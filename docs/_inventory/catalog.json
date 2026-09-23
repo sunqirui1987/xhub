@@ -1,0 +1,6211 @@
+{
+  "schema_version": 1,
+  "product": "LiteLLM-compatible AI Gateway",
+  "baseline": {
+    "name": "LiteLLM",
+    "version": "1.102.0",
+    "source": "/Users/sunqirui/Downloads/litellm-main",
+    "pyproject_sha256": "06201f793dab7a160a15a93ef1b235a5c2d20afcdeac7d91e4ff4ac8aba42743",
+    "proxy_server_sha256": "3b43161a219841eda123ee8547c1381cf6294f92af57f6c725a3a4a0145157b7",
+    "model_prices_sha256": "2a5c39959fd97f0b4aa186ba4e9e68c74079ce87be1ed1d118b74d74a6b9c282",
+    "unique_http_routes": 779,
+    "dashboard_pages": 48,
+    "provider_packages": 136
+  },
+  "implementation": {
+    "backend": {
+      "language": "Go",
+      "http": "net/http or gin",
+      "note": "HTTP method+path+request/response must match LiteLLM 1.102.0. Internal packages may differ."
+    },
+    "frontend": {
+      "framework": "Next.js App Router + React",
+      "note": "Page routes, left-nav groups, and page workflows must match ui/litellm-dashboard. Visual system may be reimplemented, not copied from enterprise_ui."
+    },
+    "not_in_scope_to_copy": [
+      "enterprise/ Python sources under non-MIT license",
+      "Python package layout",
+      "Prisma schema as-is"
+    ]
+  },
+  "families": [
+    {
+      "id": "data.chat",
+      "title": "Chat Completions",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/engines/{model}/chat/completions",
+        "/openai/deployments/{model}/chat/completions",
+        "/cursor/chat/completions",
+        "/queue/chat/completions"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.completions",
+      "title": "Text Completions",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/completions",
+        "/completions",
+        "/engines/{model}/completions",
+        "/openai/deployments/{model}/completions"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.messages",
+      "title": "Anthropic Messages",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/messages",
+        "/v1/messages/count_tokens"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.responses",
+      "title": "Responses API",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/responses",
+        "/responses",
+        "/openai/v1/responses"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.embeddings",
+      "title": "Embeddings",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/embeddings",
+        "/embeddings",
+        "/engines/{model}/embeddings",
+        "/openai/deployments/{model}/embeddings"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.images",
+      "title": "Images",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/images/generations",
+        "/v1/images/edits",
+        "/images/generations",
+        "/images/edits",
+        "/openai/deployments/{model}/images/generations",
+        "/openai/deployments/{model}/images/edits"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.audio",
+      "title": "Audio",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/audio/speech",
+        "/v1/audio/transcriptions",
+        "/audio/speech",
+        "/audio/transcriptions"
+      ],
+      "aliases": [
+        "/v1/audio/translations",
+        "/audio/translations"
+      ]
+    },
+    {
+      "id": "data.moderations",
+      "title": "Moderations",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/moderations",
+        "/moderations"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.rerank",
+      "title": "Rerank",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/rerank",
+        "/rerank",
+        "/v2/rerank"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.files",
+      "title": "Files",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/files",
+        "/files",
+        "/{provider}/v1/files"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.batches",
+      "title": "Batches",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/batches",
+        "/batches",
+        "/{provider}/v1/batches"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.assistants_threads",
+      "title": "Assistants and Threads",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/assistants",
+        "/assistants",
+        "/v1/threads",
+        "/threads"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.fine_tuning",
+      "title": "Fine-tuning",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/fine_tuning/jobs",
+        "/fine_tuning/jobs"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.containers",
+      "title": "Containers",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/containers",
+        "/containers"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.vector_stores",
+      "title": "Vector Stores data plane",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/vector_stores",
+        "/vector_stores",
+        "/v1/vector_store/list"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.videos",
+      "title": "Videos",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/videos",
+        "/videos"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.realtime",
+      "title": "Realtime",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/realtime",
+        "/realtime",
+        "/openai/v1/realtime",
+        "/vertex_ai/live"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.search_ocr_rag",
+      "title": "Search, OCR and RAG",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/search",
+        "/search",
+        "/v1/ocr",
+        "/ocr",
+        "/v1/rag/ingest",
+        "/v1/rag/query",
+        "/rag/ingest",
+        "/rag/query",
+        "/v1/indexes"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.skills_tools_memory",
+      "title": "Skills, Tools and Memory",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/skills",
+        "/v1/tool",
+        "/v1/memory",
+        "/.well-known/skills/index.json",
+        "/.well-known/agent-skills/index.json"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.evals",
+      "title": "Evals",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/evals"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.workflows",
+      "title": "Workflows",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/workflows/runs"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.agents",
+      "title": "Agents",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/agents",
+        "/v1beta/agents",
+        "/agent/daily/activity"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.access_groups",
+      "title": "Access Groups",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/access_group",
+        "/access_group"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.mcp",
+      "title": "MCP data plane",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/mcp",
+        "/mcp/proxy",
+        "/{mcp_server_name}/mcp",
+        "/v1/mcp/oauth/authorize",
+        "/v1/mcp/oauth/token"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.a2a",
+      "title": "A2A",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/a2a/{agent_id}",
+        "/v1/a2a/discover",
+        "/v1/a2a/{agent_id}/message/send"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.gemini_v1beta",
+      "title": "Gemini v1beta",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1beta/models/{model}:generateContent",
+        "/v1beta/models/{model}:streamGenerateContent",
+        "/v1beta/models/{model}:countTokens",
+        "/models/{model}:generateContent"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.passthrough",
+      "title": "Provider passthrough",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/openai/{endpoint}",
+        "/anthropic/{endpoint}",
+        "/bedrock/{endpoint}",
+        "/gemini/{endpoint}",
+        "/azure/{endpoint}",
+        "/vertex_ai/{endpoint}"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.model_hub",
+      "title": "Model Hub and model listing",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/v1/models",
+        "/models",
+        "/model_hub",
+        "/public/model_hub",
+        "/v1/model/deprecations",
+        "/model/deprecations"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.interactions",
+      "title": "Interactions",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/interactions",
+        "/v1beta/interactions"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "data.claude_code",
+      "title": "Claude Code and plugin marketplace",
+      "kind": "data",
+      "enterprise": false,
+      "http_paths": [
+        "/claude-code/marketplace.json",
+        "/claude-code/plugins",
+        "/api/event_logging/batch",
+        "/api/plugins"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.keys",
+      "title": "Virtual keys",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/key/generate",
+        "/key/list",
+        "/key/info",
+        "/key/update",
+        "/key/delete",
+        "/v2/key/info"
+      ],
+      "aliases": [
+        "/api/v1/keys"
+      ]
+    },
+    {
+      "id": "mgmt.users",
+      "title": "Users",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/user/new",
+        "/user/list",
+        "/user/info",
+        "/user/update",
+        "/user/delete",
+        "/v2/user/info"
+      ],
+      "aliases": [
+        "/api/v1/user"
+      ]
+    },
+    {
+      "id": "mgmt.teams",
+      "title": "Teams",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/team/new",
+        "/team/list",
+        "/team/info",
+        "/v2/team/list"
+      ],
+      "aliases": [
+        "/api/v1/team"
+      ]
+    },
+    {
+      "id": "mgmt.organizations",
+      "title": "Organizations",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/organization/new",
+        "/organization/list",
+        "/organization/info",
+        "/v2/organization/{organization_id}"
+      ],
+      "aliases": [
+        "/api/v1/organization"
+      ]
+    },
+    {
+      "id": "mgmt.projects",
+      "title": "Projects",
+      "kind": "management",
+      "enterprise": true,
+      "http_paths": [
+        "/project/new",
+        "/project/update",
+        "/project/delete",
+        "/project/info",
+        "/project/list"
+      ],
+      "aliases": [
+        "/api/v1/project"
+      ]
+    },
+    {
+      "id": "mgmt.budgets",
+      "title": "Budgets",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/budget/new",
+        "/budget/list",
+        "/budget/info",
+        "/budget/update",
+        "/budget/delete",
+        "/budgets",
+        "/provider/budgets"
+      ],
+      "aliases": [
+        "/api/v1/budget"
+      ]
+    },
+    {
+      "id": "mgmt.models",
+      "title": "Model admin",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/model/new",
+        "/model/update",
+        "/model/delete",
+        "/model/info",
+        "/v1/model/info",
+        "/v2/model/info"
+      ],
+      "aliases": [
+        "/api/v1/models",
+        "/api/v1/model-registry",
+        "/api/v1/model-capabilities"
+      ]
+    },
+    {
+      "id": "mgmt.guardrails",
+      "title": "Guardrails",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/guardrails",
+        "/apply_guardrail",
+        "/v2/guardrails/list"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.policies",
+      "title": "Policies",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/policies",
+        "/policy/list",
+        "/policy/info/{policy_name}"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.prompts",
+      "title": "Prompts",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/prompts",
+        "/prompts/list",
+        "/prompts/test"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.credentials",
+      "title": "Credentials",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/credentials"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.tags",
+      "title": "Tags",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/tag/new",
+        "/tag/list",
+        "/tag/info",
+        "/tag/update",
+        "/tag/delete"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.spend",
+      "title": "Spend, usage and activity",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/spend/logs",
+        "/global/spend",
+        "/global/activity",
+        "/usage/ai/chat"
+      ],
+      "aliases": [
+        "/api/v1/logs/requests",
+        "/api/v1/activity",
+        "/api/v1/usage"
+      ]
+    },
+    {
+      "id": "mgmt.config",
+      "title": "Config and YAML",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/config/yaml",
+        "/config/update",
+        "/config/list",
+        "/config_overrides/hashicorp_vault",
+        "/reload/model_cost_map"
+      ],
+      "aliases": [
+        "/api/v1/configuration",
+        "/api/v1/configuration/litellm.yaml"
+      ]
+    },
+    {
+      "id": "mgmt.sso",
+      "title": "SSO and login",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/sso/callback",
+        "/login",
+        "/v2/login",
+        "/v3/login",
+        "/fallback/login"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.scim",
+      "title": "SCIM",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/Users",
+        "/Groups",
+        "/ResourceTypes",
+        "/Schemas",
+        "/ServiceProviderConfig"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.mcp_servers",
+      "title": "MCP server admin",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/server",
+        "/toolset",
+        "/tools",
+        "/access_groups",
+        "/registry.json"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.search_tools",
+      "title": "Search tool admin",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/search_tools",
+        "/search_tools/list"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.vector_stores_admin",
+      "title": "Vector store admin",
+      "kind": "management",
+      "enterprise": true,
+      "http_paths": [
+        "/vector_store/new",
+        "/vector_store/list",
+        "/vector_store/delete",
+        "/vector_store/info",
+        "/vector_store/update"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.health",
+      "title": "Health and readiness",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/health",
+        "/health/liveliness",
+        "/health/readiness",
+        "/test",
+        "/settings"
+      ],
+      "aliases": [
+        "/api/v1/health",
+        "/health/live",
+        "/health/ready"
+      ]
+    },
+    {
+      "id": "mgmt.callbacks",
+      "title": "Callbacks and logging hooks",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/callbacks/list",
+        "/callbacks/configs",
+        "/active/callbacks",
+        "/logs",
+        "/get/config/callbacks"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.cache",
+      "title": "Cache",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/cache/settings",
+        "/ping",
+        "/flushall",
+        "/redis/info",
+        "/delete",
+        "/coordination_redis/settings"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.router",
+      "title": "Router admin",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/router/settings",
+        "/router/fields",
+        "/auto_router/session",
+        "/adaptive_router/state",
+        "/fallback",
+        "/routes"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.jwt_oidc",
+      "title": "JWT mapping",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/jwt/key/mapping/list",
+        "/jwt/key/mapping/new"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.customers",
+      "title": "Customers and end users",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/customer/new",
+        "/customer/list",
+        "/end_user/new",
+        "/end_user/list"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.invitations",
+      "title": "Invitations",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/invitation/new",
+        "/invitation/info",
+        "/invitation/update",
+        "/invitation/delete"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.compliance",
+      "title": "Compliance",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/compliance/eu-ai-act",
+        "/compliance/gdpr"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.cost_export",
+      "title": "CloudZero and Vantage export",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/cloudzero/export",
+        "/vantage/export"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.ui_settings",
+      "title": "UI settings and theme",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/get/ui_settings",
+        "/update/ui_settings",
+        "/get/ui_theme_settings",
+        "/upload/logo",
+        "/get_logo_url"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.public",
+      "title": "Public discovery endpoints",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/public/endpoints",
+        "/public/providers",
+        "/public/skill_hub",
+        "/public/mcp_hub",
+        "/public/agent_hub"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.debug",
+      "title": "Debug and memory",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/debug/memory/summary",
+        "/memory-usage",
+        "/otel-spans",
+        "/lazy/warm/{name}"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.ops_schedules",
+      "title": "Reload schedules",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/schedule/model_cost_map_reload",
+        "/schedule/anthropic_beta_headers_reload"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.audit",
+      "title": "Audit logs",
+      "kind": "management",
+      "enterprise": true,
+      "http_paths": [
+        "/audit",
+        "/audit/{id}"
+      ],
+      "aliases": [
+        "/api/v1/audit"
+      ]
+    },
+    {
+      "id": "mgmt.email",
+      "title": "Email event settings",
+      "kind": "management",
+      "enterprise": true,
+      "http_paths": [
+        "/email/event_settings"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.enterprise_misc",
+      "title": "Enterprise remaining routes",
+      "kind": "management",
+      "enterprise": true,
+      "http_paths": [
+        "/log-event",
+        "/robots.txt",
+        "/user/available_users"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.utils",
+      "title": "Proxy utilities",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/utils/token_counter",
+        "/utils/transform_request",
+        "/utils/supported_openai_params"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.allowed_ips",
+      "title": "Allowed IPs",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/get/allowed_ips",
+        "/add/allowed_ip",
+        "/delete/allowed_ip"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.alerting",
+      "title": "Alerting",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/alerting/settings"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.placeholders",
+      "title": "SCIM placeholders",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/placeholders"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "mgmt.onboarding",
+      "title": "Onboarding tokens",
+      "kind": "management",
+      "enterprise": false,
+      "http_paths": [
+        "/onboarding/get_token",
+        "/onboarding/claim_token"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "ui.pages",
+      "title": "LiteLLM Dashboard pages",
+      "kind": "ui",
+      "enterprise": false,
+      "http_paths": [
+        "/",
+        "/access-groups",
+        "/admin-panel",
+        "/agents",
+        "/api-keys",
+        "/api-reference",
+        "/budgets",
+        "/caching",
+        "/cost-optimization",
+        "/cost-tracking",
+        "/guardrails",
+        "/guardrails-monitor",
+        "/logging-and-alerts",
+        "/logs",
+        "/mcp-servers",
+        "/memory",
+        "/model-hub-table",
+        "/models-and-endpoints",
+        "/organizations",
+        "/playground",
+        "/policies",
+        "/projects",
+        "/prompts",
+        "/router-settings",
+        "/search-tools",
+        "/skills",
+        "/tag-management",
+        "/teams",
+        "/tool-policies",
+        "/transform-request",
+        "/ui-theme",
+        "/usage",
+        "/users",
+        "/vector-stores",
+        "/workflows",
+        "/old-usage",
+        "/chat",
+        "/connect",
+        "/login",
+        "/mcp/oauth/callback",
+        "/model_hub",
+        "/onboarding"
+      ],
+      "aliases": [
+        "/overview",
+        "/requests",
+        "/models",
+        "/keys",
+        "/configuration",
+        "/providers",
+        "/deployments",
+        "/routes",
+        "/api-explorer"
+      ]
+    },
+    {
+      "id": "ui.modules",
+      "title": "Dashboard source modules",
+      "kind": "ui-module",
+      "enterprise": false,
+      "http_paths": [
+        "ui/litellm-dashboard/src"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "sdk.public",
+      "title": "LiteLLM SDK public methods",
+      "kind": "sdk",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/main.py"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "sdk.router",
+      "title": "LiteLLM Router SDK methods",
+      "kind": "sdk",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/router.py"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "providers.llms",
+      "title": "Provider adapters in litellm/llms",
+      "kind": "provider",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/llms"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "router.strategies",
+      "title": "Router strategies",
+      "kind": "router",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/router_strategy"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "runtime.caching",
+      "title": "Caching runtime",
+      "kind": "runtime",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/caching"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "ops.integrations",
+      "title": "Logging and callback integrations",
+      "kind": "ops",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/integrations"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "ops.proxy_types",
+      "title": "Proxy schemas and classes",
+      "kind": "ops",
+      "enterprise": false,
+      "http_paths": [
+        "litellm/proxy"
+      ],
+      "aliases": []
+    },
+    {
+      "id": "ops.enterprise",
+      "title": "Enterprise schemas and hooks",
+      "kind": "ops",
+      "enterprise": true,
+      "http_paths": [
+        "enterprise"
+      ],
+      "aliases": []
+    }
+  ],
+  "console_nav": [
+    {
+      "group": "AI GATEWAY",
+      "items": [
+        {
+          "page": "api-keys",
+          "route": "/api-keys",
+          "label": "Virtual Keys"
+        },
+        {
+          "page": "llm-playground",
+          "route": "/playground",
+          "label": "Playground"
+        },
+        {
+          "page": "models",
+          "route": "/models-and-endpoints",
+          "label": "Models + Endpoints"
+        },
+        {
+          "page": "agents",
+          "route": "/agents",
+          "label": "Agents",
+          "parent": "agentic"
+        },
+        {
+          "page": "workflows",
+          "route": "/workflows",
+          "label": "Workflow Runs",
+          "parent": "agentic"
+        },
+        {
+          "page": "memory",
+          "route": "/memory",
+          "label": "Memory",
+          "parent": "agentic"
+        },
+        {
+          "page": "mcp-servers",
+          "route": "/mcp-servers",
+          "label": "MCP Servers"
+        },
+        {
+          "page": "skills",
+          "route": "/skills",
+          "label": "Skills"
+        },
+        {
+          "page": "guardrails",
+          "route": "/guardrails",
+          "label": "Guardrails"
+        },
+        {
+          "page": "policies",
+          "route": "/policies",
+          "label": "Policies"
+        },
+        {
+          "page": "search-tools",
+          "route": "/search-tools",
+          "label": "Search Tools",
+          "parent": "tools"
+        },
+        {
+          "page": "vector-stores",
+          "route": "/vector-stores",
+          "label": "Vector Stores",
+          "parent": "tools"
+        },
+        {
+          "page": "tool-policies",
+          "route": "/tool-policies",
+          "label": "Tool Policies",
+          "parent": "tools"
+        }
+      ]
+    },
+    {
+      "group": "OBSERVABILITY",
+      "items": [
+        {
+          "page": "new_usage",
+          "route": "/usage",
+          "label": "Usage"
+        },
+        {
+          "page": "cost-optimization",
+          "route": "/cost-optimization",
+          "label": "Cost Optimization"
+        },
+        {
+          "page": "logs",
+          "route": "/logs",
+          "label": "Logs"
+        },
+        {
+          "page": "guardrails-monitor",
+          "route": "/guardrails-monitor",
+          "label": "Guardrails Monitor"
+        }
+      ]
+    },
+    {
+      "group": "ACCESS CONTROL",
+      "items": [
+        {
+          "page": "teams",
+          "route": "/teams",
+          "label": "Teams"
+        },
+        {
+          "page": "projects",
+          "route": "/projects",
+          "label": "Projects"
+        },
+        {
+          "page": "users",
+          "route": "/users",
+          "label": "Internal Users"
+        },
+        {
+          "page": "organizations",
+          "route": "/organizations",
+          "label": "Organizations"
+        },
+        {
+          "page": "access-groups",
+          "route": "/access-groups",
+          "label": "Access Groups"
+        },
+        {
+          "page": "budgets",
+          "route": "/budgets",
+          "label": "Budgets"
+        }
+      ]
+    },
+    {
+      "group": "DEVELOPER TOOLS",
+      "items": [
+        {
+          "page": "api_ref",
+          "route": "/api-reference",
+          "label": "API Reference"
+        },
+        {
+          "page": "model-hub-table",
+          "route": "/model-hub-table",
+          "label": "AI Hub"
+        },
+        {
+          "page": "caching",
+          "route": "/caching",
+          "label": "Response Cache"
+        },
+        {
+          "page": "prompts",
+          "route": "/prompts",
+          "label": "Prompts",
+          "parent": "experimental"
+        },
+        {
+          "page": "transform-request",
+          "route": "/transform-request",
+          "label": "API Playground",
+          "parent": "experimental"
+        },
+        {
+          "page": "tag-management",
+          "route": "/tag-management",
+          "label": "Tag Management",
+          "parent": "experimental"
+        },
+        {
+          "page": "usage",
+          "route": "/old-usage",
+          "label": "Old Usage",
+          "parent": "experimental"
+        }
+      ]
+    },
+    {
+      "group": "SETTINGS",
+      "items": [
+        {
+          "page": "router-settings",
+          "route": "/router-settings",
+          "label": "Router Settings",
+          "parent": "settings"
+        },
+        {
+          "page": "logging-and-alerts",
+          "route": "/logging-and-alerts",
+          "label": "Logging & Alerts",
+          "parent": "settings"
+        },
+        {
+          "page": "admin-panel",
+          "route": "/admin-panel",
+          "label": "Admin Settings",
+          "parent": "settings"
+        },
+        {
+          "page": "cost-tracking",
+          "route": "/cost-tracking",
+          "label": "Cost Tracking",
+          "parent": "settings"
+        },
+        {
+          "page": "ui-theme",
+          "route": "/ui-theme",
+          "label": "UI Theme",
+          "parent": "settings"
+        }
+      ]
+    }
+  ],
+  "console_extra_pages": [
+    {
+      "page": "login",
+      "route": "/login",
+      "label": "Login",
+      "group": "AUTH"
+    },
+    {
+      "page": "onboarding",
+      "route": "/onboarding",
+      "label": "Onboarding",
+      "group": "AUTH"
+    },
+    {
+      "page": "connect",
+      "route": "/connect",
+      "label": "Connect",
+      "group": "AUTH"
+    },
+    {
+      "page": "chat",
+      "route": "/chat",
+      "label": "Chat shell",
+      "group": "SHELL"
+    },
+    {
+      "page": "model_hub",
+      "route": "/model_hub",
+      "label": "Public Model Hub",
+      "group": "PUBLIC"
+    },
+    {
+      "page": "mcp-oauth-callback",
+      "route": "/mcp/oauth/callback",
+      "label": "MCP OAuth Callback",
+      "group": "AUTH"
+    }
+  ],
+  "providers": [
+    "a2a",
+    "ai21",
+    "aiml",
+    "aiohttp_openai",
+    "amazon_nova",
+    "anthropic",
+    "apiserpent",
+    "aws_polly",
+    "azure",
+    "azure_ai",
+    "base_llm",
+    "baseten",
+    "bedrock",
+    "bedrock_mantle",
+    "black_forest_labs",
+    "brave",
+    "bytez",
+    "cerebras",
+    "chatgpt",
+    "clarifai",
+    "cloudflare",
+    "codestral",
+    "cohere",
+    "cometapi",
+    "compactifai",
+    "custom_httpx",
+    "dashscope",
+    "databricks",
+    "dataforseo",
+    "datarobot",
+    "deepgram",
+    "deepinfra",
+    "deepseek",
+    "deprecated_providers",
+    "docker_model_runner",
+    "duckduckgo",
+    "e2b",
+    "elevenlabs",
+    "empower",
+    "exa_ai",
+    "fal_ai",
+    "fastcrw",
+    "featherless_ai",
+    "firecrawl",
+    "fireworks_ai",
+    "friendliai",
+    "galadriel",
+    "gdc",
+    "gemini",
+    "gigachat",
+    "github",
+    "github_copilot",
+    "google_pse",
+    "gradient_ai",
+    "groq",
+    "heroku",
+    "hosted_vllm",
+    "huggingface",
+    "hyperbolic",
+    "inception",
+    "infinity",
+    "jina_ai",
+    "lambda_ai",
+    "langflow",
+    "langgraph",
+    "lemonade",
+    "linkup",
+    "litellm_proxy",
+    "llamafile",
+    "lm_studio",
+    "manus",
+    "meta",
+    "meta_llama",
+    "milvus",
+    "minimax",
+    "mistral",
+    "modelscope",
+    "mongodb",
+    "moonshot",
+    "morph",
+    "nebius",
+    "nimble",
+    "nlp_cloud",
+    "novita",
+    "nscale",
+    "nvidia_nim",
+    "nvidia_riva",
+    "oci",
+    "ollama",
+    "oobabooga",
+    "openai",
+    "openai_like",
+    "openrouter",
+    "opensandbox",
+    "ovhcloud",
+    "parallel_ai",
+    "pass_through",
+    "perplexity",
+    "petals",
+    "pg_vector",
+    "predibase",
+    "ragflow",
+    "recraft",
+    "reducto",
+    "replicate",
+    "runwayml",
+    "s3_vectors",
+    "sagemaker",
+    "sambanova",
+    "sap",
+    "scaleway",
+    "searchapi",
+    "searxng",
+    "serper",
+    "snowflake",
+    "soniox",
+    "stability",
+    "tavily",
+    "tencent",
+    "tinyfish",
+    "together_ai",
+    "topaz",
+    "triton",
+    "v0",
+    "valkey",
+    "vercel_ai_gateway",
+    "vertex_ai",
+    "vllm",
+    "volcengine",
+    "voyage",
+    "wandb",
+    "watsonx",
+    "xai",
+    "xinference",
+    "you_com",
+    "zai"
+  ],
+  "router_strategies": [
+    "adaptive_router",
+    "auto_router",
+    "base_routing_strategy",
+    "budget_limiter",
+    "complexity_router",
+    "lar1_routing",
+    "least_busy",
+    "lowest_cost",
+    "lowest_latency",
+    "lowest_tpm_rpm",
+    "lowest_tpm_rpm_v2",
+    "quality_router",
+    "savings_baseline",
+    "simple_shuffle",
+    "tag_based_routing"
+  ],
+  "sdk_methods": [
+    "adapter_completion",
+    "admission_input_tokens",
+    "admitted_prompt_token_counter",
+    "completion",
+    "completion_with_retries",
+    "config_completion",
+    "embedding",
+    "mock_completion",
+    "moderation",
+    "print_verbose",
+    "responses_api_bridge_check",
+    "responses_with_retries",
+    "speech",
+    "stream_chunk_builder",
+    "stream_chunk_builder_text_completion",
+    "text_completion",
+    "transcription"
+  ],
+  "http_routes": [
+    {
+      "method": "GET",
+      "path": "/",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 2316
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-skills/index.json",
+      "source": "litellm/proxy/discovery_endpoints/agent_skills_endpoints.py",
+      "line": 74
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/jwks.json",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2811
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/litellm-cli-auth",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2103
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/litellm-ui-config",
+      "source": "litellm/proxy/discovery_endpoints/ui_discovery_endpoints.py",
+      "line": 15
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server",
+      "source": "litellm/proxy/_experimental/mcp_server/byok_oauth_endpoints.py",
+      "line": 612
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server/{root_path:path}/v1/mcp/oauth",
+      "source": "litellm/proxy/_experimental/mcp_server/byok_oauth_endpoints.py",
+      "line": 624
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-protected-resource",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2564
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/openid-configuration",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2784
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/skills/index.json",
+      "source": "litellm/proxy/discovery_endpoints/agent_skills_endpoints.py",
+      "line": 79
+    },
+    {
+      "method": "POST",
+      "path": "/a2a/{agent_id}",
+      "source": "litellm/proxy/agent_endpoints/a2a_endpoints.py",
+      "line": 618
+    },
+    {
+      "method": "GET",
+      "path": "/a2a/{agent_id}/.well-known/agent-card.json",
+      "source": "litellm/proxy/agent_endpoints/a2a_endpoints.py",
+      "line": 548
+    },
+    {
+      "method": "GET",
+      "path": "/a2a/{agent_id}/.well-known/agent.json",
+      "source": "litellm/proxy/agent_endpoints/a2a_endpoints.py",
+      "line": 553
+    },
+    {
+      "method": "POST",
+      "path": "/a2a/{agent_id}/message/send",
+      "source": "litellm/proxy/agent_endpoints/a2a_endpoints.py",
+      "line": 623
+    },
+    {
+      "method": "GET",
+      "path": "/access_group/list",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 720
+    },
+    {
+      "method": "POST",
+      "path": "/access_group/new",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 574
+    },
+    {
+      "method": "DELETE",
+      "path": "/access_group/{access_group}/budget",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 1206
+    },
+    {
+      "method": "GET",
+      "path": "/access_group/{access_group}/budget",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 1093
+    },
+    {
+      "method": "PUT",
+      "path": "/access_group/{access_group}/budget",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 1128
+    },
+    {
+      "method": "DELETE",
+      "path": "/access_group/{access_group}/delete",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 983
+    },
+    {
+      "method": "GET",
+      "path": "/access_group/{access_group}/info",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 770
+    },
+    {
+      "method": "PUT",
+      "path": "/access_group/{access_group}/update",
+      "source": "litellm/proxy/management_endpoints/model_access_group_management_endpoints.py",
+      "line": 829
+    },
+    {
+      "method": "GET",
+      "path": "/access_groups",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 936
+    },
+    {
+      "method": "GET",
+      "path": "/active/callbacks",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1556
+    },
+    {
+      "method": "GET",
+      "path": "/adaptive_router/state",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18684
+    },
+    {
+      "method": "POST",
+      "path": "/add/allowed_ip",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 470
+    },
+    {
+      "method": "GET",
+      "path": "/agent/daily/activity",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 1082
+    },
+    {
+      "method": "GET",
+      "path": "/alerting/settings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15584
+    },
+    {
+      "method": "POST",
+      "path": "/api/event_logging/batch",
+      "source": "litellm/proxy/anthropic_endpoints/endpoints.py",
+      "line": 346
+    },
+    {
+      "method": "GET",
+      "path": "/api/plugins",
+      "source": "litellm/proxy/plugin_routes.py",
+      "line": 196
+    },
+    {
+      "method": "GET",
+      "path": "/api/plugins/auth-token",
+      "source": "litellm/proxy/plugin_routes.py",
+      "line": 217
+    },
+    {
+      "method": "POST",
+      "path": "/apply_guardrail",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 2315
+    },
+    {
+      "method": "GET",
+      "path": "/assistants",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12085
+    },
+    {
+      "method": "POST",
+      "path": "/assistants",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12175
+    },
+    {
+      "method": "DELETE",
+      "path": "/assistants/{assistant_id:path}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12265
+    },
+    {
+      "method": "POST",
+      "path": "/audio/speech",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11552
+    },
+    {
+      "method": "POST",
+      "path": "/audio/transcriptions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11680
+    },
+    {
+      "method": "GET",
+      "path": "/authorize",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 1870
+    },
+    {
+      "method": "POST",
+      "path": "/authorize/complete",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2041
+    },
+    {
+      "method": "GET",
+      "path": "/authorize/flow",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2030
+    },
+    {
+      "method": "GET",
+      "path": "/authorize/mcp-session",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 1845
+    },
+    {
+      "method": "GET",
+      "path": "/auto_router/benchmarks",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 647
+    },
+    {
+      "method": "GET",
+      "path": "/auto_router/classifier/default_prompt",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2633
+    },
+    {
+      "method": "POST",
+      "path": "/auto_router/classifier/default_prompt",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2598
+    },
+    {
+      "method": "GET",
+      "path": "/auto_router/session",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 712
+    },
+    {
+      "method": "GET",
+      "path": "/auto_router/shadow_eval",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 1615
+    },
+    {
+      "method": "POST",
+      "path": "/auto_router/shadow_eval/start",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 1386
+    },
+    {
+      "method": "GET",
+      "path": "/auto_router/shadow_eval/{job_id}",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 1665
+    },
+    {
+      "method": "POST",
+      "path": "/auto_router/shadow_eval/{job_id}/stop",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 1720
+    },
+    {
+      "method": "POST",
+      "path": "/auto_router/test_routing",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 342
+    },
+    {
+      "method": "POST",
+      "path": "/auto_router/validate_complexity_router_config",
+      "source": "litellm/proxy/management_endpoints/auto_router_endpoints.py",
+      "line": 313
+    },
+    {
+      "method": "GET",
+      "path": "/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 691
+    },
+    {
+      "method": "POST",
+      "path": "/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 107
+    },
+    {
+      "method": "GET",
+      "path": "/batches/{batch_id:path}",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 400
+    },
+    {
+      "method": "POST",
+      "path": "/batches/{batch_id:path}/cancel",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 873
+    },
+    {
+      "method": "POST",
+      "path": "/budget/delete",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 328
+    },
+    {
+      "method": "POST",
+      "path": "/budget/info",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 203
+    },
+    {
+      "method": "GET",
+      "path": "/budget/list",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 300
+    },
+    {
+      "method": "POST",
+      "path": "/budget/new",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "path": "/budget/settings",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 232
+    },
+    {
+      "method": "POST",
+      "path": "/budget/update",
+      "source": "litellm/proxy/management_endpoints/budget_management_endpoints.py",
+      "line": 118
+    },
+    {
+      "method": "GET",
+      "path": "/budgets",
+      "source": "litellm/proxy/management_endpoints/management_v1/budgets.py",
+      "line": 138
+    },
+    {
+      "method": "GET",
+      "path": "/cache/settings",
+      "source": "litellm/proxy/management_endpoints/cache_settings_endpoints.py",
+      "line": 442
+    },
+    {
+      "method": "POST",
+      "path": "/cache/settings",
+      "source": "litellm/proxy/management_endpoints/cache_settings_endpoints.py",
+      "line": 569
+    },
+    {
+      "method": "POST",
+      "path": "/cache/settings/test",
+      "source": "litellm/proxy/management_endpoints/cache_settings_endpoints.py",
+      "line": 508
+    },
+    {
+      "method": "GET",
+      "path": "/callback",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2142
+    },
+    {
+      "method": "GET",
+      "path": "/callbacks/configs",
+      "source": "litellm/proxy/management_endpoints/callback_management_endpoints.py",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "path": "/callbacks/list",
+      "source": "litellm/proxy/management_endpoints/callback_management_endpoints.py",
+      "line": 17
+    },
+    {
+      "method": "POST",
+      "path": "/chat/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10958
+    },
+    {
+      "method": "GET",
+      "path": "/claude-code/marketplace.json",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 87
+    },
+    {
+      "method": "GET",
+      "path": "/claude-code/plugins",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 391
+    },
+    {
+      "method": "POST",
+      "path": "/claude-code/plugins",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 277
+    },
+    {
+      "method": "DELETE",
+      "path": "/claude-code/plugins/{plugin_name}",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 727
+    },
+    {
+      "method": "GET",
+      "path": "/claude-code/plugins/{plugin_name}",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 462
+    },
+    {
+      "method": "PUT",
+      "path": "/claude-code/plugins/{plugin_name}",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 527
+    },
+    {
+      "method": "POST",
+      "path": "/claude-code/plugins/{plugin_name}/disable",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 678
+    },
+    {
+      "method": "POST",
+      "path": "/claude-code/plugins/{plugin_name}/enable",
+      "source": "litellm/proxy/anthropic_endpoints/claude_code_endpoints/claude_code_marketplace.py",
+      "line": 629
+    },
+    {
+      "method": "DELETE",
+      "path": "/cloudzero/delete",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 518
+    },
+    {
+      "method": "POST",
+      "path": "/cloudzero/dry-run",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 395
+    },
+    {
+      "method": "POST",
+      "path": "/cloudzero/export",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 453
+    },
+    {
+      "method": "POST",
+      "path": "/cloudzero/init",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 345
+    },
+    {
+      "method": "GET",
+      "path": "/cloudzero/settings",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 133
+    },
+    {
+      "method": "PUT",
+      "path": "/cloudzero/settings",
+      "source": "litellm/proxy/spend_tracking/cloudzero_endpoints.py",
+      "line": 192
+    },
+    {
+      "method": "POST",
+      "path": "/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11128
+    },
+    {
+      "method": "POST",
+      "path": "/compliance/eu-ai-act",
+      "source": "litellm/proxy/management_endpoints/compliance_endpoints.py",
+      "line": 26
+    },
+    {
+      "method": "POST",
+      "path": "/compliance/gdpr",
+      "source": "litellm/proxy/management_endpoints/compliance_endpoints.py",
+      "line": 55
+    },
+    {
+      "method": "POST",
+      "path": "/comprehendmedical",
+      "source": "litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py",
+      "line": 1287
+    },
+    {
+      "method": "POST",
+      "path": "/comprehendmedical/{operation}",
+      "source": "litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py",
+      "line": 1210
+    },
+    {
+      "method": "GET",
+      "path": "/config/block_requests_for_models_without_pricing",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 507
+    },
+    {
+      "method": "PATCH",
+      "path": "/config/block_requests_for_models_without_pricing",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 517
+    },
+    {
+      "method": "POST",
+      "path": "/config/callback/delete",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17810
+    },
+    {
+      "method": "GET",
+      "path": "/config/cost_discount_config",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 192
+    },
+    {
+      "method": "PATCH",
+      "path": "/config/cost_discount_config",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 227
+    },
+    {
+      "method": "GET",
+      "path": "/config/cost_margin_config",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 325
+    },
+    {
+      "method": "PATCH",
+      "path": "/config/cost_margin_config",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 360
+    },
+    {
+      "method": "POST",
+      "path": "/config/field/delete",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17729
+    },
+    {
+      "method": "GET",
+      "path": "/config/field/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17364
+    },
+    {
+      "method": "POST",
+      "path": "/config/field/update",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17120
+    },
+    {
+      "method": "GET",
+      "path": "/config/list",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17562
+    },
+    {
+      "method": "DELETE",
+      "path": "/config/pass_through_endpoint",
+      "source": "litellm/proxy/pass_through_endpoints/pass_through_endpoints.py",
+      "line": 3683
+    },
+    {
+      "method": "GET",
+      "path": "/config/pass_through_endpoint",
+      "source": "litellm/proxy/pass_through_endpoints/pass_through_endpoints.py",
+      "line": 3396
+    },
+    {
+      "method": "POST",
+      "path": "/config/pass_through_endpoint",
+      "source": "litellm/proxy/pass_through_endpoints/pass_through_endpoints.py",
+      "line": 3591
+    },
+    {
+      "method": "GET",
+      "path": "/config/pass_through_endpoint/team/{team_id}",
+      "source": "litellm/proxy/pass_through_endpoints/pass_through_endpoints.py",
+      "line": 3401
+    },
+    {
+      "method": "POST",
+      "path": "/config/pass_through_endpoint/{endpoint_id}",
+      "source": "litellm/proxy/pass_through_endpoints/pass_through_endpoints.py",
+      "line": 3452
+    },
+    {
+      "method": "GET",
+      "path": "/config/pass_through_endpoints/settings",
+      "source": "litellm/proxy/config_management_endpoints/pass_through_endpoints.py",
+      "line": 17
+    },
+    {
+      "method": "POST",
+      "path": "/config/update",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16852
+    },
+    {
+      "method": "GET",
+      "path": "/config/yaml",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18128
+    },
+    {
+      "method": "DELETE",
+      "path": "/config_overrides/cyberark",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 822
+    },
+    {
+      "method": "GET",
+      "path": "/config_overrides/cyberark",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 764
+    },
+    {
+      "method": "POST",
+      "path": "/config_overrides/cyberark",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 649
+    },
+    {
+      "method": "POST",
+      "path": "/config_overrides/cyberark/test_connection",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 886
+    },
+    {
+      "method": "DELETE",
+      "path": "/config_overrides/hashicorp_vault",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 521
+    },
+    {
+      "method": "GET",
+      "path": "/config_overrides/hashicorp_vault",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 461
+    },
+    {
+      "method": "POST",
+      "path": "/config_overrides/hashicorp_vault",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 325
+    },
+    {
+      "method": "POST",
+      "path": "/config_overrides/hashicorp_vault/test_connection",
+      "source": "litellm/proxy/management_endpoints/config_override_endpoints.py",
+      "line": 588
+    },
+    {
+      "method": "GET",
+      "path": "/containers",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 167
+    },
+    {
+      "method": "POST",
+      "path": "/containers",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 35
+    },
+    {
+      "method": "DELETE",
+      "path": "/containers/{container_id}",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 377
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{container_id}",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 272
+    },
+    {
+      "method": "GET",
+      "path": "/coordination_redis/settings",
+      "source": "litellm/proxy/management_endpoints/coordination_redis_endpoints.py",
+      "line": 292
+    },
+    {
+      "method": "POST",
+      "path": "/coordination_redis/settings",
+      "source": "litellm/proxy/management_endpoints/coordination_redis_endpoints.py",
+      "line": 324
+    },
+    {
+      "method": "POST",
+      "path": "/coordination_redis/settings/test",
+      "source": "litellm/proxy/management_endpoints/coordination_redis_endpoints.py",
+      "line": 395
+    },
+    {
+      "method": "POST",
+      "path": "/cost/estimate",
+      "source": "litellm/proxy/management_endpoints/cost_tracking_settings.py",
+      "line": 569
+    },
+    {
+      "method": "POST",
+      "path": "/cost/predict-cache",
+      "source": "litellm/proxy/management_endpoints/prompt_cache_prediction.py",
+      "line": 175
+    },
+    {
+      "method": "GET",
+      "path": "/credentials",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 114
+    },
+    {
+      "method": "POST",
+      "path": "/credentials",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 43
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/by_model/{model_id}",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 178
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/by_name/{credential_name:path}",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 141
+    },
+    {
+      "method": "POST",
+      "path": "/credentials/migrate-encryption",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 4917
+    },
+    {
+      "method": "GET",
+      "path": "/credentials/migrate-encryption/check",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 4957
+    },
+    {
+      "method": "DELETE",
+      "path": "/credentials/{credential_name:path}",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 220
+    },
+    {
+      "method": "PATCH",
+      "path": "/credentials/{credential_name:path}",
+      "source": "litellm/proxy/credential_endpoints/endpoints.py",
+      "line": 295
+    },
+    {
+      "method": "POST",
+      "path": "/cursor/chat/completions",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 469
+    },
+    {
+      "method": "GET",
+      "path": "/cursor/models",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 442
+    },
+    {
+      "method": "GET",
+      "path": "/cursor/v1/models",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 447
+    },
+    {
+      "method": "POST",
+      "path": "/customer/block",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 141
+    },
+    {
+      "method": "GET",
+      "path": "/customer/daily/activity",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 864
+    },
+    {
+      "method": "POST",
+      "path": "/customer/delete",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 729
+    },
+    {
+      "method": "GET",
+      "path": "/customer/info",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 492
+    },
+    {
+      "method": "GET",
+      "path": "/customer/list",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 807
+    },
+    {
+      "method": "POST",
+      "path": "/customer/new",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 312
+    },
+    {
+      "method": "POST",
+      "path": "/customer/unblock",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 197
+    },
+    {
+      "method": "POST",
+      "path": "/customer/update",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 550
+    },
+    {
+      "method": "GET",
+      "path": "/debug/asyncio-tasks",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 57
+    },
+    {
+      "method": "GET",
+      "path": "/debug/memory/details",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 669
+    },
+    {
+      "method": "POST",
+      "path": "/debug/memory/gc/configure",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 728
+    },
+    {
+      "method": "GET",
+      "path": "/debug/memory/summary",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 315
+    },
+    {
+      "method": "POST",
+      "path": "/delete",
+      "source": "litellm/proxy/caching_routes.py",
+      "line": 122
+    },
+    {
+      "method": "POST",
+      "path": "/delete/allowed_ip",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 534
+    },
+    {
+      "method": "GET",
+      "path": "/discover",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2924
+    },
+    {
+      "method": "POST",
+      "path": "/embeddings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11301
+    },
+    {
+      "method": "GET",
+      "path": "/enabled",
+      "source": "litellm/proxy/_experimental/mcp_server/server.py",
+      "line": 4839
+    },
+    {
+      "method": "POST",
+      "path": "/end_user/block",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 135
+    },
+    {
+      "method": "GET",
+      "path": "/end_user/daily/activity",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 870
+    },
+    {
+      "method": "POST",
+      "path": "/end_user/delete",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 735
+    },
+    {
+      "method": "GET",
+      "path": "/end_user/info",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 498
+    },
+    {
+      "method": "GET",
+      "path": "/end_user/list",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 813
+    },
+    {
+      "method": "POST",
+      "path": "/end_user/new",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 306
+    },
+    {
+      "method": "POST",
+      "path": "/end_user/unblock",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 191
+    },
+    {
+      "method": "POST",
+      "path": "/end_user/update",
+      "source": "litellm/proxy/management_endpoints/customer_endpoints.py",
+      "line": 556
+    },
+    {
+      "method": "POST",
+      "path": "/engines/{model:path}/chat/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10963
+    },
+    {
+      "method": "POST",
+      "path": "/engines/{model:path}/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11129
+    },
+    {
+      "method": "POST",
+      "path": "/engines/{model:path}/embeddings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11307
+    },
+    {
+      "method": "POST",
+      "path": "/fallback",
+      "source": "litellm/proxy/management_endpoints/fallback_management_endpoints.py",
+      "line": 41
+    },
+    {
+      "method": "GET",
+      "path": "/fallback/login",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15825
+    },
+    {
+      "method": "DELETE",
+      "path": "/fallback/{model}",
+      "source": "litellm/proxy/management_endpoints/fallback_management_endpoints.py",
+      "line": 249
+    },
+    {
+      "method": "GET",
+      "path": "/fallback/{model}",
+      "source": "litellm/proxy/management_endpoints/fallback_management_endpoints.py",
+      "line": 192
+    },
+    {
+      "method": "GET",
+      "path": "/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1479
+    },
+    {
+      "method": "POST",
+      "path": "/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 370
+    },
+    {
+      "method": "DELETE",
+      "path": "/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1256
+    },
+    {
+      "method": "GET",
+      "path": "/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1062
+    },
+    {
+      "method": "GET",
+      "path": "/files/{file_id:path}/content",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 757
+    },
+    {
+      "method": "GET",
+      "path": "/fine_tuning/jobs",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 374
+    },
+    {
+      "method": "POST",
+      "path": "/fine_tuning/jobs",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 68
+    },
+    {
+      "method": "GET",
+      "path": "/fine_tuning/jobs/{fine_tuning_job_id:path}",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 228
+    },
+    {
+      "method": "POST",
+      "path": "/fine_tuning/jobs/{fine_tuning_job_id:path}/cancel",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 501
+    },
+    {
+      "method": "POST",
+      "path": "/flushall",
+      "source": "litellm/proxy/caching_routes.py",
+      "line": 216
+    },
+    {
+      "method": "GET",
+      "path": "/gateway/daily/activity",
+      "source": "litellm/proxy/management_endpoints/gateway_request_endpoints.py",
+      "line": 94
+    },
+    {
+      "method": "GET",
+      "path": "/get/allowed_ips",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 457
+    },
+    {
+      "method": "GET",
+      "path": "/get/config/callbacks",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 17960
+    },
+    {
+      "method": "GET",
+      "path": "/get/default_team_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 715
+    },
+    {
+      "method": "GET",
+      "path": "/get/internal_user_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 692
+    },
+    {
+      "method": "GET",
+      "path": "/get/mcp_semantic_filter_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1302
+    },
+    {
+      "method": "GET",
+      "path": "/get/mcp_tool_search_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1368
+    },
+    {
+      "method": "GET",
+      "path": "/get/sso_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 966
+    },
+    {
+      "method": "GET",
+      "path": "/get/ui_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1460
+    },
+    {
+      "method": "GET",
+      "path": "/get/ui_theme_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1161
+    },
+    {
+      "method": "GET",
+      "path": "/get/user_banner",
+      "source": "litellm/proxy/ui_crud_endpoints/user_banner_endpoints.py",
+      "line": 67
+    },
+    {
+      "method": "GET",
+      "path": "/get_favicon",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16569
+    },
+    {
+      "method": "GET",
+      "path": "/get_image",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16498
+    },
+    {
+      "method": "GET",
+      "path": "/get_logo_url",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16457
+    },
+    {
+      "method": "GET",
+      "path": "/global/activity",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 623
+    },
+    {
+      "method": "GET",
+      "path": "/global/activity/cache_hits",
+      "source": "litellm/proxy/analytics_endpoints/analytics_endpoints.py",
+      "line": 25
+    },
+    {
+      "method": "GET",
+      "path": "/global/activity/exceptions",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1064
+    },
+    {
+      "method": "GET",
+      "path": "/global/activity/exceptions/deployment",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 917
+    },
+    {
+      "method": "GET",
+      "path": "/global/activity/model",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 765
+    },
+    {
+      "method": "GET",
+      "path": "/global/all_end_users",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 4003
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3775
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/all_tag_names",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1969
+    },
+    {
+      "method": "POST",
+      "path": "/global/spend/end_users",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 4035
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/keys",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3867
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/logs",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3685
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/models",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 4119
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/provider",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1172
+    },
+    {
+      "method": "POST",
+      "path": "/global/spend/refresh",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3568
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/report",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1301
+    },
+    {
+      "method": "POST",
+      "path": "/global/spend/reset",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3533
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/tags",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 2021
+    },
+    {
+      "method": "GET",
+      "path": "/global/spend/teams",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3914
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 325
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/apply_guardrail",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 2314
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/list",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 126
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/register",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 684
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/submissions",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 860
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/submissions/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 956
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/submissions/{guardrail_id}/approve",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 992
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/submissions/{guardrail_id}/reject",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1073
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/test_custom_code",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 2030
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/ui/add_guardrail_settings",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1379
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/ui/category_yaml/{category_name}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1434
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/ui/major_airlines",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1493
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/ui/provider_specific_params",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1905
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/usage/detail/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/usage_endpoints.py",
+      "line": 621
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/usage/logs",
+      "source": "litellm/proxy/guardrails/usage_endpoints.py",
+      "line": 859
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/usage/overview",
+      "source": "litellm/proxy/guardrails/usage_endpoints.py",
+      "line": 548
+    },
+    {
+      "method": "POST",
+      "path": "/guardrails/validate_blocked_words_file",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1525
+    },
+    {
+      "method": "DELETE",
+      "path": "/guardrails/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 555
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1284
+    },
+    {
+      "method": "PATCH",
+      "path": "/guardrails/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1117
+    },
+    {
+      "method": "PUT",
+      "path": "/guardrails/{guardrail_id}",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 432
+    },
+    {
+      "method": "GET",
+      "path": "/guardrails/{guardrail_id}/info",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 1289
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1118
+    },
+    {
+      "method": "GET",
+      "path": "/health/backlog",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1874
+    },
+    {
+      "method": "GET",
+      "path": "/health/drain",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1898
+    },
+    {
+      "method": "GET",
+      "path": "/health/history",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1292
+    },
+    {
+      "method": "GET",
+      "path": "/health/latest",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1332
+    },
+    {
+      "method": "GET",
+      "path": "/health/license",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1441
+    },
+    {
+      "method": "GET",
+      "path": "/health/liveliness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1946
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/health/liveliness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1983
+    },
+    {
+      "method": "GET",
+      "path": "/health/liveness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1950
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/health/liveness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1987
+    },
+    {
+      "method": "GET",
+      "path": "/health/readiness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1839
+    },
+    {
+      "method": "OPTIONS",
+      "path": "/health/readiness",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1967
+    },
+    {
+      "method": "GET",
+      "path": "/health/readiness/details",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1862
+    },
+    {
+      "method": "GET",
+      "path": "/health/services",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 262
+    },
+    {
+      "method": "GET",
+      "path": "/health/shared-status",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1364
+    },
+    {
+      "method": "POST",
+      "path": "/health/test_connection",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 2003
+    },
+    {
+      "method": "POST",
+      "path": "/images/edits",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 228
+    },
+    {
+      "method": "POST",
+      "path": "/images/generations",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 65
+    },
+    {
+      "method": "POST",
+      "path": "/interactions",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 226
+    },
+    {
+      "method": "DELETE",
+      "path": "/interactions/{interaction_id}",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 380
+    },
+    {
+      "method": "GET",
+      "path": "/interactions/{interaction_id}",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 312
+    },
+    {
+      "method": "POST",
+      "path": "/interactions/{interaction_id}/cancel",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 448
+    },
+    {
+      "method": "POST",
+      "path": "/introspect",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2083
+    },
+    {
+      "method": "POST",
+      "path": "/invitation/delete",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16778
+    },
+    {
+      "method": "GET",
+      "path": "/invitation/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16676
+    },
+    {
+      "method": "POST",
+      "path": "/invitation/new",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16605
+    },
+    {
+      "method": "POST",
+      "path": "/invitation/update",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16721
+    },
+    {
+      "method": "POST",
+      "path": "/jwt/key/mapping/delete",
+      "source": "litellm/proxy/management_endpoints/jwt_key_mapping_endpoints.py",
+      "line": 206
+    },
+    {
+      "method": "GET",
+      "path": "/jwt/key/mapping/info",
+      "source": "litellm/proxy/management_endpoints/jwt_key_mapping_endpoints.py",
+      "line": 277
+    },
+    {
+      "method": "GET",
+      "path": "/jwt/key/mapping/list",
+      "source": "litellm/proxy/management_endpoints/jwt_key_mapping_endpoints.py",
+      "line": 239
+    },
+    {
+      "method": "POST",
+      "path": "/jwt/key/mapping/new",
+      "source": "litellm/proxy/management_endpoints/jwt_key_mapping_endpoints.py",
+      "line": 92
+    },
+    {
+      "method": "POST",
+      "path": "/jwt/key/mapping/update",
+      "source": "litellm/proxy/management_endpoints/jwt_key_mapping_endpoints.py",
+      "line": 144
+    },
+    {
+      "method": "GET",
+      "path": "/key/aliases",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 6185
+    },
+    {
+      "method": "POST",
+      "path": "/key/block",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 6738
+    },
+    {
+      "method": "POST",
+      "path": "/key/bulk_update",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 3201
+    },
+    {
+      "method": "POST",
+      "path": "/key/delete",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 3653
+    },
+    {
+      "method": "POST",
+      "path": "/key/generate",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 1728
+    },
+    {
+      "method": "POST",
+      "path": "/key/health",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 6966
+    },
+    {
+      "method": "GET",
+      "path": "/key/info",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 3930
+    },
+    {
+      "method": "GET",
+      "path": "/key/list",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 5954
+    },
+    {
+      "method": "POST",
+      "path": "/key/regenerate",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 5202
+    },
+    {
+      "method": "POST",
+      "path": "/key/service-account/generate",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 1939
+    },
+    {
+      "method": "GET",
+      "path": "/key/spend/report",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1795
+    },
+    {
+      "method": "POST",
+      "path": "/key/unblock",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 6852
+    },
+    {
+      "method": "POST",
+      "path": "/key/update",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 2950
+    },
+    {
+      "method": "POST",
+      "path": "/key/{key:path}/regenerate",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 5197
+    },
+    {
+      "method": "POST",
+      "path": "/key/{key:path}/reset_spend",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 5659
+    },
+    {
+      "method": "POST",
+      "path": "/lazy/warm/{name}",
+      "source": "litellm/proxy/_lazy_features.py",
+      "line": 471
+    },
+    {
+      "method": "GET",
+      "path": "/litellm/.well-known/litellm-ui-config",
+      "source": "litellm/proxy/discovery_endpoints/ui_discovery_endpoints.py",
+      "line": 16
+    },
+    {
+      "method": "POST",
+      "path": "/login",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15853
+    },
+    {
+      "method": "POST",
+      "path": "/make_public",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2832
+    },
+    {
+      "method": "GET",
+      "path": "/memory-usage",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 107
+    },
+    {
+      "method": "GET",
+      "path": "/memory-usage-in-mem-cache",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 127
+    },
+    {
+      "method": "GET",
+      "path": "/memory-usage-in-mem-cache-items",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 169
+    },
+    {
+      "method": "POST",
+      "path": "/model/block",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 1119
+    },
+    {
+      "method": "GET",
+      "path": "/model/cost_map/source",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18353
+    },
+    {
+      "method": "POST",
+      "path": "/model/delete",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 1834
+    },
+    {
+      "method": "GET",
+      "path": "/model/deprecations",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15277
+    },
+    {
+      "method": "GET",
+      "path": "/model/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15060
+    },
+    {
+      "method": "GET",
+      "path": "/model/metrics",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 14638
+    },
+    {
+      "method": "GET",
+      "path": "/model/metrics/exceptions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 14842
+    },
+    {
+      "method": "GET",
+      "path": "/model/metrics/slow_responses",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 14753
+    },
+    {
+      "method": "POST",
+      "path": "/model/new",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2007
+    },
+    {
+      "method": "GET",
+      "path": "/model/settings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15551
+    },
+    {
+      "method": "GET",
+      "path": "/model/streaming_metrics",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 14506
+    },
+    {
+      "method": "POST",
+      "path": "/model/unblock",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 1148
+    },
+    {
+      "method": "POST",
+      "path": "/model/update",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2209
+    },
+    {
+      "method": "PATCH",
+      "path": "/model/{model_id}/update",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 816
+    },
+    {
+      "method": "GET",
+      "path": "/model_group/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15353
+    },
+    {
+      "method": "POST",
+      "path": "/model_group/make_public",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2396
+    },
+    {
+      "method": "GET",
+      "path": "/model_hub",
+      "source": "litellm/proxy/public_endpoints/public_v1/model_hub.py",
+      "line": 226
+    },
+    {
+      "method": "POST",
+      "path": "/model_hub/update_useful_links",
+      "source": "litellm/proxy/management_endpoints/model_management_endpoints.py",
+      "line": 2484
+    },
+    {
+      "method": "GET",
+      "path": "/model_hub/{facet}",
+      "source": "litellm/proxy/public_endpoints/public_v1/model_hub.py",
+      "line": 276
+    },
+    {
+      "method": "GET",
+      "path": "/models",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10606
+    },
+    {
+      "method": "GET",
+      "path": "/models/{model_id}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10842
+    },
+    {
+      "method": "POST",
+      "path": "/models/{model_name:path}:countTokens",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 148
+    },
+    {
+      "method": "POST",
+      "path": "/models/{model_name:path}:generateContent",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 21
+    },
+    {
+      "method": "POST",
+      "path": "/models/{model_name:path}:streamGenerateContent",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 82
+    },
+    {
+      "method": "POST",
+      "path": "/moderations",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11424
+    },
+    {
+      "method": "GET",
+      "path": "/network/client-ip",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 975
+    },
+    {
+      "method": "POST",
+      "path": "/ocr",
+      "source": "litellm/proxy/ocr_endpoints/endpoints.py",
+      "line": 241
+    },
+    {
+      "method": "POST",
+      "path": "/onboarding/claim_token",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16332
+    },
+    {
+      "method": "GET",
+      "path": "/onboarding/get_token",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16133
+    },
+    {
+      "method": "POST",
+      "path": "/openai/deployments/{model:path}/chat/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10968
+    },
+    {
+      "method": "POST",
+      "path": "/openai/deployments/{model:path}/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11134
+    },
+    {
+      "method": "POST",
+      "path": "/openai/deployments/{model:path}/embeddings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11313
+    },
+    {
+      "method": "POST",
+      "path": "/openai/deployments/{model:path}/images/edits",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 233
+    },
+    {
+      "method": "POST",
+      "path": "/openai/deployments/{model:path}/images/generations",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 71
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/openai/v1/realtime",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11933
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/realtime/calls",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 370
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/realtime/client_secrets",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 226
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/realtime/transcription_sessions",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 531
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/responses",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 189
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/responses/compact",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 957
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/responses/input_tokens",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1112
+    },
+    {
+      "method": "DELETE",
+      "path": "/openai/v1/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 783
+    },
+    {
+      "method": "GET",
+      "path": "/openai/v1/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 670
+    },
+    {
+      "method": "POST",
+      "path": "/openai/v1/responses/{response_id}/cancel",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1185
+    },
+    {
+      "method": "GET",
+      "path": "/openai/v1/responses/{response_id}/input_items",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 889
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/openai/{endpoint:path}",
+      "source": "litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py",
+      "line": 2479
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/openai_passthrough/{endpoint:path}",
+      "source": "litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py",
+      "line": 2478
+    },
+    {
+      "method": "GET",
+      "path": "/openapi-registry",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2988
+    },
+    {
+      "method": "GET",
+      "path": "/organization/daily/activity",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 536
+    },
+    {
+      "method": "DELETE",
+      "path": "/organization/delete",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 946
+    },
+    {
+      "method": "GET",
+      "path": "/organization/info",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1108
+    },
+    {
+      "method": "POST",
+      "path": "/organization/info",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1155
+    },
+    {
+      "method": "GET",
+      "path": "/organization/list",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1002
+    },
+    {
+      "method": "POST",
+      "path": "/organization/member_add",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1194
+    },
+    {
+      "method": "DELETE",
+      "path": "/organization/member_delete",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1495
+    },
+    {
+      "method": "PATCH",
+      "path": "/organization/member_update",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 1343
+    },
+    {
+      "method": "POST",
+      "path": "/organization/new",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 339
+    },
+    {
+      "method": "GET",
+      "path": "/organization/spend/report",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1926
+    },
+    {
+      "method": "PATCH",
+      "path": "/organization/update",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 639
+    },
+    {
+      "method": "GET",
+      "path": "/otel-spans",
+      "source": "litellm/proxy/common_utils/debug_utils.py",
+      "line": 786
+    },
+    {
+      "method": "GET",
+      "path": "/ping",
+      "source": "litellm/proxy/caching_routes.py",
+      "line": 50
+    },
+    {
+      "method": "POST",
+      "path": "/policies",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 151
+    },
+    {
+      "method": "POST",
+      "path": "/policies/attachments",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 708
+    },
+    {
+      "method": "POST",
+      "path": "/policies/attachments/estimate-impact",
+      "source": "litellm/proxy/policy_engine/policy_resolve_endpoints.py",
+      "line": 321
+    },
+    {
+      "method": "GET",
+      "path": "/policies/attachments/list",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 654
+    },
+    {
+      "method": "DELETE",
+      "path": "/policies/attachments/{attachment_id}",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 839
+    },
+    {
+      "method": "GET",
+      "path": "/policies/attachments/{attachment_id}",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 800
+    },
+    {
+      "method": "GET",
+      "path": "/policies/compare",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 321
+    },
+    {
+      "method": "GET",
+      "path": "/policies/list",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 72
+    },
+    {
+      "method": "DELETE",
+      "path": "/policies/name/{policy_name}/all-versions",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 352
+    },
+    {
+      "method": "GET",
+      "path": "/policies/name/{policy_name}/versions",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 220
+    },
+    {
+      "method": "POST",
+      "path": "/policies/name/{policy_name}/versions",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 245
+    },
+    {
+      "method": "POST",
+      "path": "/policies/resolve",
+      "source": "litellm/proxy/policy_engine/policy_resolve_endpoints.py",
+      "line": 215
+    },
+    {
+      "method": "POST",
+      "path": "/policies/test-pipeline",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 591
+    },
+    {
+      "method": "GET",
+      "path": "/policies/usage/overview",
+      "source": "litellm/proxy/guardrails/usage_endpoints.py",
+      "line": 934
+    },
+    {
+      "method": "DELETE",
+      "path": "/policies/{policy_id}",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 476
+    },
+    {
+      "method": "GET",
+      "path": "/policies/{policy_id}",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 381
+    },
+    {
+      "method": "PUT",
+      "path": "/policies/{policy_id}",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 417
+    },
+    {
+      "method": "GET",
+      "path": "/policies/{policy_id}/resolved-guardrails",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 525
+    },
+    {
+      "method": "PUT",
+      "path": "/policies/{policy_id}/status",
+      "source": "litellm/proxy/policy_engine/policy_endpoints.py",
+      "line": 280
+    },
+    {
+      "method": "GET",
+      "path": "/policy/info/{policy_name}",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 491
+    },
+    {
+      "method": "GET",
+      "path": "/policy/list",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 452
+    },
+    {
+      "method": "GET",
+      "path": "/policy/templates",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 626
+    },
+    {
+      "method": "POST",
+      "path": "/policy/templates/enrich",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 714
+    },
+    {
+      "method": "POST",
+      "path": "/policy/templates/enrich/stream",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 870
+    },
+    {
+      "method": "POST",
+      "path": "/policy/templates/suggest",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 1093
+    },
+    {
+      "method": "POST",
+      "path": "/policy/templates/test",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 1140
+    },
+    {
+      "method": "POST",
+      "path": "/policy/test",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 548
+    },
+    {
+      "method": "POST",
+      "path": "/policy/validate",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 383
+    },
+    {
+      "method": "POST",
+      "path": "/prompts",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 593
+    },
+    {
+      "method": "GET",
+      "path": "/prompts/list",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 219
+    },
+    {
+      "method": "POST",
+      "path": "/prompts/test",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 1010
+    },
+    {
+      "method": "DELETE",
+      "path": "/prompts/{prompt_id}",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 806
+    },
+    {
+      "method": "GET",
+      "path": "/prompts/{prompt_id}",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 465
+    },
+    {
+      "method": "PATCH",
+      "path": "/prompts/{prompt_id}",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 886
+    },
+    {
+      "method": "PUT",
+      "path": "/prompts/{prompt_id}",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 689
+    },
+    {
+      "method": "GET",
+      "path": "/prompts/{prompt_id}/info",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 471
+    },
+    {
+      "method": "GET",
+      "path": "/prompts/{prompt_id}/versions",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 316
+    },
+    {
+      "method": "GET",
+      "path": "/provider/budgets",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 4156
+    },
+    {
+      "method": "GET",
+      "path": "/public/agent_hub",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 263
+    },
+    {
+      "method": "GET",
+      "path": "/public/agents/fields",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 568
+    },
+    {
+      "method": "GET",
+      "path": "/public/autorouter_presets",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 533
+    },
+    {
+      "method": "GET",
+      "path": "/public/complexity_router/scorer_defaults",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 405
+    },
+    {
+      "method": "GET",
+      "path": "/public/endpoints",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 550
+    },
+    {
+      "method": "GET",
+      "path": "/public/litellm_blog_posts",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 448
+    },
+    {
+      "method": "GET",
+      "path": "/public/litellm_model_cost_map",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 427
+    },
+    {
+      "method": "GET",
+      "path": "/public/mcp_hub",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 287
+    },
+    {
+      "method": "GET",
+      "path": "/public/model_hub",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 211
+    },
+    {
+      "method": "GET",
+      "path": "/public/model_hub/info",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 345
+    },
+    {
+      "method": "GET",
+      "path": "/public/providers",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 369
+    },
+    {
+      "method": "GET",
+      "path": "/public/providers/fields",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 382
+    },
+    {
+      "method": "GET",
+      "path": "/public/skill_hub",
+      "source": "litellm/proxy/public_endpoints/public_endpoints.py",
+      "line": 301
+    },
+    {
+      "method": "POST",
+      "path": "/queue/chat/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15697
+    },
+    {
+      "method": "POST",
+      "path": "/rag/ingest",
+      "source": "litellm/proxy/rag_endpoints/endpoints.py",
+      "line": 473
+    },
+    {
+      "method": "POST",
+      "path": "/rag/query",
+      "source": "litellm/proxy/rag_endpoints/endpoints.py",
+      "line": 621
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/realtime",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11935
+    },
+    {
+      "method": "POST",
+      "path": "/realtime/calls",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 366
+    },
+    {
+      "method": "POST",
+      "path": "/realtime/client_secrets",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 221
+    },
+    {
+      "method": "POST",
+      "path": "/realtime/transcription_sessions",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 526
+    },
+    {
+      "method": "GET",
+      "path": "/redis/info",
+      "source": "litellm/proxy/caching_routes.py",
+      "line": 180
+    },
+    {
+      "method": "POST",
+      "path": "/register",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2856
+    },
+    {
+      "method": "GET",
+      "path": "/registry.json",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 987
+    },
+    {
+      "method": "POST",
+      "path": "/reload/anthropic_beta_headers",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18407
+    },
+    {
+      "method": "POST",
+      "path": "/reload/model_cost_map",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18154
+    },
+    {
+      "method": "POST",
+      "path": "/rerank",
+      "source": "litellm/proxy/rerank_endpoints/endpoints.py",
+      "line": 35
+    },
+    {
+      "method": "POST",
+      "path": "/responses",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 184
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/responses",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1416
+    },
+    {
+      "method": "POST",
+      "path": "/responses/compact",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 952
+    },
+    {
+      "method": "POST",
+      "path": "/responses/input_tokens",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1107
+    },
+    {
+      "method": "DELETE",
+      "path": "/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 778
+    },
+    {
+      "method": "GET",
+      "path": "/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 665
+    },
+    {
+      "method": "POST",
+      "path": "/responses/{response_id}/cancel",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1180
+    },
+    {
+      "method": "GET",
+      "path": "/responses/{response_id}/input_items",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 884
+    },
+    {
+      "method": "POST",
+      "path": "/revoke",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2070
+    },
+    {
+      "method": "GET",
+      "path": "/router/fields",
+      "source": "litellm/proxy/management_endpoints/router_settings_endpoints.py",
+      "line": 127
+    },
+    {
+      "method": "GET",
+      "path": "/router/settings",
+      "source": "litellm/proxy/management_endpoints/router_settings_endpoints.py",
+      "line": 61
+    },
+    {
+      "method": "GET",
+      "path": "/routes",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18719
+    },
+    {
+      "method": "DELETE",
+      "path": "/schedule/anthropic_beta_headers_reload",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18540
+    },
+    {
+      "method": "POST",
+      "path": "/schedule/anthropic_beta_headers_reload",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18480
+    },
+    {
+      "method": "GET",
+      "path": "/schedule/anthropic_beta_headers_reload/status",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18585
+    },
+    {
+      "method": "DELETE",
+      "path": "/schedule/model_cost_map_reload",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18271
+    },
+    {
+      "method": "POST",
+      "path": "/schedule/model_cost_map_reload",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18222
+    },
+    {
+      "method": "GET",
+      "path": "/schedule/model_cost_map_reload/status",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18311
+    },
+    {
+      "method": "POST",
+      "path": "/search",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "path": "/search/tools",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 247
+    },
+    {
+      "method": "POST",
+      "path": "/search/{search_tool_name}",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 23
+    },
+    {
+      "method": "POST",
+      "path": "/search_tools",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 267
+    },
+    {
+      "method": "GET",
+      "path": "/search_tools/list",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 135
+    },
+    {
+      "method": "POST",
+      "path": "/search_tools/test_connection",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 555
+    },
+    {
+      "method": "GET",
+      "path": "/search_tools/ui/available_providers",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 646
+    },
+    {
+      "method": "DELETE",
+      "path": "/search_tools/{search_tool_id}",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 422
+    },
+    {
+      "method": "GET",
+      "path": "/search_tools/{search_tool_id}",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 478
+    },
+    {
+      "method": "PUT",
+      "path": "/search_tools/{search_tool_id}",
+      "source": "litellm/proxy/search_endpoints/search_tool_management.py",
+      "line": 339
+    },
+    {
+      "method": "GET",
+      "path": "/server",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1106
+    },
+    {
+      "method": "POST",
+      "path": "/server",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1569
+    },
+    {
+      "method": "PUT",
+      "path": "/server",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2679
+    },
+    {
+      "method": "GET",
+      "path": "/server/health",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1223
+    },
+    {
+      "method": "POST",
+      "path": "/server/import",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1662
+    },
+    {
+      "method": "POST",
+      "path": "/server/oauth/session",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1772
+    },
+    {
+      "method": "GET",
+      "path": "/server/oauth/{server_id}/authorize",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1985
+    },
+    {
+      "method": "POST",
+      "path": "/server/oauth/{server_id}/register",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2104
+    },
+    {
+      "method": "POST",
+      "path": "/server/oauth/{server_id}/token",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2044
+    },
+    {
+      "method": "POST",
+      "path": "/server/register",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1274
+    },
+    {
+      "method": "GET",
+      "path": "/server/submissions",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1348
+    },
+    {
+      "method": "DELETE",
+      "path": "/server/{server_id}",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2131
+    },
+    {
+      "method": "GET",
+      "path": "/server/{server_id}",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1469
+    },
+    {
+      "method": "PUT",
+      "path": "/server/{server_id}/approve",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1378
+    },
+    {
+      "method": "DELETE",
+      "path": "/server/{server_id}/oauth-user-credential",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2335
+    },
+    {
+      "method": "POST",
+      "path": "/server/{server_id}/oauth-user-credential",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2266
+    },
+    {
+      "method": "GET",
+      "path": "/server/{server_id}/oauth-user-credential/status",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2374
+    },
+    {
+      "method": "PUT",
+      "path": "/server/{server_id}/reject",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 1422
+    },
+    {
+      "method": "DELETE",
+      "path": "/server/{server_id}/user-credential",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2234
+    },
+    {
+      "method": "POST",
+      "path": "/server/{server_id}/user-credential",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2197
+    },
+    {
+      "method": "DELETE",
+      "path": "/server/{server_id}/user-env-vars",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2624
+    },
+    {
+      "method": "GET",
+      "path": "/server/{server_id}/user-env-vars",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2560
+    },
+    {
+      "method": "POST",
+      "path": "/server/{server_id}/user-env-vars",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2582
+    },
+    {
+      "method": "GET",
+      "path": "/settings",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 1551
+    },
+    {
+      "method": "POST",
+      "path": "/spend/calculate",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 2165
+    },
+    {
+      "method": "GET",
+      "path": "/spend/keys",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 384
+    },
+    {
+      "method": "GET",
+      "path": "/spend/logs",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3321
+    },
+    {
+      "method": "GET",
+      "path": "/spend/logs/session/ui",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 4350
+    },
+    {
+      "method": "GET",
+      "path": "/spend/logs/ui",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 2354
+    },
+    {
+      "method": "GET",
+      "path": "/spend/logs/ui/{request_id}",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 3228
+    },
+    {
+      "method": "GET",
+      "path": "/spend/logs/v2",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 2346
+    },
+    {
+      "method": "GET",
+      "path": "/spend/tags",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 521
+    },
+    {
+      "method": "GET",
+      "path": "/spend/users",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 446
+    },
+    {
+      "method": "GET",
+      "path": "/spend_logs/end_users",
+      "source": "litellm/proxy/management_endpoints/management_v1/spend_logs.py",
+      "line": 172
+    },
+    {
+      "method": "GET",
+      "path": "/spend_logs/users",
+      "source": "litellm/proxy/management_endpoints/management_v1/spend_logs.py",
+      "line": 223
+    },
+    {
+      "method": "GET",
+      "path": "/sso/callback",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 1991
+    },
+    {
+      "method": "POST",
+      "path": "/sso/cli/complete/{login_id}",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 749
+    },
+    {
+      "method": "GET",
+      "path": "/sso/cli/poll/{key_id}",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2432
+    },
+    {
+      "method": "POST",
+      "path": "/sso/cli/start",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 703
+    },
+    {
+      "method": "GET",
+      "path": "/sso/debug/callback",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 4666
+    },
+    {
+      "method": "GET",
+      "path": "/sso/debug/login",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 4619
+    },
+    {
+      "method": "GET",
+      "path": "/sso/get/ui_settings",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2634
+    },
+    {
+      "method": "GET",
+      "path": "/sso/key/generate",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 998
+    },
+    {
+      "method": "GET",
+      "path": "/sso/readiness",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2666
+    },
+    {
+      "method": "POST",
+      "path": "/sso/saml/callback",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2141
+    },
+    {
+      "method": "GET",
+      "path": "/sso/saml/login",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2120
+    },
+    {
+      "method": "GET",
+      "path": "/sso/saml/metadata",
+      "source": "litellm/proxy/management_endpoints/ui_sso.py",
+      "line": 2132
+    },
+    {
+      "method": "GET",
+      "path": "/tag/daily/activity",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 722
+    },
+    {
+      "method": "GET",
+      "path": "/tag/dau",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 213
+    },
+    {
+      "method": "POST",
+      "path": "/tag/delete",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 686
+    },
+    {
+      "method": "GET",
+      "path": "/tag/distinct",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 162
+    },
+    {
+      "method": "POST",
+      "path": "/tag/info",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 486
+    },
+    {
+      "method": "GET",
+      "path": "/tag/list",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 575
+    },
+    {
+      "method": "GET",
+      "path": "/tag/mau",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 426
+    },
+    {
+      "method": "POST",
+      "path": "/tag/new",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 246
+    },
+    {
+      "method": "GET",
+      "path": "/tag/summary",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 547
+    },
+    {
+      "method": "POST",
+      "path": "/tag/update",
+      "source": "litellm/proxy/management_endpoints/tag_management_endpoints.py",
+      "line": 394
+    },
+    {
+      "method": "GET",
+      "path": "/tag/user-agent/per-user-analytics",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 652
+    },
+    {
+      "method": "GET",
+      "path": "/tag/wau",
+      "source": "litellm/proxy/management_endpoints/user_agent_analytics_endpoints.py",
+      "line": 305
+    },
+    {
+      "method": "GET",
+      "path": "/team/available",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4808
+    },
+    {
+      "method": "POST",
+      "path": "/team/block",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4686
+    },
+    {
+      "method": "POST",
+      "path": "/team/bulk_member_add",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3792
+    },
+    {
+      "method": "GET",
+      "path": "/team/daily/activity",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 6182
+    },
+    {
+      "method": "GET",
+      "path": "/team/daily/activity/aggregated",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 6268
+    },
+    {
+      "method": "POST",
+      "path": "/team/delete",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3938
+    },
+    {
+      "method": "GET",
+      "path": "/team/filter/ui",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5528
+    },
+    {
+      "method": "GET",
+      "path": "/team/info",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4418
+    },
+    {
+      "method": "POST",
+      "path": "/team/key/bulk_update",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 3397
+    },
+    {
+      "method": "GET",
+      "path": "/team/list",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5417
+    },
+    {
+      "method": "POST",
+      "path": "/team/member_add",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3113
+    },
+    {
+      "method": "POST",
+      "path": "/team/member_delete",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3283
+    },
+    {
+      "method": "POST",
+      "path": "/team/member_update",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3476
+    },
+    {
+      "method": "GET",
+      "path": "/team/metadata_schema",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4790
+    },
+    {
+      "method": "POST",
+      "path": "/team/model/add",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5611
+    },
+    {
+      "method": "POST",
+      "path": "/team/model/delete",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5716
+    },
+    {
+      "method": "POST",
+      "path": "/team/new",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 1184
+    },
+    {
+      "method": "POST",
+      "path": "/team/permissions_bulk_update",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5936
+    },
+    {
+      "method": "GET",
+      "path": "/team/permissions_list",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5803
+    },
+    {
+      "method": "POST",
+      "path": "/team/permissions_update",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5870
+    },
+    {
+      "method": "GET",
+      "path": "/team/spend/by_user",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 6380
+    },
+    {
+      "method": "GET",
+      "path": "/team/spend/report",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1884
+    },
+    {
+      "method": "POST",
+      "path": "/team/unblock",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4741
+    },
+    {
+      "method": "POST",
+      "path": "/team/update",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 1940
+    },
+    {
+      "method": "GET",
+      "path": "/team/{team_id:path}/callback",
+      "source": "litellm/proxy/management_endpoints/team_callback_endpoints.py",
+      "line": 718
+    },
+    {
+      "method": "POST",
+      "path": "/team/{team_id:path}/callback",
+      "source": "litellm/proxy/management_endpoints/team_callback_endpoints.py",
+      "line": 253
+    },
+    {
+      "method": "DELETE",
+      "path": "/team/{team_id:path}/callback/{callback_name}",
+      "source": "litellm/proxy/management_endpoints/team_callback_endpoints.py",
+      "line": 434
+    },
+    {
+      "method": "PATCH",
+      "path": "/team/{team_id}",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 2369
+    },
+    {
+      "method": "POST",
+      "path": "/team/{team_id}/disable_logging",
+      "source": "litellm/proxy/management_endpoints/team_callback_endpoints.py",
+      "line": 579
+    },
+    {
+      "method": "POST",
+      "path": "/team/{team_id}/member/{user_id}/reset_spend",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 3680
+    },
+    {
+      "method": "GET",
+      "path": "/team/{team_id}/members/me",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 4572
+    },
+    {
+      "method": "GET",
+      "path": "/test",
+      "source": "litellm/proxy/health_endpoints/_health_endpoints.py",
+      "line": 238
+    },
+    {
+      "method": "POST",
+      "path": "/test/connection",
+      "source": "litellm/proxy/_experimental/mcp_server/rest_endpoints.py",
+      "line": 1554
+    },
+    {
+      "method": "POST",
+      "path": "/test/tools/list",
+      "source": "litellm/proxy/_experimental/mcp_server/rest_endpoints.py",
+      "line": 1588
+    },
+    {
+      "method": "POST",
+      "path": "/threads",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12354
+    },
+    {
+      "method": "GET",
+      "path": "/threads/{thread_id}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12443
+    },
+    {
+      "method": "GET",
+      "path": "/threads/{thread_id}/messages",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12621
+    },
+    {
+      "method": "POST",
+      "path": "/threads/{thread_id}/messages",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12530
+    },
+    {
+      "method": "POST",
+      "path": "/threads/{thread_id}/runs",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12708
+    },
+    {
+      "method": "POST",
+      "path": "/token",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 1944
+    },
+    {
+      "method": "GET",
+      "path": "/token/generate",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 18744
+    },
+    {
+      "method": "GET",
+      "path": "/tools",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 912
+    },
+    {
+      "method": "POST",
+      "path": "/tools/call",
+      "source": "litellm/proxy/_experimental/mcp_server/rest_endpoints.py",
+      "line": 1056
+    },
+    {
+      "method": "GET",
+      "path": "/tools/list",
+      "source": "litellm/proxy/_experimental/mcp_server/rest_endpoints.py",
+      "line": 834
+    },
+    {
+      "method": "GET",
+      "path": "/toolset",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 3065
+    },
+    {
+      "method": "POST",
+      "path": "/toolset",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 3025
+    },
+    {
+      "method": "PUT",
+      "path": "/toolset",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 3115
+    },
+    {
+      "method": "DELETE",
+      "path": "/toolset/{toolset_id}",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 3166
+    },
+    {
+      "method": "GET",
+      "path": "/toolset/{toolset_id}",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 3088
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/default_team_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 941
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/internal_user_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 911
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/mcp_semantic_filter_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1332
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/mcp_tool_search_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1394
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/sso_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1021
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/ui_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1518
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/ui_theme_settings",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1216
+    },
+    {
+      "method": "PATCH",
+      "path": "/update/user_banner",
+      "source": "litellm/proxy/ui_crud_endpoints/user_banner_endpoints.py",
+      "line": 87
+    },
+    {
+      "method": "POST",
+      "path": "/upload/logo",
+      "source": "litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py",
+      "line": 1651
+    },
+    {
+      "method": "POST",
+      "path": "/usage/ai/chat",
+      "source": "litellm/proxy/management_endpoints/usage_endpoints/endpoints.py",
+      "line": 34
+    },
+    {
+      "method": "GET",
+      "path": "/user-credentials",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2412
+    },
+    {
+      "method": "GET",
+      "path": "/user-env-vars/status",
+      "source": "litellm/proxy/management_endpoints/mcp_management_endpoints.py",
+      "line": 2651
+    },
+    {
+      "method": "GET",
+      "path": "/user/available_roles",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 640
+    },
+    {
+      "method": "POST",
+      "path": "/user/bulk_update",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 1756
+    },
+    {
+      "method": "GET",
+      "path": "/user/daily/activity",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 2761
+    },
+    {
+      "method": "GET",
+      "path": "/user/daily/activity/aggregated",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 2883
+    },
+    {
+      "method": "POST",
+      "path": "/user/delete",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 2305
+    },
+    {
+      "method": "GET",
+      "path": "/user/filter/ui",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 2651
+    },
+    {
+      "method": "GET",
+      "path": "/user/info",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 892
+    },
+    {
+      "method": "GET",
+      "path": "/user/list",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 2132
+    },
+    {
+      "method": "POST",
+      "path": "/user/new",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 441
+    },
+    {
+      "method": "GET",
+      "path": "/user/spend/report",
+      "source": "litellm/proxy/spend_tracking/spend_management_endpoints.py",
+      "line": 1842
+    },
+    {
+      "method": "POST",
+      "path": "/user/update",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 1607
+    },
+    {
+      "method": "GET",
+      "path": "/utils/available_routes",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12827
+    },
+    {
+      "method": "POST",
+      "path": "/utils/dotprompt_json_converter",
+      "source": "litellm/proxy/prompts/prompt_endpoints.py",
+      "line": 1151
+    },
+    {
+      "method": "GET",
+      "path": "/utils/supported_openai_params",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 13086
+    },
+    {
+      "method": "POST",
+      "path": "/utils/test_policies_and_guardrails",
+      "source": "litellm/proxy/management_endpoints/policy_endpoints/endpoints.py",
+      "line": 280
+    },
+    {
+      "method": "POST",
+      "path": "/utils/token_counter",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12961
+    },
+    {
+      "method": "POST",
+      "path": "/utils/transform_request",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 13124
+    },
+    {
+      "method": "POST",
+      "path": "/v1/a2a/discover",
+      "source": "litellm/proxy/a2a/endpoints.py",
+      "line": 66
+    },
+    {
+      "method": "POST",
+      "path": "/v1/a2a/{agent_id}/message/send",
+      "source": "litellm/proxy/agent_endpoints/a2a_endpoints.py",
+      "line": 628
+    },
+    {
+      "method": "GET",
+      "path": "/v1/access_group",
+      "source": "litellm/proxy/management_endpoints/access_group_endpoints.py",
+      "line": 511
+    },
+    {
+      "method": "POST",
+      "path": "/v1/access_group",
+      "source": "litellm/proxy/management_endpoints/access_group_endpoints.py",
+      "line": 439
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/access_group/{access_group_id}",
+      "source": "litellm/proxy/management_endpoints/access_group_endpoints.py",
+      "line": 644
+    },
+    {
+      "method": "GET",
+      "path": "/v1/access_group/{access_group_id}",
+      "source": "litellm/proxy/management_endpoints/access_group_endpoints.py",
+      "line": 526
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/access_group/{access_group_id}",
+      "source": "litellm/proxy/management_endpoints/access_group_endpoints.py",
+      "line": 547
+    },
+    {
+      "method": "GET",
+      "path": "/v1/agents",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 275
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agents",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 416
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agents/make_public",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 978
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/agents/{agent_id}",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 820
+    },
+    {
+      "method": "GET",
+      "path": "/v1/agents/{agent_id}",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 535
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/agents/{agent_id}",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 717
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/agents/{agent_id}",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 615
+    },
+    {
+      "method": "POST",
+      "path": "/v1/agents/{agent_id}/make_public",
+      "source": "litellm/proxy/agent_endpoints/endpoints.py",
+      "line": 875
+    },
+    {
+      "method": "GET",
+      "path": "/v1/assistants",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12080
+    },
+    {
+      "method": "POST",
+      "path": "/v1/assistants",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12170
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/assistants/{assistant_id:path}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12260
+    },
+    {
+      "method": "POST",
+      "path": "/v1/audio/speech",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11547
+    },
+    {
+      "method": "POST",
+      "path": "/v1/audio/transcriptions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11675
+    },
+    {
+      "method": "GET",
+      "path": "/v1/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 686
+    },
+    {
+      "method": "POST",
+      "path": "/v1/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 102
+    },
+    {
+      "method": "GET",
+      "path": "/v1/batches/{batch_id:path}",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 395
+    },
+    {
+      "method": "POST",
+      "path": "/v1/batches/{batch_id:path}/cancel",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 868
+    },
+    {
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10953
+    },
+    {
+      "method": "POST",
+      "path": "/v1/completions",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11127
+    },
+    {
+      "method": "GET",
+      "path": "/v1/containers",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 161
+    },
+    {
+      "method": "POST",
+      "path": "/v1/containers",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 29
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/containers/{container_id}",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 371
+    },
+    {
+      "method": "GET",
+      "path": "/v1/containers/{container_id}",
+      "source": "litellm/proxy/container_endpoints/endpoints.py",
+      "line": 266
+    },
+    {
+      "method": "POST",
+      "path": "/v1/embeddings",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11295
+    },
+    {
+      "method": "GET",
+      "path": "/v1/evals",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 118
+    },
+    {
+      "method": "POST",
+      "path": "/v1/evals",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 27
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/evals/{eval_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 397
+    },
+    {
+      "method": "GET",
+      "path": "/v1/evals/{eval_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 219
+    },
+    {
+      "method": "POST",
+      "path": "/v1/evals/{eval_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 307
+    },
+    {
+      "method": "POST",
+      "path": "/v1/evals/{eval_id}/cancel",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 485
+    },
+    {
+      "method": "GET",
+      "path": "/v1/evals/{eval_id}/runs",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 677
+    },
+    {
+      "method": "POST",
+      "path": "/v1/evals/{eval_id}/runs",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 578
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/evals/{eval_id}/runs/{run_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 946
+    },
+    {
+      "method": "GET",
+      "path": "/v1/evals/{eval_id}/runs/{run_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 770
+    },
+    {
+      "method": "POST",
+      "path": "/v1/evals/{eval_id}/runs/{run_id}",
+      "source": "litellm/proxy/openai_evals_endpoints/endpoints.py",
+      "line": 857
+    },
+    {
+      "method": "GET",
+      "path": "/v1/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1474
+    },
+    {
+      "method": "POST",
+      "path": "/v1/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 365
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1251
+    },
+    {
+      "method": "GET",
+      "path": "/v1/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1057
+    },
+    {
+      "method": "GET",
+      "path": "/v1/files/{file_id:path}/content",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 752
+    },
+    {
+      "method": "GET",
+      "path": "/v1/fine_tuning/jobs",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 368
+    },
+    {
+      "method": "POST",
+      "path": "/v1/fine_tuning/jobs",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 62
+    },
+    {
+      "method": "GET",
+      "path": "/v1/fine_tuning/jobs/{fine_tuning_job_id:path}",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 222
+    },
+    {
+      "method": "POST",
+      "path": "/v1/fine_tuning/jobs/{fine_tuning_job_id:path}/cancel",
+      "source": "litellm/proxy/fine_tuning_endpoints/endpoints.py",
+      "line": 495
+    },
+    {
+      "method": "POST",
+      "path": "/v1/images/edits",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 223
+    },
+    {
+      "method": "POST",
+      "path": "/v1/images/generations",
+      "source": "litellm/proxy/image_endpoints/endpoints.py",
+      "line": 59
+    },
+    {
+      "method": "GET",
+      "path": "/v1/indexes",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 612
+    },
+    {
+      "method": "POST",
+      "path": "/v1/indexes",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 548
+    },
+    {
+      "method": "GET",
+      "path": "/v1/mcp/oauth/authorize",
+      "source": "litellm/proxy/_experimental/mcp_server/byok_oauth_endpoints.py",
+      "line": 651
+    },
+    {
+      "method": "POST",
+      "path": "/v1/mcp/oauth/authorize",
+      "source": "litellm/proxy/_experimental/mcp_server/byok_oauth_endpoints.py",
+      "line": 718
+    },
+    {
+      "method": "POST",
+      "path": "/v1/mcp/oauth/token",
+      "source": "litellm/proxy/_experimental/mcp_server/byok_oauth_endpoints.py",
+      "line": 781
+    },
+    {
+      "method": "GET",
+      "path": "/v1/memory",
+      "source": "litellm/proxy/memory/memory_endpoints.py",
+      "line": 345
+    },
+    {
+      "method": "POST",
+      "path": "/v1/memory",
+      "source": "litellm/proxy/memory/memory_endpoints.py",
+      "line": 299
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/memory/{key:path}",
+      "source": "litellm/proxy/memory/memory_endpoints.py",
+      "line": 554
+    },
+    {
+      "method": "GET",
+      "path": "/v1/memory/{key:path}",
+      "source": "litellm/proxy/memory/memory_endpoints.py",
+      "line": 427
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/memory/{key:path}",
+      "source": "litellm/proxy/memory/memory_endpoints.py",
+      "line": 443
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages",
+      "source": "litellm/proxy/anthropic_endpoints/endpoints.py",
+      "line": 93
+    },
+    {
+      "method": "POST",
+      "path": "/v1/messages/count_tokens",
+      "source": "litellm/proxy/anthropic_endpoints/endpoints.py",
+      "line": 260
+    },
+    {
+      "method": "GET",
+      "path": "/v1/model/deprecations",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15283
+    },
+    {
+      "method": "GET",
+      "path": "/v1/model/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15065
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10605
+    },
+    {
+      "method": "GET",
+      "path": "/v1/models/{model_id}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 10837
+    },
+    {
+      "method": "POST",
+      "path": "/v1/moderations",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11418
+    },
+    {
+      "method": "POST",
+      "path": "/v1/ocr",
+      "source": "litellm/proxy/ocr_endpoints/endpoints.py",
+      "line": 235
+    },
+    {
+      "method": "POST",
+      "path": "/v1/rag/ingest",
+      "source": "litellm/proxy/rag_endpoints/endpoints.py",
+      "line": 467
+    },
+    {
+      "method": "POST",
+      "path": "/v1/rag/query",
+      "source": "litellm/proxy/rag_endpoints/endpoints.py",
+      "line": 615
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/v1/realtime",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11934
+    },
+    {
+      "method": "POST",
+      "path": "/v1/realtime/calls",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 362
+    },
+    {
+      "method": "POST",
+      "path": "/v1/realtime/client_secrets",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 216
+    },
+    {
+      "method": "POST",
+      "path": "/v1/realtime/transcription_sessions",
+      "source": "litellm/proxy/realtime_endpoints/endpoints.py",
+      "line": 521
+    },
+    {
+      "method": "POST",
+      "path": "/v1/rerank",
+      "source": "litellm/proxy/rerank_endpoints/endpoints.py",
+      "line": 29
+    },
+    {
+      "method": "POST",
+      "path": "/v1/responses",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 179
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/v1/responses",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1415
+    },
+    {
+      "method": "POST",
+      "path": "/v1/responses/compact",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 947
+    },
+    {
+      "method": "POST",
+      "path": "/v1/responses/input_tokens",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1102
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 773
+    },
+    {
+      "method": "GET",
+      "path": "/v1/responses/{response_id}",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 660
+    },
+    {
+      "method": "POST",
+      "path": "/v1/responses/{response_id}/cancel",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 1175
+    },
+    {
+      "method": "GET",
+      "path": "/v1/responses/{response_id}/input_items",
+      "source": "litellm/proxy/response_api_endpoints/endpoints.py",
+      "line": 879
+    },
+    {
+      "method": "POST",
+      "path": "/v1/search",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 29
+    },
+    {
+      "method": "GET",
+      "path": "/v1/search/tools",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 241
+    },
+    {
+      "method": "POST",
+      "path": "/v1/search/{search_tool_name}",
+      "source": "litellm/proxy/search_endpoints/endpoints.py",
+      "line": 17
+    },
+    {
+      "method": "GET",
+      "path": "/v1/skills",
+      "source": "litellm/proxy/anthropic_endpoints/skills_endpoints.py",
+      "line": 181
+    },
+    {
+      "method": "POST",
+      "path": "/v1/skills",
+      "source": "litellm/proxy/anthropic_endpoints/skills_endpoints.py",
+      "line": 83
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/skills/{skill_id}",
+      "source": "litellm/proxy/anthropic_endpoints/skills_endpoints.py",
+      "line": 408
+    },
+    {
+      "method": "GET",
+      "path": "/v1/skills/{skill_id}",
+      "source": "litellm/proxy/anthropic_endpoints/skills_endpoints.py",
+      "line": 311
+    },
+    {
+      "method": "GET",
+      "path": "/v1/skills/{skill_id}/archive",
+      "source": "litellm/proxy/discovery_endpoints/agent_skills_endpoints.py",
+      "line": 112
+    },
+    {
+      "method": "POST",
+      "path": "/v1/threads",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12349
+    },
+    {
+      "method": "GET",
+      "path": "/v1/threads/{thread_id}",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12438
+    },
+    {
+      "method": "GET",
+      "path": "/v1/threads/{thread_id}/messages",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12616
+    },
+    {
+      "method": "POST",
+      "path": "/v1/threads/{thread_id}/messages",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12525
+    },
+    {
+      "method": "POST",
+      "path": "/v1/threads/{thread_id}/runs",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 12703
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/list",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 177
+    },
+    {
+      "method": "POST",
+      "path": "/v1/tool/policy",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 585
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/policy/options",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 161
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/spend",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 233
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/{tool_name:path}",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 494
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/{tool_name:path}/detail",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 314
+    },
+    {
+      "method": "GET",
+      "path": "/v1/tool/{tool_name:path}/logs",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 404
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/tool/{tool_name:path}/overrides",
+      "source": "litellm/proxy/management_endpoints/tool_management_endpoints.py",
+      "line": 698
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_store/list",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 320
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_stores",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 349
+    },
+    {
+      "method": "POST",
+      "path": "/v1/vector_stores",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 179
+    },
+    {
+      "method": "POST",
+      "path": "/v1/vector_stores/{vector_store_id:path}/search",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 100
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 485
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 286
+    },
+    {
+      "method": "POST",
+      "path": "/v1/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 419
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_stores/{vector_store_id}/files",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 589
+    },
+    {
+      "method": "POST",
+      "path": "/v1/vector_stores/{vector_store_id}/files",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 482
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 1009
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 685
+    },
+    {
+      "method": "POST",
+      "path": "/v1/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 902
+    },
+    {
+      "method": "GET",
+      "path": "/v1/vector_stores/{vector_store_id}/files/{file_id}/content",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 792
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 119
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 33
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/characters",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 508
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/characters/{character_id}",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 611
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/edits",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 717
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/extensions",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 819
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/{video_id}",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 204
+    },
+    {
+      "method": "GET",
+      "path": "/v1/videos/{video_id}/content",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 302
+    },
+    {
+      "method": "POST",
+      "path": "/v1/videos/{video_id}/remix",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 407
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/runs",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 229
+    },
+    {
+      "method": "POST",
+      "path": "/v1/workflows/runs",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 194
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/runs/{run_id}",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 274
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/workflows/runs/{run_id}",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 308
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/runs/{run_id}/events",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 419
+    },
+    {
+      "method": "POST",
+      "path": "/v1/workflows/runs/{run_id}/events",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 353
+    },
+    {
+      "method": "GET",
+      "path": "/v1/workflows/runs/{run_id}/messages",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 503
+    },
+    {
+      "method": "POST",
+      "path": "/v1/workflows/runs/{run_id}/messages",
+      "source": "litellm/proxy/management_endpoints/workflow_management_endpoints.py",
+      "line": 449
+    },
+    {
+      "method": "GET",
+      "path": "/v1beta/agents",
+      "source": "litellm/proxy/google_endpoints/agents_endpoints.py",
+      "line": 214
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/agents",
+      "source": "litellm/proxy/google_endpoints/agents_endpoints.py",
+      "line": 142
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1beta/agents/{name}",
+      "source": "litellm/proxy/google_endpoints/agents_endpoints.py",
+      "line": 329
+    },
+    {
+      "method": "GET",
+      "path": "/v1beta/agents/{name}",
+      "source": "litellm/proxy/google_endpoints/agents_endpoints.py",
+      "line": 271
+    },
+    {
+      "method": "GET",
+      "path": "/v1beta/agents/{name}/versions",
+      "source": "litellm/proxy/google_endpoints/agents_endpoints.py",
+      "line": 387
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/interactions",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 220
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1beta/interactions/{interaction_id}",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 374
+    },
+    {
+      "method": "GET",
+      "path": "/v1beta/interactions/{interaction_id}",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 306
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/interactions/{interaction_id}/cancel",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 442
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/models/{model_name:path}:countTokens",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 143
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/models/{model_name:path}:generateContent",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 17
+    },
+    {
+      "method": "POST",
+      "path": "/v1beta/models/{model_name:path}:streamGenerateContent",
+      "source": "litellm/proxy/google_endpoints/endpoints.py",
+      "line": 78
+    },
+    {
+      "method": "GET",
+      "path": "/v2/guardrails/list",
+      "source": "litellm/proxy/guardrails/guardrail_endpoints.py",
+      "line": 179
+    },
+    {
+      "method": "POST",
+      "path": "/v2/key/info",
+      "source": "litellm/proxy/management_endpoints/key_management_endpoints.py",
+      "line": 3832
+    },
+    {
+      "method": "POST",
+      "path": "/v2/login",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15932
+    },
+    {
+      "method": "GET",
+      "path": "/v2/model/info",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 14269
+    },
+    {
+      "method": "PATCH",
+      "path": "/v2/organization/{organization_id}",
+      "source": "litellm/proxy/management_endpoints/organization_endpoints.py",
+      "line": 784
+    },
+    {
+      "method": "POST",
+      "path": "/v2/rerank",
+      "source": "litellm/proxy/rerank_endpoints/endpoints.py",
+      "line": 23
+    },
+    {
+      "method": "GET",
+      "path": "/v2/team/list",
+      "source": "litellm/proxy/management_endpoints/team_endpoints.py",
+      "line": 5151
+    },
+    {
+      "method": "GET",
+      "path": "/v2/user/info",
+      "source": "litellm/proxy/management_endpoints/internal_user_endpoints.py",
+      "line": 1032
+    },
+    {
+      "method": "POST",
+      "path": "/v3/login",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 15994
+    },
+    {
+      "method": "POST",
+      "path": "/v3/login/exchange",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 16069
+    },
+    {
+      "method": "DELETE",
+      "path": "/vantage/delete",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 521
+    },
+    {
+      "method": "POST",
+      "path": "/vantage/dry-run",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 357
+    },
+    {
+      "method": "POST",
+      "path": "/vantage/export",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 448
+    },
+    {
+      "method": "POST",
+      "path": "/vantage/init",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 310
+    },
+    {
+      "method": "GET",
+      "path": "/vantage/settings",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 147
+    },
+    {
+      "method": "PUT",
+      "path": "/vantage/settings",
+      "source": "litellm/proxy/spend_tracking/vantage_endpoints.py",
+      "line": 199
+    },
+    {
+      "method": "POST",
+      "path": "/vector_store/delete",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 419
+    },
+    {
+      "method": "POST",
+      "path": "/vector_store/info",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 497
+    },
+    {
+      "method": "GET",
+      "path": "/vector_store/list",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 314
+    },
+    {
+      "method": "POST",
+      "path": "/vector_store/new",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 245
+    },
+    {
+      "method": "POST",
+      "path": "/vector_store/update",
+      "source": "litellm/proxy/vector_store_endpoints/management_endpoints.py",
+      "line": 569
+    },
+    {
+      "method": "GET",
+      "path": "/vector_stores",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 350
+    },
+    {
+      "method": "POST",
+      "path": "/vector_stores",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 180
+    },
+    {
+      "method": "POST",
+      "path": "/vector_stores/{vector_store_id:path}/search",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 104
+    },
+    {
+      "method": "DELETE",
+      "path": "/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 486
+    },
+    {
+      "method": "GET",
+      "path": "/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 287
+    },
+    {
+      "method": "POST",
+      "path": "/vector_stores/{vector_store_id}",
+      "source": "litellm/proxy/vector_store_endpoints/endpoints.py",
+      "line": 420
+    },
+    {
+      "method": "GET",
+      "path": "/vector_stores/{vector_store_id}/files",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 595
+    },
+    {
+      "method": "POST",
+      "path": "/vector_stores/{vector_store_id}/files",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 488
+    },
+    {
+      "method": "DELETE",
+      "path": "/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 1015
+    },
+    {
+      "method": "GET",
+      "path": "/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 691
+    },
+    {
+      "method": "POST",
+      "path": "/vector_stores/{vector_store_id}/files/{file_id}",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 908
+    },
+    {
+      "method": "GET",
+      "path": "/vector_stores/{vector_store_id}/files/{file_id}/content",
+      "source": "litellm/proxy/vector_store_files_endpoints/endpoints.py",
+      "line": 798
+    },
+    {
+      "method": "WEBSOCKET",
+      "path": "/vertex_ai/live",
+      "source": "litellm/proxy/proxy_server.py",
+      "line": 11838
+    },
+    {
+      "method": "GET",
+      "path": "/videos",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 125
+    },
+    {
+      "method": "POST",
+      "path": "/videos",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 39
+    },
+    {
+      "method": "POST",
+      "path": "/videos/characters",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 514
+    },
+    {
+      "method": "GET",
+      "path": "/videos/characters/{character_id}",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 617
+    },
+    {
+      "method": "POST",
+      "path": "/videos/edits",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 723
+    },
+    {
+      "method": "POST",
+      "path": "/videos/extensions",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 825
+    },
+    {
+      "method": "GET",
+      "path": "/videos/{video_id}",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 210
+    },
+    {
+      "method": "GET",
+      "path": "/videos/{video_id}/content",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 308
+    },
+    {
+      "method": "POST",
+      "path": "/videos/{video_id}/remix",
+      "source": "litellm/proxy/video_endpoints/endpoints.py",
+      "line": 413
+    },
+    {
+      "method": "GET",
+      "path": "/{mcp_server_name}/authorize",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 1869
+    },
+    {
+      "method": "POST",
+      "path": "/{mcp_server_name}/register",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 2855
+    },
+    {
+      "method": "POST",
+      "path": "/{mcp_server_name}/token",
+      "source": "litellm/proxy/_experimental/mcp_server/discoverable_endpoints.py",
+      "line": 1943
+    },
+    {
+      "method": "GET",
+      "path": "/{provider}/v1/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 681
+    },
+    {
+      "method": "POST",
+      "path": "/{provider}/v1/batches",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 97
+    },
+    {
+      "method": "GET",
+      "path": "/{provider}/v1/batches/{batch_id:path}",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 390
+    },
+    {
+      "method": "POST",
+      "path": "/{provider}/v1/batches/{batch_id:path}/cancel",
+      "source": "litellm/proxy/batches_endpoints/endpoints.py",
+      "line": 863
+    },
+    {
+      "method": "GET",
+      "path": "/{provider}/v1/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1469
+    },
+    {
+      "method": "POST",
+      "path": "/{provider}/v1/files",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 360
+    },
+    {
+      "method": "DELETE",
+      "path": "/{provider}/v1/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1246
+    },
+    {
+      "method": "GET",
+      "path": "/{provider}/v1/files/{file_id:path}",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 1052
+    },
+    {
+      "method": "GET",
+      "path": "/{provider}/v1/files/{file_id:path}/content",
+      "source": "litellm/proxy/openai_files_endpoints/files_endpoints.py",
+      "line": 747
+    }
+  ]
+}

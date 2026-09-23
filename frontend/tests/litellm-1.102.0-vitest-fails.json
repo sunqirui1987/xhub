@@ -1,0 +1,26 @@
+{
+  "unit": {
+    "numFailedTests": 0,
+    "numPassedTests": 2667,
+    "success": true,
+    "fails": []
+  },
+  "component": {
+    "numFailedTests": 0,
+    "numPassedTests": 6568,
+    "success": true,
+    "fails": []
+  },
+  "integration": {
+    "numFailedTests": 0,
+    "numPassedTests": 904,
+    "success": true,
+    "fails": []
+  },
+  "types": {
+    "numFailedTests": 0,
+    "numPassedTests": 4,
+    "success": true,
+    "fails": []
+  }
+}
