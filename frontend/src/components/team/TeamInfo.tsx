@@ -563,9 +563,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
   const routerSettingsRef = React.useRef<RouterSettingsAccordionRef>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const { userRole, userId } = useAuthorized();
-  const { data: allMcpServers = [], isError: mcpServersFailed, isLoading: mcpServersLoading } = useMCPServers();
-  const { data: allMcpToolsets = [], isError: mcpToolsetsFailed, isLoading: mcpToolsetsLoading } = useMCPToolsets();
-  const { data: allAccessGroups = [], isError: accessGroupsFailed, isLoading: accessGroupsLoading } = useAccessGroups();
+
   const canEditTeamEstimates = isProxyAdminRole(userRole);
   const teamEstimateTooltip = estimateTooltips(canEditTeamEstimates, "team");
   const { data: userOrganizations = [] } = useOrganizations();
@@ -584,17 +582,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
   // rate limit dropdown to models this team actually has access to.
   const watchedModels = form.watch("models");
   const killSwitchOn = form.watch("disable_global_guardrails");
-  const watchedMcpSelection = form.watch("mcp_servers_and_groups");
-  const watchedToolPermissions = form.watch("mcp_tool_permissions");
-  const mcpLookupFailure =
-    (
-      [
-        [mcpServersFailed, "the MCP server list could not be loaded"],
-        [mcpToolsetsFailed, "the MCP toolset list could not be loaded"],
-        [accessGroupsFailed, "the access group list could not be loaded"],
-        [mcpServersLoading || mcpToolsetsLoading || accessGroupsLoading, "the MCP server inventory is still loading"],
-      ] as const
-    ).find(([failed]) => failed)?.[1] ?? null;
   const availableRateLimitModels = useMemo(() => {
     const selected = watchedModels ?? teamData?.team_info?.models ?? [];
     if (selected.includes("all-proxy-models") || selected.includes("all-team-models")) {
@@ -685,53 +672,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
     fetchOrganization();
   }, [accessToken, teamData?.team_info?.organization_id]);
 
-  useEffect(() => {
-    const fetchPolicies = async () => {
-      try {
-        if (!accessToken) return;
-        const response = await getPoliciesList(accessToken);
-        const policyNames = response.policies.map((p: { policy_name: string }) => p.policy_name);
-        setPoliciesList(policyNames);
-      } catch (error) {
-        console.error("Failed to fetch policies:", error);
-      }
-    };
 
-    if (canViewPolicies) fetchPolicies();
-  }, [accessToken, canViewPolicies]);
-
-  // Fetch resolved guardrails for all policies
-  useEffect(() => {
-    const fetchPolicyGuardrails = async () => {
-      if (!accessToken || !teamData?.team_info?.policies || teamData.team_info.policies.length === 0) {
-        return;
-      }
-
-      setLoadingPolicies(true);
-      const guardrailsMap: Record<string, string[]> = {};
-
-      try {
-        await Promise.all(
-          teamData.team_info.policies.map(async (policyName: string) => {
-            try {
-              const policyInfo = await getPolicyInfoWithGuardrails(accessToken, policyName);
-              guardrailsMap[policyName] = policyInfo.resolved_guardrails || [];
-            } catch (error) {
-              console.error(`Failed to fetch guardrails for policy ${policyName}:`, error);
-              guardrailsMap[policyName] = [];
-            }
-          }),
-        );
-        setPolicyGuardrails(guardrailsMap);
-      } catch (error) {
-        console.error("Failed to fetch policy guardrails:", error);
-      } finally {
-        setLoadingPolicies(false);
-      }
-    };
-
-    fetchPolicyGuardrails();
-  }, [accessToken, teamData?.team_info?.policies]);
 
   const handleMemberCreate = async (values: any) => {
     try {
@@ -944,7 +885,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
               : values.soft_budget_alerting_emails || [],
           ...(secretManagerSettings !== undefined ? { secret_manager_settings: secretManagerSettings } : {}),
         },
-        ...(values.policies?.length > 0 ? { policies: values.policies } : {}),
         ...(values.organization_id !== info.organization_id ? { organization_id: values.organization_id ?? null } : {}),
       };
 
@@ -964,100 +904,13 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
         updateData.team_member_rpm_limit = sanitizeNumeric(values.team_member_rpm_limit);
       }
 
-      // Handle object_permission updates
-      const { servers, accessGroups, toolsets } = values.mcp_servers_and_groups || {
-        servers: [],
-        accessGroups: [],
-        toolsets: [],
-      };
-      const submittedToolPermissions: Record<string, string[]> = values.mcp_tool_permissions || {};
-      const effectiveMcpInput = {
-        allServers: allMcpServers,
-        selectedServers: servers || [],
-        selectedAccessGroups: accessGroups || [],
-        selectedToolsets: toolsets || [],
-        toolsets: allMcpToolsets,
-        toolPermissions: submittedToolPermissions,
-      };
-      const loadedObjectPermission = info.object_permission ?? {};
-      const loadedMcpInput = {
-        allServers: allMcpServers,
-        selectedServers: loadedObjectPermission.mcp_servers ?? [],
-        selectedAccessGroups: loadedObjectPermission.mcp_access_groups ?? [],
-        selectedToolsets: loadedObjectPermission.mcp_toolsets ?? [],
-        toolsets: allMcpToolsets,
-        toolPermissions: loadedObjectPermission.mcp_tool_permissions ?? {},
-      };
-      const loadedEffectiveMcpServers = resolveEffectiveMcpServers(loadedMcpInput);
-      const standingServerIds = standingToolPermissionServerIds(
-        loadedEffectiveMcpServers,
-        info.access_group_ids ?? [],
-        allAccessGroups,
-        info.access_group_mcp_server_ids ?? [],
-      );
-      const mcpGrantInput: McpGrantInput = {
-        effectiveServers: resolveEffectiveMcpServers(effectiveMcpInput),
-        selectedAccessGroupIds: values.access_group_ids || [],
-        accessGroups: allAccessGroups,
-        standingServerIds,
-        loadTeamGroups: async () => {
-          const teamInfo = await teamInfoCall(accessToken, teamId);
-          return {
-            ids: teamInfo.team_info.access_group_ids ?? [],
-            serverIds: teamInfo.team_info.access_group_mcp_server_ids ?? [],
-          };
-        },
-      };
-      const mcpResolution: McpGrantResolution =
-        mcpLookupFailure !== null
-          ? { kind: "unresolvable", reason: mcpLookupFailure }
-          : await grantedMcpServerIds(mcpGrantInput);
-      if (mcpResolution.kind === "unresolvable" && Object.keys(submittedToolPermissions).length > 0) {
-        toast.fromError(mcpUnresolvableSaveError(mcpResolution.reason));
-        return;
-      }
-      const mcpToolPermissions =
-        mcpResolution.kind === "resolved"
-          ? retainedMcpToolPermissions(submittedToolPermissions, mcpResolution.serverIds, allMcpServers)
-          : submittedToolPermissions;
-
-      updateData.object_permission = {};
-      if (servers) {
-        updateData.object_permission.mcp_servers = servers;
-      }
-      if (accessGroups) {
-        updateData.object_permission.mcp_access_groups = accessGroups;
-      }
-      if (mcpToolPermissions) {
-        updateData.object_permission.mcp_tool_permissions = mcpToolPermissions;
-      }
-      if (toolsets) {
-        updateData.object_permission.mcp_toolsets = toolsets;
-      }
+      delete values.policies;
       delete values.mcp_servers_and_groups;
       delete values.mcp_tool_permissions;
-
-      // Handle agent permissions
-      const { agents, accessGroups: agentAccessGroups } = values.agents_and_groups || {
-        agents: [],
-        accessGroups: [],
-      };
-      updateData.object_permission.agents = agents;
-      updateData.object_permission.agent_access_groups = agentAccessGroups;
       delete values.agents_and_groups;
-
-      // Handle vector stores permissions
-      if (values.vector_stores) {
-        updateData.object_permission.vector_stores = values.vector_stores;
-      }
-
-      if (Array.isArray(values.object_permission_search_tools)) {
-        updateData.object_permission.search_tools = values.object_permission_search_tools;
-      }
-
-      if (Array.isArray(values.object_permission_skills)) {
-        updateData.object_permission.skills = values.object_permission_skills;
-      }
+      delete values.vector_stores;
+      delete values.object_permission_search_tools;
+      delete values.object_permission_skills;
 
       // Pass access_group_ids to the update request
       if (values.access_group_ids !== undefined) {
@@ -1718,28 +1571,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                     )}
                   </FormField>
 
-                  {canViewPolicies && (
-                    <FormField
-                      control={form.control}
-                      name="policies"
-                      label={labelWithDocsHint(
-                        t("Policies"),
-                        t("Apply policies to this team to control guardrails and other settings"),
-                        "https://docs.litellm.ai/docs/proxy/guardrails/guardrail_policies",
-                      )}
-                    >
-                      {({ id, value, onChange }) => (
-                        <TagsInput
-                          id={id}
-                          value={value ?? []}
-                          onValueChange={onChange}
-                          options={policiesList.map((name) => ({ value: name, label: name }))}
-                          placeholder={t("Select or enter policies")}
-                        />
-                      )}
-                    </FormField>
-                  )}
-
                   <FormField
                     control={form.control}
                     name="access_group_ids"
@@ -1753,17 +1584,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                         value={value}
                         onChange={onChange}
                         placeholder={t("Select access groups (optional)")}
-                      />
-                    )}
-                  </FormField>
-
-                  <FormField control={form.control} name="vector_stores" label={t("Vector Stores")}>
-                    {({ value, onChange }) => (
-                      <VectorStoreSelector
-                        onChange={onChange}
-                        value={value}
-                        accessToken={accessToken || ""}
-                        placeholder={t("Select vector stores")}
                       />
                     )}
                   </FormField>
@@ -1792,88 +1612,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                         accessToken={accessToken || ""}
                         placeholder={t("Select pass through routes")}
                         disabled={!premiumUser || !is_proxy_admin}
-                      />
-                    )}
-                  </FormField>
-
-                  <FormField control={form.control} name="mcp_servers_and_groups" label={t("MCP Servers / Access Groups")}>
-                    {({ value, onChange }) => (
-                      <MCPServerSelector
-                        onChange={onChange}
-                        value={value}
-                        accessToken={accessToken || ""}
-                        placeholder={t("Select MCP servers or access groups (optional)")}
-                        allowAllProxyMcpServers={is_proxy_admin}
-                      />
-                    )}
-                  </FormField>
-
-                  <div className="mb-6">
-                    <MCPToolPermissions
-                      accessToken={accessToken || ""}
-                      selectedServers={watchedMcpSelection?.servers || []}
-                      selectedAccessGroups={watchedMcpSelection?.accessGroups || []}
-                      selectedToolsets={watchedMcpSelection?.toolsets || []}
-                      toolPermissions={watchedToolPermissions || {}}
-                      onChange={(toolPerms) => form.setValue("mcp_tool_permissions", toolPerms)}
-                    />
-                  </div>
-
-                  <FormField control={form.control} name="agents_and_groups" label={t("Agents / Access Groups")}>
-                    {({ value, onChange }) => (
-                      <AgentSelector
-                        onChange={onChange}
-                        value={value}
-                        accessToken={accessToken || ""}
-                        placeholder={t("Select agents or access groups (optional)")}
-                      />
-                    )}
-                  </FormField>
-
-                  <Collapsible
-                    open={searchToolSettingsOpen}
-                    onOpenChange={setSearchToolSettingsOpen}
-                    className="mt-4 mb-4 overflow-hidden rounded-lg border"
-                  >
-                    <CollapsibleTrigger className="group/section flex w-full items-center justify-between px-4 py-3 text-left">
-                      <b>{t("Search Tool Settings")}</b>
-                      <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="px-4 pb-3">
-                      <FormField
-                        control={form.control}
-                        name="object_permission_search_tools"
-                        label={labelWithHint(
-                          t("Allowed Search Tools"),
-                          t("Select which search tools this team can access. Leave empty to allow all search tools."),
-                        )}
-                      >
-                        {({ value, onChange }) => (
-                          <SearchToolSelector
-                            onChange={onChange}
-                            value={value}
-                            accessToken={accessToken || ""}
-                            placeholder={t("Select search tools (optional, empty = all allowed)")}
-                          />
-                        )}
-                      </FormField>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <FormField
-                    control={form.control}
-                    name="object_permission_skills"
-                    label={labelWithHint(
-                      t("Skills"),
-                      t("Enabled skills are visible to every team. Grant disabled (private) Claude Code plugins to this team here."),
-                    )}
-                  >
-                    {({ value, onChange }) => (
-                      <SkillSelector
-                        onChange={onChange}
-                        value={value}
-                        accessToken={accessToken || ""}
-                        placeholder={t("Select skills (optional)")}
                       />
                     )}
                   </FormField>

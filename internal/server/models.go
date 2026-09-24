@@ -3,9 +3,11 @@ package server
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/store"
 )
 
 func (s *Server) modelPublic(m config.ModelEntry) map[string]any {
@@ -20,6 +22,10 @@ func (s *Server) modelPublic(m config.ModelEntry) map[string]any {
 	blocked := false
 	if v, ok := info["blocked"].(bool); ok {
 		blocked = v
+	}
+	// 配置文件里的模型没有 db_model。控制台据此禁用删除和保存。
+	if _, ok := info["db_model"].(bool); !ok {
+		info["db_model"] = false
 	}
 	return map[string]any{
 		"model_name":     m.ModelName,
@@ -59,10 +65,20 @@ func (s *Server) modelNew(w http.ResponseWriter, r *http.Request) {
 	if str(info["id"]) == "" {
 		info["id"] = "model_" + httpx.CallID()[:12]
 	}
+	// 页面创建的模型进数据库。重启后 loadStoredState 会把它加回来，并标成 db_model。
+	info["db_model"] = true
+	if str(info["created_at"]) == "" {
+		info["created_at"] = time.Now().UTC().Format(time.RFC3339)
+	}
+	entry := config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info}
+	if err := s.Store.UpsertProxyModel(proxyModel(entry)); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
+	}
 	s.mu.Lock()
-	s.Cfg.ModelList = append(s.Cfg.ModelList, config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info})
+	s.Cfg.ModelList = append(s.Cfg.ModelList, entry)
 	s.mu.Unlock()
-	httpx.WriteJSON(w, 200, s.modelPublic(config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info}))
+	httpx.WriteJSON(w, 200, s.modelPublic(entry))
 }
 
 func (s *Server) modelUpdate(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +106,10 @@ func (s *Server) modelUpdate(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "model not found")
 		return
 	}
+	if !modelIsDB(m) {
+		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be updated. Edit the config file.")
+		return
+	}
 	if v := str(body["model_name"]); v != "" {
 		m.ModelName = v
 	}
@@ -98,6 +118,9 @@ func (s *Server) modelUpdate(w http.ResponseWriter, r *http.Request) {
 			m.LiteLLMParams = map[string]any{}
 		}
 		for k, v := range params {
+			if secret, ok := v.(string); ok && secret == "*****" {
+				continue
+			}
 			m.LiteLLMParams[k] = v
 		}
 	}
@@ -108,6 +131,11 @@ func (s *Server) modelUpdate(w http.ResponseWriter, r *http.Request) {
 		for k, v := range info {
 			m.ModelInfo[k] = v
 		}
+	}
+	m.ModelInfo["db_model"] = true
+	if err := s.Store.UpsertProxyModel(proxyModel(m)); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
 	}
 	s.Cfg.ModelList[i] = m
 	httpx.WriteJSON(w, 200, s.modelPublic(m))
@@ -131,6 +159,14 @@ func (s *Server) modelDelete(w http.ResponseWriter, r *http.Request) {
 	i, m, ok := s.findModelLocked(id)
 	if !ok {
 		httpx.WriteError(w, 400, "invalid_request", "model not found")
+		return
+	}
+	if !modelIsDB(m) {
+		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be deleted on the dashboard. Delete it from the config file.")
+		return
+	}
+	if err := s.Store.DeleteProxyModel(str(m.ModelInfo["id"])); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
 	s.Cfg.ModelList = append(s.Cfg.ModelList[:i], s.Cfg.ModelList[i+1:]...)
@@ -174,9 +210,33 @@ func (s *Server) setModelBlocked(w http.ResponseWriter, r *http.Request, blocked
 	if m.ModelInfo == nil {
 		m.ModelInfo = map[string]any{}
 	}
+	if !modelIsDB(m) {
+		httpx.WriteError(w, 400, "invalid_request", "Config models cannot be paused from the dashboard.")
+		return
+	}
 	m.ModelInfo["blocked"] = blocked
 	s.Cfg.ModelList[i] = m
+	if err := s.Store.UpsertProxyModel(proxyModel(m)); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
+	}
 	httpx.WriteJSON(w, 200, s.modelPublic(m))
+}
+
+func (s *Server) modelCostMapSource(w http.ResponseWriter, r *http.Request) {
+	if s.requireManage(w, r) == nil {
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{
+		"source":          "local",
+		"url":             nil,
+		"is_env_forced":   localCostMapForced(),
+		"fallback_reason": nil,
+		"loaded_at":       modelCostMapLoadedAt,
+		"source_revision": nil,
+		"etag":            nil,
+		"model_count":     modelCostMapCount(),
+	})
 }
 
 func (s *Server) modelGroupInfo(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +276,56 @@ func (s *Server) modelGroupInfo(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"data": data})
+}
+
+func modelIsDB(m config.ModelEntry) bool {
+	if m.ModelInfo == nil {
+		return false
+	}
+	v, ok := m.ModelInfo["db_model"].(bool)
+	return ok && v
+}
+
+func proxyModel(m config.ModelEntry) store.ProxyModel {
+	id := ""
+	if m.ModelInfo != nil {
+		id = str(m.ModelInfo["id"])
+	}
+	return store.ProxyModel{ID: id, ModelName: m.ModelName, Params: m.LiteLLMParams, Info: m.ModelInfo}
+}
+
+// loadStoredState 把数据库里的模型并进本次进程的模型表。
+// 配置文件里的模型不在这张表里，所以重启后仍然只来自 yaml，页面上删不掉。
+func (s *Server) loadStoredState() {
+	if s.Store == nil {
+		return
+	}
+	rows, err := s.Store.ListProxyModels()
+	if err != nil {
+		return
+	}
+	for _, row := range rows {
+		if row.Info == nil {
+			row.Info = map[string]any{}
+		}
+		row.Info["id"] = row.ID
+		row.Info["db_model"] = true
+		if _, _, ok := s.findModelByIDLocked(row.ID); ok {
+			continue
+		}
+		s.Cfg.ModelList = append(s.Cfg.ModelList, config.ModelEntry{
+			ModelName: row.ModelName, LiteLLMParams: row.Params, ModelInfo: row.Info,
+		})
+	}
+}
+
+func (s *Server) findModelByIDLocked(id string) (int, config.ModelEntry, bool) {
+	for i, m := range s.Cfg.ModelList {
+		if m.ModelInfo != nil && str(m.ModelInfo["id"]) == id {
+			return i, m, true
+		}
+	}
+	return -1, config.ModelEntry{}, false
 }
 
 func (s *Server) findModelLocked(id string) (int, config.ModelEntry, bool) {

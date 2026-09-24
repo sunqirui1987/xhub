@@ -143,8 +143,8 @@ describe("key ownership", () => {
     ).toStrictEqual(expected);
   });
 
-  it("adds the selected agent id for an agent-owned key", () => {
-    const expected = { key_alias: "my-key", agent_id: "agent-1", duration: null, metadata: "{}" };
+  it("does not send an agent id for an agent-owned key", () => {
+    const expected = { key_alias: "my-key", duration: null, metadata: "{}" };
     expect(payloadOf(build({ key_alias: "my-key" }, { keyOwner: "agent", selectedAgentId: "agent-1" }))).toStrictEqual(
       expected,
     );
@@ -226,114 +226,21 @@ describe("metadata", () => {
   });
 });
 
-describe("object_permission", () => {
-  it("is absent when nothing contributes to it", () => {
-    expect(payloadOf(build({ key_alias: "my-key", allowed_vector_store_ids: [] }))).toStrictEqual(
-      aliasOnly({ allowed_vector_store_ids: [] }),
-    );
-  });
-
-  it("moves selected vector stores off the top level", () => {
-    expect(payloadOf(build({ key_alias: "my-key", allowed_vector_store_ids: ["vs-1"] }))).toStrictEqual(
-      aliasOnly({ object_permission: { vector_stores: ["vs-1"] } }),
-    );
-  });
-
-  it("splits an MCP selection into servers, access groups and toolsets", () => {
-    expect(
-      payloadOf(
-        build({
-          key_alias: "my-key",
-          allowed_mcp_servers_and_groups: { servers: ["s-1"], accessGroups: ["g-1"], toolsets: ["t-1"] },
-        }),
-      ),
-    ).toStrictEqual(
-      aliasOnly({
-        object_permission: { mcp_servers: ["s-1"], mcp_access_groups: ["g-1"], mcp_toolsets: ["t-1"] },
-      }),
-    );
-  });
-
-  it("omits the empty halves of an MCP selection", () => {
-    expect(
-      payloadOf(
-        build({
-          key_alias: "my-key",
-          allowed_mcp_servers_and_groups: { servers: ["s-1"], accessGroups: [], toolsets: [] },
-        }),
-      ),
-    ).toStrictEqual(aliasOnly({ object_permission: { mcp_servers: ["s-1"] } }));
-  });
-
-  it("leaves an all-empty MCP selection on the top level", () => {
-    expect(
-      payloadOf(
-        build({ key_alias: "my-key", allowed_mcp_servers_and_groups: { servers: [], accessGroups: [], toolsets: [] } }),
-      ),
-    ).toStrictEqual(aliasOnly({ allowed_mcp_servers_and_groups: { servers: [], accessGroups: [], toolsets: [] } }));
-  });
-
-  it("nests configured MCP tool permissions", () => {
-    expect(payloadOf(build({ key_alias: "my-key", mcp_tool_permissions: { "s-1": ["read"] } }))).toStrictEqual(
-      aliasOnly({ object_permission: { mcp_tool_permissions: { "s-1": ["read"] } } }),
-    );
-  });
-
-  it("always strips mcp_tool_permissions from the top level, even when empty", () => {
-    expect(payloadOf(build({ key_alias: "my-key", mcp_tool_permissions: {} }))).toStrictEqual(aliasOnly());
-  });
-
-  it("lets a standalone access group list win over the one from the MCP selection", () => {
-    expect(
-      payloadOf(
-        build({
-          key_alias: "my-key",
-          allowed_mcp_servers_and_groups: { servers: ["s-1"], accessGroups: ["from-selector"] },
-          allowed_mcp_access_groups: ["standalone"],
-        }),
-      ),
-    ).toStrictEqual(aliasOnly({ object_permission: { mcp_servers: ["s-1"], mcp_access_groups: ["standalone"] } }));
-  });
-
-  it("splits an agent selection into agents and agent access groups", () => {
-    expect(
-      payloadOf(build({ key_alias: "my-key", allowed_agents_and_groups: { agents: ["a-1"], accessGroups: ["ag-1"] } })),
-    ).toStrictEqual(aliasOnly({ object_permission: { agents: ["a-1"], agent_access_groups: ["ag-1"] } }));
-  });
-
-  it("moves the selected skills under object_permission and off the top level", () => {
-    expect(payloadOf(build({ key_alias: "my-key", allowed_skills: ["private-skill"] }))).toStrictEqual(
-      aliasOnly({ object_permission: { skills: ["private-skill"] } }),
-    );
-  });
-
-  it("sends no object_permission for an empty skill selection", () => {
-    expect(payloadOf(build({ key_alias: "my-key", allowed_skills: [] }))).toStrictEqual(aliasOnly());
-  });
-
-  it("merges every source into a single object_permission", () => {
+describe("removed column fields", () => {
+  it("drops agent, MCP, skill, policy, prompt, and tool-column fields", () => {
     const everySource = {
       key_alias: "my-key",
       allowed_vector_store_ids: ["vs-1"],
       allowed_mcp_servers_and_groups: { servers: ["s-1"], accessGroups: ["g-1"], toolsets: ["t-1"] },
       mcp_tool_permissions: { "s-1": ["read"] },
+      allowed_mcp_access_groups: ["standalone"],
       allowed_agents_and_groups: { agents: ["a-1"], accessGroups: ["ag-1"] },
       allowed_skills: ["private-skill"],
+      policies: ["p1"],
+      prompts: ["greet"],
+      object_permission: { mcp_servers: ["s-1"] },
     };
-    expect(payloadOf(build(everySource))).toStrictEqual(
-      aliasOnly({
-        object_permission: {
-          vector_stores: ["vs-1"],
-          mcp_servers: ["s-1"],
-          mcp_access_groups: ["g-1"],
-          mcp_toolsets: ["t-1"],
-          mcp_tool_permissions: { "s-1": ["read"] },
-          agents: ["a-1"],
-          agent_access_groups: ["ag-1"],
-          skills: ["private-skill"],
-        },
-      }),
-    );
+    expect(payloadOf(build(everySource))).toStrictEqual(aliasOnly());
   });
 });
 
@@ -499,9 +406,9 @@ describe("serialised wire shape", () => {
     expect(payloadOf(build({ ...CLOSED_SECTIONS_VALUES, team_id: "team-1" })).team_id).toBe("team-1");
   });
 
-  it("adds fifteen keys to the object and only the two limit types to the wire when Optional Settings opens", () => {
+  it("keeps optional settings except the removed column fields, and only the two limit types on the wire", () => {
     const payload = payloadOf(build(OPTIONAL_SETTINGS_VALUES));
-    expect(Object.keys(payload)).toHaveLength(23);
+    expect(Object.keys(payload)).toHaveLength(20);
     expect(wireKeys(payload)).toStrictEqual([
       "team_id",
       "key_alias",

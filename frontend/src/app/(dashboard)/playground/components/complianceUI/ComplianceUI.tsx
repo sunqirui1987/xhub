@@ -710,38 +710,10 @@ export default function ComplianceUI({
         <div className="shrink-0 border-b border-border px-6 py-4">
           <div className="mb-3">
             <h3 className="text-sm font-semibold text-foreground">{t("Test Configuration")}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {canViewPolicies
-                ? t("Select policies, guardrails, or both to test against.")
-                : t("Select guardrails to test against.")}
-            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t("Select guardrails to test against.")}</p>
           </div>
 
           <div className="flex items-start gap-3 flex-wrap">
-            {canViewPolicies && (
-              <>
-                <div className="flex-1 min-w-[200px]">
-                  <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5 block">
-                    {t("Policies")}
-                  </label>
-                  {accessToken && (
-                    <PolicySelector
-                      value={selectedPolicies}
-                      onChange={setSelectedPolicies}
-                      accessToken={accessToken}
-                      onPoliciesLoaded={handlePoliciesLoaded}
-                    />
-                  )}
-                </div>
-
-                <div className="flex flex-col items-center pt-6 shrink-0">
-                  <div className="w-px h-4 bg-border" />
-                  <span className="text-[10px] font-medium text-muted-foreground my-1">{t("or")}</span>
-                  <div className="w-px h-4 bg-border" />
-                </div>
-              </>
-            )}
-
             <div className="flex-1 min-w-[200px]">
               <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5 block">
                 {t("Guardrails")}
@@ -1044,9 +1016,16 @@ export default function ComplianceUI({
                   );
                   return (
                     <div key={fw.name} className="rounded-lg overflow-hidden">
-                      <button
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
                         onClick={() => toggleFramework(fw.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggleFramework(fw.name);
+                          }
+                        }}
                         className="w-full flex items-center gap-2 px-3 py-2.5 text-left bg-muted hover:bg-accent transition-colors rounded-lg border border-border"
                       >
                         {isExpanded ? (
@@ -1074,7 +1053,7 @@ export default function ComplianceUI({
                         >
                           {fwSelectedCount === fwPromptCount ? t("Clear") : t("All")}
                         </button>
-                      </button>
+                      </div>
 
                       {isExpanded && (
                         <div className="ml-3 mt-1 space-y-0.5 border-l-2 border-border pl-3">

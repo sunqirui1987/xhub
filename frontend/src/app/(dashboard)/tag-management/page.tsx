@@ -1,9 +1,5 @@
-"use client";
+import { notFound } from "next/navigation";
 
-import TagManagement from "./_components";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
-export default function TagManagementPage() {
-  const { accessToken, userRole, userId } = useAuthorized();
-  return <TagManagement accessToken={accessToken} userRole={userRole} userID={userId} />;
+export default function RemovedDashboardPage() {
+  notFound();
 }

@@ -207,6 +207,26 @@ describe("CostBreakdownViewer", () => {
     expect(screen.getByText(/\(Cached\)/)).toBeInTheDocument();
   });
 
+  it("shows '(Cached)' when cacheHit is the boolean true", () => {
+    const breakdown: CostBreakdown = {
+      input_cost: 0.001,
+      output_cost: 0.002,
+      total_cost: 0.003,
+    };
+
+    renderWithProviders(<CostBreakdownViewer costBreakdown={breakdown} totalSpend={0} cacheHit={true} />);
+
+    expect(screen.getByText(/\(Cached\)/)).toBeInTheDocument();
+  });
+
+  it("renders when cacheHit is the boolean false", () => {
+    const { container } = renderWithProviders(
+      <CostBreakdownViewer costBreakdown={null} totalSpend={0} cacheHit={false} />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("shows discount label with percentage when panel is expanded", async () => {
     const breakdown: CostBreakdown = {
       input_cost: 0.01,

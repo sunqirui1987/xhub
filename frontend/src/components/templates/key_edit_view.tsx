@@ -163,19 +163,8 @@ export function KeyEditView({
       }
     };
 
-    const fetchPrompts = async () => {
-      if (!accessToken) return;
-      try {
-        const response = await getPromptsList(accessToken);
-        setPromptsList(Array.from(new Set(response.prompts.map((prompt) => prompt.prompt_id))));
-      } catch (error) {
-        console.error("Failed to fetch prompts:", error);
-      }
-    };
-
-    if (canViewPrompts) fetchPrompts();
     fetchModels();
-  }, [userID, userRole, accessToken, team, keyData.team_id, canViewPrompts]);
+  }, [userID, userRole, accessToken, team, keyData.team_id]);
 
   // Sync disabled callbacks with form when component mounts
   useEffect(() => {
@@ -635,27 +624,6 @@ export function KeyEditView({
             )}
           </FormField>
 
-          {canViewPolicies && (
-            <FormField
-              control={form.control}
-              name="policies"
-              label={labelWithHint(t("Policies"), t("Apply policies to this key to control guardrails and other settings"))}
-            >
-              {({ value, onChange }) =>
-                accessToken ? (
-                  <PolicySelector
-                    onChange={onChange}
-                    value={value as string[] | undefined}
-                    accessToken={accessToken}
-                    disabled={!premiumUser}
-                  />
-                ) : (
-                  <div />
-                )
-              }
-            </FormField>
-          )}
-
           <FormField control={form.control} name="tags" label={t("Tags")}>
             {({ value, onChange, id }) => (
               <TagsInput
@@ -667,30 +635,6 @@ export function KeyEditView({
               />
             )}
           </FormField>
-
-          {canViewPrompts && (
-            <FormField
-              control={form.control}
-              name="prompts"
-              label={premiumUser ? t("Prompts") : labelWithHint(t("Prompts"), t("Setting prompts by key is a premium feature"))}
-            >
-              {({ value, onChange, id }) => (
-                <TagsInput
-                  id={id}
-                  value={(value as string[] | undefined) ?? []}
-                  onValueChange={onChange}
-                  options={promptsList.map((name) => ({ value: name, label: name }))}
-                  disabled={!premiumUser}
-                  placeholder={currentValuePlaceholder(
-                    premiumUser,
-                    keyData.metadata?.prompts,
-                    t("Premium feature - Upgrade to set prompts by key"),
-                    t("Select or enter prompts"),
-                  )}
-                />
-              )}
-            </FormField>
-          )}
 
           <FormField
             control={form.control}
@@ -736,42 +680,6 @@ export function KeyEditView({
               />
             )}
           </FormField>
-
-          <FormField control={form.control} name="vector_stores" label={t("Vector Stores")}>
-            {({ value, onChange }) => (
-              <VectorStoreSelector
-                onChange={onChange}
-                value={value as string[] | undefined}
-                accessToken={accessToken || ""}
-                placeholder={t("Select vector stores")}
-              />
-            )}
-          </FormField>
-
-          <FormField control={form.control} name="mcp_servers_and_groups" label={t("MCP Servers / Access Groups")}>
-            {({ value, onChange }) => (
-              <MCPServerSelector
-                onChange={onChange}
-                value={value as McpServersAndGroups | undefined}
-                accessToken={accessToken || ""}
-                placeholder={t("Select MCP servers or access groups (optional)")}
-                allowNoMcpServers
-              />
-            )}
-          </FormField>
-
-          <div className="mb-6">
-            <MCPToolPermissions
-              accessToken={accessToken || ""}
-              selectedServers={mcpSelection?.servers || []}
-              selectedAccessGroups={mcpSelection?.accessGroups || []}
-              selectedToolsets={mcpSelection?.toolsets || []}
-              toolPermissions={(mcpToolPermissions as Record<string, string[]> | undefined) || {}}
-              onChange={(toolPerms) => form.setValue("mcp_tool_permissions", toolPerms)}
-            />
-          </div>
-
-          <KeyAgentAndSkillFields control={form.control} accessToken={accessToken || ""} />
 
           <FormField
             control={form.control}

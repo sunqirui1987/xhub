@@ -77,24 +77,24 @@ func (s *Store) migrateIdentity() error {
 	_, err := s.DB.Exec(`
 CREATE TABLE IF NOT EXISTS users (
   user_id TEXT PRIMARY KEY, user_email TEXT, user_role TEXT, user_alias TEXT,
-  models_json TEXT NOT NULL DEFAULT '[]', max_budget REAL, spend REAL NOT NULL DEFAULT 0,
+  models_json TEXT NOT NULL DEFAULT '[]', max_budget DOUBLE PRECISION, spend DOUBLE PRECISION NOT NULL DEFAULT 0,
   password TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS teams (
   team_id TEXT PRIMARY KEY, team_alias TEXT, organization_id TEXT,
-  models_json TEXT NOT NULL DEFAULT '[]', max_budget REAL, spend REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+  models_json TEXT NOT NULL DEFAULT '[]', max_budget DOUBLE PRECISION, spend DOUBLE PRECISION NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS organizations (
   organization_id TEXT PRIMARY KEY, organization_alias TEXT,
-  models_json TEXT NOT NULL DEFAULT '[]', max_budget REAL, spend REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+  models_json TEXT NOT NULL DEFAULT '[]', max_budget DOUBLE PRECISION, spend DOUBLE PRECISION NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (
   project_id TEXT PRIMARY KEY, project_alias TEXT, team_id TEXT,
-  models_json TEXT NOT NULL DEFAULT '[]', max_budget REAL, spend REAL NOT NULL DEFAULT 0,
+  models_json TEXT NOT NULL DEFAULT '[]', max_budget DOUBLE PRECISION, spend DOUBLE PRECISION NOT NULL DEFAULT 0,
   blocked INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS budgets (
-  budget_id TEXT PRIMARY KEY, max_budget REAL, soft_budget REAL, tpm_limit INTEGER, rpm_limit INTEGER,
+  budget_id TEXT PRIMARY KEY, max_budget DOUBLE PRECISION, soft_budget DOUBLE PRECISION, tpm_limit INTEGER, rpm_limit INTEGER,
   max_parallel_requests INTEGER, budget_duration TEXT, budget_reset_at TEXT, model_max_budget TEXT, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS kv (
 	}
 	_, _ = s.DB.Exec(`ALTER TABLE users ADD COLUMN password TEXT`)
 	_, _ = s.DB.Exec(`ALTER TABLE projects ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`)
-	_, _ = s.DB.Exec(`ALTER TABLE budgets ADD COLUMN soft_budget REAL`)
+	_, _ = s.DB.Exec(`ALTER TABLE budgets ADD COLUMN soft_budget DOUBLE PRECISION`)
 	_, _ = s.DB.Exec(`ALTER TABLE budgets ADD COLUMN max_parallel_requests INTEGER`)
 	_, _ = s.DB.Exec(`ALTER TABLE budgets ADD COLUMN budget_reset_at TEXT`)
 	_, _ = s.DB.Exec(`ALTER TABLE budgets ADD COLUMN model_max_budget TEXT`)
@@ -524,7 +524,8 @@ func budgetMap(b Budget) map[string]any {
 }
 
 func (s *Store) PutKV(kind, id, body string) error {
-	_, err := s.DB.Exec(`INSERT OR REPLACE INTO kv (kind,id,body,created_at) VALUES (?,?,?,?)`, kind, id, body, time.Now().UTC().Format(time.RFC3339))
+	_, err := s.DB.Exec(`INSERT INTO kv (kind,id,body,created_at) VALUES (?,?,?,?)
+		ON CONFLICT (kind, id) DO UPDATE SET body=EXCLUDED.body, created_at=EXCLUDED.created_at`, kind, id, body, time.Now().UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -584,7 +585,7 @@ func (s *Store) ListKV(kind string) ([]map[string]any, error) {
 }
 
 func (s *Store) ListSpendLogs() ([]map[string]any, error) {
-	rows, err := s.DB.Query(`SELECT request_id,call_type,model,api_key,prompt_tokens,completion_tokens,spend,start_time,end_time,cache_hit FROM spend_logs`)
+	rows, err := s.DB.Query(`SELECT request_id,call_type,model,api_key,prompt_tokens,completion_tokens,spend,start_time,end_time,cache_hit,status FROM spend_logs`)
 	if err != nil {
 		return nil, err
 	}
@@ -592,16 +593,32 @@ func (s *Store) ListSpendLogs() ([]map[string]any, error) {
 	var out []map[string]any
 	for rows.Next() {
 		var id, ct, model, ak, st, et string
+		var status sql.NullString
 		var pt, ctok, hit int
-		var sp float64
-		if err := rows.Scan(&id, &ct, &model, &ak, &pt, &ctok, &sp, &st, &et, &hit); err != nil {
+		var sp sql.NullFloat64
+		if err := rows.Scan(&id, &ct, &model, &ak, &pt, &ctok, &sp, &st, &et, &hit, &status); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{
+		row := map[string]any{
 			"request_id": id, "call_type": ct, "model": model, "api_key": ak,
-			"prompt_tokens": pt, "completion_tokens": ctok, "spend": sp,
+			"prompt_tokens": pt, "completion_tokens": ctok, "total_tokens": pt + ctok,
 			"startTime": st, "endTime": et, "cache_hit": hit != 0,
-		})
+			"status": "success", "session_total_count": 1,
+		}
+		if sp.Valid {
+			row["spend"] = sp.Float64
+		} else {
+			row["spend"] = nil
+		}
+		if status.Valid && status.String != "" {
+			row["status"] = status.String
+		}
+		if startAt, err := time.Parse(time.RFC3339Nano, st); err == nil {
+			if endAt, err := time.Parse(time.RFC3339Nano, et); err == nil {
+				row["request_duration_ms"] = endAt.Sub(startAt).Milliseconds()
+			}
+		}
+		out = append(out, row)
 	}
 	if out == nil {
 		out = []map[string]any{}

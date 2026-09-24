@@ -265,7 +265,7 @@ const AgentCardDiscovery: React.FC<AgentCardDiscoveryProps> = ({
               }
             />
             <TooltipContent>
-              LiteLLM will fetch /.well-known/agent-card.json from this URL and let you pick which skills and
+              XHub will fetch /.well-known/agent-card.json from this URL and let you pick which skills and
               capabilities to expose through the proxy.
             </TooltipContent>
           </Tooltip>

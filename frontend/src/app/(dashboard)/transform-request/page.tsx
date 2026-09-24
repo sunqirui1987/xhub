@@ -1,9 +1,5 @@
-"use client";
+import { notFound } from "next/navigation";
 
-import TransformRequestPanel from "./TransformRequestPanel";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
-export default function TransformRequest() {
-  const { accessToken } = useAuthorized();
-  return <TransformRequestPanel accessToken={accessToken} />;
+export default function RemovedDashboardPage() {
+  notFound();
 }

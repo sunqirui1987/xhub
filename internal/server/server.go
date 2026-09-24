@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,11 +16,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"github.com/sunqirui1987/xhub/internal/spend"
 	"github.com/sunqirui1987/xhub/internal/store"
@@ -28,21 +31,25 @@ import (
 const Version = "xhub-dev"
 
 type Server struct {
-	Cfg      *config.Config
-	Store    *store.Store
-	Client   *http.Client
-	Mux      *http.ServeMux
-	Cache    *cache.DualCache
-	Hooks    *hooks.Engine
-	Busy     map[string]int
-	rpmHits  map[string][]time.Time
-	tpmHits  map[string][]tokHit
-	catalog  []catRoute
-	sessions map[string]sessionRec
-	ssoCodes map[string]bool
-	idem     map[string]idemRec
-	uiProxy  http.Handler
-	mu       sync.Mutex
+	Cfg                *config.Config
+	Store              *store.Store
+	Client             *http.Client
+	engine             *gin.Engine
+	registered         map[string]struct{}
+	Cache              *cache.DualCache
+	Hooks              *hooks.Engine
+	Busy               map[string]int
+	Live               *live.Client
+	rpmHits            map[string][]time.Time
+	tpmHits            map[string][]tokHit
+	catalog            []catRoute
+	sessions           map[string]sessionRec
+	ssoCodes           map[string]bool
+	emailEvents        []emailEventSetting
+	idem               map[string]idemRec
+	uiProxy            http.Handler
+	mu                 sync.Mutex
+	yamlStoreModelInDB bool
 }
 
 type idemRec struct {
@@ -64,25 +71,56 @@ type sessionRec struct {
 
 func New(cfg *config.Config, st *store.Store) *Server {
 	s := &Server{
-		Cfg:      cfg,
-		Store:    st,
-		Client:   &http.Client{Timeout: time.Duration(cfg.RouterSettings.Timeout) * time.Second},
-		Mux:      http.NewServeMux(),
-		Cache:    cache.New(),
-		Hooks:    hooks.New(),
-		Busy:     map[string]int{},
-		rpmHits:  map[string][]time.Time{},
-		tpmHits:  map[string][]tokHit{},
-		catalog:  loadCatalog(),
-		sessions: map[string]sessionRec{},
-		ssoCodes: map[string]bool{},
-		idem:     map[string]idemRec{},
-		uiProxy:  newUIProxy(),
+		Cfg:                cfg,
+		Store:              st,
+		Client:             &http.Client{Timeout: time.Duration(cfg.RouterSettings.Timeout) * time.Second},
+		engine:             newEngine(),
+		registered:         map[string]struct{}{},
+		Cache:              cache.New(),
+		Hooks:              hooks.New(),
+		Busy:               map[string]int{},
+		rpmHits:            map[string][]time.Time{},
+		tpmHits:            map[string][]tokHit{},
+		catalog:            loadCatalog(),
+		sessions:           map[string]sessionRec{},
+		ssoCodes:           map[string]bool{},
+		idem:               map[string]idemRec{},
+		uiProxy:            newUIProxy(),
+		yamlStoreModelInDB: cfg.GeneralSettings.StoreModelInDB,
 	}
+	if cfg.GeneralSettings.RedisURL != "" {
+		if client, err := live.Open(cfg.GeneralSettings.RedisURL); err == nil {
+			s.Live = client
+		}
+	}
+	s.applyTypedRouter(s.mergedRouterSettings())
+	s.loadStoredState()
 	s.routes()
 	s.identityRoutes()
-	s.Mux.HandleFunc("/", s.catalogFallback)
+	// 每条 catalog 路由单独挂到 Gin。不再用 "/" 把未注册路径收成非 404。
+	s.mountCatalog()
 	return s
+}
+
+// Run 在 addr 上接受连接。进程入口用它，而不是把 ServeMux 交给 ListenAndServe。
+func (s *Server) Run(addr string) error {
+	if s.Live != nil {
+		go s.flushLoop()
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return (&http.Server{Handler: s.Handler()}).Serve(ln)
+}
+
+func newEngine() *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+	e := gin.New()
+	e.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
+		httpx.WriteError(w, http.StatusNotFound, "not_found", "Not Found")
+	}))
+	return e
 }
 
 func setCORS(w http.ResponseWriter, r *http.Request) {
@@ -150,12 +188,12 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
-		if stream {
-			s.Mux.ServeHTTP(w, r)
+		if stream || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			s.engine.ServeHTTP(w, r)
 			return
 		}
 		hw := &holdWriter{ResponseWriter: w, code: 200}
-		s.Mux.ServeHTTP(hw, r)
+		s.engine.ServeHTTP(hw, r)
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", "application/json")
 		}
@@ -212,37 +250,43 @@ func (h *holdWriter) Write(p []byte) (int, error) {
 }
 
 func (s *Server) routes() {
-	s.Mux.HandleFunc("GET /health/liveliness", s.healthLive)
-	s.Mux.HandleFunc("GET /health/liveness", s.healthLive)
-	s.Mux.HandleFunc("GET /health/readiness", s.healthReady)
-	s.Mux.HandleFunc("GET /health/readiness/details", s.healthDetails)
-	s.Mux.HandleFunc("GET /health", s.healthReady)
-	s.Mux.HandleFunc("GET /.well-known/litellm-ui-config", s.uiConfig)
-	s.Mux.HandleFunc("GET /litellm/.well-known/litellm-ui-config", s.uiConfig)
-	s.Mux.HandleFunc("POST /login", s.login)
-	s.Mux.HandleFunc("POST /v2/login", s.login)
+	s.handle("GET /health/liveliness", s.healthLive)
+	s.handle("GET /health/liveness", s.healthLive)
+	s.handle("GET /health/readiness", s.healthReady)
+	s.handle("GET /health/readiness/details", s.healthDetails)
+	s.handle("GET /health", s.healthReady)
+	s.handle("GET /.well-known/litellm-ui-config", s.uiConfig)
+	s.handle("GET /litellm/.well-known/litellm-ui-config", s.uiConfig)
+	s.handle("POST /login", s.login)
+	s.handle("POST /v2/login", s.login)
 
-	s.Mux.HandleFunc("POST /key/generate", s.keyGenerate)
-	s.Mux.HandleFunc("POST /key/service-account/generate", s.keyGenerateServiceAccount)
-	s.Mux.HandleFunc("GET /key/list", s.keyList)
-	s.Mux.HandleFunc("GET /key/info", s.keyInfo)
-	s.Mux.HandleFunc("POST /v2/key/info", s.keyInfo)
-	s.Mux.HandleFunc("POST /key/delete", s.keyDelete)
-	s.Mux.HandleFunc("POST /key/block", s.keyBlock)
-	s.Mux.HandleFunc("POST /key/unblock", s.keyUnblock)
-	s.Mux.HandleFunc("POST /key/update", s.keyUpdate)
-	s.Mux.HandleFunc("POST /key/bulk_update", s.keyBulkUpdate)
-	s.Mux.HandleFunc("POST /key/regenerate", s.keyRegenerate)
-	s.Mux.HandleFunc("POST /key/{key}/regenerate", s.keyRegenerate)
-	s.Mux.HandleFunc("POST /key/{key}/reset_spend", s.keyResetSpend)
-	s.Mux.HandleFunc("GET /key/aliases", s.keyAliases)
-	s.Mux.HandleFunc("POST /key/health", s.keyHealth)
+	s.handle("POST /key/generate", s.keyGenerate)
+	s.handle("POST /key/service-account/generate", s.keyGenerateServiceAccount)
+	s.handle("GET /key/list", s.keyList)
+	s.handle("GET /key/info", s.keyInfo)
+	s.handle("POST /v2/key/info", s.keyInfo)
+	s.handle("POST /key/delete", s.keyDelete)
+	s.handle("POST /key/block", s.keyBlock)
+	s.handle("POST /key/unblock", s.keyUnblock)
+	s.handle("POST /key/update", s.keyUpdate)
+	s.handle("POST /key/bulk_update", s.keyBulkUpdate)
+	s.handle("POST /key/regenerate", s.keyRegenerate)
+	s.handle("POST /key/{key}/regenerate", s.keyRegenerate)
+	s.handle("POST /key/{key}/reset_spend", s.keyResetSpend)
+	s.handle("GET /key/aliases", s.keyAliases)
+	s.handle("POST /key/health", s.keyHealth)
 
-	s.Mux.HandleFunc("GET /v1/models", s.listModels)
-	s.Mux.HandleFunc("GET /models", s.listModels)
+	s.handle("GET /v1/models", s.listModels)
+	s.handle("GET /models", s.listModels)
+	s.handle("POST /utils/token_counter", s.tokenCounter)
+	s.handle("GET /utils/supported_openai_params", s.supportedOpenAIParams)
 
-	s.Mux.HandleFunc("POST /v1/chat/completions", s.chat)
-	s.Mux.HandleFunc("POST /chat/completions", s.chat)
+	s.handle("POST /v1/chat/completions", s.chat)
+	s.handle("POST /chat/completions", s.chat)
+
+	s.handle("GET /email/event_settings", s.emailEventSettings)
+	s.handle("PATCH /email/event_settings", s.emailEventSettings)
+	s.handle("POST /email/event_settings/reset", s.emailEventSettingsReset)
 }
 
 func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {
@@ -726,7 +770,7 @@ func keyResponse(k store.Key, plain string, includePlain bool) map[string]any {
 		"soft_budget":            nullFloatMap(k.SoftBudget),
 		"spend":                  k.Spend,
 		"key_type":               k.KeyType,
-		"blocked":                k.Blocked,
+		"blocked":                nullBoolJSON(k.Blocked),
 		"tpm_limit":              nullIntMap(k.TPMLimit),
 		"rpm_limit":              nullIntMap(k.RPMLimit),
 		"max_parallel_requests":  nullIntMap(k.MaxParallel),
@@ -905,35 +949,75 @@ func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 	}
 }
 
-func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool) {
+func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string) {
 	if usage == nil {
-		return
+		usage = map[string]any{}
 	}
 	pt := asInt(usage["prompt_tokens"])
 	ct := asInt(usage["completion_tokens"])
 	total, in, out, okc := spend.Cost(alias, pt, ct)
-	if !okc {
+	// LiteLLM stores response_cost or 0.0. Unknown models still get a row, with spend 0.
+	logged := sql.NullFloat64{Float64: 0, Valid: true}
+	if okc {
+		logged = sql.NullFloat64{Float64: total, Valid: true}
+		w.Header().Set("x-litellm-response-cost", spend.Format(total))
+		w.Header().Set("x-litellm-response-cost-original", spend.Format(total))
+		w.Header().Set("x-litellm-response-cost-input", spend.Format(in))
+		w.Header().Set("x-litellm-response-cost-output", spend.Format(out))
+		if p.Key != nil {
+			shown := p.Key.Spend + total
+			if s.Live != nil {
+				shown = p.Key.Spend + s.Live.HotSpend(p.Hash) + total
+			}
+			w.Header().Set("x-litellm-key-spend", spend.Format(shown))
+		}
+	}
+	hash := ""
+	teamID, userID, orgID := "", "", ""
+	if p != nil {
+		hash = p.Hash
+		if p.Key != nil {
+			teamID, userID, orgID = p.Key.TeamID, p.Key.UserID, p.Key.OrganizationID
+		}
+	}
+	end := time.Now()
+	tokens := pt + ct
+	if tokens == 0 {
+		tokens = asInt(usage["total_tokens"])
+	}
+	s.noteUsage(depID, tokens)
+	row := live.SpendLog{
+		RequestID: callID, CallType: "chat", Model: alias, APIKey: hash,
+		Prompt: pt, Completion: ct, Spend: logged.Float64, SpendValid: logged.Valid,
+		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
+		CacheHit: cacheHit, Status: "success", TeamID: teamID, UserID: userID, OrgID: orgID,
+	}
+	if s.Live != nil && s.Live.EnqueueLog(row) == nil {
+		if okc {
+			_ = s.Live.ChargeSpend(hash, total)
+			_ = s.Live.ChargeSpend(teamID, total)
+			_ = s.Live.ChargeSpend(userID, total)
+			_ = s.Live.ChargeSpend(orgID, total)
+		}
 		return
 	}
-	w.Header().Set("x-litellm-response-cost", spend.Format(total))
-	w.Header().Set("x-litellm-response-cost-original", spend.Format(total))
-	w.Header().Set("x-litellm-response-cost-input", spend.Format(in))
-	w.Header().Set("x-litellm-response-cost-output", spend.Format(out))
-	hash := p.Hash
-	if p.Key != nil {
-		_ = s.Store.AddSpend(p.Hash, total)
-		if p.Key.TeamID != "" {
-			_ = s.Store.AddTeamSpend(p.Key.TeamID, total)
+	s.persistSpend(hash, teamID, userID, orgID, callID, alias, pt, ct, logged, start, end, cacheHit, total, okc && hash != "")
+}
+
+func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string, pt, ct int, logged sql.NullFloat64, start, end time.Time, cacheHit bool, total float64, charge bool) {
+	if charge {
+		_ = s.Store.AddSpend(hash, total)
+		if teamID != "" {
+			_ = s.Store.AddTeamSpend(teamID, total)
 		}
-		if p.Key.UserID != "" {
-			_ = s.Store.AddUserSpend(p.Key.UserID, total)
+		if userID != "" {
+			_ = s.Store.AddUserSpend(userID, total)
 		}
-		if p.Key.OrganizationID != "" {
-			_ = s.Store.AddOrgSpend(p.Key.OrganizationID, total)
+		if orgID != "" {
+			_ = s.Store.AddOrgSpend(orgID, total)
 		}
-		w.Header().Set("x-litellm-key-spend", spend.Format(p.Key.Spend+total))
 	}
-	_ = s.Store.InsertSpendLog(callID, "chat", alias, hash, pt, ct, total, start, time.Now(), cacheHit)
+	_ = s.Store.InsertSpendLog(callID, "chat", alias, hash, pt, ct, logged, start, end, cacheHit, "success")
 }
 
 func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck string, hit []byte, start time.Time) {
@@ -945,7 +1029,7 @@ func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID,
 	var parsed map[string]any
 	if json.Unmarshal(hit, &parsed) == nil {
 		if usage, ok := parsed["usage"].(map[string]any); ok {
-			s.recordSpend(w, p, callID, alias, usage, start, true)
+			s.recordSpend(w, p, callID, alias, usage, start, true, "")
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -954,9 +1038,9 @@ func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID,
 	_, _ = w.Write(hit)
 }
 
-func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time) {
+func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string) {
 	if op == "audio_speech" {
-		s.recordSpend(w, p, callID, alias, map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}, start, false)
+		s.recordSpend(w, p, callID, alias, map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}, start, false, depID)
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", "audio/mpeg")
 		}
@@ -1012,7 +1096,7 @@ func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID,
 			usage["prompt_tokens"] = usage["input_tokens"]
 			usage["completion_tokens"] = usage["output_tokens"]
 		}
-		s.recordSpend(w, p, callID, alias, usage, start, false)
+		s.recordSpend(w, p, callID, alias, usage, start, false, depID)
 		respBody, _ = json.Marshal(parsed)
 		s.Cache.Set(ck, respBody)
 	}
@@ -1022,11 +1106,13 @@ func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID,
 	_, _ = w.Write(respBody)
 }
 
-func pipeStream(w http.ResponseWriter, resp *http.Response) bool {
+func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]any) {
 	defer resp.Body.Close()
 	buf := make([]byte, 4096)
 	flusher, _ := w.(http.Flusher)
 	wrote := false
+	var pending []byte
+	var usage map[string]any
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
@@ -1039,10 +1125,33 @@ func pipeStream(w http.ResponseWriter, resp *http.Response) bool {
 			if flusher != nil {
 				flusher.Flush()
 			}
+			pending = append(pending, buf[:n]...)
+			usage = streamUsage(pending, usage)
+			if len(pending) > 1<<20 {
+				pending = pending[len(pending)-4096:]
+			}
 		}
 		if err != nil {
-			break
+			return wrote, usage
 		}
 	}
-	return wrote
+}
+
+func streamUsage(raw []byte, prev map[string]any) map[string]any {
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		line = bytes.TrimPrefix(line, []byte("data:"))
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
+			continue
+		}
+		var doc map[string]any
+		if json.Unmarshal(line, &doc) != nil {
+			continue
+		}
+		if u, ok := doc["usage"].(map[string]any); ok {
+			prev = u
+		}
+	}
+	return prev
 }

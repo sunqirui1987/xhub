@@ -144,7 +144,7 @@ const VECTOR_STORE_ID_PLACEHOLDERS: Record<string, string> = {
   mongodb: "my-vector-index (MongoDB Vector Search index name)",
 };
 
-const VERTEX_SEARCH_API_WITH_ENGINE_PLACEHOLDER = "Any identifier you'll use to reference this in LiteLLM";
+const VERTEX_SEARCH_API_WITH_ENGINE_PLACEHOLDER = "Any identifier you'll use to reference this in XHub";
 
 const DEFAULT_VECTOR_STORE_ID_PLACEHOLDER = "Enter vector store ID from your provider";
 

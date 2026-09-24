@@ -25,7 +25,7 @@ interface CostBreakdownViewerProps {
   totalSpend: number;
   promptTokens?: number;
   completionTokens?: number;
-  cacheHit?: string;
+  cacheHit?: string | boolean | null;
   rawInputTokens?: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
@@ -52,7 +52,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
   cacheCreationTokens,
 }) => {
   const [open, setOpen] = useState(false);
-  const isCached = cacheHit?.toLowerCase() === "true";
+  const isCached = String(cacheHit ?? "").toLowerCase() === "true";
   const hasTokenCounts = promptTokens !== undefined || completionTokens !== undefined;
 
   const hasCostBreakdown = costBreakdown?.input_cost !== undefined || costBreakdown?.output_cost !== undefined;

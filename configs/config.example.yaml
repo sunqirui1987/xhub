@@ -1,9 +1,4 @@
-model_list:
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com/v1
+model_list: []
 
 router_settings:
   routing_strategy: simple-shuffle
@@ -12,4 +7,6 @@ router_settings:
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-  database_url: sqlite://./xhub.db
+  database_url: postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable
+  redis_url: redis://127.0.0.1:6379/1
+  store_model_in_db: true

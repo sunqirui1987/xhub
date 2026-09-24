@@ -35,7 +35,9 @@ func loadCatalog() []catRoute {
 	return r
 }
 
-func (s *Server) catalogFallback(w http.ResponseWriter, r *http.Request) {
+// serveFamilyRoute 处理已经在 Gin 上按路径注册、但没有更早专用 handler 的 catalog 路由。
+// 它不挂在 "/" 上。未注册的路径由引擎的 NoRoute 返回 404。
+func (s *Server) serveFamilyRoute(w http.ResponseWriter, r *http.Request) {
 	if !s.matchCatalog(r.Method, r.URL.Path) {
 		httpx.WriteError(w, 404, "not_found", "Not Found")
 		return

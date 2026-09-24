@@ -53,7 +53,7 @@ interface CostMapSourceInfo {
   loaded_at: string | null;
   source_revision: string | null;
   etag: string | null;
-  model_count: number;
+  model_count?: number | null;
 }
 
 const SHORT_REVISION_LENGTH = 12;
@@ -101,6 +101,11 @@ const formatDateTime = (dateTimeString: string | null) => {
   if (!dateTimeString) return "Never";
   const parsed = new Date(dateTimeString);
   return Number.isNaN(parsed.getTime()) ? dateTimeString : parsed.toLocaleString();
+};
+
+const formatModelCount = (count: number | null | undefined) => {
+  if (typeof count !== "number" || !Number.isFinite(count)) return "—";
+  return count.toLocaleString();
 };
 
 const CostMapProvenanceRows: React.FC<{ sourceInfo: CostMapSourceInfo }> = ({ sourceInfo }) => (
@@ -364,7 +369,7 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
 
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">{t("Models loaded:")}</span>
-                <span className="font-medium">{sourceInfo.model_count.toLocaleString()}</span>
+                <span className="font-medium">{formatModelCount(sourceInfo.model_count)}</span>
               </div>
 
               {sourceInfo.url && (

@@ -25,12 +25,6 @@ export const orgToForm = (org: Organization): OrgSettingsFormValues => {
     budget_duration: budget.budget_duration ?? "",
     tpm_limit: budget.tpm_limit?.toString() ?? "",
     rpm_limit: budget.rpm_limit?.toString() ?? "",
-    vector_stores: org.object_permission?.vector_stores ?? [],
-    mcp: {
-      servers: org.object_permission?.mcp_servers ?? [],
-      accessGroups: org.object_permission?.mcp_access_groups ?? [],
-      toolsets: org.object_permission?.mcp_toolsets ?? [],
-    },
     metadata: org.metadata && Object.keys(org.metadata).length > 0 ? JSON.stringify(org.metadata, null, 2) : "",
   };
 };
@@ -40,24 +34,7 @@ const numberOrNull = (raw: string): number | null => (raw.trim() === "" ? null :
 const metadataOrNull = (raw: string): OrgPatchBody["metadata"] =>
   raw.trim() === "" ? null : metadataRecordSchema.parse(JSON.parse(raw));
 
-const objectPermissionFromDirty = (
-  dirty: Partial<OrgSettingsFormValues>,
-): OrgPatchBody["object_permission"] | undefined => {
-  if (dirty.vector_stores === undefined && dirty.mcp === undefined) {
-    return undefined;
-  }
-  return {
-    ...(dirty.vector_stores !== undefined && { vector_stores: dirty.vector_stores }),
-    ...(dirty.mcp !== undefined && {
-      mcp_servers: dirty.mcp.servers,
-      mcp_access_groups: dirty.mcp.accessGroups,
-      mcp_toolsets: dirty.mcp.toolsets,
-    }),
-  };
-};
-
 export const buildOrgPatch = (dirty: Partial<OrgSettingsFormValues>): OrgPatchBody => {
-  const objectPermission = objectPermissionFromDirty(dirty);
   return {
     ...(dirty.organization_alias !== undefined && { organization_alias: dirty.organization_alias }),
     ...(dirty.models !== undefined && { models: dirty.models }),
@@ -68,6 +45,5 @@ export const buildOrgPatch = (dirty: Partial<OrgSettingsFormValues>): OrgPatchBo
       budget_duration: dirty.budget_duration === "" ? null : dirty.budget_duration,
     }),
     ...(dirty.metadata !== undefined && { metadata: metadataOrNull(dirty.metadata) }),
-    ...(objectPermission !== undefined && { object_permission: objectPermission }),
   };
 };

@@ -1,17 +1,5 @@
-"use client";
+import { notFound } from "next/navigation";
 
-import CacheDashboard from "./_components/cache_dashboard";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
-export default function Caching() {
-  const { accessToken, userRole, userId, token, premiumUser } = useAuthorized();
-  return (
-    <CacheDashboard
-      userID={userId}
-      userRole={userRole}
-      token={token}
-      accessToken={accessToken}
-      premiumUser={premiumUser}
-    />
-  );
+export default function RemovedDashboardPage() {
+  notFound();
 }

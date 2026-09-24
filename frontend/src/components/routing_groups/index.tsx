@@ -138,7 +138,7 @@ const RoutingGroups: React.FC = () => {
                 {t("Create Group")}
               </Button>
               <span className="text-sm whitespace-nowrap text-muted-foreground">
-                {t("Showing {value0}{value1}", { value0: (filteredGroups.length), value1: (filteredGroups.length === 1 ? "result" : "results") })}
+                {t("Showing {count}", { count: filteredGroups.length })}
               </span>
             </div>
           </div>
@@ -172,7 +172,9 @@ const RoutingGroups: React.FC = () => {
             <DialogTitle>{t("Delete routing group?")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-foreground">
-            {t("Models in")} <span className="font-medium">{deletingGroup?.group_name}</span> {t("will fall back to the proxy's top-level routing strategy. This cannot be undone.")}
+            {t("After deletion, models in routing group")}{" "}
+            <span className="font-medium">{deletingGroup?.group_name}</span>{" "}
+            {t("will use the gateway's top-level routing strategy. This cannot be undone.")}
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeletingGroup(null)}>

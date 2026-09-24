@@ -3,6 +3,7 @@ package server
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 )
@@ -32,6 +33,50 @@ func TestOpenAICatalogMatchesLiteLLMPriceMap(t *testing.T) {
 	raw, _ := modelCostMapValue.(map[string]any)
 	if len(raw) < 3000 {
 		t.Fatalf("cost map keys %d", len(raw))
+	}
+}
+
+func TestModelCostMapSource(t *testing.T) {
+	s, master := testEnv(t)
+	h := s.Handler()
+
+	denied := doJSON(t, h, "GET", "/model/cost_map/source", "", nil)
+	if denied.Code != 401 {
+		t.Fatalf("unauth %d %s", denied.Code, denied.Body.String())
+	}
+
+	rec := doJSON(t, h, "GET", "/model/cost_map/source", master, nil)
+	if rec.Code != 200 {
+		t.Fatalf("source %d %s", rec.Code, rec.Body.String())
+	}
+	body := decodeBody(t, rec.Body.Bytes())
+	if body["source"] != "local" {
+		t.Fatalf("source %v", body["source"])
+	}
+	if body["url"] != nil || body["etag"] != nil || body["source_revision"] != nil || body["fallback_reason"] != nil {
+		t.Fatalf("unexpected provenance %s", rec.Body.String())
+	}
+	if body["is_env_forced"] != false {
+		t.Fatalf("is_env_forced %v", body["is_env_forced"])
+	}
+	loadedAt, _ := body["loaded_at"].(string)
+	if _, err := time.Parse(time.RFC3339, loadedAt); err != nil {
+		t.Fatalf("loaded_at %q", loadedAt)
+	}
+	n, ok := body["model_count"].(float64)
+	raw, _ := modelCostMapValue.(map[string]any)
+	want := len(raw)
+	if _, hasSpec := raw["sample_spec"]; hasSpec {
+		want--
+	}
+	if !ok || int(n) != want || want < 3000 {
+		t.Fatalf("model_count %v want %d", body["model_count"], want)
+	}
+
+	t.Setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+	forced := doJSON(t, h, "GET", "/model/cost_map/source", master, nil)
+	if decodeBody(t, forced.Body.Bytes())["is_env_forced"] != true {
+		t.Fatalf("forced %s", forced.Body.String())
 	}
 }
 

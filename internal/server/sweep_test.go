@@ -30,6 +30,12 @@ func TestCatalogPathSweepNo404(t *testing.T) {
 		} else {
 			rec = doJSON(t, s.Handler(), rt.M, path, master, map[string]any{"model": "gpt-4o-mini"})
 		}
+		if removedColumnRoute(path) {
+			if rec.Code != 404 {
+				t.Fatalf("%s %s removed column want 404 got %d", rt.M, path, rec.Code)
+			}
+			continue
+		}
 		if rec.Code == 404 && isTypedResource404(rec) {
 			continue
 		}

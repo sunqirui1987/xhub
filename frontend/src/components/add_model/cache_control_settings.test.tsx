@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import CacheControlInjectionPoints, { type CacheControlInjectionPoint } from "./cache_control_settings";
 
 const ROLE_HINT = "XHub will mark all messages of this role as cacheable";
-const INDEX_HINT = "(Optional) If set litellm will mark the message at this index as cacheable";
+const INDEX_HINT = "(Optional) If set XHub will mark the message at this index as cacheable";
 
 const ONE_POINT: CacheControlInjectionPoint[] = [{ location: "message" }];
 

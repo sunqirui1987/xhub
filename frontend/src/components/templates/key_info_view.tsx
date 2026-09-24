@@ -96,8 +96,6 @@ export default function KeyInfoView({
   const { data: organizations } = useOrganizations();
   const { data: projects } = useProjects();
   const { data: uiSettingsData } = useUISettings();
-  const { data: allMcpServers } = useMCPServers();
-  const { data: allMcpToolsets } = useMCPToolsets();
   const enableProjectsUI = Boolean(uiSettingsData?.values?.enable_projects_ui);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -123,40 +121,6 @@ export default function KeyInfoView({
       setCurrentKeyData(keyData);
     }
   }, [keyData]);
-
-  // Fetch resolved guardrails for all policies
-  useEffect(() => {
-    const fetchPolicyGuardrails = async () => {
-      const policies = currentKeyData?.metadata?.policies;
-      if (!accessToken || !policies || !Array.isArray(policies) || policies.length === 0) {
-        return;
-      }
-
-      setLoadingPolicies(true);
-      const guardrailsMap: Record<string, string[]> = {};
-
-      try {
-        await Promise.all(
-          policies.map(async (policyName: string) => {
-            try {
-              const policyInfo = await getPolicyInfoWithGuardrails(accessToken, policyName);
-              guardrailsMap[policyName] = policyInfo.resolved_guardrails || [];
-            } catch (error) {
-              console.error(`Failed to fetch guardrails for policy ${policyName}:`, error);
-              guardrailsMap[policyName] = [];
-            }
-          }),
-        );
-        setPolicyGuardrails(guardrailsMap);
-      } catch (error) {
-        console.error("Failed to fetch policy guardrails:", error);
-      } finally {
-        setLoadingPolicies(false);
-      }
-    };
-
-    fetchPolicyGuardrails();
-  }, [accessToken, currentKeyData?.metadata?.policies]);
 
   // Reset recent regeneration indicator after 5 seconds
   useEffect(() => {
@@ -236,55 +200,14 @@ export default function KeyInfoView({
         formValues.soft_budget = nextSoftBudget;
       }
 
-      // Handle object_permission updates
-      if (formValues.vector_stores !== undefined) {
-        formValues.object_permission = {
-          ...currentKeyData.object_permission,
-          vector_stores: formValues.vector_stores || [],
-        };
-        // Remove vector_stores from the top level as it should be in object_permission
-        delete formValues.vector_stores;
-      }
-
-      const mcpEntitlement = extractMcpEntitlement(formValues, allMcpServers ?? [], allMcpToolsets ?? []);
-      if (mcpEntitlement) {
-        // Without a catalog the grants an allowlist key still has are unresolvable, so nothing is
-        // pruned and a revocation would save as a no-op while reporting success. Refuse instead.
-        const unresolvableSelection =
-          allMcpServers === undefined ||
-          mcpEntitlement.mcp_toolsets.some(
-            (toolsetId) => !(allMcpToolsets ?? []).some((toolset) => toolset.toolset_id === toolsetId),
-          );
-        if (unresolvableSelection && Object.keys(mcpEntitlement.mcp_tool_permissions).length > 0) {
-          toast.error(t("MCP server or toolset list is unavailable, so MCP permissions cannot be saved yet. Retry."));
-          return;
-        }
-        formValues.object_permission = {
-          ...(formValues.object_permission ?? currentKeyData.object_permission),
-          ...mcpEntitlement,
-        };
-      }
+      delete formValues.vector_stores;
       delete formValues.mcp_servers_and_groups;
       delete formValues.mcp_tool_permissions;
-
-      // Handle agent permissions
-      if (formValues.agents_and_groups !== undefined) {
-        const { agents, accessGroups } = formValues.agents_and_groups || { agents: [], accessGroups: [] };
-        formValues.object_permission = {
-          ...formValues.object_permission,
-          agents: agents || [],
-          agent_access_groups: accessGroups || [],
-        };
-        delete formValues.agents_and_groups;
-      }
-
-      if (formValues.skills !== undefined) {
-        formValues.object_permission = {
-          ...formValues.object_permission,
-          skills: formValues.skills || [],
-        };
-        delete formValues.skills;
-      }
+      delete formValues.agents_and_groups;
+      delete formValues.skills;
+      delete formValues.policies;
+      delete formValues.prompts;
+      delete formValues.object_permission;
 
       formValues.max_budget = mapEmptyStringToNull(formValues.max_budget);
       formValues.tpm_limit = mapEmptyStringToNull(formValues.tpm_limit);

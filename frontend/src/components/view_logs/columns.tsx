@@ -30,7 +30,7 @@ export type LogEntry = {
   end_user?: string;
   custom_llm_provider?: string;
   metadata?: Record<string, any>;
-  cache_hit: string;
+  cache_hit: string | boolean;
   cache_key?: string;
   request_tags?: Record<string, any>;
   requester_ip_address?: string;

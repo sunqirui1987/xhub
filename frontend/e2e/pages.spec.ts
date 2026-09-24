@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { DASHBOARD_PAGES, NAV_GROUPS, loginAdmin, t, uiPath, watchGateway } from "./helpers";
 
 test.describe("console pages", () => {
-  test("five nav groups and Virtual Keys home", async ({ page }) => {
+  test("nav groups and Virtual Keys home", async ({ page }) => {
     await loginAdmin(page);
     for (const g of NAV_GROUPS) {
       await expect(page.getByText(g, { exact: true }).first()).toBeVisible();

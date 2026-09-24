@@ -59,6 +59,15 @@ describe("PriceDataReload", () => {
     expect(screen.getByText("No periodic reload scheduled")).toBeInTheDocument();
   });
 
+  it("renders when the source omits model_count", async () => {
+    vi.mocked(getModelCostMapSource).mockResolvedValue({ ...remoteSource, model_count: undefined } as never);
+    render(<PriceDataReload accessToken="sk-test" />);
+
+    expect(await screen.findByText("Pricing Data Source")).toBeInTheDocument();
+    expect(screen.getByText("Models loaded:")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
   it("shows which revision of the cost map is loaded when the source reports one", async () => {
     vi.mocked(getModelCostMapSource).mockResolvedValue({ ...remoteSource, ...provenance } as never);
     render(<PriceDataReload accessToken="sk-test" />);

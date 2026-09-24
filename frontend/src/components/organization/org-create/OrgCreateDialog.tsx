@@ -5,7 +5,6 @@ import * as React from "react";
 
 import { organizationKeys } from "@/app/(dashboard)/hooks/organizations/useOrganizations";
 import { ModelSelect } from "@/components/ModelSelect/ModelSelect";
-import MCPServerSelector from "@/components/mcp_server_management/MCPServerSelector";
 import { toast } from "@/lib/toast";
 import { FieldGroup } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
@@ -14,7 +13,6 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import VectorStoreSelector from "@/components/vector_store_management/VectorStoreSelector";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { fetchClient } from "@/lib/http/api";
 import { t } from "@/i18n";
@@ -128,38 +126,6 @@ export const OrgCreateDialog = ({
 
             <FormField control={form.control} name="rpm_limit" label={t("Requests per minute Limit (RPM)")}>
               {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} />}
-            </FormField>
-
-            <FormField
-              control={form.control}
-              name="vector_stores"
-              label={t("Allowed Vector Stores")}
-              description={t("Select vector stores this organization can access. Leave empty for access to all vector stores")}
-            >
-              {(field) => (
-                <VectorStoreSelector
-                  value={field.value}
-                  onChange={field.onChange}
-                  accessToken={accessToken}
-                  placeholder={t("Select vector stores (optional)")}
-                />
-              )}
-            </FormField>
-
-            <FormField
-              control={form.control}
-              name="mcp"
-              label={t("Allowed MCP Servers")}
-              description={t("Select MCP servers, access groups, and toolsets this organization can access. Leave empty for access to all")}
-            >
-              {(field) => (
-                <MCPServerSelector
-                  value={field.value}
-                  onChange={field.onChange}
-                  accessToken={accessToken}
-                  placeholder={t("Select MCP servers and access groups (optional)")}
-                />
-              )}
             </FormField>
 
             <FormField control={form.control} name="metadata" label={t("Metadata")}>

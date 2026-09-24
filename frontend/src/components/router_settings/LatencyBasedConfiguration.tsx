@@ -22,6 +22,7 @@ const LatencyBasedConfiguration: React.FC<LatencyBasedConfigurationProps> = ({ r
     lowest_latency_buffer:
       "Shuffle between deployments within this % of the lowest latency. Default - 0 (i.e. always pick lowest latency).",
   };
+  const paramLabel = (param: string) => t(param.replace(/_/g, " "));
 
   return (
     <>
@@ -36,9 +37,9 @@ const LatencyBasedConfiguration: React.FC<LatencyBasedConfigurationProps> = ({ r
             <div key={param} className="space-y-2">
               <label className="block">
                 <span className="text-xs font-medium text-foreground uppercase tracking-wide">
-                  {param.replace(/_/g, " ")}
+                  {paramLabel(param)}
                 </span>
-                <p className="text-xs text-muted-foreground mt-0.5 mb-2">{paramExplanation[param] || ""}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-2">{t(paramExplanation[param] || "")}</p>
                 <Input
                   name={param}
                   defaultValue={typeof value === "object" ? JSON.stringify(value, null, 2) : value?.toString()}

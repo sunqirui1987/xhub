@@ -1,9 +1,5 @@
-"use client";
+import { notFound } from "next/navigation";
 
-import { SearchTools } from "./_components";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
-export default function SearchToolsPage() {
-  const { accessToken, userRole, userId } = useAuthorized();
-  return <SearchTools accessToken={accessToken} userRole={userRole} userID={userId} />;
+export default function RemovedDashboardPage() {
+  notFound();
 }

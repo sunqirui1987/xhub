@@ -58,11 +58,12 @@ console.log(response);`;
 
 const SNIPPET_TABS = [
   { value: "curl", label: "cURL", language: "bash", build: buildCurlSnippet },
-  { value: "python", label: t("Python (OpenAI SDK)"), language: "python", build: buildPythonSnippet },
-  { value: "javascript", label: t("JavaScript (OpenAI SDK)"), language: "javascript", build: buildJsSnippet },
+  { value: "python", labelKey: "Python (OpenAI SDK)", language: "python", build: buildPythonSnippet },
+  { value: "javascript", labelKey: "JavaScript (OpenAI SDK)", language: "javascript", build: buildJsSnippet },
 ] as const;
 
 export function RoutingGroupUsagePanel({ group, baseUrl }: RoutingGroupUsagePanelProps) {
+  const strategyLabel = t(formatStrategyLabel(group.routing_strategy));
   return (
     <div className="border-y bg-muted/40 px-4 py-4">
       <div className="mb-2 flex items-center gap-2">
@@ -70,14 +71,16 @@ export function RoutingGroupUsagePanel({ group, baseUrl }: RoutingGroupUsagePane
         <span className="text-sm font-medium text-foreground">{t("How routing works for this group")}</span>
       </div>
       <p className="mb-3 text-sm text-muted-foreground">
-        {t("Callers request any model in the group by name; LiteLLM picks a deployment behind the scenes using the")}{" "}
-        <span className="font-medium text-foreground">{formatStrategyLabel(group.routing_strategy)}</span> {t("strategy.")}
+        {t(
+          "Callers request any model in the group by name. The gateway picks a deployment using the {strategy} strategy.",
+          { strategy: strategyLabel },
+        )}
       </p>
       <Tabs defaultValue="curl">
         <TabsList variant="line" className="h-auto w-full justify-start rounded-none border-b p-0">
           {SNIPPET_TABS.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="flex-none rounded-none px-4 py-2">
-              {tab.label}
+              {"labelKey" in tab ? t(tab.labelKey) : tab.label}
             </TabsTrigger>
           ))}
         </TabsList>

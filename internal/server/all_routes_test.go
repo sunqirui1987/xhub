@@ -38,6 +38,12 @@ func TestEveryCatalogAPI(t *testing.T) {
 		body := catalogBody(path)
 		rec := doJSON(t, h, method, path, tok, body)
 		checked++
+		if removedColumnRoute(path) {
+			if rec.Code != 404 {
+				bad = append(bad, fmt.Sprintf("%s %s removed column want 404 got %d", method, path, rec.Code))
+			}
+			continue
+		}
 		if rec.Code == 404 && isTypedResource404(rec) {
 			if rec.Result().Header.Get("x-litellm-call-id") == "" {
 				bad = append(bad, fmt.Sprintf("%s %s typed 404 missing call-id", method, path))

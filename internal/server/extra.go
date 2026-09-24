@@ -45,33 +45,75 @@ func (s *Server) loginExchange(w http.ResponseWriter, r *http.Request) {
 	s.loginSuccess(w, "admin", "proxy_admin")
 }
 
-func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
+type emailEventSetting struct {
+	Event   string `json:"event"`
+	Enabled bool   `json:"enabled"`
+}
+
+func defaultEmailEventSettings() []emailEventSetting {
+	return []emailEventSetting{
+		{Event: "Virtual Key Created", Enabled: false},
+		{Event: "New User Invitation", Enabled: true},
+		{Event: "Virtual Key Rotated", Enabled: false},
+		{Event: "Soft Budget Crossed", Enabled: false},
+		{Event: "Max Budget Alert", Enabled: false},
+	}
+}
+
+func (s *Server) currentEmailEventSettings() []emailEventSetting {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.emailEvents == nil {
+		return defaultEmailEventSettings()
+	}
+	out := make([]emailEventSetting, len(s.emailEvents))
+	copy(out, s.emailEvents)
+	return out
+}
+
+func (s *Server) emailEventSettings(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
 	}
-	s.Cache.Flush()
-	httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
+	if r.Method == http.MethodPatch {
+		var body struct {
+			Settings []emailEventSetting `json:"settings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Settings == nil {
+			httpx.WriteError(w, 400, "invalid_request", "settings required")
+			return
+		}
+		s.mu.Lock()
+		s.emailEvents = append([]emailEventSetting(nil), body.Settings...)
+		s.mu.Unlock()
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"settings": s.currentEmailEventSettings()})
+}
+
+func (s *Server) emailEventSettingsReset(w http.ResponseWriter, r *http.Request) {
+	if s.requireManage(w, r) == nil {
+		return
+	}
+	settings := defaultEmailEventSettings()
+	s.mu.Lock()
+	s.emailEvents = settings
+	s.mu.Unlock()
+	httpx.WriteJSON(w, 200, map[string]any{"settings": settings})
+}
+
+func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
+	httpx.WriteError(w, 404, "not_found", "Not Found")
 }
 
 func (s *Server) cacheSettings(w http.ResponseWriter, r *http.Request) {
-	if s.requireManage(w, r) == nil {
-		return
-	}
-	cur := map[string]any{"type": "memory", "ttl": 600}
-	httpx.WriteJSON(w, 200, map[string]any{
-		"type":           "memory",
-		"status":         "ok",
-		"redis_info":     map[string]any{},
-		"current_values": cur,
-		"fields":         []any{},
-	})
+	httpx.WriteError(w, 404, "not_found", "Not Found")
 }
 
 func (s *Server) routerSettings(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
 	}
-	rs := s.routerSettingsMap()
+	rs := s.mergedRouterSettings()
 	httpx.WriteJSON(w, 200, map[string]any{
 		"routing_strategy":              rs["routing_strategy"],
 		"num_retries":                   rs["num_retries"],
@@ -84,26 +126,7 @@ func (s *Server) routerSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) routerSettingsMap() map[string]any {
-	return map[string]any{
-		"routing_strategy":         s.Cfg.RouterSettings.RoutingStrategy,
-		"routing_strategy_args":    map[string]any{},
-		"routing_groups":           []any{},
-		"num_retries":              s.Cfg.RouterSettings.NumRetries,
-		"timeout":                  s.Cfg.RouterSettings.Timeout,
-		"stream_timeout":           nil,
-		"max_fallbacks":            5,
-		"fallbacks":                []any{},
-		"context_window_fallbacks": []any{},
-		"content_policy_fallbacks": []any{},
-		"retry_policy":             map[string]any{},
-		"model_group_retry_policy": map[string]any{},
-		"model_group_alias":        map[string]any{},
-		"allowed_fails":            0,
-		"cooldown_time":            0,
-		"retry_after":              0,
-		"enable_pre_call_checks":   false,
-		"enable_tag_filtering":     false,
-	}
+	return s.mergedRouterSettings()
 }
 
 func routingStrategyDescriptions() map[string]string {
@@ -135,7 +158,7 @@ func (s *Server) routerSettingsFields(rs map[string]any) []map[string]any {
 		{"fallbacks", "List", "List of fallback model mappings", "Fallbacks", []any{}, nil},
 		{"context_window_fallbacks", "List", "List of fallback models for context window errors", "Context Window Fallbacks", []any{}, nil},
 		{"content_policy_fallbacks", "List", "List of fallback models for content policy errors", "Content Policy Fallbacks", []any{}, nil},
-		{"allowed_fails", "Integer", "Number of times a deployment can fail before being added to cooldown", "Allowed Fails", nil, nil},
+		{"allowed_fails", "Integer", "Number of times a deployment can fail before being added to cooldown", "Allowed Fails", 3, nil},
 		{"cooldown_time", "Float", "Time in seconds to cooldown a deployment after failure", "Cooldown Time", nil, nil},
 		{"retry_after", "Integer", "Minimum time to wait before retrying a failed request in seconds", "Retry After", 0, nil},
 		{"retry_policy", "Dictionary", "Custom retry policy for different exception types", "Retry Policy", nil, nil},
@@ -197,12 +220,16 @@ func (s *Server) configCallbacks(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"name": "ms_teams", "variables": emptyVars},
 		},
 		"active_alerting_destinations": []any{},
-		"router_settings":              s.routerSettingsMap(),
+		"router_settings":              s.mergedRouterSettings(),
 	})
 }
 
 func (s *Server) configList(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
+		return
+	}
+	if r.URL.Query().Get("config_type") == "general_settings" || r.URL.Query().Get("config_type") == "" {
+		httpx.WriteJSON(w, 200, s.generalSettingsList())
 		return
 	}
 	httpx.WriteJSON(w, 200, []map[string]any{

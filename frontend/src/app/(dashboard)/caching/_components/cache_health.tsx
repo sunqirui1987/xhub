@@ -205,7 +205,7 @@ const HealthCheckDetails: React.FC<{ response: any }> = ({ response }) => {
                 <TableClickableErrorField label={t("Ping Response")} value={String(response.ping_response)} />
                 <TableClickableErrorField label={t("Set Cache Response")} value={response.set_cache_response || "N/A"} />
                 <TableClickableErrorField
-                  label="litellm_settings.cache_params"
+                  label="cache_params"
                   value={JSON.stringify(parsedLitellmParams, null, 2)}
                 />
 

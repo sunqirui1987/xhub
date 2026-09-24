@@ -10,16 +10,17 @@ interface TagFilteringToggleProps {
 
 const TagFilteringToggle: React.FC<TagFilteringToggleProps> = ({ enabled, routerFieldsMetadata, onToggle }) => {
   const toggleId = useId();
+  const tagFilteringLabel = routerFieldsMetadata["enable_tag_filtering"]?.ui_field_name || "Enable Tag Filtering";
 
   return (
     <div className="space-y-3 max-w-3xl">
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <label htmlFor={toggleId} className="text-xs font-medium text-foreground uppercase tracking-wide">
-            {routerFieldsMetadata["enable_tag_filtering"]?.ui_field_name || t("Enable Tag Filtering")}
+            {t(tagFilteringLabel)}
           </label>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {routerFieldsMetadata["enable_tag_filtering"]?.field_description || ""}
+            {t(routerFieldsMetadata["enable_tag_filtering"]?.field_description || "")}
             {routerFieldsMetadata["enable_tag_filtering"]?.link && (
               <>
                 {" "}

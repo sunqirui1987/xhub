@@ -235,18 +235,6 @@ func TestMgmtFamilyPersist(t *testing.T) {
 		t.Fatalf("guardrail still listed %s", gl2.Body.String())
 	}
 
-	pr := doJSON(t, h, "POST", "/prompts", master, map[string]any{"prompt_id": "p1"})
-	if pr.Code != 200 {
-		t.Fatal(pr.Body.String())
-	}
-	prm := decodeBody(t, pr.Body.Bytes())
-	mustKeys(t, prm, "prompt_id", "version", "created_at")
-	assertNotStub(t, pr.Body.String())
-	pl := doJSON(t, h, "GET", "/prompts/list", master, nil)
-	if !strings.Contains(pl.Body.String(), "p1") {
-		t.Fatalf("prompt list %s", pl.Body.String())
-	}
-
 	pj := doJSON(t, h, "POST", "/project/new", master, map[string]any{"project_alias": "checkout", "max_budget": 20.0})
 	pm := decodeBody(t, pj.Body.Bytes())
 	mustKeys(t, pm, "project_id", "project_alias", "blocked", "created_at")
@@ -273,10 +261,6 @@ func TestMgmtFamilyPersist(t *testing.T) {
 		t.Fatalf("project still listed %s", plst.Body.String())
 	}
 
-	ag := doJSON(t, h, "POST", "/v1/agents", master, map[string]any{"agent_name": "ops", "model": "gpt-4o-mini", "litellm_params": map[string]any{}})
-	am := decodeBody(t, ag.Body.Bytes())
-	mustKeys(t, am, "agent_id", "agent_name", "created_at")
-	assertNotStub(t, ag.Body.String())
 }
 
 func TestFrozenFamilyLLMKey(t *testing.T) {
@@ -284,18 +268,12 @@ func TestFrozenFamilyLLMKey(t *testing.T) {
 	h := s.Handler()
 	sk := mintLLM(t, s, master)
 
-	no := doJSON(t, h, "POST", "/v1/agents", "", map[string]any{"agent_name": "x"})
-	if no.Code != 401 {
-		t.Fatalf("agents no key %d %s", no.Code, no.Body.String())
+	for _, p := range []string{"/v1/agents", "/v1/search", "/v1/vector_stores", "/v1/workflows/runs"} {
+		gone := doJSON(t, h, "POST", p, sk, map[string]any{"name": "x"})
+		if gone.Code != 404 {
+			t.Fatalf("%s want 404 got %d %s", p, gone.Code, gone.Body.String())
+		}
 	}
-	ag := doJSON(t, h, "POST", "/v1/agents", sk, map[string]any{
-		"agent_name": "researcher", "litellm_params": map[string]any{"model": "gpt-4o-mini"},
-	})
-	if ag.Code != 200 {
-		t.Fatalf("agents llm_api %d %s", ag.Code, ag.Body.String())
-	}
-	mustKeys(t, decodeBody(t, ag.Body.Bytes()), "agent_id", "agent_name", "litellm_params", "created_at")
-	assertNotStub(t, ag.Body.String())
 
 	ix := doJSON(t, h, "POST", "/v1beta/interactions", sk, map[string]any{"model": "gemini-2.5-flash", "input": "hi"})
 	if ix.Code != 200 {
@@ -308,21 +286,4 @@ func TestFrozenFamilyLLMKey(t *testing.T) {
 	}
 	mustKeys(t, decodeBody(t, ix2.Body.Bytes()), "id", "status", "output")
 
-	se := doJSON(t, h, "POST", "/v1/search", sk, map[string]any{"query": "what is xhub", "max_results": 5})
-	if se.Code != 200 {
-		t.Fatalf("search %d %s", se.Code, se.Body.String())
-	}
-	mustKeys(t, decodeBody(t, se.Body.Bytes()), "results", "usage")
-
-	vs := doJSON(t, h, "POST", "/v1/vector_stores", sk, map[string]any{"name": "docs"})
-	if vs.Code != 200 {
-		t.Fatalf("vector_stores %d %s", vs.Code, vs.Body.String())
-	}
-	mustKeys(t, decodeBody(t, vs.Body.Bytes()), "id", "object", "name", "status", "file_counts", "created_at")
-
-	wf := doJSON(t, h, "POST", "/v1/workflows/runs", sk, map[string]any{"content": "continue"})
-	if wf.Code != 200 {
-		t.Fatalf("workflows %d %s", wf.Code, wf.Body.String())
-	}
-	mustKeys(t, decodeBody(t, wf.Body.Bytes()), "run_id", "status", "events", "messages")
 }

@@ -38,8 +38,6 @@ describe("orgToForm", () => {
       budget_duration: "30d",
       tpm_limit: "1000",
       rpm_limit: "50",
-      vector_stores: ["vs-1"],
-      mcp: { servers: ["srv-1"], accessGroups: ["group-1"], toolsets: ["ts-1"] },
       metadata: JSON.stringify({ cost_center: "eng" }, null, 2),
     });
   });
@@ -59,8 +57,6 @@ describe("orgToForm", () => {
       budget_duration: "",
       tpm_limit: "",
       rpm_limit: "",
-      vector_stores: [],
-      mcp: { servers: [], accessGroups: [], toolsets: [] },
       metadata: "",
     });
   });
@@ -92,17 +88,8 @@ describe("buildOrgPatch", () => {
     expect(buildOrgPatch({ metadata: '{"a": 1}' })).toEqual({ metadata: { a: 1 } });
   });
 
-  it("builds object_permission from vector stores alone without touching mcp keys", () => {
-    expect(buildOrgPatch({ vector_stores: [] })).toEqual({ object_permission: { vector_stores: [] } });
-  });
-
-  it("builds object_permission from mcp alone, keeping empty arrays as clears", () => {
-    expect(buildOrgPatch({ mcp: { servers: [], accessGroups: [], toolsets: ["ts-2"] } })).toEqual({
-      object_permission: { mcp_servers: [], mcp_access_groups: [], mcp_toolsets: ["ts-2"] },
-    });
-  });
-
-  it("omits object_permission entirely when neither permission field is dirty", () => {
+  it("omits agent, MCP, and vector-store fields from an organization patch", () => {
     expect(buildOrgPatch({ organization_alias: "acme-2" })).toEqual({ organization_alias: "acme-2" });
+    expect(buildOrgPatch({ organization_alias: "acme-2" })).not.toHaveProperty("object_permission");
   });
 });

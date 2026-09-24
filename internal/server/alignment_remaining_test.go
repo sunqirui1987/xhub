@@ -242,15 +242,8 @@ func TestCustomerCacheCallbackSCIM(t *testing.T) {
 	}
 
 	ping := doJSON(t, h, "GET", "/cache/ping", master, nil)
-	if ping.Code != 200 {
-		t.Fatal(ping.Body.String())
-	}
-	pm := decodeBody(t, ping.Body.Bytes())
-	if pm["status"] == "ok" && pm["ping"] == nil {
-		t.Fatalf("ping stub %v", pm)
-	}
-	if pm["ping"] != "pong" && pm["status"] != "healthy" {
-		t.Fatalf("ping payload %v", pm)
+	if ping.Code != 404 {
+		t.Fatalf("cache ping want 404 got %d %s", ping.Code, ping.Body.String())
 	}
 
 	_ = doJSON(t, h, "POST", "/callbacks/configs", master, map[string]any{"callback_name": "langfuse"})

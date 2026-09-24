@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/config"
-	"github.com/sunqirui1987/xhub/internal/router"
+	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
 func catalogProviderPackages(t *testing.T) []string {
@@ -37,9 +37,31 @@ func TestAllCatalogProvidersHaveAdapter(t *testing.T) {
 	sk := decodeBody(t, gen.Body.Bytes())["key"].(string)
 	base := s.Cfg.ModelList[0].LiteLLMParams["api_base"]
 
+	if _, ok := llm.ProtocolGroup("not-a-provider"); ok {
+		t.Fatal("unknown provider must not be treated as an adapter")
+	}
 	for _, pkg := range names {
-		if !router.KnownAdapter(pkg) {
-			t.Fatalf("KnownAdapter(%q) = false", pkg)
+		if _, ok := llm.ProtocolGroup(pkg); !ok {
+			t.Fatalf("ProtocolGroup(%q) missing", pkg)
+		}
+		if !llm.ChatProbeUsesFixture(pkg) {
+			up, err := llm.Build(t.Context(), llm.Request{
+				Op: "chat", Provider: pkg, APIBase: "https://upstream.example", APIKey: "sk-fake", Model: "m",
+				Body: map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}},
+			})
+			if pkg == "deprecated_providers" || pkg == "base_llm" || pkg == "custom_httpx" || pkg == "pass_through" {
+				if err == nil {
+					t.Fatalf("%s should not build an openai chat url", pkg)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("%s build: %v", pkg, err)
+			}
+			if strings.HasSuffix(up.URL, "/chat/completions") {
+				t.Fatalf("%s must not post OpenAI chat JSON to /chat/completions (%s)", pkg, up.URL)
+			}
+			continue
 		}
 		alias := "prov-" + pkg
 		s.mu.Lock()

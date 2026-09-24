@@ -301,23 +301,8 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
       }
     };
 
-    const fetchPolicies = async () => {
-      try {
-        if (accessToken == null) {
-          return;
-        }
-
-        const response = await getPoliciesList(accessToken);
-        const policyNames = response.policies.map((p: { policy_name: string }) => p.policy_name);
-        setPoliciesList(policyNames);
-      } catch (error) {
-        console.error("Failed to fetch policies:", error);
-      }
-    };
-
     fetchGuardrails();
-    if (canViewPolicies) fetchPolicies();
-  }, [accessToken, canViewPolicies]);
+  }, [accessToken]);
 
   const openCreateTeamModal = () => {
     // Org admins must scope a team to an org, so with exactly one we preselect it.
@@ -440,84 +425,15 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
           }
         }
 
-        const hasSearchTools =
-          Array.isArray(formValues.object_permission_search_tools) &&
-          formValues.object_permission_search_tools.length > 0;
-
-        if (
-          (formValues.allowed_vector_store_ids && formValues.allowed_vector_store_ids.length > 0) ||
-          (formValues.allowed_mcp_servers_and_groups &&
-            (formValues.allowed_mcp_servers_and_groups.servers?.length > 0 ||
-              formValues.allowed_mcp_servers_and_groups.accessGroups?.length > 0 ||
-              formValues.allowed_mcp_servers_and_groups.toolsets?.length > 0 ||
-              formValues.allowed_mcp_servers_and_groups.toolPermissions))
-        ) {
-          if (!formValues.object_permission) {
-            formValues.object_permission = {};
-          }
-          if (formValues.allowed_vector_store_ids && formValues.allowed_vector_store_ids.length > 0) {
-            formValues.object_permission.vector_stores = formValues.allowed_vector_store_ids;
-            delete formValues.allowed_vector_store_ids;
-          }
-          if (formValues.allowed_mcp_servers_and_groups) {
-            const { servers, accessGroups, toolsets } = formValues.allowed_mcp_servers_and_groups;
-            if (servers && servers.length > 0) {
-              formValues.object_permission.mcp_servers = servers;
-            }
-            if (accessGroups && accessGroups.length > 0) {
-              formValues.object_permission.mcp_access_groups = accessGroups;
-            }
-            if (toolsets && toolsets.length > 0) {
-              formValues.object_permission.mcp_toolsets = toolsets;
-            }
-            delete formValues.allowed_mcp_servers_and_groups;
-          }
-
-          if (formValues.mcp_tool_permissions && Object.keys(formValues.mcp_tool_permissions).length > 0) {
-            formValues.object_permission.mcp_tool_permissions = formValues.mcp_tool_permissions;
-            delete formValues.mcp_tool_permissions;
-          }
-        }
-
-        // Transform allowed_mcp_access_groups into object_permission
-        if (formValues.allowed_mcp_access_groups && formValues.allowed_mcp_access_groups.length > 0) {
-          if (!formValues.object_permission) {
-            formValues.object_permission = {};
-          }
-          formValues.object_permission.mcp_access_groups = formValues.allowed_mcp_access_groups;
-          delete formValues.allowed_mcp_access_groups;
-        }
-
-        // Handle agent permissions
-        if (formValues.allowed_agents_and_groups) {
-          const { agents, accessGroups } = formValues.allowed_agents_and_groups;
-          if (!formValues.object_permission) {
-            formValues.object_permission = {};
-          }
-          if (agents && agents.length > 0) {
-            formValues.object_permission.agents = agents;
-          }
-          if (accessGroups && accessGroups.length > 0) {
-            formValues.object_permission.agent_access_groups = accessGroups;
-          }
-          delete formValues.allowed_agents_and_groups;
-        }
-
-        if (hasSearchTools) {
-          if (!formValues.object_permission) {
-            formValues.object_permission = {};
-          }
-          formValues.object_permission.search_tools = formValues.object_permission_search_tools;
-          delete formValues.object_permission_search_tools;
-        }
-
-        if (Array.isArray(formValues.object_permission_skills) && formValues.object_permission_skills.length > 0) {
-          if (!formValues.object_permission) {
-            formValues.object_permission = {};
-          }
-          formValues.object_permission.skills = formValues.object_permission_skills;
-        }
+        delete formValues.allowed_vector_store_ids;
+        delete formValues.allowed_mcp_servers_and_groups;
+        delete formValues.mcp_tool_permissions;
+        delete formValues.allowed_mcp_access_groups;
+        delete formValues.allowed_agents_and_groups;
+        delete formValues.object_permission_search_tools;
         delete formValues.object_permission_skills;
+        delete formValues.object_permission;
+        delete formValues.policies;
 
         // Add model_aliases if any are defined
         if (Object.keys(modelAliases).length > 0) {
@@ -976,29 +892,6 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                             />
                           )}
                         </FormField>
-                        {canViewPolicies && (
-                          <FormField
-                            control={form.control}
-                            name="policies"
-                            className="mt-8"
-                            label={labelWithDocsHint(
-                              t("Policies"),
-                              t("Apply policies to this team to control guardrails and other settings"),
-                              "https://docs.litellm.ai/docs/proxy/guardrails/guardrail_policies",
-                            )}
-                            description={t("Select existing policies or enter new ones")}
-                          >
-                            {({ id, value, onChange }) => (
-                              <TagsInput
-                                id={id}
-                                value={value ?? []}
-                                onValueChange={onChange}
-                                options={policiesList.map((name) => ({ value: name, label: name }))}
-                                placeholder={t("Select or enter policies")}
-                              />
-                            )}
-                          </FormField>
-                        )}
                         <FormField
                           control={form.control}
                           name="access_group_ids"
@@ -1014,25 +907,6 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                               value={value}
                               onChange={onChange}
                               placeholder={t("Select access groups (optional)")}
-                            />
-                          )}
-                        </FormField>
-                        <FormField
-                          control={form.control}
-                          name="allowed_vector_store_ids"
-                          className="mt-8"
-                          label={labelWithHint(
-                            t("Allowed Vector Stores"),
-                            t("Select which vector stores this team can access by default. Leave empty for access to all vector stores"),
-                          )}
-                          description={t("Select vector stores this team can access. Leave empty for access to all vector stores")}
-                        >
-                          {({ value, onChange }) => (
-                            <VectorStoreSelector
-                              onChange={onChange}
-                              value={value}
-                              accessToken={accessToken || ""}
-                              placeholder={t("Select vector stores (optional)")}
                             />
                           )}
                         </FormField>
@@ -1065,146 +939,6 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                           )}
                         </FormField>
                       </FieldGroup>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <Collapsible
-                    open={mcpSettingsOpen}
-                    onOpenChange={setMcpSettingsOpen}
-                    className="mt-8 mb-8 overflow-hidden rounded-lg border"
-                  >
-                    <CollapsibleTrigger className="group/section flex w-full items-center justify-between px-4 py-3 text-left">
-                      <b>{t("MCP Settings")}</b>
-                      <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="px-4 pb-3">
-                      <FormField
-                        control={form.control}
-                        name="allowed_mcp_servers_and_groups"
-                        className="mt-4"
-                        label={labelWithHint(
-                          t("Allowed MCP Servers"),
-                          t("Select which MCP servers or access groups this team can access"),
-                        )}
-                        description={t("Select MCP servers or access groups this team can access")}
-                      >
-                        {({ value, onChange }) => (
-                          <MCPServerSelector
-                            onChange={onChange}
-                            value={value}
-                            accessToken={accessToken || ""}
-                            placeholder={t("Select MCP servers or access groups (optional)")}
-                            allowAllProxyMcpServers={isProxyAdminRole(userRole || "")}
-                          />
-                        )}
-                      </FormField>
-
-                      <div className="mt-6">
-                        <MCPToolPermissions
-                          accessToken={accessToken || ""}
-                          selectedServers={watchedMcpSelection?.servers || []}
-                          selectedAccessGroups={watchedMcpSelection?.accessGroups || []}
-                          selectedToolsets={watchedMcpSelection?.toolsets || []}
-                          toolPermissions={watchedToolPermissions || {}}
-                          onChange={(toolPerms) => form.setValue("mcp_tool_permissions", toolPerms)}
-                        />
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <Collapsible
-                    open={agentSettingsOpen}
-                    onOpenChange={setAgentSettingsOpen}
-                    className="mt-8 mb-8 overflow-hidden rounded-lg border"
-                  >
-                    <CollapsibleTrigger className="group/section flex w-full items-center justify-between px-4 py-3 text-left">
-                      <b>{t("Agent Settings")}</b>
-                      <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="px-4 pb-3">
-                      <FormField
-                        control={form.control}
-                        name="allowed_agents_and_groups"
-                        className="mt-4"
-                        label={labelWithHint(
-                          t("Allowed Agents"),
-                          t("Select which agents or access groups this team can access"),
-                        )}
-                        description={t("Select agents or access groups this team can access")}
-                      >
-                        {({ value, onChange }) => (
-                          <AgentSelector
-                            onChange={onChange}
-                            value={value}
-                            accessToken={accessToken || ""}
-                            placeholder={t("Select agents or access groups (optional)")}
-                          />
-                        )}
-                      </FormField>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <Collapsible
-                    open={searchToolSettingsOpen}
-                    onOpenChange={setSearchToolSettingsOpen}
-                    className="mt-8 mb-8 overflow-hidden rounded-lg border"
-                  >
-                    <CollapsibleTrigger className="group/section flex w-full items-center justify-between px-4 py-3 text-left">
-                      <b>{t("Search Tool Settings")}</b>
-                      <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="px-4 pb-3">
-                      <FormField
-                        control={form.control}
-                        name="object_permission_search_tools"
-                        className="mt-4"
-                        label={labelWithHint(
-                          t("Allowed Search Tools"),
-                          t("Select which search tools this team can access. Leave empty to allow all search tools."),
-                        )}
-                        description={t("Restrict which configured search tools keys on this team may call.")}
-                      >
-                        {({ value, onChange }) => (
-                          <SearchToolSelector
-                            onChange={onChange}
-                            value={value}
-                            accessToken={accessToken || ""}
-                            placeholder={t("Select search tools (optional, empty = all allowed)")}
-                          />
-                        )}
-                      </FormField>
-                    </CollapsibleContent>
-                  </Collapsible>
-
-                  <Collapsible
-                    open={skillSettingsOpen}
-                    onOpenChange={setSkillSettingsOpen}
-                    className="mt-8 mb-8 overflow-hidden rounded-lg border"
-                  >
-                    <CollapsibleTrigger className="group/section flex w-full items-center justify-between px-4 py-3 text-left">
-                      <b>{t("Skill Settings")}</b>
-                      <ChevronDown className="size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180" />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="px-4 pb-3">
-                      <FormField
-                        control={form.control}
-                        name="object_permission_skills"
-                        className="mt-4"
-                        label={labelWithHint(
-                          t("Allowed Skills"),
-                          t("Enabled skills are visible to every team. Grant disabled (private) Claude Code plugins to this team here."),
-                        )}
-                        description={t("Private skills keys on this team may see in the Claude Code marketplace.")}
-                      >
-                        {({ value, onChange }) => (
-                          <SkillSelector
-                            onChange={onChange}
-                            value={value}
-                            accessToken={accessToken || ""}
-                            placeholder={t("Select skills (optional)")}
-                          />
-                        )}
-                      </FormField>
                     </CollapsibleContent>
                   </Collapsible>
 

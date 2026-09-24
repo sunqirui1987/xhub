@@ -19,6 +19,7 @@ import {
 } from "@/components/GuardrailsMonitor/usageUnits";
 import { Button } from "@/components/ui/button";
 import { t } from "@/i18n";
+import { scrubBrand } from "@/i18n/brand";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { EvaluationSettingsModal } from "./EvaluationSettingsModal";
@@ -39,6 +40,8 @@ const providerColors: Record<string, string> = {
   Bedrock: "bg-warning/15 text-warning border-warning/20",
   "Google Cloud": "bg-info/15 text-info border-info/20",
   LiteLLM:
+    "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800",
+  XHub:
     "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800",
   Custom: "bg-muted text-muted-foreground border-border",
 };
@@ -198,10 +201,10 @@ export function GuardrailsOverview({
       cell: ({ row }) => (
         <span
           className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded border ${
-            providerColors[row.original.provider] ?? providerColors.Custom
+            providerColors[row.original.provider] ?? providerColors[scrubBrand(row.original.provider)] ?? providerColors.Custom
           }`}
         >
-          {row.original.provider}
+          {scrubBrand(row.original.provider)}
         </span>
       ),
     },

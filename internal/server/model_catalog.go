@@ -2,22 +2,26 @@ package server
 
 import (
 	"encoding/json"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // LiteLLM 1.102.0 model_prices_and_context_window.json, parsed once.
 // Wildcard expansion (openai/*) reads the same per-provider sets LiteLLM
 // builds in litellm._populate_provider_model_sets / models_by_provider.
 var (
-	modelCostMapValue any
-	modelsByProvider  map[string][]string
+	modelCostMapValue    any
+	modelCostMapLoadedAt string
+	modelsByProvider     map[string][]string
 )
 
 var bedrockPricingOnly = regexp.MustCompile(`^bedrock/[a-zA-Z0-9_-]+/.+$`)
 
 func init() {
 	loadModelCatalog()
+	modelCostMapLoadedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
 func loadModelCatalog() {
@@ -410,6 +414,23 @@ func isBedrockPricingOnlyModel(key string) bool {
 
 func providerModels(provider string) []string {
 	return modelsByProvider[provider]
+}
+
+// modelCostMapCount 是当前加载的价格表条目数。sample_spec 是字段说明，不计入模型。
+func modelCostMapCount() int {
+	raw, ok := modelCostMapValue.(map[string]any)
+	if !ok {
+		return 0
+	}
+	n := len(raw)
+	if _, ok := raw["sample_spec"]; ok {
+		n--
+	}
+	return n
+}
+
+func localCostMapForced() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("LITELLM_LOCAL_MODEL_COST_MAP")), "true")
 }
 
 // knownLLMProviders is LiteLLM's LlmProviders values. A leading segment is

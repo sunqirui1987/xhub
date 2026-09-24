@@ -71,7 +71,7 @@ func Resolve(cfg *config.Config, st *store.Store, r *http.Request) (*Principal, 
 	if err != nil {
 		return nil, errNo
 	}
-	if k.Blocked {
+	if k.Blocked.Valid && k.Blocked.Bool {
 		return nil, errBlocked
 	}
 	if k.ExpiresAt.Valid && time.Now().After(k.ExpiresAt.Time) {

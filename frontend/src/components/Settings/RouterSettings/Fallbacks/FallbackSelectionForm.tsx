@@ -78,7 +78,7 @@ export function FallbackSelectionForm({
   };
 
   const groupLabel = (group: FallbackGroup, index: number) =>
-    group.primaryModel ? group.primaryModel : `Group ${index + 1}`;
+    group.primaryModel ? group.primaryModel : t("Group {index}", { index: index + 1 });
 
   if (groups.length === 0) {
     return (

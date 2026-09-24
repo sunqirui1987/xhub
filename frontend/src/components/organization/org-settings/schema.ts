@@ -30,12 +30,6 @@ const orgSettingsShape = {
   budget_duration: z.string(),
   tpm_limit: wholeNumberOrEmpty,
   rpm_limit: wholeNumberOrEmpty,
-  vector_stores: z.array(z.string()),
-  mcp: z.object({
-    servers: z.array(z.string()),
-    accessGroups: z.array(z.string()),
-    toolsets: z.array(z.string()),
-  }),
   metadata: z.string().refine((value) => isBlank(value) || isJsonObject(value), t("Metadata must be a valid JSON object")),
 };
 

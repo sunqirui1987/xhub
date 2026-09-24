@@ -35,10 +35,10 @@ const ReliabilityRetriesSection: React.FC<ReliabilityRetriesSectionProps> = ({
             <div key={param} className="space-y-2">
               <label className="block">
                 <span className="text-xs font-medium text-foreground uppercase tracking-wide">
-                  {routerFieldsMetadata[param]?.ui_field_name || param}
+                  {t(routerFieldsMetadata[param]?.ui_field_name || param)}
                 </span>
                 <p className="text-xs text-muted-foreground mt-0.5 mb-2">
-                  {routerFieldsMetadata[param]?.field_description || ""}
+                  {t(routerFieldsMetadata[param]?.field_description || "")}
                 </p>
                 <Input
                   name={param}

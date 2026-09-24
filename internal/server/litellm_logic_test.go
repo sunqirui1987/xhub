@@ -148,10 +148,15 @@ func TestMixedRoutesAcceptLLMKey(t *testing.T) {
 	h := s.Handler()
 	sk := mintLLM(t, s, master)
 	rec := doJSON(t, h, "POST", "/v1/agents", sk, map[string]any{"agent_name": "ops"})
-	if rec.Code != 200 {
-		t.Fatalf("llm_api mixed POST %d %s", rec.Code, rec.Body.String())
+	if rec.Code != 404 {
+		t.Fatalf("removed agents route want 404 got %d %s", rec.Code, rec.Body.String())
 	}
-	mustKeys(t, decodeBody(t, rec.Body.Bytes()), "agent_id", "agent_name")
+	kept := doJSON(t, h, "POST", "/v1/chat/completions", sk, map[string]any{
+		"model": "gpt-4o-mini", "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+	})
+	if kept.Code != 200 {
+		t.Fatalf("llm_api chat %d %s", kept.Code, kept.Body.String())
+	}
 }
 
 func TestBudgetExceededEnvelopeChat(t *testing.T) {

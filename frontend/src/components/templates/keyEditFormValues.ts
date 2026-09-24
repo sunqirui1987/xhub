@@ -172,7 +172,7 @@ export interface MountedFieldGates {
 
 export const toSubmittedValues = (
   values: KeyEditFormValues,
-  { canViewPolicies, canViewPrompts }: MountedFieldGates,
+  _gates: MountedFieldGates,
 ): Record<string, unknown> => ({
   key_alias: values.key_alias,
   models: values.models,
@@ -193,16 +193,9 @@ export const toSubmittedValues = (
   default_estimated_output_tokens_per_model: values.default_estimated_output_tokens_per_model,
   guardrails: values.guardrails,
   disable_global_guardrails: values.disable_global_guardrails,
-  ...(canViewPolicies ? { policies: values.policies } : {}),
   tags: values.tags,
-  ...(canViewPrompts ? { prompts: values.prompts } : {}),
   access_group_ids: values.access_group_ids,
   allowed_passthrough_routes: values.allowed_passthrough_routes,
-  vector_stores: values.vector_stores,
-  mcp_servers_and_groups: values.mcp_servers_and_groups,
-  mcp_tool_permissions: values.mcp_tool_permissions,
-  agents_and_groups: values.agents_and_groups,
-  skills: values.skills,
   organization_id: values.organization_id,
   team_id: values.team_id,
   logging_settings: values.logging_settings,

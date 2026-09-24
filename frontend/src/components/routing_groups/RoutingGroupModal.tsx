@@ -31,6 +31,7 @@ import {
 import type { RoutingGroup } from "./types";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { formatStrategyLabel } from "./strategy";
 import { t } from "@/i18n";
 
 interface RoutingGroupModalProps {
@@ -49,6 +50,7 @@ interface RoutingGroupModalProps {
 const ARGS_EXAMPLES: Record<string, string> = {
   "latency-based-routing": 'Example: { "ttl": 3600, "lowest_latency_buffer": 0 }',
 };
+const DEFAULT_ARGS_EXAMPLE = 'Example: { "ttl": 60 }';
 
 const RoutingGroupModal: React.FC<RoutingGroupModalProps> = ({
   open,
@@ -166,7 +168,7 @@ const RoutingGroupModal: React.FC<RoutingGroupModalProps> = ({
               control={form.control}
               name="routing_strategy"
               label={t("Routing Strategy")}
-              description={strategyDescriptions[selectedStrategy]}
+              description={selectedStrategy ? t(strategyDescriptions[selectedStrategy] || "") : undefined}
             >
               {({ id, value, onChange, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy }) => (
                 <Select
@@ -186,7 +188,8 @@ const RoutingGroupModal: React.FC<RoutingGroupModalProps> = ({
                   <SelectContent>
                     {availableStrategies.map((strategy) => (
                       <SelectItem key={strategy} value={strategy}>
-                        {strategy}
+                        {t(formatStrategyLabel(strategy))}
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">{strategy}</span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -199,7 +202,7 @@ const RoutingGroupModal: React.FC<RoutingGroupModalProps> = ({
                 control={form.control}
                 name="routing_strategy_args"
                 label={t("Strategy Arguments (JSON)")}
-                description={ARGS_EXAMPLES[selectedStrategy] ?? 'Example: { "ttl": 60 }'}
+                description={t(ARGS_EXAMPLES[selectedStrategy] ?? DEFAULT_ARGS_EXAMPLE)}
               >
                 {({ ref, ...field }) => (
                   <Textarea {...field} ref={ref} rows={4} placeholder='{ "ttl": 3600 }' className="font-mono text-xs" />

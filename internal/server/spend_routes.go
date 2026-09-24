@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
@@ -155,24 +156,15 @@ func (s *Server) globalSpendKeys(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
 	}
-	list, _ := s.Store.ListSpendLogs()
-	byKey := map[string]float64{}
-	alias := map[string]string{}
-	for _, row := range list {
-		k := str(row["api_key"])
-		if k == "" {
+	keys, _ := s.Store.ListKeys()
+	out := []map[string]any{}
+	for _, k := range keys {
+		if k.Spend == 0 {
 			continue
 		}
-		if sp, ok := row["spend"].(float64); ok {
-			byKey[k] += sp
-		}
-		if a := str(row["key_alias"]); a != "" {
-			alias[k] = a
-		}
-	}
-	out := []map[string]any{}
-	for k, sp := range byKey {
-		out = append(out, map[string]any{"api_key": k, "total_spend": sp, "spend": sp, "key_alias": alias[k]})
+		out = append(out, map[string]any{
+			"api_key": k.TokenHash, "total_spend": k.Spend, "spend": k.Spend, "key_alias": k.KeyAlias,
+		})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
@@ -310,6 +302,43 @@ func (s *Server) spendTags(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
 }
 
+func spendTimeInRange(ts string, r *http.Request) bool {
+	start := r.URL.Query().Get("start_date")
+	end := r.URL.Query().Get("end_date")
+	if start == "" && end == "" {
+		return true
+	}
+	at, ok := parseSpendTime(ts)
+	if !ok {
+		return true
+	}
+	if bound, ok := parseSpendTime(start); ok && at.Before(bound) {
+		return false
+	}
+	if bound, ok := parseSpendTime(end); ok && at.After(bound) {
+		return false
+	}
+	return true
+}
+
+func parseSpendTime(ts string) (time.Time, bool) {
+	if ts == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04"} {
+		if t, err := time.Parse(layout, ts); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func sortSpendLogs(list []map[string]any) {
+	sort.Slice(list, func(i, j int) bool {
+		return str(list[i]["startTime"]) > str(list[j]["startTime"])
+	})
+}
+
 func spendDay(ts string) string {
 	if ts == "" {
 		return time.Now().UTC().Format("2006-01-02")
@@ -336,17 +365,6 @@ func spendInRange(day string, r *http.Request) bool {
 		return false
 	}
 	return true
-}
-
-func asFloat(v any) float64 {
-	switch t := v.(type) {
-	case float64:
-		return t
-	case int:
-		return float64(t)
-	default:
-		return 0
-	}
 }
 
 func (s *Server) healthTestConnection(w http.ResponseWriter, r *http.Request) {

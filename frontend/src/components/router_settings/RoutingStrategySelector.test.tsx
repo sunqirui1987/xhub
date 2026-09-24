@@ -71,7 +71,7 @@ describe("RoutingStrategySelector", () => {
     await openStrategyDropdown(user);
 
     // "least-busy" has no entry in routingStrategyDescriptions - it still offers the bare option
-    expect(await screen.findByRole("option", { name: "least-busy" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /least-busy/ })).toBeInTheDocument();
   });
 
   it("should call onStrategyChange with the selected strategy value", async () => {

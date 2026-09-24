@@ -13,6 +13,9 @@ type Config struct {
 	RouterSettings  RouterSettings  `yaml:"router_settings"`
 	LiteLLMSettings map[string]any  `yaml:"litellm_settings"`
 	GeneralSettings GeneralSettings `yaml:"general_settings"`
+	// Raw maps keep YAML keys the typed structs do not name. Database overlay wins per key.
+	RouterRaw  map[string]any `yaml:"-"`
+	GeneralRaw map[string]any `yaml:"-"`
 }
 
 type ModelEntry struct {
@@ -30,6 +33,7 @@ type RouterSettings struct {
 type GeneralSettings struct {
 	MasterKey                 string `yaml:"master_key"`
 	DatabaseURL               string `yaml:"database_url"`
+	RedisURL                  string `yaml:"redis_url"`
 	StoreModelInDB            bool   `yaml:"store_model_in_db"`
 	AllowMasterKeyLLM         bool   `yaml:"allow_master_key_llm"`
 	DisableEnvCredentialLogin bool   `yaml:"disable_env_credential_login"`
@@ -46,8 +50,26 @@ func Load(path string) (*Config, error) {
 	}
 	c.GeneralSettings.MasterKey = resolve(c.GeneralSettings.MasterKey)
 	c.GeneralSettings.DatabaseURL = resolve(c.GeneralSettings.DatabaseURL)
+	c.GeneralSettings.RedisURL = resolve(c.GeneralSettings.RedisURL)
+	var doc struct {
+		RouterSettings  map[string]any `yaml:"router_settings"`
+		GeneralSettings map[string]any `yaml:"general_settings"`
+		LiteLLMSettings map[string]any `yaml:"litellm_settings"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	c.RouterRaw = doc.RouterSettings
+	c.GeneralRaw = doc.GeneralSettings
+	if c.LiteLLMSettings == nil {
+		c.LiteLLMSettings = doc.LiteLLMSettings
+	}
 	if c.GeneralSettings.DatabaseURL == "" {
-		c.GeneralSettings.DatabaseURL = "sqlite://./xhub.db"
+		return nil, fmt.Errorf("general_settings.database_url is required and must be a postgres:// URL")
+	}
+	low := strings.ToLower(c.GeneralSettings.DatabaseURL)
+	if strings.HasPrefix(low, "sqlite:") || strings.HasPrefix(low, "file:") {
+		return nil, fmt.Errorf("sqlite is not supported; set general_settings.database_url to a postgres:// URL")
 	}
 	if c.RouterSettings.RoutingStrategy == "" {
 		c.RouterSettings.RoutingStrategy = "simple-shuffle"

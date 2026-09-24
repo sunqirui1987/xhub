@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -9,6 +10,23 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
+
+// nullBoolFrom leaves the field unset when the client omitted it.
+// LiteLLM stores that as JSON null, not false.
+func nullBoolFrom(body map[string]any, key string) sql.NullBool {
+	v, ok := body[key]
+	if !ok || v == nil {
+		return sql.NullBool{}
+	}
+	return sql.NullBool{Bool: boolOf(v), Valid: true}
+}
+
+func nullBoolJSON(v sql.NullBool) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Bool
+}
 
 func (s *Server) keyGenerateServiceAccount(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
@@ -196,7 +214,7 @@ func keyFromBody(plain string, body map[string]any) (store.Key, error) {
 		TPMLimit:       parseNullInt(body["tpm_limit"]),
 		RPMLimit:       parseNullInt(body["rpm_limit"]),
 		MaxParallel:    parseNullInt(body["max_parallel_requests"]),
-		Blocked:        boolOf(body["blocked"]),
+		Blocked:        nullBoolFrom(body, "blocked"),
 		ExpiresAt:      exp,
 		BudgetDuration: budgetDur,
 		BudgetResetAt:  store.ResetAtFrom(str(body["budget_reset_at"]), budgetDur),
@@ -251,7 +269,7 @@ func applyKeyPatch(k *store.Key, body map[string]any) {
 		k.MaxParallel = parseNullInt(body["max_parallel_requests"])
 	}
 	if _, ok := body["blocked"]; ok {
-		k.Blocked = boolOf(body["blocked"])
+		k.Blocked = nullBoolFrom(body, "blocked")
 	}
 	if v, ok := body["budget_duration"].(string); ok {
 		k.BudgetDuration = v

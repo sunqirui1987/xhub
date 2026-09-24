@@ -176,11 +176,7 @@ describe("Sidebar (leftnav)", () => {
       "Virtual Keys",
       "Playground",
       "Models + Endpoints",
-      "Agentic",
-      "MCP Servers",
       "Guardrails",
-      "Policies",
-      "Tools",
       "Usage",
       "Logs",
       "Guardrails Monitor",
@@ -189,10 +185,6 @@ describe("Sidebar (leftnav)", () => {
       "Organizations",
       "Access Groups",
       "Budgets",
-      "API Reference",
-      "AI Hub",
-
-      "Experimental",
       "Settings",
     ];
 
@@ -201,21 +193,21 @@ describe("Sidebar (leftnav)", () => {
     });
   });
 
-  it("expands a nested tab to reveal its children (Tools > Search Tools)", async () => {
+  it("expands Settings to reveal Router Settings", async () => {
     renderWithProviders(<Sidebar {...defaultProps} />);
 
-    expect(screen.queryByText("Search Tools")).not.toBeInTheDocument();
+    expect(screen.queryByText("Router Settings")).not.toBeInTheDocument();
     act(() => {
-      fireEvent.click(screen.getByText("Tools"));
+      fireEvent.click(screen.getByText("Settings"));
     });
     await waitFor(() => {
-      expect(screen.getByText("Search Tools")).toBeInTheDocument();
+      expect(screen.getByText("Router Settings")).toBeInTheDocument();
     });
   });
   it("reports whether a nested tab is expanded", async () => {
     renderWithProviders(<Sidebar {...defaultProps} />);
 
-    const toggle = screen.getByText("Tools").closest("button")!;
+    const toggle = screen.getByText("Settings").closest("button")!;
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     act(() => {
@@ -271,17 +263,11 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.getByText("Models + Endpoints")).toBeInTheDocument();
     });
 
-    it("shows Agents (under Agentic) to Admin Viewer (read-only)", async () => {
+    it("does not show Agents to Admin Viewer", () => {
       mockUseAuthorized.mockReturnValue(adminViewerAuth);
       renderWithProviders(<Sidebar {...defaultProps} />);
-      // Agents is now nested under the "Agentic" submenu — expand parent
-      // first to render the children, then assert Agents is visible.
-      act(() => {
-        fireEvent.click(screen.getByText("Agentic"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Agents")).toBeInTheDocument();
-      });
+      expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+      expect(screen.queryByText("Agentic")).not.toBeInTheDocument();
     });
 
     it("shows Logs to Admin Viewer", () => {
@@ -308,28 +294,18 @@ describe("Sidebar (leftnav)", () => {
       mockUseAuthorized.mockReset();
     });
 
-    it("should hide Tool Policies from internal users while keeping other Tools children", async () => {
+    it("does not show the removed Tools column to internal users", () => {
       mockUseAuthorized.mockReturnValue(internalAuth);
       renderWithProviders(<Sidebar {...defaultProps} />);
-
-      act(() => {
-        fireEvent.click(screen.getByText("Tools"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Search Tools")).toBeInTheDocument();
-      });
-      expect(screen.queryByText("Tool Policies")).not.toBeInTheDocument();
+      expect(screen.queryByText("Tools")).not.toBeInTheDocument();
+      expect(screen.queryByText("Search Tools")).not.toBeInTheDocument();
+      expect(screen.getByText("Guardrails")).toBeInTheDocument();
     });
 
-    it("should show Tool Policies to admins", async () => {
+    it("does not show the removed Tools column to admins", () => {
       renderWithProviders(<Sidebar {...defaultProps} />);
-
-      act(() => {
-        fireEvent.click(screen.getByText("Tools"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Tool Policies")).toBeInTheDocument();
-      });
+      expect(screen.queryByText("Tools")).not.toBeInTheDocument();
+      expect(screen.queryByText("Tool Policies")).not.toBeInTheDocument();
     });
 
     it("should hide the Policies entry from internal users while keeping Guardrails", () => {
@@ -340,41 +316,11 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.queryByText("Policies")).not.toBeInTheDocument();
     });
 
-    it("should hide the Prompts entry from internal users while keeping other Experimental children", async () => {
-      mockUseAuthorized.mockReturnValue(internalAuth);
+    it("does not show Experimental or its children", () => {
       renderWithProviders(<Sidebar {...defaultProps} />);
-
-      act(() => {
-        fireEvent.click(screen.getByText("Experimental"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("API Playground")).toBeInTheDocument();
-      });
+      expect(screen.queryByText("Experimental")).not.toBeInTheDocument();
       expect(screen.queryByText("Prompts")).not.toBeInTheDocument();
-    });
-
-    it("should hide Old Usage from internal users while keeping other Experimental children", async () => {
-      mockUseAuthorized.mockReturnValue(internalAuth);
-      renderWithProviders(<Sidebar {...defaultProps} />);
-
-      act(() => {
-        fireEvent.click(screen.getByText("Experimental"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("API Playground")).toBeInTheDocument();
-      });
       expect(screen.queryByText("Old Usage")).not.toBeInTheDocument();
-    });
-
-    it("should show Old Usage to admins", async () => {
-      renderWithProviders(<Sidebar {...defaultProps} />);
-
-      act(() => {
-        fireEvent.click(screen.getByText("Experimental"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Old Usage")).toBeInTheDocument();
-      });
     });
   });
 
@@ -400,20 +346,14 @@ describe("Sidebar (leftnav)", () => {
       mockUseAuthorized.mockReset();
     });
 
-    it("hides Workflow Runs and Memory from an internal user under Agentic", async () => {
+    it("hides Workflow Runs and Memory from an internal user", () => {
       mockUseAuthorized.mockReturnValue(authFor("internal"));
       renderWithProviders(<Sidebar {...defaultProps} />);
 
-      act(() => {
-        fireEvent.click(screen.getByText("Agentic"));
-      });
-      // Liveness gate: the sibling Agents child stays visible to this role, so
-      // the absences below mean the gate fired, not that the group never opened.
-      await waitFor(() => {
-        expect(screen.getByText("Agents")).toBeInTheDocument();
-      });
+      expect(screen.getByText("Logs")).toBeInTheDocument();
       expect(screen.queryByText("Workflow Runs")).not.toBeInTheDocument();
       expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+      expect(screen.queryByText("Agents")).not.toBeInTheDocument();
     });
 
     // An org admin's session role is "Org Admin", which no capability list
@@ -433,23 +373,20 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     });
 
-    it("keeps the Agentic group for an internal user, who can still see Agents", () => {
+    it("does not keep an Agentic group for an internal user", () => {
       mockUseAuthorized.mockReturnValue(authFor("internal"));
       renderWithProviders(<Sidebar {...defaultProps} />);
 
-      expect(screen.getByText("Agentic")).toBeInTheDocument();
+      expect(screen.queryByText("Agentic")).not.toBeInTheDocument();
+      expect(screen.getByText("Guardrails")).toBeInTheDocument();
     });
 
-    it("shows Workflow Runs and Memory to admins", async () => {
+    it("does not show Workflow Runs and Memory to admins", () => {
       renderWithProviders(<Sidebar {...defaultProps} />);
 
-      act(() => {
-        fireEvent.click(screen.getByText("Agentic"));
-      });
-      await waitFor(() => {
-        expect(screen.getByText("Workflow Runs")).toBeInTheDocument();
-      });
-      expect(screen.getByText("Memory")).toBeInTheDocument();
+      expect(screen.queryByText("Workflow Runs")).not.toBeInTheDocument();
+      expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+      expect(screen.getByText("Models + Endpoints")).toBeInTheDocument();
     });
 
     it("hides Guardrails Monitor from an internal user while keeping Usage and Cost Optimization", () => {
@@ -522,17 +459,14 @@ describe("Sidebar (leftnav)", () => {
   });
 
   it("expands the parent group of the current nested route and marks the child active", () => {
-    navState.pathname = "/ui/search-tools";
+    navState.pathname = "/ui/router-settings";
     renderWithProviders(<Sidebar {...defaultProps} />);
-    expect(screen.getByRole("link", { name: "Search Tools" })).toHaveAttribute("data-active", "true");
-    expect(screen.getByRole("button", { name: "Tools" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: "Router Settings" })).toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("links every leaf to its path route, including the ids that differ from their route", () => {
     renderWithProviders(<Sidebar {...defaultProps} />);
-    act(() => {
-      fireEvent.click(screen.getByText("Experimental"));
-    });
 
     const expectHref = (label: string, href: string) =>
       expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", href);
@@ -540,20 +474,55 @@ describe("Sidebar (leftnav)", () => {
     expectHref("Playground", "/ui/playground");
     expectHref("Models + Endpoints", "/ui/models-and-endpoints");
     expectHref("Usage", "/ui/usage");
-    expectHref("API Reference", "/ui/api-reference");
-    expectHref("Old Usage", "/ui/old-usage");
+    expectHref("Guardrails", "/ui/guardrails");
+    expectHref("Logs", "/ui/logs");
+  });
+
+  it("hides the removed columns and their nested pages", () => {
+    renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
+    const gone = [
+      "Agents",
+      "Workflow Runs",
+      "Memory",
+      "MCP Servers",
+      "Skills",
+      "Policies",
+      "Tools",
+      "Search Tools",
+      "Vector Stores",
+      "Tool Policies",
+      "Developer Tools",
+      "API Reference",
+      "AI Hub",
+      "Caching",
+      "Experimental",
+      "Prompts",
+      "Transform Request",
+      "Tag Management",
+      "Old Usage",
+    ];
+    for (const label of gone) {
+      expect(screen.queryByText(label), label).not.toBeInTheDocument();
+    }
+    const pages = menuGroups.flatMap((group) => group.items.flatMap((item) => [item.page, ...(item.children ?? []).map((child) => child.page)]));
+    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage"]) {
+      expect(pages, id).not.toContain(id);
+    }
+    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "budgets", "settings"]) {
+      expect(pages, id).toContain(id);
+    }
   });
 
   it("never links a leaf to the legacy ?page= switch", () => {
     renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
-    for (const group of ["Agentic", "Tools", "Experimental", "Settings"]) {
+    for (const group of ["Settings"]) {
       act(() => {
         fireEvent.click(screen.getByText(group));
       });
     }
     const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href") ?? "");
     expect(hrefs.filter((href) => href.includes("page="))).toHaveLength(0);
-    expect(hrefs.filter((href) => href.startsWith("/ui/")).length).toBeGreaterThan(30);
+    expect(hrefs.filter((href) => href.startsWith("/ui/")).length).toBeGreaterThan(10);
   });
 
   it("hides labels but keeps items reachable (icon + link) when collapsed to the rail", () => {
@@ -607,15 +576,14 @@ describe("getBreadcrumb", () => {
   it("resolves routes whose segment differs from the sidebar page id", () => {
     expect(getBreadcrumb("/ui/models-and-endpoints")).toEqual({ section: "AI GATEWAY", title: "Models + Endpoints" });
     expect(getBreadcrumb("/ui/usage")).toEqual({ section: "OBSERVABILITY", title: "Usage" });
-    expect(getBreadcrumb("/ui/old-usage")).toEqual({ section: "DEVELOPER TOOLS", title: "Old Usage" });
   });
 
   it("titles the dashboard root as Virtual Keys", () => {
     expect(getBreadcrumb("/ui/")).toEqual({ section: "AI GATEWAY", title: "Virtual Keys" });
   });
 
-  it("resolves a nested child route to its parent section", () => {
-    expect(getBreadcrumb("/ui/search-tools/")).toEqual({ section: "AI GATEWAY", title: "Search Tools" });
+  it("does not keep a section for a removed nested route", () => {
+    expect(getBreadcrumb("/ui/search-tools/")).toEqual({ section: null, title: "Search Tools" });
   });
 
   it("resolves router-settings under the Settings section", () => {

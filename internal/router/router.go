@@ -6,46 +6,71 @@ import (
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
 func All(list []config.ModelEntry, alias string) []config.ModelEntry {
 	return matchDeployments(list, alias)
 }
 
-func Order(list []config.ModelEntry, alias, strategy string, busy map[string]int) []config.ModelEntry {
+// State is the Redis-backed view of deployments. Zero values keep the old
+// in-process behavior (busy map only).
+type State struct {
+	Busy     map[string]int
+	Cooldown map[string]bool
+	Latency  map[string]float64
+	Usage    map[string]float64
+}
+
+func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry {
 	pool := All(list, alias)
-	first := Pick(list, alias, strategy, busy)
+	first := Pick(list, alias, strategy, st)
 	if first == nil {
 		return pool
 	}
-	fid := depID(*first)
+	fid := DeploymentID(*first)
 	out := []config.ModelEntry{*first}
 	for _, e := range pool {
-		if depID(e) != fid {
+		if DeploymentID(e) != fid {
 			out = append(out, e)
 		}
 	}
 	return out
 }
 
-func Pick(list []config.ModelEntry, alias, strategy string, busy map[string]int) *config.ModelEntry {
+func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry {
 	pool := matchDeployments(list, alias)
 	if len(pool) == 0 {
 		return nil
 	}
-	switch strategy {
-	case "least-busy":
+	if len(st.Cooldown) > 0 {
+		open := make([]config.ModelEntry, 0, len(pool))
+		for _, e := range pool {
+			if !st.Cooldown[DeploymentID(e)] {
+				open = append(open, e)
+			}
+		}
+		if len(open) > 0 {
+			pool = open
+		}
+	}
+	kind, ok := strategyKind(strategy)
+	if !ok {
+		return nil
+	}
+	switch kind {
+	case "busy":
 		best := 0
 		bestN := 1 << 30
 		for i, e := range pool {
-			n := busy[depID(e)]
+			n := st.Busy[DeploymentID(e)]
 			if n < bestN {
 				bestN = n
 				best = i
 			}
 		}
 		return &pool[best]
-	case "lowest-cost":
+	case "cost":
 		best := 0
 		bestC := 1e99
 		for i, e := range pool {
@@ -56,8 +81,54 @@ func Pick(list []config.ModelEntry, alias, strategy string, busy map[string]int)
 			}
 		}
 		return &pool[best]
+	case "latency":
+		best := 0
+		bestC := 1e99
+		for i, e := range pool {
+			c := paramFloat(e, "latency_ms", float64(i))
+			if st.Latency != nil {
+				if v, ok := st.Latency[DeploymentID(e)]; ok {
+					c = v
+				}
+			}
+			if c < bestC {
+				bestC = c
+				best = i
+			}
+		}
+		return &pool[best]
+	case "tpm":
+		best := 0
+		bestC := 1e99
+		for i, e := range pool {
+			c := paramFloat(e, "tpm", float64(i))
+			if st.Usage != nil {
+				if v, ok := st.Usage[DeploymentID(e)]; ok {
+					c = v
+				}
+			}
+			if c < bestC {
+				bestC = c
+				best = i
+			}
+		}
+		return &pool[best]
+	case "tag":
+		best := 0
+		bestW := -1.0
+		for i, e := range pool {
+			if e.ParamString("tag", "") == "" && i > 0 {
+				continue
+			}
+			w := paramFloat(e, "weight", 1)
+			if w > bestW {
+				bestW = w
+				best = i
+			}
+		}
+		return &pool[best]
 	default:
-		// simple-shuffle and others: first matching (stable for tests); weight if present
+		// simple_shuffle 以及按权重选的策略：权重最大者。测试依赖这个稳定结果。
 		best := 0
 		bestW := -1.0
 		for i, e := range pool {
@@ -86,7 +157,7 @@ func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntr
 	byPattern := map[string][]config.ModelEntry{}
 	var patterns []string
 	for _, e := range list {
-		if !strings.Contains(e.ModelName, "*") {
+		if !llm.IsWildcardModel(e.ModelName) {
 			continue
 		}
 		if _, ok := byPattern[e.ModelName]; !ok {
@@ -156,7 +227,7 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
-func depID(e config.ModelEntry) string {
+func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 }
 
@@ -178,73 +249,49 @@ func paramFloat(e config.ModelEntry, key string, fallback float64) float64 {
 	}
 }
 
+// AdapterURL 是聊天补全的上游地址。其他操作用 AdapterURLOp。
 func AdapterURL(provider, apiBase, realModel string) string {
 	return AdapterURLOp("chat", provider, apiBase, realModel)
 }
 
+// AdapterURLOp 按操作和供应商给出完整 URL。规则在 internal/llm.Endpoint。
 func AdapterURLOp(op, provider, apiBase, realModel string) string {
-	base := strings.TrimRight(apiBase, "/")
-	azurePrefix := base + "/openai/deployments/" + realModel
-	switch op {
-	case "embeddings":
-		if provider == "azure" {
-			return azurePrefix + "/embeddings"
-		}
-		return base + "/embeddings"
-	case "completions":
-		if provider == "azure" {
-			return azurePrefix + "/completions"
-		}
-		return base + "/completions"
-	case "messages":
-		if provider == "gemini" || provider == "vertex_ai" {
-			return AdapterURLOp("chat", provider, apiBase, realModel)
-		}
-		return base + "/v1/messages"
-	case "images":
-		if provider == "azure" {
-			return azurePrefix + "/images/generations"
-		}
-		return base + "/images/generations"
-	case "images_edits":
-		if provider == "azure" {
-			return azurePrefix + "/images/edits"
-		}
-		return base + "/images/edits"
-	case "audio_speech":
-		return base + "/audio/speech"
-	case "audio_transcription":
-		return base + "/audio/transcriptions"
-	case "audio_translation":
-		return base + "/audio/translations"
-	case "moderations":
-		return base + "/moderations"
-	case "rerank":
-		return base + "/rerank"
-	case "responses":
-		return base + "/responses"
-	case "videos":
-		return base + "/videos"
-	case "gemini":
-		return AdapterURLOp("chat", provider, apiBase, realModel)
-	default:
-		switch provider {
-		case "anthropic":
-			return base + "/v1/messages"
-		case "azure":
-			return azurePrefix + "/chat/completions"
-		case "gemini":
-			return base + "/v1beta/models/" + realModel + ":generateContent"
-		case "vertex_ai":
-			return base + "/v1/projects/x/locations/us/publishers/google/models/" + realModel + ":generateContent"
-		default:
-			return base + "/chat/completions"
-		}
-	}
+	return llm.Endpoint(op, provider, apiBase, realModel)
 }
 
-func KnownAdapter(provider string) bool {
-	// Every LiteLLM 1.102.0 llms package is an adapter: OpenAI-compatible HTTP
-	// by default, with provider-specific URL/body in AdapterURLOp/EncodeRequest.
-	return strings.TrimSpace(provider) != ""
+// ValidateStrategy 只接受 catalog 里的 15 个策略名，以及网关配置里已经在用的连字符写法。
+// 不认识的名字返回错误，不再当成 simple-shuffle。
+func ValidateStrategy(strategy string) error {
+	if _, ok := strategyKind(strategy); !ok {
+		return errUnknownStrategy
+	}
+	return nil
+}
+
+var errUnknownStrategy = strategyError("unknown routing strategy")
+
+type strategyError string
+
+func (e strategyError) Error() string { return string(e) }
+
+func strategyKind(strategy string) (string, bool) {
+	s := strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_")
+	switch s {
+	case "", "simple_shuffle", "base_routing_strategy", "adaptive_router", "auto_router", "complexity_router", "quality_router":
+		return "weight", true
+	case "least_busy":
+		return "busy", true
+	case "lowest_cost", "budget_limiter", "savings_baseline":
+		return "cost", true
+	case "lowest_latency", "lar1_routing", "latency_based_routing":
+		return "latency", true
+	case "lowest_tpm_rpm", "lowest_tpm_rpm_v2", "usage_based_routing", "usage_based_routing_v2":
+		return "tpm", true
+	case "cost_based_routing":
+		return "cost", true
+	case "tag_based_routing":
+		return "tag", true
+	default:
+		return "", false
+	}
 }

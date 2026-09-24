@@ -113,10 +113,10 @@ describe("dashboard landing", () => {
     expect(screen.queryByTestId("api-keys-dashboard")).not.toBeInTheDocument();
   });
 
-  it("carries the MCP env-var deep link's other params through the legacy redirect", () => {
-    state.search = "page=mcp-servers&fill_env_vars=srv-1";
+  it("does not send an old agent bookmark to a removed screen", () => {
+    state.search = "page=agents";
     render(<CreateKeyPage />);
-    expect(mockReplace).toHaveBeenCalledWith("/mocked-ui/mcp-servers?fill_env_vars=srv-1");
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it("still sends the user to an explicit stored return URL", () => {

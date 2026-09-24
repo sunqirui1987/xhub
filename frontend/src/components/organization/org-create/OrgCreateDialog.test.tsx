@@ -109,8 +109,8 @@ describe("OrgCreateDialog", () => {
     await user.type(screen.getByLabelText("Organization Name"), "new-org");
     await user.click(screen.getByRole("button", { name: "set-models" }));
     await user.type(screen.getByLabelText("Tokens per minute Limit (TPM)"), "1000");
-    await user.click(screen.getByRole("button", { name: "set-vector-stores" }));
-    await user.click(screen.getByRole("button", { name: "set-mcp" }));
+    expect(screen.queryByRole("button", { name: "set-vector-stores" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "set-mcp" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create Organization" }));
 
     await waitFor(() => expect(createOrganization).toHaveBeenCalledTimes(1));
@@ -118,11 +118,6 @@ describe("OrgCreateDialog", () => {
       organization_alias: "new-org",
       models: ["gpt-5.2"],
       tpm_limit: 1000,
-      object_permission: {
-        vector_stores: ["vs-1"],
-        mcp_servers: ["srv-1"],
-        mcp_toolsets: ["ts-1"],
-      },
     };
     expect(createOrganization.mock.calls[0][0]).toStrictEqual(expectedBody);
   });

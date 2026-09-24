@@ -3,6 +3,9 @@ package server
 import (
 	"strings"
 	"testing"
+
+	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/store"
 )
 
 func TestModelCRUDAlignment(t *testing.T) {
@@ -69,6 +72,55 @@ func TestModelCRUDAlignment(t *testing.T) {
 	lst := doJSON(t, h, "GET", "/model/info", master, nil)
 	if strings.Contains(lst.Body.String(), "alias-1") {
 		t.Fatalf("model still listed %s", lst.Body.String())
+	}
+}
+
+func TestConfigModelCannotDeleteAndAddedModelReloads(t *testing.T) {
+	db := testDatabaseURL(t)
+	yamlModel := config.ModelEntry{
+		ModelName:     "gpt-4o-mini",
+		LiteLLMParams: map[string]any{"model": "openai/gpt-4o-mini", "api_key": "sk-file"},
+		ModelInfo:     map[string]any{"id": "cfg-gpt"},
+	}
+	open := func() *Server {
+		cfg := &config.Config{
+			ModelList:       []config.ModelEntry{yamlModel},
+			RouterSettings:  config.RouterSettings{RoutingStrategy: "simple-shuffle", NumRetries: 1, Timeout: 5},
+			GeneralSettings: config.GeneralSettings{MasterKey: "sk-master", DatabaseURL: db, StoreModelInDB: true},
+		}
+		st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.DB.Close() })
+		return New(cfg, st)
+	}
+	s := open()
+	h := s.Handler()
+	denied := doJSON(t, h, "POST", "/model/delete", "sk-master", map[string]any{"id": "cfg-gpt"})
+	if denied.Code != 400 {
+		t.Fatalf("config delete %d %s", denied.Code, denied.Body.String())
+	}
+	created := doJSON(t, h, "POST", "/model/new", "sk-master", map[string]any{
+		"model_name":     "added-model",
+		"litellm_params": map[string]any{"model": "openai/gpt-4o", "api_key": "sk-added"},
+	})
+	if created.Code != 200 {
+		t.Fatal(created.Body.String())
+	}
+	info, _ := decodeBody(t, created.Body.Bytes())["model_info"].(map[string]any)
+	if info["db_model"] != true {
+		t.Fatalf("new model db_model %v", info["db_model"])
+	}
+	_ = s.Store.DB.Close()
+
+	s2 := open()
+	listed := doJSON(t, s2.Handler(), "GET", "/model/info", "sk-master", nil)
+	if !strings.Contains(listed.Body.String(), "added-model") {
+		t.Fatalf("added model missing after reload %s", listed.Body.String())
+	}
+	if !strings.Contains(listed.Body.String(), `"db_model":false`) && !strings.Contains(listed.Body.String(), `"db_model": false`) {
+		t.Fatalf("config model should stay non-db %s", listed.Body.String())
 	}
 }
 

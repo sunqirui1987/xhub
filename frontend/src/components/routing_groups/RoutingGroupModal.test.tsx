@@ -90,7 +90,7 @@ const pickModels = async (user: ReturnType<typeof userEvent.setup>, ...models: s
 
 const pickStrategy = async (user: ReturnType<typeof userEvent.setup>, strategy: string) => {
   await user.click(screen.getByLabelText("Routing Strategy"));
-  await user.click(await screen.findByRole("option", { name: strategy }));
+  await user.click(await screen.findByRole("option", { name: new RegExp(strategy) }));
 };
 
 const save = async (user: ReturnType<typeof userEvent.setup>, name: string) =>

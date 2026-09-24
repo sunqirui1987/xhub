@@ -92,7 +92,7 @@ export function FallbackGroupConfig({
       <div className="flex items-center justify-center -my-4 z-raised">
         <div className="bg-indigo-50 text-indigo-500 px-4 py-1 rounded-full text-xs font-bold border border-indigo-100 flex items-center gap-2 shadow-xs dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-900">
           <ArrowDown className="w-4 h-4" />
-          IF FAILS, TRY...
+          {t("IF FAILS, TRY...")}
         </div>
       </div>
 
@@ -122,7 +122,10 @@ export function FallbackGroupConfig({
             />
             <p className="text-xs text-muted-foreground mt-1 ml-1">
               {canAddMoreFallbacks
-                ? `Search and select multiple models. Selected models will appear below in order. (${group.fallbackModels.length}/${maxFallbacks} used)`
+                ? t("Search and select multiple models. Selected models will appear below in order. ({used}/{max} used)", {
+                    used: group.fallbackModels.length,
+                    max: maxFallbacks,
+                  })
                 : t("Maximum {maxFallbacks} fallbacks reached. Remove some to add more.", { maxFallbacks })}
             </p>
           </div>

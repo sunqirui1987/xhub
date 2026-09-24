@@ -10,22 +10,31 @@ describe("legacyPageRedirectHref", () => {
     expect(redirect("page=models")).toBe("/ui/models-and-endpoints");
     expect(redirect("page=llm-playground")).toBe("/ui/playground");
     expect(redirect("page=new_usage")).toBe("/ui/usage");
-    expect(redirect("page=usage")).toBe("/ui/old-usage");
   });
 
-  it("keeps the older aliases for renamed pages", () => {
-    expect(redirect("page=api_ref")).toBe("/ui/api-reference");
-    expect(redirect("page=api-reference")).toBe("/ui/api-reference");
-    expect(redirect("page=claude-code-plugins")).toBe("/ui/skills");
-  });
-
-  it("forwards the remaining query params so the MCP env-var setup link still opens its form", () => {
-    expect(redirect("page=mcp-servers&fill_env_vars=srv-1")).toBe("/ui/mcp-servers?fill_env_vars=srv-1");
-    expect(redirect("fill_env_vars=srv-1&page=mcp-servers")).toBe("/ui/mcp-servers?fill_env_vars=srv-1");
-  });
-
-  it("keeps forwarded values encoded", () => {
-    expect(redirect("page=mcp-servers&fill_env_vars=a%26b%3Dc")).toBe("/ui/mcp-servers?fill_env_vars=a%26b%3Dc");
+  it("does not open removed columns from old bookmarks", () => {
+    for (const page of [
+      "agents",
+      "workflows",
+      "memory",
+      "mcp-servers",
+      "skills",
+      "policies",
+      "search-tools",
+      "vector-stores",
+      "tool-policies",
+      "prompts",
+      "tag-management",
+      "transform-request",
+      "caching",
+      "api_ref",
+      "api-reference",
+      "model-hub-table",
+      "usage",
+      "claude-code-plugins",
+    ]) {
+      expect(redirect(`page=${page}`), page).toBeNull();
+    }
   });
 
   it("returns null when there is no page param or the id is unknown", () => {
@@ -39,7 +48,7 @@ describe("legacyPageRedirectHref", () => {
     const leaves = menuGroups
       .flatMap((group) => group.items.flatMap((item) => item.children ?? [item]))
       .filter((item) => !item.external_url);
-    expect(leaves.length).toBeGreaterThan(30);
+    expect(leaves.length).toBeGreaterThan(10);
     for (const leaf of leaves) {
       expect(redirect(`page=${leaf.page}`), leaf.page).toBe(`/ui/${leaf.route ?? leaf.page}`);
     }

@@ -1702,32 +1702,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
                   />
                 </div>
 
-                {canViewPolicies && (
-                  <div>
-                    <div className="mb-2 flex items-center gap-1 text-sm font-medium text-foreground">
-                      <Shield className="mr-1 size-4" aria-hidden="true" /> {t("Policies")}
-                      <Tooltip>
-                        <TooltipTrigger aria-label={t("About policies")}>
-                          <Info className="size-3.5 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent className="max-w-xs">
-                          {t("Select policy/policies to apply to this LLM API call. Policies define which guardrails are applied based on conditions. You can set up your policies")}{" "}
-                          <a href={uiHref("policies")} className="text-info underline">
-                            {t("here")}
-                          </a>
-                          .
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                    <PolicySelector
-                      value={selectedPolicies}
-                      onChange={setSelectedPolicies}
-                      className="mb-4"
-                      accessToken={accessToken || ""}
-                    />
-                  </div>
-                )}
-
                 {endpointType === EndpointType.RESPONSES && (
                   <div>
                     <CodeInterpreterTool

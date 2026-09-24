@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,15 +12,29 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
+func testDatabaseURL(t *testing.T) string {
+	t.Helper()
+	base := os.Getenv("XHUB_TEST_DATABASE_URL")
+	if base == "" {
+		base = "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable"
+	}
+	sum := sha256.Sum256([]byte(t.Name() + time.Now().UTC().Format(time.RFC3339Nano)))
+	schema := "t_" + hex.EncodeToString(sum[:8])
+	if strings.Contains(base, "?") {
+		return base + "&search_path=" + schema
+	}
+	return base + "?search_path=" + schema
+}
+
 func testEnv(t *testing.T) (*Server, string) {
 	t.Helper()
-	dir := t.TempDir()
-	db := filepath.Join(dir, "t.db")
+	db := testDatabaseURL(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -132,7 +148,7 @@ func testEnv(t *testing.T) (*Server, string) {
 			},
 		},
 		RouterSettings:  config.RouterSettings{RoutingStrategy: "simple-shuffle", NumRetries: 2, Timeout: 15},
-		GeneralSettings: config.GeneralSettings{MasterKey: "sk-master", DatabaseURL: "sqlite://" + db},
+		GeneralSettings: config.GeneralSettings{MasterKey: "sk-master", DatabaseURL: db},
 	}
 	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
 	if err != nil {
@@ -323,7 +339,7 @@ func TestConfigLoadEnv(t *testing.T) {
 	t.Setenv("LITELLM_MASTER_KEY", "sk-from-env")
 	dir := t.TempDir()
 	p := filepath.Join(dir, "c.yaml")
-	if err := os.WriteFile(p, []byte("general_settings:\n  master_key: os.environ/LITELLM_MASTER_KEY\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("general_settings:\n  master_key: os.environ/LITELLM_MASTER_KEY\n  database_url: postgres://xhub:xhub@127.0.0.1:5433/xhub?sslmode=disable\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c, err := config.Load(p)

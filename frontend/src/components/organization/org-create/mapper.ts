@@ -13,25 +13,12 @@ export const emptyOrgFormValues: OrgSettingsFormValues = {
   budget_duration: "",
   tpm_limit: "",
   rpm_limit: "",
-  vector_stores: [],
-  mcp: { servers: [], accessGroups: [], toolsets: [] },
   metadata: "",
 };
 
 const metadataRecordSchema = z.record(z.string(), z.unknown());
 
-const objectPermissionFromValues = (values: OrgSettingsFormValues): OrgCreateBody["object_permission"] => {
-  const grants = {
-    ...(values.vector_stores.length > 0 && { vector_stores: values.vector_stores }),
-    ...(values.mcp.servers.length > 0 && { mcp_servers: values.mcp.servers }),
-    ...(values.mcp.accessGroups.length > 0 && { mcp_access_groups: values.mcp.accessGroups }),
-    ...(values.mcp.toolsets.length > 0 && { mcp_toolsets: values.mcp.toolsets }),
-  };
-  return Object.keys(grants).length > 0 ? grants : undefined;
-};
-
 export const buildOrgCreateBody = (values: OrgSettingsFormValues): OrgCreateBody => {
-  const objectPermission = objectPermissionFromValues(values);
   return {
     organization_alias: values.organization_alias,
     models: values.models,
@@ -40,6 +27,5 @@ export const buildOrgCreateBody = (values: OrgSettingsFormValues): OrgCreateBody
     ...(values.rpm_limit.trim() !== "" && { rpm_limit: Number(values.rpm_limit) }),
     ...(values.budget_duration !== "" && { budget_duration: values.budget_duration }),
     ...(values.metadata.trim() !== "" && { metadata: metadataRecordSchema.parse(JSON.parse(values.metadata)) }),
-    ...(objectPermission !== undefined && { object_permission: objectPermission }),
   };
 };

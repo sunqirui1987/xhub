@@ -552,7 +552,7 @@ func (s *Server) writeCatalogPersist(w http.ResponseWriter, r *http.Request, bod
 		for i := range list {
 			freezeFamily(kind, list[i])
 		}
-		httpx.WriteJSON(w, 200, catalogListBody(kind, path, list))
+		httpx.WriteJSON(w, 200, catalogListBody(kind, path, redactCredentialList(kind, list, true)))
 	case "info":
 		if id == "" {
 			httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
@@ -563,7 +563,7 @@ func (s *Server) writeCatalogPersist(w http.ResponseWriter, r *http.Request, bod
 			m = map[string]any{"id": id, idField(kind): id, "object": singular(kind)}
 		}
 		freezeFamily(kind, m)
-		httpx.WriteJSON(w, 200, m)
+		httpx.WriteJSON(w, 200, redactCredentialObject(kind, m, true))
 	case "delete":
 		ids := idsFrom(body, kind+"s", idField(kind))
 		if id != "" {
@@ -584,18 +584,22 @@ func (s *Server) writeCatalogPersist(w http.ResponseWriter, r *http.Request, bod
 		if err != nil {
 			m = map[string]any{"id": id, idField(kind): id, "created_at": time.Now().UTC().Format(time.RFC3339)}
 		}
-		for k, v := range body {
-			if k == "password" {
-				continue
+		if kind == "credentials" || kind == "credential" {
+			mergeCredentialPatch(m, body)
+		} else {
+			for k, v := range body {
+				if k == "password" {
+					continue
+				}
+				m[k] = v
 			}
-			m[k] = v
 		}
 		m["id"] = id
 		m[idField(kind)] = id
 		freezeFamily(kind, m)
 		b, _ := json.Marshal(m)
 		_ = s.Store.PutKV(kind, id, string(b))
-		httpx.WriteJSON(w, 200, m)
+		httpx.WriteJSON(w, 200, redactCredentialObject(kind, m, true))
 	default:
 		if id == "" {
 			id = singular(kind) + "_" + httpx.CallID()[:12]
@@ -631,13 +635,109 @@ func (s *Server) writeCatalogPersist(w http.ResponseWriter, r *http.Request, bod
 		freezeFamily(kind, obj)
 		b, _ := json.Marshal(obj)
 		_ = s.Store.PutKV(kind, id, string(b))
-		httpx.WriteJSON(w, 200, obj)
+		httpx.WriteJSON(w, 200, redactCredentialObject(kind, obj, false))
 	}
+}
+
+// mergeCredentialPatch 按 LiteLLM update_db_credential 合并凭证。
+// 新的 credential_values 叠到已有字段上。打码后的密钥（含连续 *）不覆盖原值，
+// 否则编辑时表单把掩码传回来会把真密钥写成星号。
+func mergeCredentialPatch(dst, body map[string]any) {
+	for k, v := range body {
+		if k == "password" || k == "credential_values" {
+			continue
+		}
+		dst[k] = v
+	}
+	incoming, ok := body["credential_values"].(map[string]any)
+	if !ok {
+		return
+	}
+	cur, _ := dst["credential_values"].(map[string]any)
+	if cur == nil {
+		cur = map[string]any{}
+	}
+	for k, v := range incoming {
+		if isSensitiveCredentialKey(k) {
+			s, _ := v.(string)
+			if strings.TrimSpace(s) == "" || strings.Contains(s, "**") {
+				continue
+			}
+		}
+		cur[k] = v
+	}
+	dst["credential_values"] = cur
+}
+
+func redactCredentialObject(kind string, obj map[string]any, showValues bool) map[string]any {
+	if kind != "credentials" && kind != "credential" {
+		return obj
+	}
+	vals, ok := obj["credential_values"].(map[string]any)
+	if !ok {
+		return obj
+	}
+	out := make(map[string]any, len(obj))
+	for k, v := range obj {
+		if k == "credential_values" {
+			continue
+		}
+		out[k] = v
+	}
+	if showValues {
+		out["credential_values"] = maskCredentialValues(vals)
+	}
+	return out
+}
+
+func redactCredentialList(kind string, list []map[string]any, showValues bool) []map[string]any {
+	if kind != "credentials" && kind != "credential" {
+		return list
+	}
+	out := make([]map[string]any, len(list))
+	for i, m := range list {
+		out[i] = redactCredentialObject(kind, m, showValues)
+	}
+	return out
+}
+
+func isSensitiveCredentialKey(k string) bool {
+	l := strings.ToLower(k)
+	for _, w := range []string{"authorization", "token", "key", "secret", "password", "passwd", "credential"} {
+		if strings.Contains(l, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// maskCredentialValues 对齐 LiteLLM _get_masked_values 的列表默认值。
+// 含 key/secret/token 的字段只留头尾各 2 个字符，其余换成 *。短于 4 个字符的写成 *****。
+// api_base 这类地址原样返回，编辑表单才能看到上次保存的地址。
+func maskCredentialValues(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		s, ok := v.(string)
+		if !ok || !isSensitiveCredentialKey(k) {
+			out[k] = v
+			continue
+		}
+		out[k] = maskSecret(s)
+	}
+	return out
+}
+
+func maskSecret(v string) string {
+	const unmasked = 4
+	if len(v) <= unmasked {
+		return "*****"
+	}
+	head := unmasked / 2
+	return v[:head] + strings.Repeat("*", len(v)-unmasked) + v[len(v)-head:]
 }
 
 func freezeFamily(kind string, obj map[string]any) {
 	delete(obj, "password")
-	delete(obj, "credential_values")
 	now := time.Now().UTC().Format(time.RFC3339)
 	if obj["id"] == nil {
 		obj["id"] = singular(kind) + "_" + httpx.CallID()[:12]
@@ -776,7 +876,6 @@ func freezeFamily(kind string, obj map[string]any) {
 	case "credentials", "credential":
 		setDefault(obj, "credential_name", id)
 		setDefault(obj, "credential_info", map[string]any{})
-		delete(obj, "credential_values")
 	case "guardrails", "apply_guardrail":
 		setDefault(obj, "guardrail_id", id)
 		setDefault(obj, "guardrail_name", "")
@@ -1043,10 +1142,10 @@ func catalogListBody(kind, path string, list []map[string]any) any {
 		return map[string]any{"object": "list", "data": list, "logs": list}
 	case strings.Contains(p, "/guardrails/ui/add_guardrail_settings"):
 		return map[string]any{
-			"supported_entities": []any{},
-			"supported_actions":  []any{"MASK", "BLOCK"},
-			"supported_modes":    []any{"pre_call", "during_call", "post_call"},
-			"pii_entity_categories": []any{},
+			"supported_entities":     []any{},
+			"supported_actions":      []any{"MASK", "BLOCK"},
+			"supported_modes":        []any{"pre_call", "during_call", "post_call"},
+			"pii_entity_categories":  []any{},
 			"guardrail_provider_map": map[string]any{"Presidio": "presidio", "Custom": "custom"},
 		}
 	case strings.Contains(p, "/guardrails/ui/provider_specific_params"):

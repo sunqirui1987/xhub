@@ -39,6 +39,25 @@ export interface generalSettingsItem {
 
 const NUMERIC_INPUT_WIDTH = "w-36";
 
+const GENERAL_FIELD_LABELS: Record<string, string> = {
+  mcp_internal_ip_ranges: "MCP internal IP ranges",
+  alert_to_webhook_url: "Alert webhook URL",
+  allow_requests_on_db_unavailable: "Allow requests when the database is unavailable",
+  enable_anthropic_prompt_caching: "Automatic Anthropic prompt caching",
+  anthropic_prompt_caching_ttl: "Cache lifetime (TTL)",
+  budget_exceeded_throttle_percentage: "Budget exceeded throttle",
+  max_ui_session_budget: "Dashboard session budget",
+};
+
+const TTL_LABELS: Record<string, string> = {
+  "5m": "5 minutes",
+  "1h": "1 hour",
+};
+
+const fieldLabel = (fieldName: string) => t(GENERAL_FIELD_LABELS[fieldName] ?? fieldName);
+
+const ttlOptionLabel = (option: string) => t(TTL_LABELS[option] ?? option);
+
 const toNumericValue = (raw: string): number | null => (raw === "" ? null : Number(raw));
 
 const SettingValueEditor: React.FC<{
@@ -146,7 +165,7 @@ export const PromptCachingPanel: React.FC<{
         <div className="mt-6 flex items-start justify-between gap-8">
           <div className="min-w-0 max-w-2xl">
             <p className="font-medium">{t("Automatic Anthropic prompt caching")}</p>
-            <p className="mt-1 break-words text-xs text-muted-foreground">{enableSetting.field_description}</p>
+            <p className="mt-1 break-words text-xs text-muted-foreground">{t(enableSetting.field_description)}</p>
           </div>
           <Switch checked={enabled} onCheckedChange={(checked) => persist(ENABLE_ANTHROPIC_PROMPT_CACHING, checked)} />
         </div>
@@ -155,7 +174,7 @@ export const PromptCachingPanel: React.FC<{
           <div className="mt-6 flex items-start justify-between gap-8">
             <div className="min-w-0 max-w-2xl">
               <p className={`font-medium ${enabled ? "" : "text-muted-foreground"}`}>{t("Cache lifetime (TTL)")}</p>
-              <p className="mt-1 break-words text-xs text-muted-foreground">{ttlSetting.field_description}</p>
+              <p className="mt-1 break-words text-xs text-muted-foreground">{t(ttlSetting.field_description)}</p>
             </div>
             <Select
               disabled={!enabled}
@@ -163,13 +182,13 @@ export const PromptCachingPanel: React.FC<{
               onValueChange={(newValue) => persist(ANTHROPIC_PROMPT_CACHING_TTL, newValue)}
             >
               <SelectTrigger className="min-w-40">
-                <SelectValue placeholder="5m (default)" />
+                <SelectValue placeholder={t("5m (default)")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={null}>5m (default)</SelectItem>
+                <SelectItem value={null}>{t("5m (default)")}</SelectItem>
                 {(ttlSetting.field_options ?? []).map((option) => (
                   <SelectItem key={option} value={option}>
-                    {option}
+                    {ttlOptionLabel(option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -291,17 +310,9 @@ const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, user
                     .map((value, index) => (
                       <TableRow key={index}>
                         <TableCell className="whitespace-normal">
-                          <p className="break-words">{value.field_name}</p>
-                          <p
-                            style={{
-                              fontSize: "0.65rem",
-                              color: "#808080",
-                              fontStyle: "italic",
-                            }}
-                            className="mt-1 break-words"
-                          >
-                            {value.field_description}
-                          </p>
+                          <p className="break-words font-medium">{fieldLabel(value.field_name)}</p>
+                          <p className="mt-0.5 break-all font-mono text-[0.65rem] text-muted-foreground">{value.field_name}</p>
+                          <p className="mt-1 break-words text-xs text-muted-foreground">{t(value.field_description)}</p>
                         </TableCell>
                         <TableCell>
                           <SettingValueEditor setting={value} onChange={handleInputChange} />

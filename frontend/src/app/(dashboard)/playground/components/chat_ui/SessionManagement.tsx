@@ -48,12 +48,12 @@ const SessionManagement: React.FC<SessionManagementProps> = ({
   const getSessionDescription = () => {
     if (!responsesSessionId) {
       return useApiSessionManagement
-        ? "LiteLLM will manage session using previous_response_id"
+        ? "XHub will manage session using previous_response_id"
         : "UI will manage session using chat history";
     }
 
     return useApiSessionManagement
-      ? "LiteLLM API session active - context maintained server-side"
+      ? "XHub API session active - context maintained server-side"
       : "UI session active - context maintained client-side";
   };
 

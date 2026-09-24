@@ -124,7 +124,7 @@ messages = [
         content="You are a helpful assistant that im using to make a test request to."
     ),
     HumanMessage(
-        content="test from litellm. tell me why it's amazing in 1 sentence"
+        content="test from XHub. tell me why it's amazing in 1 sentence"
     ),
 ]
 response = chat(messages)

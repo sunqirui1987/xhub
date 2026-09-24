@@ -314,36 +314,7 @@ export function UserEditView({
             )}
           </FormField>
 
-          {canEditMcpPermissions && (
-            <>
-              <FormField
-                control={form.control}
-                name="mcp_servers_and_groups"
-                label={labelWithHint(
-                  t("pages.users.mcpServersGroups"),
-                  t("Caps which MCP servers, access groups, and tools this user may reach. Every key the user holds is limited to this set."),
-                )}
-              >
-                {({ value, onChange }) => (
-                  <MCPServerSelector
-                    onChange={onChange}
-                    value={value}
-                    accessToken={accessToken || ""}
-                    placeholder={t("pages.users.selectMcpOptional")}
-                  />
-                )}
-              </FormField>
 
-              <MCPToolPermissions
-                accessToken={accessToken || ""}
-                selectedServers={form.watch("mcp_servers_and_groups")?.servers || []}
-                selectedAccessGroups={form.watch("mcp_servers_and_groups")?.accessGroups || []}
-                selectedToolsets={form.watch("mcp_servers_and_groups")?.toolsets || []}
-                toolPermissions={form.watch("mcp_tool_permissions") || {}}
-                onChange={(toolPerms) => form.setValue("mcp_tool_permissions", toolPerms)}
-              />
-            </>
-          )}
         </FieldGroup>
 
         <div className="mt-6 flex justify-end gap-2">

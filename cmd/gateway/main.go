@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"log"
-	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/server"
@@ -25,7 +24,8 @@ func main() {
 	}
 	srv := server.New(cfg, st)
 	log.Printf("xhub listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, srv.Handler()); err != nil {
+	// 数据面和管理面都挂在这一个 Gin 引擎上。只留数据面会让 /key/generate 变成 404。
+	if err := srv.Run(*addr); err != nil {
 		log.Fatal(err)
 	}
 }

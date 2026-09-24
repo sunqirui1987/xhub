@@ -216,19 +216,31 @@ func TestUnknownPriceNotZero(t *testing.T) {
 		t.Fatalf("spend should stay 0 when price unknown, got %v", sp)
 	}
 	after := spendRows(t, s, master)
-	if len(after) != len(before) {
-		for _, m := range after[len(before):] {
-			if num(m["spend"]) == 0 {
-				t.Fatalf("unknown-price chat wrote spend 0 row %+v", m)
-			}
-			t.Fatalf("unknown-price chat must not write spend_logs, got %+v", m)
-		}
-	}
+	found := false
 	for _, m := range after {
-		if m["model"] == "mystery" {
-			t.Fatalf("mystery must not appear in spend_logs %+v", m)
+		if m["model"] != "mystery" {
+			continue
+		}
+		found = true
+		if m["spend"] != float64(0) {
+			t.Fatalf("unknown price spend %v", m["spend"])
+		}
+		if m["status"] != "success" {
+			t.Fatalf("status %v", m["status"])
 		}
 	}
+	if !found {
+		t.Fatalf("unknown-price chat missing from spend logs %v", after)
+	}
+	ui := doJSON(t, s.Handler(), "GET", "/spend/logs/ui?page=1&page_size=25", master, nil)
+	if ui.Code != 200 || !strings.Contains(ui.Body.String(), "mystery") {
+		t.Fatalf("ui logs %d %s", ui.Code, ui.Body.String())
+	}
+	page := decodeBody(t, ui.Body.Bytes())
+	if page["total"] == float64(0) || page["page_size"] != float64(25) {
+		t.Fatalf("ui page %v", page)
+	}
+	_ = before
 }
 
 func TestViewOnlyWrite403(t *testing.T) {
@@ -519,7 +531,7 @@ func mustPick(t *testing.T, list []config.ModelEntry, strat string, busy map[str
 }
 
 func pickForTest(list []config.ModelEntry, strat string, busy map[string]int) string {
-	d := router.Pick(list, "m", strat, busy)
+	d := router.Pick(list, "m", strat, router.State{Busy: busy})
 	if d == nil {
 		return ""
 	}
@@ -536,23 +548,27 @@ func TestCatalogDataPlaneAuth(t *testing.T) {
 	if masterRec.Code != 401 {
 		t.Fatalf("master data-plane catalog want 401 got %d %s", masterRec.Code, masterRec.Body.String())
 	}
-	for _, p := range []string{"/v1/agents", "/v1/skills", "/v1/memory", "/v1/workflows/runs", "/v1/tool/list"} {
+	for _, p := range []string{"/v1/agents", "/v1/skills", "/v1/memory", "/v1/workflows/runs"} {
 		rec := doJSON(t, s.Handler(), "GET", p, master, nil)
-		if rec.Code != 200 {
-			t.Fatalf("master GET %s want 200 got %d %s", p, rec.Code, rec.Body.String())
+		if rec.Code != 404 {
+			t.Fatalf("master GET %s want 404 got %d %s", p, rec.Code, rec.Body.String())
 		}
-		noKey := doJSON(t, s.Handler(), "GET", p, "", nil)
-		if noKey.Code != 401 {
-			t.Fatalf("no-key GET %s want 401 got %d %s", p, noKey.Code, noKey.Body.String())
-		}
+	}
+	toolList := doJSON(t, s.Handler(), "GET", "/v1/tool/list", master, nil)
+	if toolList.Code != 404 {
+		t.Fatalf("master GET /v1/tool/list want 404 got %d %s", toolList.Code, toolList.Body.String())
+	}
+	toolSpend := doJSON(t, s.Handler(), "GET", "/v1/tool/spend", master, nil)
+	if toolSpend.Code == 404 {
+		t.Fatalf("tool spend should stay %d %s", toolSpend.Code, toolSpend.Body.String())
 	}
 	pub := doJSON(t, s.Handler(), "GET", "/public/model_hub", "", nil)
-	if pub.Code != 200 {
-		t.Fatalf("public model hub want 200 got %d %s", pub.Code, pub.Body.String())
+	if pub.Code != 404 {
+		t.Fatalf("public model hub want 404 got %d %s", pub.Code, pub.Body.String())
 	}
 	hub := doJSON(t, s.Handler(), "GET", "/model_hub", "", nil)
-	if hub.Code != 200 {
-		t.Fatalf("model_hub want 200 got %d %s", hub.Code, hub.Body.String())
+	if hub.Code != 404 {
+		t.Fatalf("model_hub want 404 got %d %s", hub.Code, hub.Body.String())
 	}
 	gen := doJSON(t, s.Handler(), "POST", "/key/generate", master, map[string]any{"key_type": "llm_api"})
 	var g map[string]any
@@ -818,25 +834,26 @@ func TestDashboardSessionShapes(t *testing.T) {
 	}
 
 	for _, p := range []string{
-		"/v1/mcp/server", "/v1/mcp/server/health", "/v1/mcp/toolset", "/v1/mcp/user-env-vars/status",
-		"/v1/access_group", "/tag/list", "/policy/templates", "/callbacks/configs", "/alerting/settings",
-		"/v1/agents", "/config/list", "/global/spend/logs", "/global/spend/keys",
+		"/v1/access_group", "/callbacks/configs", "/alerting/settings",
+		"/config/list", "/global/spend/logs", "/global/spend/keys",
 		"/global/spend/models", "/global/spend/provider", "/global/activity/model",
 	} {
 		mustArray(p)
 	}
+	for _, p := range []string{
+		"/v1/mcp/server", "/v1/mcp/server/health", "/tag/list", "/policy/templates", "/v1/agents",
+		"/policies/list", "/prompts/list", "/search_tools/list", "/vector_store/list",
+		"/v1/memory", "/v1/workflows/runs", "/v1/mcp/access_groups", "/v1/mcp/server/submissions",
+		"/search_tools/ui/available_providers", "/cache/settings", "/cache/ping", "/v1/tool/list", "/public/agents/fields",
+	} {
+		gone := doJSON(t, h, "GET", p, sess, nil)
+		if gone.Code != 404 {
+			t.Fatalf("%s want 404 got %d %s", p, gone.Code, gone.Body.String())
+		}
+	}
 	mustKeyArray("/v2/guardrails/list", "guardrails")
 	mustKeyArray("/guardrails/list", "guardrails")
-	mustKeyArray("/policies/list", "policies")
-	mustKeyArray("/prompts/list", "prompts")
-	mustKeyArray("/search_tools/list", "search_tools")
-	mustKeyArray("/vector_store/list", "data")
-	mustKeyArray("/v1/memory", "memories")
-	mustKeyArray("/v1/workflows/runs", "runs")
 	mustKeyArray("/claude-code/plugins", "plugins")
-	mustKeyArray("/v1/tool/list", "tools")
-	mustKeyArray("/v1/mcp/access_groups", "access_groups")
-	mustKeyArray("/v1/mcp/server/submissions", "items")
 	mustKeyArray("/user/daily/activity/aggregated", "results")
 	mustKeyArray("/user/daily/activity", "results")
 	mustKeyArray("/gateway/daily/activity", "by_route")
@@ -858,7 +875,6 @@ func TestDashboardSessionShapes(t *testing.T) {
 	if _, ok := crs["values"].(map[string]any); !ok {
 		t.Fatalf("coordination redis values %v", crs)
 	}
-	mustKeyArray("/search_tools/ui/available_providers", "providers")
 	mustKeyArray("/credentials", "credentials")
 	mustKeyArray("/global/spend/tags", "spend_per_tag")
 	mustKeyArray("/global/spend/all_tag_names", "tag_names")
@@ -893,28 +909,9 @@ func TestDashboardSessionShapes(t *testing.T) {
 		t.Fatalf("total_spend_per_team want array %v", teams["total_spend_per_team"])
 	}
 
-	cache := mustObj("/cache/settings")
-	if _, ok := cache["current_values"].(map[string]any); !ok {
-		t.Fatalf("cache/settings.current_values missing %v", cache)
-	}
-
-	mem := mustObj("/v1/memory")
-	if _, ok := mem["total"].(float64); !ok {
-		t.Fatalf("memory.total missing %v", mem)
-	}
 	pl := mustObj("/claude-code/plugins")
 	if _, ok := pl["count"].(float64); !ok {
 		t.Fatalf("plugins.count missing %v", pl)
-	}
-
-	fields := doJSON(t, h, "GET", "/public/agents/fields", "", nil)
-	if fields.Code != 200 {
-		t.Fatalf("public agents fields %d %s", fields.Code, fields.Body.String())
-	}
-	var fv any
-	_ = json.Unmarshal(fields.Body.Bytes(), &fv)
-	if _, ok := fv.([]any); !ok {
-		t.Fatalf("public/agents/fields want array got %s", fields.Body.String())
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(strings.Split(jwt, ".")[1])

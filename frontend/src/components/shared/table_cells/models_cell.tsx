@@ -63,7 +63,7 @@ export function ModelsCell({ models, maxVisible = 3, allowedRoutes, keyType }: M
           }
           trigger={
             <Badge variant="outline" className="cursor-default">
-              +{overflow.length} more
+              {t("+{value0} more", { value0: overflow.length })}
             </Badge>
           }
         />

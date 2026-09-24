@@ -9,12 +9,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	DB *sql.DB
+	DB    sqlDB
+	stmts int64
 }
 
 type Key struct {
@@ -35,7 +34,7 @@ type Key struct {
 	TPMLimit       sql.NullInt64
 	RPMLimit       sql.NullInt64
 	MaxParallel    sql.NullInt64
-	Blocked        bool
+	Blocked        sql.NullBool
 	ExpiresAt      sql.NullTime
 	BudgetDuration string
 	BudgetResetAt  sql.NullTime
@@ -45,23 +44,15 @@ type Key struct {
 }
 
 func Open(databaseURL string) (*Store, error) {
-	path := strings.TrimPrefix(databaseURL, "sqlite://")
-	path = strings.TrimPrefix(path, "file:")
-	if path == "" {
-		path = "./xhub.db"
+	u := strings.ToLower(strings.TrimSpace(databaseURL))
+	switch {
+	case u == "", strings.HasPrefix(u, "sqlite:"), strings.HasPrefix(u, "file:"):
+		return nil, fmt.Errorf("sqlite is not supported; set general_settings.database_url to a postgres:// URL")
+	case strings.HasPrefix(u, "postgres://"), strings.HasPrefix(u, "postgresql://"):
+		return openPostgres(databaseURL)
+	default:
+		return nil, fmt.Errorf("database_url must be postgres:// or postgresql://")
 	}
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
-	if err != nil {
-		return nil, err
-	}
-	s := &Store{DB: db}
-	if err := s.migrate(); err != nil {
-		return nil, err
-	}
-	if err := s.migrateIdentity(); err != nil {
-		return nil, err
-	}
-	return s, nil
 }
 
 func (s *Store) migrate() error {
@@ -78,13 +69,13 @@ CREATE TABLE IF NOT EXISTS verification_tokens (
   budget_id TEXT,
   key_type TEXT NOT NULL DEFAULT 'default',
   models_json TEXT NOT NULL DEFAULT '[]',
-  max_budget REAL,
-  soft_budget REAL,
-  spend REAL NOT NULL DEFAULT 0,
+  max_budget DOUBLE PRECISION,
+  soft_budget DOUBLE PRECISION,
+  spend DOUBLE PRECISION NOT NULL DEFAULT 0,
   tpm_limit INTEGER,
   rpm_limit INTEGER,
   max_parallel_requests INTEGER,
-  blocked INTEGER NOT NULL DEFAULT 0,
+  blocked INTEGER,
   expires_at TEXT,
   budget_duration TEXT,
   budget_reset_at TEXT,
@@ -99,10 +90,11 @@ CREATE TABLE IF NOT EXISTS spend_logs (
   api_key TEXT,
   prompt_tokens INTEGER,
   completion_tokens INTEGER,
-  spend REAL,
+  spend DOUBLE PRECISION,
   start_time TEXT,
   end_time TEXT,
-  cache_hit INTEGER NOT NULL DEFAULT 0
+  cache_hit INTEGER NOT NULL DEFAULT 0,
+  status TEXT
 );
 `)
 	if err != nil {
@@ -111,15 +103,72 @@ CREATE TABLE IF NOT EXISTS spend_logs (
 	for _, q := range []string{
 		`ALTER TABLE verification_tokens ADD COLUMN agent_id TEXT`,
 		`ALTER TABLE verification_tokens ADD COLUMN budget_id TEXT`,
-		`ALTER TABLE verification_tokens ADD COLUMN soft_budget REAL`,
+		`ALTER TABLE verification_tokens ADD COLUMN soft_budget DOUBLE PRECISION`,
 		`ALTER TABLE verification_tokens ADD COLUMN budget_duration TEXT`,
 		`ALTER TABLE verification_tokens ADD COLUMN budget_reset_at TEXT`,
 		`ALTER TABLE verification_tokens ADD COLUMN metadata_json TEXT`,
 		`ALTER TABLE verification_tokens ADD COLUMN tags_json TEXT`,
+		`ALTER TABLE spend_logs ADD COLUMN status TEXT`,
 	} {
 		_, _ = s.DB.Exec(q)
 	}
 	return nil
+}
+
+// relaxBlockedNull lets an omitted blocked field stay NULL, matching LiteLLM.
+// SQLite cannot drop NOT NULL in place, so the table is rebuilt when needed.
+func (s *Store) relaxBlockedNull() error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TABLE verification_tokens_relaxed (
+  token TEXT PRIMARY KEY,
+  key_alias TEXT,
+  key_name TEXT,
+  user_id TEXT,
+  team_id TEXT,
+  organization_id TEXT,
+  project_id TEXT,
+  agent_id TEXT,
+  budget_id TEXT,
+  key_type TEXT NOT NULL DEFAULT 'default',
+  models_json TEXT NOT NULL DEFAULT '[]',
+  max_budget DOUBLE PRECISION,
+  soft_budget DOUBLE PRECISION,
+  spend DOUBLE PRECISION NOT NULL DEFAULT 0,
+  tpm_limit INTEGER,
+  rpm_limit INTEGER,
+  max_parallel_requests INTEGER,
+  blocked INTEGER,
+  expires_at TEXT,
+  budget_duration TEXT,
+  budget_reset_at TEXT,
+  metadata_json TEXT,
+  tags_json TEXT,
+  created_at TEXT NOT NULL
+)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO verification_tokens_relaxed (
+		token, key_alias, key_name, user_id, team_id, organization_id, project_id, agent_id, budget_id,
+		key_type, models_json, max_budget, soft_budget, spend, tpm_limit, rpm_limit, max_parallel_requests,
+		blocked, expires_at, budget_duration, budget_reset_at, metadata_json, tags_json, created_at
+	) SELECT
+		token, key_alias, key_name, user_id, team_id, organization_id, project_id, agent_id, budget_id,
+		key_type, models_json, max_budget, soft_budget, spend, tpm_limit, rpm_limit, max_parallel_requests,
+		blocked, expires_at, budget_duration, budget_reset_at, metadata_json, tags_json, created_at
+	FROM verification_tokens`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE verification_tokens`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`ALTER TABLE verification_tokens_relaxed RENAME TO verification_tokens`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func HashKey(plain string) string {
@@ -153,7 +202,7 @@ func (s *Store) InsertKey(k Key) error {
 	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		k.TokenHash, k.KeyAlias, k.KeyName, k.UserID, k.TeamID, k.OrganizationID, k.ProjectID, k.AgentID, k.BudgetID,
 		k.KeyType, k.ModelsJSON, nullFloat(k.MaxBudget), nullFloat(k.SoftBudget), k.Spend, nullInt(k.TPMLimit), nullInt(k.RPMLimit),
-		nullInt(k.MaxParallel), boolInt(k.Blocked), exp, k.BudgetDuration, reset, k.MetadataJSON, k.TagsJSON, k.CreatedAt.UTC().Format(time.RFC3339),
+		nullInt(k.MaxParallel), nullBoolInt(k.Blocked), exp, k.BudgetDuration, reset, k.MetadataJSON, k.TagsJSON, k.CreatedAt.UTC().Format(time.RFC3339),
 	)
 	return err
 }
@@ -174,7 +223,7 @@ func (s *Store) UpdateKey(k Key) error {
 		WHERE token=?`,
 		k.KeyAlias, k.UserID, k.TeamID, k.OrganizationID, k.ProjectID, k.AgentID, k.BudgetID,
 		k.KeyType, k.ModelsJSON, nullFloat(k.MaxBudget), nullFloat(k.SoftBudget), nullInt(k.TPMLimit), nullInt(k.RPMLimit),
-		nullInt(k.MaxParallel), boolInt(k.Blocked), exp, k.BudgetDuration, reset, k.MetadataJSON, k.TagsJSON, k.TokenHash,
+		nullInt(k.MaxParallel), nullBoolInt(k.Blocked), exp, k.BudgetDuration, reset, k.MetadataJSON, k.TagsJSON, k.TokenHash,
 	)
 	if err != nil {
 		return err
@@ -217,17 +266,31 @@ func (s *Store) SetBlocked(hash string, blocked bool) error {
 	return err
 }
 
+func nullBoolInt(v sql.NullBool) any {
+	if !v.Valid {
+		return nil
+	}
+	return boolInt(v.Bool)
+}
+
 func (s *Store) AddSpend(hash string, delta float64) error {
 	_, err := s.DB.Exec(`UPDATE verification_tokens SET spend = spend + ? WHERE token = ?`, delta, hash)
 	return err
 }
 
-func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend float64, start, end time.Time, cacheHit bool) error {
+func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status string) error {
+	if status == "" {
+		status = "success"
+	}
+	var spendVal any
+	if spend.Valid {
+		spendVal = spend.Float64
+	}
 	_, err := s.DB.Exec(`INSERT INTO spend_logs (
-		request_id, call_type, model, api_key, prompt_tokens, completion_tokens, spend, start_time, end_time, cache_hit
-	) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		requestID, callType, model, apiKeyHash, prompt, completion, spend,
-		start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), boolInt(cacheHit),
+		request_id, call_type, model, api_key, prompt_tokens, completion_tokens, spend, start_time, end_time, cache_hit, status
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		requestID, callType, model, apiKeyHash, prompt, completion, spendVal,
+		start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), boolInt(cacheHit), status,
 	)
 	return err
 }
@@ -244,14 +307,16 @@ func (s *Store) scanOne(q string, arg any) (*Key, error) {
 func scanKey(row rowScanner) (*Key, error) {
 	var k Key
 	var exp, created, reset, agent, budgetID, meta, tags, dur sql.NullString
-	var blocked int
+	var blocked sql.NullInt64
 	err := row.Scan(&k.TokenHash, &k.KeyAlias, &k.KeyName, &k.UserID, &k.TeamID, &k.OrganizationID, &k.ProjectID,
 		&agent, &budgetID, &k.KeyType, &k.ModelsJSON, &k.MaxBudget, &k.SoftBudget, &k.Spend, &k.TPMLimit, &k.RPMLimit, &k.MaxParallel,
 		&blocked, &exp, &dur, &reset, &meta, &tags, &created)
 	if err != nil {
 		return nil, err
 	}
-	k.Blocked = blocked != 0
+	if blocked.Valid {
+		k.Blocked = sql.NullBool{Bool: blocked.Int64 != 0, Valid: true}
+	}
 	k.AgentID = agent.String
 	k.BudgetID = budgetID.String
 	k.BudgetDuration = dur.String

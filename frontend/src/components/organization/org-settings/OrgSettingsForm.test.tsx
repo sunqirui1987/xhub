@@ -145,47 +145,12 @@ describe("OrgSettingsForm", () => {
     expect(patchOrganization).toHaveBeenCalledWith("org-1", { models: [] });
   });
 
-  it("wraps a vector store change in object_permission without mcp keys", async () => {
-    const user = userEvent.setup();
-    const { patchOrganization } = renderForm();
-
-    await user.click(screen.getByRole("button", { name: "set-vector-stores" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
-
-    await waitFor(() => expect(patchOrganization).toHaveBeenCalledTimes(1));
-    expect(patchOrganization).toHaveBeenCalledWith("org-1", {
-      object_permission: { vector_stores: ["vs-2"] },
-    });
-  });
-
-  it("wraps an mcp change in object_permission with all three mcp keys", async () => {
-    const user = userEvent.setup();
-    const { patchOrganization } = renderForm();
-
-    await user.click(screen.getByRole("button", { name: "set-mcp" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
-
-    await waitFor(() => expect(patchOrganization).toHaveBeenCalledTimes(1));
-    expect(patchOrganization).toHaveBeenCalledWith("org-1", {
-      object_permission: { mcp_servers: ["srv-2"], mcp_access_groups: [], mcp_toolsets: [] },
-    });
-  });
-
-  it("preserves existing toolsets when only the servers change", async () => {
-    const user = userEvent.setup();
-    const orgWithToolsets: Organization = {
-      ...org,
-      object_permission: { ...org.object_permission!, mcp_toolsets: ["ts-1"] },
-    };
-    const { patchOrganization } = renderForm({ org: orgWithToolsets });
-
-    await user.click(screen.getByRole("button", { name: "set-mcp" }));
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
-
-    await waitFor(() => expect(patchOrganization).toHaveBeenCalledTimes(1));
-    expect(patchOrganization).toHaveBeenCalledWith("org-1", {
-      object_permission: { mcp_servers: ["srv-2"], mcp_access_groups: [], mcp_toolsets: ["ts-1"] },
-    });
+  it("does not offer MCP or vector-store selectors", () => {
+    renderForm();
+    expect(screen.queryByRole("button", { name: "set-vector-stores" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "set-mcp" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Vector Stores")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("MCP Servers & Access Groups")).not.toBeInTheDocument();
   });
 
   it("does not send a patch when an edit is reverted to the original value", async () => {

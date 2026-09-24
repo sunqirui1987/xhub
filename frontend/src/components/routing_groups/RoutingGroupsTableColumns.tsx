@@ -92,7 +92,7 @@ export const getRoutingGroupsTableColumns = ({
     cell: ({ row }) => (
       <span className="flex items-center gap-1.5 text-sm">
         <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-        {formatStrategyLabel(row.original.routing_strategy)}
+        {t(formatStrategyLabel(row.original.routing_strategy))}
       </span>
     ),
   },

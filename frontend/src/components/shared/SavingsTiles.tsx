@@ -41,7 +41,7 @@ const SavingsTiles = ({ results, isLoading }: { results: DailyData[]; isLoading:
         label={t("Total saved")}
         value={usd(totals.total)}
         hint={isLoading ? t("Loading...") : t("Compression + prompt caching + auto-router")}
-        info="The sum of the three tiles beside it. Its caching term is the LiteLLM-injected share, so this total is what the gateway itself delivered; caching that clients or providers brought on their own appears only in the caching tile's Total figure."
+        info="The sum of the three tiles beside it. Its caching term is the XHub-injected share, so this total is what the gateway itself delivered; caching that clients or providers brought on their own appears only in the caching tile's Total figure."
       />
       <SummaryCard
         label={t("Compression savings")}
@@ -54,7 +54,7 @@ const SavingsTiles = ({ results, isLoading }: { results: DailyData[]; isLoading:
         value={usd(totals.gatewayAttributedCaching)}
         hint={t("LiteLLM injected")}
         secondary={{ label: t("Total"), value: usd(totals.caching) }}
-        info="What caching saved against paying the input rate for every token: the discount on tokens served from cache, less the premium providers charge to write a cache entry. The headline figure is the share LiteLLM earned by inserting the breakpoints itself, through configured injection points or auto prompt caching. The total beside it also counts requests that arrived with their own cache_control and providers that cache implicitly. Either can be negative on traffic that writes more cache than it reuses, which is why the headline is not always the smaller of the two."
+        info="What caching saved against paying the input rate for every token: the discount on tokens served from cache, less the premium providers charge to write a cache entry. The headline figure is the share XHub earned by inserting the breakpoints itself, through configured injection points or auto prompt caching. The total beside it also counts requests that arrived with their own cache_control and providers that cache implicitly. Either can be negative on traffic that writes more cache than it reuses, which is why the headline is not always the smaller of the two."
       />
       <SummaryCard
         label={t("Auto-router savings")}

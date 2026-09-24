@@ -6,12 +6,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
 
@@ -74,7 +76,11 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 		}
 	}
 
-	pool := router.Order(s.Cfg.ModelList, alias, s.Cfg.RouterSettings.RoutingStrategy, s.Busy)
+	if err := router.ValidateStrategy(s.Cfg.RouterSettings.RoutingStrategy); err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
+		return
+	}
+	pool := router.Order(s.Cfg.ModelList, alias, s.Cfg.RouterSettings.RoutingStrategy, s.routerState())
 	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
@@ -88,8 +94,9 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 	var lastStatus int
 	var lastProvider string
 	triedHTTP := false
+	missingCredential := false
 
-	for di, dep := range pool {
+	for di, rawDep := range pool {
 		if di > 0 {
 			p2, err := s.resolve(r)
 			if err != nil || p2 == nil || !p2.CanLLM(s.Cfg) {
@@ -101,39 +108,46 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 				return
 			}
 		}
+		dep := s.withCredential(rawDep)
 		upstreamModel := dep.ParamString("model", alias)
 		provider, realModel := config.SplitProviderModel(upstreamModel)
-		if p := dep.ParamString("custom_llm_provider", ""); p != "" {
-			provider = p
+		if custom := dep.ParamString("custom_llm_provider", ""); custom != "" {
+			provider = custom
 		}
+		provider = strings.ToLower(strings.TrimSpace(provider))
 		lastProvider = provider
-		if !router.KnownAdapter(provider) {
+		if _, ok := llm.ProtocolGroup(provider); !ok || provider == "" {
 			continue
 		}
-		apiBase := stringsTrim(dep.ParamString("api_base", "https://api.openai.com/v1"))
+		apiBase := stringsTrim(dep.ParamString("api_base", ""))
 		apiKey := dep.ParamString("api_key", "")
-		if apiKey == "" {
+		if apiKey == "" || apiBase == "" {
+			missingCredential = true
 			continue
 		}
 		did := dep.ParamString("api_base", "") + "|" + upstreamModel
-		payload, err := router.EncodeRequest(op, provider, body, realModel)
+		built, err := llm.Build(r.Context(), llm.Request{
+			Op: op, Provider: provider, APIBase: apiBase, APIKey: apiKey, Model: realModel, Body: body,
+			VertexProject:  dep.ParamString("vertex_project", ""),
+			VertexLocation: dep.ParamString("vertex_location", ""),
+		})
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		upURL := router.AdapterURLOp(op, provider, apiBase, realModel)
 
 		for try := 0; try < attempts; try++ {
 			triedHTTP = true
 			s.incBusy(did)
-			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upURL, bytes.NewReader(payload))
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, built.URL, bytes.NewReader(built.Body))
 			if err != nil {
 				s.decBusy(did)
 				lastErr = err
 				continue
 			}
-			req.Header.Set("Authorization", "Bearer "+apiKey)
-			req.Header.Set("Content-Type", "application/json")
+			for key, values := range built.Header {
+				req.Header[key] = values
+			}
 			resp, err := s.Client.Do(req)
 			if err != nil {
 				s.decBusy(did)
@@ -144,16 +158,22 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 				_, _ = io.ReadAll(resp.Body)
 				resp.Body.Close()
 				s.decBusy(did)
+				s.noteFailure(router.DeploymentID(rawDep))
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
 				continue
 			}
 
+			s.noteLatency(router.DeploymentID(rawDep), float64(time.Since(start).Milliseconds()))
 			s.setChatHeaders(w, p, alias, apiBase)
 			if stream {
-				wrote := pipeStream(w, resp)
+				wrote, usage := pipeStream(w, resp)
 				s.decBusy(did)
 				if wrote {
+					if usage == nil {
+						usage = map[string]any{"prompt_tokens": estimateTokens(body), "completion_tokens": 0}
+					}
+					s.recordSpend(w, p, callID, alias, usage, start, false, router.DeploymentID(rawDep))
 					return
 				}
 				lastErr = errEmptyUpstream
@@ -162,17 +182,17 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			s.decBusy(did)
-			s.writeChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start)
+			s.writeChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, router.DeploymentID(rawDep))
 			return
 		}
 	}
 
 	if !triedHTTP {
-		msg := "provider_not_implemented"
-		if lastProvider != "" {
-			msg = "provider_not_implemented: " + lastProvider
+		if lastProvider != "" || missingCredential {
+			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "Authentication Error, No api key passed in.")
+			return
 		}
-		httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", msg)
+		httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
 		return
 	}
 	if lastStatus > 0 {
@@ -184,6 +204,19 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 		return
 	}
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
+}
+
+func (s *Server) withCredential(dep config.ModelEntry) config.ModelEntry {
+	name := dep.ParamString("litellm_credential_name", "")
+	var values map[string]any
+	if name != "" {
+		if rec, err := s.Store.GetKV("credentials", name); err == nil {
+			values, _ = rec["credential_values"].(map[string]any)
+		}
+	}
+	out := dep
+	out.LiteLLMParams = llm.Hydrate(dep.LiteLLMParams, values)
+	return out
 }
 
 func stringsTrim(s string) string {
@@ -232,7 +265,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 		httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in allowed model list")
 		return false
 	}
-	if p.Key != nil && p.Key.MaxBudget.Valid && p.Key.Spend >= p.Key.MaxBudget.Float64 {
+	if p.Key != nil && p.Key.MaxBudget.Valid && p.Key.Spend+s.hotSpend(p.Hash) >= p.Key.MaxBudget.Float64 {
 		httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Budget has been exceeded")
 		return false
 	}
@@ -246,7 +279,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in team allowed model list")
 				return false
 			}
-			if team.MaxBudget.Valid && team.Spend >= team.MaxBudget.Float64 {
+			if team.MaxBudget.Valid && team.Spend+s.hotSpend(team.ID) >= team.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Team budget has been exceeded")
 				return false
 			}
@@ -258,7 +291,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in user allowed model list")
 				return false
 			}
-			if user.MaxBudget.Valid && user.Spend >= user.MaxBudget.Float64 {
+			if user.MaxBudget.Valid && user.Spend+s.hotSpend(user.ID) >= user.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "User budget has been exceeded")
 				return false
 			}
@@ -270,7 +303,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in organization allowed model list")
 				return false
 			}
-			if org.MaxBudget.Valid && org.Spend >= org.MaxBudget.Float64 {
+			if org.MaxBudget.Valid && org.Spend+s.hotSpend(org.ID) >= org.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Organization budget has been exceeded")
 				return false
 			}
@@ -282,9 +315,19 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	return true
 }
 
+func (s *Server) hotSpend(id string) float64 {
+	if s.Live == nil {
+		return 0
+	}
+	return s.Live.HotSpend(id)
+}
+
 func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
 	if p.Key == nil {
 		return true
+	}
+	if s.Live != nil {
+		return s.enforceRedisRateLimits(w, path, p, est)
 	}
 	now := time.Now()
 	win := now.Add(-time.Minute)
@@ -320,6 +363,24 @@ func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.P
 			return false
 		}
 		s.tpmHits[hash] = append(keep, tokHit{t: now, n: est})
+	}
+	return true
+}
+
+func (s *Server) enforceRedisRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
+	if p.Key.RPMLimit.Valid {
+		n, err := s.Live.HitRPM(p.Hash)
+		if err == nil && (n > p.Key.RPMLimit.Int64 || p.Key.RPMLimit.Int64 == 0) {
+			httpx.WriteTypedError(w, path, 429, "rate_limit", "rpm_limit exceeded")
+			return false
+		}
+	}
+	if p.Key.TPMLimit.Valid {
+		n, err := s.Live.HitTPM(p.Hash, est)
+		if err == nil && (n > p.Key.TPMLimit.Int64 || p.Key.TPMLimit.Int64 == 0) {
+			httpx.WriteTypedError(w, path, 429, "rate_limit", "tpm_limit exceeded")
+			return false
+		}
 	}
 	return true
 }

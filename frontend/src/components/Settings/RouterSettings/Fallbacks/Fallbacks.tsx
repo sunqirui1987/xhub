@@ -271,7 +271,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
           </TableHeader>
 
           <TableBody>
-            {routerSettings[t("fallbacks")].map((item: FallbackEntry, index: number) =>
+            {routerSettings.fallbacks.map((item: FallbackEntry, index: number) =>
               Object.entries(item).map(([key, value]) => (
                 <TableRow key={index.toString() + key}>
                   <TableCell className="align-top whitespace-normal">
@@ -353,7 +353,7 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
         isOpen={isDeleteModalOpen}
         title={t("Delete Fallback?")}
         message={t("Are you sure you want to delete this fallback? This action cannot be undone.")}
-        resourceInformationTitle="Fallback Information"
+        resourceInformationTitle={t("Fallback Information")}
         resourceInformation={[
           {
             label: t("Model Name"),

@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { RoutingGroup } from "./types";
 
 export const STRATEGIES_WITH_ARGS = new Set<string>(["latency-based-routing", "usage-based-routing"]);
@@ -43,6 +44,6 @@ export const buildRoutingGroupPayload = (values: RoutingGroupFormValues): Routin
   try {
     return { ok: true, group: { ...base, routing_strategy_args: JSON.parse(args) as Record<string, unknown> } };
   } catch {
-    return { ok: false, argsError: "Must be valid JSON" };
+    return { ok: false, argsError: t("Must be valid JSON") };
   }
 };

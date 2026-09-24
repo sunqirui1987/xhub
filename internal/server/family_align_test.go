@@ -35,29 +35,18 @@ func TestAllFamilyFrozenKeys(t *testing.T) {
 		{"threads", "POST", "/v1/threads", sk, map[string]any{"messages": []any{}}, []string{"id", "object", "created_at"}},
 		{"fine_tuning", "POST", "/v1/fine_tuning/jobs", sk, map[string]any{"model": "gpt-4o-mini", "training_file": "file_1"}, []string{"id", "object", "model", "status", "created_at", "fine_tuned_model"}},
 		{"containers", "POST", "/v1/containers", sk, map[string]any{"name": "c1"}, []string{"id", "object", "name", "status", "created_at"}},
-		{"vector_stores", "POST", "/v1/vector_stores", sk, map[string]any{"name": "docs"}, []string{"id", "object", "name", "status", "file_counts", "created_at"}},
 		{"videos", "POST", "/v1/videos", sk, map[string]any{"model": "sora", "prompt": "clip"}, []string{"id", "object", "status", "model", "created_at"}},
-		{"search", "POST", "/v1/search", sk, map[string]any{"query": "q", "max_results": 3}, []string{"results", "usage"}},
 		{"ocr", "POST", "/v1/ocr", sk, map[string]any{"url": "https://x"}, []string{"results", "usage"}},
 		{"rag", "POST", "/v1/rag/query", sk, map[string]any{"query": "q"}, []string{"results", "usage"}},
 		{"indexes", "POST", "/v1/indexes", sk, map[string]any{"name": "idx"}, []string{"id", "object", "name", "status", "created_at"}},
 		{"evals", "POST", "/v1/evals", sk, map[string]any{"name": "qa-eval"}, []string{"id", "object", "name", "status", "created_at"}},
 		{"interactions", "POST", "/v1beta/interactions", sk, map[string]any{"model": "gemini-2.5-flash", "input": "hi"}, []string{"id", "status", "output"}},
-		{"a2a", "POST", "/a2a/agent1/message/send", sk, map[string]any{"message": map[string]any{"role": "user"}}, []string{"id", "status", "artifacts"}},
 		{"realtime", "POST", "/v1/realtime/client_secrets", sk, map[string]any{"model": "gpt-4o-realtime", "modalities": []any{"text"}, "voice": "alloy"}, []string{"id", "object", "model", "client_secret"}},
 		{"gemini", "POST", "/v1beta/models/gemini-pro:generateContent", sk, map[string]any{"contents": []any{}}, []string{"candidates", "usageMetadata"}},
-		{"agents", "POST", "/v1/agents", sk, map[string]any{"agent_name": "researcher", "litellm_params": map[string]any{"model": "gpt-4o-mini"}}, []string{"agent_id", "agent_name", "litellm_params", "created_at"}},
-		{"workflows", "POST", "/v1/workflows/runs", sk, map[string]any{"content": "go"}, []string{"run_id", "status", "events", "messages"}},
-		{"skills", "POST", "/v1/skills", sk, map[string]any{"name": "sum", "source": "inline"}, []string{"id", "name"}},
-		{"memory", "POST", "/v1/memory", sk, map[string]any{"key": "pref", "value": "dark"}, []string{"id", "key", "value"}},
-		{"prompts", "POST", "/prompts", master, map[string]any{"prompt_id": "greet", "prompt_info": map[string]any{"prompt": "hi"}}, []string{"prompt_id", "version", "created_at"}},
 		{"guardrails", "POST", "/guardrails", master, map[string]any{"guardrail_name": "pii", "litellm_params": map[string]any{"guardrail": "presidio"}}, []string{"guardrail_id", "guardrail_name", "litellm_params", "created_at"}},
-		{"policies", "POST", "/policies", master, map[string]any{"policy_name": "p1", "statements": []any{}}, []string{"policy_id", "policy_name", "version", "status", "created_at"}},
-		{"tags", "POST", "/tag/new", master, map[string]any{"name": "prod", "description": "d"}, []string{"name", "spend", "created_at"}},
 		{"credentials", "POST", "/credentials", master, map[string]any{"credential_name": "openai", "credential_values": map[string]any{"api_key": "sk-secret"}}, []string{"credential_name", "credential_info"}},
 		{"customer", "POST", "/customer/new", master, map[string]any{"user_id": "end_123", "max_budget": 5.0}, []string{"user_id", "spend", "max_budget", "blocked"}},
 		{"invitation", "POST", "/invitation/new", master, map[string]any{"user_email": "n@x.com"}, []string{"id", "user_id", "is_accepted", "expires"}},
-		{"search_tools", "POST", "/search_tools", master, map[string]any{"search_tool_name": "web"}, []string{"search_tool_id", "search_tool_name"}},
 	}
 
 	for _, c := range cases {
@@ -110,7 +99,9 @@ func TestAllFamilyFrozenKeys(t *testing.T) {
 	mustKeys(t, decodeBody(t, hd.Body.Bytes()), "status", "healthy_count", "unhealthy_count", "details")
 
 	cs := doJSON(t, h, "GET", "/cache/settings", master, nil)
-	mustKeys(t, decodeBody(t, cs.Body.Bytes()), "status", "redis_info")
+	if cs.Code != http.StatusNotFound {
+		t.Fatalf("cache settings want 404 got %d %s", cs.Code, cs.Body.String())
+	}
 
 	mi := doJSON(t, h, "GET", "/model/info", master, nil)
 	var mj map[string]any
