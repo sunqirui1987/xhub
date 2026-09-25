@@ -505,10 +505,10 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.queryByText(label), label).not.toBeInTheDocument();
     }
     const pages = menuGroups.flatMap((group) => group.items.flatMap((item) => [item.page, ...(item.children ?? []).map((child) => child.page)]));
-    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage", "budgets", "admin-panel", "ui-theme"]) {
+    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage", "budgets", "ui-theme"]) {
       expect(pages, id).not.toContain(id);
     }
-    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "settings"]) {
+    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "settings", "admin-panel"]) {
       expect(pages, id).toContain(id);
     }
   });

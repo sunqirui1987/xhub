@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { getProxyBaseUrl } from "@/components/networking";
 import { t } from "@/i18n";
 
 interface ThemeContextType {
@@ -26,40 +25,10 @@ interface ThemeProviderProps {
   accessToken?: string | null;
 }
 
-export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children, accessToken }) => {
+export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoUrlDark, setLogoUrlDark] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const loadThemeSettings = async () => {
-      try {
-        const proxyBaseUrl = getProxyBaseUrl();
-        const url = proxyBaseUrl ? `${proxyBaseUrl}/get/ui_theme_settings` : "/get/ui_theme_settings";
-        const response = await fetch(url, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.values?.logo_url) {
-            setLogoUrl(data.values.logo_url);
-          }
-          if (data.values?.logo_url_dark) {
-            setLogoUrlDark(data.values.logo_url_dark);
-          }
-          if (data.values?.favicon_url) {
-            setFaviconUrl(data.values.favicon_url);
-          }
-        }
-      } catch (error) {
-        console.warn("Failed to load theme settings from backend:", error);
-      }
-    };
-
-    loadThemeSettings();
-  }, []);
 
   useEffect(() => {
     if (faviconUrl) {

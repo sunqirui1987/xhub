@@ -32,13 +32,22 @@ func TestRemovedColumns404AndChatKeepsTools(t *testing.T) {
 		"/toolset",
 		"/v1/tool/list",
 		"/model_hub",
+		"/get/ui_theme_settings",
+		"/config_overrides/cyberark",
+		"/config_overrides/hashicorp_vault",
 	} {
 		rec := doJSON(t, h, "GET", path, master, nil)
 		if rec.Code != 404 {
 			t.Fatalf("%s want 404 got %d %s", path, rec.Code, rec.Body.String())
 		}
 	}
-	for _, path := range []string{"/cache/settings/test", "/tools/call", "/test/tools/list"} {
+	for _, path := range []string{"/update/ui_theme_settings", "/update/ui_settings"} {
+		rec := doJSON(t, h, "PATCH", path, master, map[string]any{})
+		if rec.Code != 404 {
+			t.Fatalf("PATCH %s want 404 got %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	for _, path := range []string{"/cache/settings/test", "/tools/call", "/test/tools/list", "/config_overrides/cyberark/test_connection"} {
 		rec := doJSON(t, h, "POST", path, master, map[string]any{})
 		if rec.Code != 404 {
 			t.Fatalf("POST %s want 404 got %d %s", path, rec.Code, rec.Body.String())
@@ -47,6 +56,14 @@ func TestRemovedColumns404AndChatKeepsTools(t *testing.T) {
 	ready := doJSON(t, h, "GET", "/health/readiness", "", nil)
 	if ready.Code != 200 || !strings.Contains(ready.Body.String(), `"status":"ready"`) {
 		t.Fatalf("readiness %d %s", ready.Code, ready.Body.String())
+	}
+	ui := doJSON(t, h, "GET", "/get/ui_settings", master, nil)
+	if ui.Code != 200 || !strings.Contains(ui.Body.String(), `"enable_chat_ui"`) {
+		t.Fatalf("ui settings %d %s", ui.Code, ui.Body.String())
+	}
+	ssoUI := doJSON(t, h, "GET", "/sso/get/ui_settings", master, nil)
+	if ssoUI.Code != 200 {
+		t.Fatalf("sso ui settings %d %s", ssoUI.Code, ssoUI.Body.String())
 	}
 	kept := doJSON(t, h, "GET", "/v1/tool/spend", master, nil)
 	if kept.Code == 404 {

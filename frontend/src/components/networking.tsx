@@ -7277,26 +7277,6 @@ export const getUiSettings = async () => {
   return data;
 };
 
-export const updateUiSettings = async (accessToken: string, settings: Record<string, any>) => {
-  const proxyBaseUrl = getProxyBaseUrl();
-  const url = proxyBaseUrl ? `${proxyBaseUrl}/update/ui_settings` : `/update/ui_settings`;
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(settings),
-  });
-  if (!response.ok) {
-    const errorData = await response.json();
-    const errorMessage = deriveErrorMessage(errorData);
-    throw new Error(errorMessage);
-  }
-  const data = await response.json();
-  return data;
-};
-
 export type UserBannerSeverity = "info" | "warning" | "error";
 
 export interface UserBanner {

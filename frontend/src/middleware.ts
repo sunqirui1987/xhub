@@ -24,6 +24,7 @@ const APP_PAGES = new Set([
   "/router-settings",
   "/logging-and-alerts",
   "/cost-tracking",
+  "/admin-panel",
   "/chat",
   "/chat/api-keys",
   "/chat/credentials",

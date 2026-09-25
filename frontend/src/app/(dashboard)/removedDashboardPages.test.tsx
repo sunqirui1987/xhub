@@ -25,7 +25,6 @@ import TransformRequestPage from "./transform-request/page";
 import TagManagementPage from "./tag-management/page";
 import OldUsagePage from "./old-usage/page";
 import BudgetsPage from "./budgets/page";
-import AdminPanelPage from "./admin-panel/page";
 import UIThemePage from "./ui-theme/page";
 import PublicModelHubPage from "../model_hub/page";
 import { dashboardAppPath } from "@/middleware";
@@ -49,7 +48,6 @@ const removedPages = [
   ["tag-management", TagManagementPage],
   ["old-usage", OldUsagePage],
   ["budgets", BudgetsPage],
-  ["admin-panel", AdminPanelPage],
   ["ui-theme", UIThemePage],
 ] as const;
 
@@ -77,7 +75,6 @@ describe("removed dashboard pages", () => {
       "/tag-management",
       "/old-usage",
       "/budgets",
-      "/admin-panel",
       "/ui-theme",
       "/model_hub",
     ]) {
@@ -86,10 +83,12 @@ describe("removed dashboard pages", () => {
     }
   });
 
-  it("still renders /logs and /models-and-endpoints", () => {
+  it("still renders /logs, /models-and-endpoints, and /admin-panel", () => {
     expect(dashboardAppPath("/logs")).toBe("/logs");
     expect(dashboardAppPath("/ui/logs")).toBe("/logs");
     expect(dashboardAppPath("/models-and-endpoints")).toBe("/models-and-endpoints");
     expect(dashboardAppPath("/ui/models-and-endpoints")).toBe("/models-and-endpoints");
+    expect(dashboardAppPath("/admin-panel")).toBe("/admin-panel");
+    expect(dashboardAppPath("/ui/admin-panel")).toBe("/admin-panel");
   });
 });

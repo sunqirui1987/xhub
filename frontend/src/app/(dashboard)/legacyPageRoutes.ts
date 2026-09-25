@@ -16,6 +16,7 @@ const LEGACY_PAGE_ROUTES: ReadonlyMap<string, string> = new Map(
     new_usage: "usage",
     "cost-optimization": "cost-optimization",
     "router-settings": "router-settings",
+    "admin-panel": "admin-panel",
     users: "users",
     teams: "teams",
     organizations: "organizations",

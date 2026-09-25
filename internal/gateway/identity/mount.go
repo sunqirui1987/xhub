@@ -71,6 +71,5 @@ func Module(h Gate) module.Module {
 		reg.Handle("GET /get/user_banner", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
 		reg.Handle("GET /get_image", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
 		reg.Handle("GET /get_logo_url", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
-		reg.Handle("GET /get/ui_theme_settings", func(w http.ResponseWriter, r *http.Request) { UiSettings(h, w, r) })
 	})
 }

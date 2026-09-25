@@ -387,11 +387,6 @@
       "count": 3
     }
   },
-  "src/app/(dashboard)/hooks/configOverrides/hashicorpVaultApi.ts": {
-    "no-restricted-syntax": {
-      "count": 4
-    }
-  },
   "src/app/(dashboard)/hooks/guardrails/useRegisterGuardrail.ts": {
     "no-restricted-syntax": {
       "count": 1
@@ -1118,14 +1113,6 @@
       "count": 1
     }
   },
-  "src/app/(dashboard)/ui-theme/UIThemeSettings.tsx": {
-    "no-restricted-syntax": {
-      "count": 3
-    },
-    "react-hooks/immutability": {
-      "count": 1
-    }
-  },
   "src/app/(dashboard)/usage/_components/components/EndpointUsage/components/EndpointUsageTable.tsx": {
     "no-nested-ternary": {
       "count": 1
@@ -1319,11 +1306,6 @@
       "count": 1
     }
   },
-  "src/components/Settings/AdminSettings/HashicorpVault/HashicorpVault.tsx": {
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
   "src/components/Settings/AdminSettings/MCPSemanticFilterSettings/MCPSemanticFilterSettings.tsx": {
     "no-nested-ternary": {
       "count": 1
@@ -1338,16 +1320,6 @@
     }
   },
   "src/components/Settings/AdminSettings/SSOSettings/RedactableField.tsx": {
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
-  "src/components/Settings/AdminSettings/UISettings/PageVisibilitySettings.tsx": {
-    "react-hooks/set-state-in-render": {
-      "count": 1
-    }
-  },
-  "src/components/Settings/AdminSettings/UISettings/UISettings.tsx": {
     "no-nested-ternary": {
       "count": 1
     }
