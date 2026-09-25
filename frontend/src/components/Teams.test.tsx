@@ -530,13 +530,15 @@ describe("Teams - team detail deep link (?team=)", () => {
     await waitFor(() => expect(screen.queryByTestId("team-info-view")).not.toBeInTheDocument());
   });
 
-  it("should preserve the legacy inset for the team detail view", async () => {
+  it("uses the shared canvas for the team detail view", async () => {
     renderWithQueryClient(<Teams accessToken="test-token" userID="user-123" userRole="Admin" />, {
       searchParams: "?team=team-from-url",
     });
 
     await waitFor(() => expect(mockTeamInfoView).toHaveBeenCalled());
-    expect(screen.getByRole("main")).toHaveClass("px-12", "py-6");
+    const canvas = screen.getByRole("main");
+    expect(canvas).toHaveClass("flex", "h-full", "flex-col");
+    expect(canvas).not.toHaveClass("px-12");
   });
 });
 
@@ -553,7 +555,9 @@ describe("Teams - Create Team CTA is grouped with the tabs on the left", () => {
     const createButton = within(tabNav).getByTestId("create-team-button");
     const firstTab = within(tabNav).getByRole("tab", { name: "Your Teams" });
 
-    expect(screen.getByRole("main")).toHaveClass("p-8");
+    const canvas = screen.getByRole("main");
+    expect(canvas).toHaveClass("flex", "h-full", "flex-col");
+    expect(canvas).not.toHaveClass("p-8");
     expect(within(tabNav).getByRole("separator")).toBeInTheDocument();
     expect(createButton.compareDocumentPosition(firstTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

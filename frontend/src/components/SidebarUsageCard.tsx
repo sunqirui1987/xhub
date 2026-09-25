@@ -33,7 +33,7 @@ const UsageMeter = ({ label, used, total }: MeterData) => {
       <div className="flex items-baseline justify-between gap-2">
         <MeterLabel>{label}</MeterLabel>
         <span className="text-xs font-medium tabular-nums">
-          <span className="text-foreground">{used.toLocaleString()}</span>
+          <span className="text-sidebar-foreground">{used.toLocaleString()}</span>
           <span className="text-muted-foreground"> / {total.toLocaleString()}</span>
         </span>
       </div>
@@ -103,7 +103,7 @@ export default function SidebarUsageCard({ accessToken, collapsed, onExpandRail 
           <Award className="size-4" strokeWidth={1.75} />
         </span>
         <span className="min-w-0 flex-1 leading-tight">
-          <span className="block text-[13px] font-semibold text-foreground">{t("Enterprise usage")}</span>
+          <span className="block text-[13px] font-semibold text-sidebar-foreground">{t("Enterprise usage")}</span>
           <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>
         </span>
         <ChevronDown className="size-4 flex-none -rotate-90 text-muted-foreground transition-transform group-data-[panel-open]/usage:rotate-0" />

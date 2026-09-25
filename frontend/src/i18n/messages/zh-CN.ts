@@ -15,7 +15,7 @@ export const zhCN = {
   },
   login: {
     title: "登录",
-    subtitle: "进入 XHub 管理控制台。",
+    subtitle: "登录以开始你的会话",
     defaultCredentials: "默认凭据",
     defaultCredentialsBody: "默认用户名为 {admin}，密码为网关已配置的 {masterKey}。",
     defaultCredentialsHint: "需要配置控制台账号或 SSO？",

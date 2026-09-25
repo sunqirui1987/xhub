@@ -71,7 +71,7 @@ export default function ApiKeysDashboard() {
   }, [accessToken, userID, userRole]);
 
   return (
-    <main className="flex h-full flex-col p-8">
+    <main className="flex h-full min-h-0 flex-col">
       <VirtualKeysTable
         headerActions={
           isViewOnly ? undefined : (

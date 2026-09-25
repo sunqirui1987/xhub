@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/sunqirui1987/xhub/internal/llm/estimate"
 )
 
 func TestHydrateFillsEmptyAndFoldsProvider(t *testing.T) {
@@ -93,39 +95,39 @@ print(json.dumps({
 	if err := json.Unmarshal([]byte(line), &py); err != nil {
 		t.Fatalf("json %v %s", err, line)
 	}
-	final, pct, amt := ApplyDiscount(10, "openai", map[string]float64{"openai": 0.1})
+	final, pct, amt := estimate.ApplyDiscount(10, "openai", map[string]float64{"openai": 0.1})
 	eq3(t, "discount", py["discount"], final, pct, amt)
-	final, pct, amt = ApplyDiscount(10, "", nil)
+	final, pct, amt = estimate.ApplyDiscount(10, "", nil)
 	eq3(t, "discount_none", py["discount_none"], final, pct, amt)
-	mf, mp, mfix, mtot := ApplyMargin(10, "openai", map[string]Margin{
+	mf, mp, mfix, mtot := estimate.ApplyMargin(10, "openai", map[string]estimate.Margin{
 		"openai": {Percent: 0.2, FixedAmount: 0.5, HasPercent: true, HasFixed: true},
 		"global": {Percent: 0.05, IsPercent: true},
 	})
 	eq4(t, "margin", py["margin"], mf, mp, mfix, mtot)
-	mf, mp, mfix, mtot = ApplyMargin(10, "other", map[string]Margin{
+	mf, mp, mfix, mtot = estimate.ApplyMargin(10, "other", map[string]estimate.Margin{
 		"global": {Percent: 0.05, IsPercent: true},
 	})
 	eq4(t, "margin_global", py["margin_global"], mf, mp, mfix, mtot)
-	tier, known, standard := MapTrafficType("ON_DEMAND_PRIORITY")
+	tier, known, standard := estimate.MapTrafficType("ON_DEMAND_PRIORITY")
 	if !known || standard || tier != py["traf"] {
 		t.Fatalf("traf %v %v %v py %v", tier, known, standard, py["traf"])
 	}
-	_, known, standard = MapTrafficType("ON_DEMAND")
+	_, known, standard = estimate.MapTrafficType("ON_DEMAND")
 	if !known || !standard || py["traf_std"] != nil {
 		t.Fatalf("std %v %v py %v", known, standard, py["traf_std"])
 	}
-	_, known, _ = MapTrafficType("NOPE")
+	_, known, _ = estimate.MapTrafficType("NOPE")
 	if known || py["traf_miss"] != nil {
 		t.Fatalf("miss py %v", py["traf_miss"])
 	}
-	if _, ok := NormalizeServiceTier("auto", true); ok || py["norm_auto"] != nil {
+	if _, ok := estimate.NormalizeServiceTier("auto", true); ok || py["norm_auto"] != nil {
 		t.Fatal("auto")
 	}
-	got, ok := NormalizeServiceTier("Flex", true)
+	got, ok := estimate.NormalizeServiceTier("Flex", true)
 	if !ok || got != py["norm_flex"] {
 		t.Fatalf("flex %v py %v", got, py["norm_flex"])
 	}
-	inCost, outCost := TokenCost(3, 4, 0.5, 0.25)
+	inCost, outCost := estimate.TokenCost(3, 4, 0.5, 0.25)
 	if inCost != 1.5 || outCost != 1 {
 		t.Fatalf("token cost %v %v", inCost, outCost)
 	}

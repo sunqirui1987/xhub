@@ -17,7 +17,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
-import { MultiSelect } from "@/components/shared/MultiSelect";
 import { useVisitedTabs } from "@/hooks/useVisitedTabs";
 import CodeBlock from "@/components/CodeBlock";
 import { toast } from "@/lib/toast";
@@ -28,8 +27,6 @@ import {
   modelPatchUpdateCall,
   proxyBaseUrl,
 } from "@/components/networking";
-import { fetchMCPServers } from "@/components/networking";
-import { MCPServer } from "@/components/mcp_tools/types";
 import { AgentModel, fetchAvailableAgentModels, MCPToolEntry } from "../../llm_calls/fetch_agents";
 import { fetchAvailableModels, ModelGroup } from "@/components/llm_calls/fetch_models";
 import ComplianceUI from "../complianceUI/ComplianceUI";
@@ -158,32 +155,6 @@ function parseUnderlyingModel(litellmModel: string | undefined): string | undefi
   return litellmModel.slice("litellm_agent/".length) || undefined;
 }
 
-const MCP_TOOLS_PREFIX = "litellm_proxy/mcp/";
-
-function buildToolsFromServerIds(serverIds: string[], servers: MCPServer[]): MCPToolEntry[] {
-  return serverIds.map((serverId) => {
-    const server = servers.find((s) => s.server_id === serverId);
-    const serverName = server?.alias || server?.server_name || serverId;
-    return {
-      type: "mcp",
-      server_label: "litellm",
-      server_url: `${MCP_TOOLS_PREFIX}${serverName}`,
-      require_approval: "never",
-    };
-  });
-}
-
-function getServerIdsFromTools(tools: MCPToolEntry[], servers: MCPServer[]): string[] {
-  return tools
-    .filter((t) => t.type === "mcp" && t.server_url?.startsWith(MCP_TOOLS_PREFIX))
-    .map((t) => {
-      const suffix = t.server_url.slice(MCP_TOOLS_PREFIX.length);
-      const server = servers.find((s) => (s.alias || s.server_name || s.server_id) === suffix);
-      return server?.server_id;
-    })
-    .filter((id): id is string => id != null);
-}
-
 export default function AgentBuilderView({
   accessToken,
   token,
@@ -214,9 +185,6 @@ export default function AgentBuilderView({
   const [draftTemperature, setDraftTemperature] = useState(0.7);
   const [draftMaxTokens, setDraftMaxTokens] = useState(4096);
   const [draftTools, setDraftTools] = useState<MCPToolEntry[]>([]);
-
-  const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
-  const [loadingMCPServers, setLoadingMCPServers] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -268,23 +236,6 @@ export default function AgentBuilderView({
     loadModels();
   }, [loadModels]);
 
-  const loadMCPServers = useCallback(async () => {
-    if (!effectiveApiKey) return;
-    setLoadingMCPServers(true);
-    try {
-      const servers = await fetchMCPServers(effectiveApiKey);
-      setMCPServers(Array.isArray(servers) ? servers : (servers as { data?: MCPServer[] })?.data ?? []);
-    } catch (e) {
-      console.error("Error fetching MCP servers:", e);
-    } finally {
-      setLoadingMCPServers(false);
-    }
-  }, [effectiveApiKey]);
-
-  useEffect(() => {
-    loadMCPServers();
-  }, [loadMCPServers]);
-
   // Clear created key when switching to another agent
   useEffect(() => {
     setCreatedKeyValue(null);
@@ -313,12 +264,6 @@ export default function AgentBuilderView({
       setDraftTools(tools);
     }
   }, [selectedId, isNewAgent, selectedAgent?.model_name, selectedAgent?.litellm_params?.tools]);
-
-  const selectedMCPServerIds = getServerIdsFromTools(draftTools, mcpServers);
-
-  const handleMCPServerChange = (serverIds: string[]) => {
-    setDraftTools(buildToolsFromServerIds(serverIds, mcpServers));
-  };
 
   const handleAddAgent = () => {
     setSelectedId(NEW_AGENT_ID);
@@ -622,26 +567,6 @@ export default function AgentBuilderView({
                               onChange={(e) => setDraftMaxTokens(Number(e.target.value))}
                             />
                           </div>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-sm font-medium text-foreground">{t("MCP servers")}</label>
-                          <MultiSelect
-                            placeholder={t("Select MCP servers to attach (same format as chat completions API)")}
-                            value={selectedMCPServerIds}
-                            onValueChange={handleMCPServerChange}
-                            loading={loadingMCPServers}
-                            className="w-full"
-                            options={mcpServers.map((s) => ({
-                              value: s.server_id,
-                              label: s.alias || s.server_name || s.server_id,
-                            }))}
-                          />
-                          {selectedAgent && draftTools.length > 0 && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {draftTools.length} {t("MCP server")}{draftTools.length !== 1 ? "s" : ""} {t("saved. Use the same")}{" "}
-                              <code className="rounded-sm bg-muted px-1">tools</code> {t("array in chat completions when calling this agent.")}
-                            </p>
-                          )}
                         </div>
                         {selectedAgent && (
                           <div className="flex flex-wrap items-center gap-2 pt-2">

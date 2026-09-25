@@ -76,3 +76,16 @@ json.dump({"input": body, "filtered": filter_out_litellm_params(body)}, open(sys
 		}
 	}
 }
+
+// normJSON 把两边的 JSON 数字收成同一种形状，避免 float64 和 json.Number 比不相等。
+func normJSON(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out any
+	if json.Unmarshal(raw, &out) != nil {
+		return v
+	}
+	return out
+}

@@ -13,7 +13,6 @@ interface SidebarProviderProps {
 const SidebarProvider = ({ sidebarCollapsed, onToggleCollapsed }: SidebarProviderProps) => {
   const { accessToken } = useAuthorized();
   const [enabledPagesInternalUsers, setEnabledPagesInternalUsers] = useState<string[] | null>(null);
-  const [enableProjectsUI, setEnableProjectsUI] = useState<boolean>(false);
   const [disableAgentsForInternalUsers, setDisableAgentsForInternalUsers] = useState<boolean>(false);
   const [allowAgentsForTeamAdmins, setAllowAgentsForTeamAdmins] = useState<boolean>(false);
   const [disableVectorStoresForInternalUsers, setDisableVectorStoresForInternalUsers] = useState<boolean>(false);
@@ -32,10 +31,6 @@ const SidebarProvider = ({ sidebarCollapsed, onToggleCollapsed }: SidebarProvide
         if (settings?.values?.enabled_ui_pages_internal_users !== undefined) {
           setEnabledPagesInternalUsers(settings.values.enabled_ui_pages_internal_users);
         } else {
-        }
-
-        if (settings?.values?.enable_projects_ui !== undefined) {
-          setEnableProjectsUI(Boolean(settings.values.enable_projects_ui));
         }
 
         if (settings?.values?.disable_agents_for_internal_users !== undefined) {
@@ -66,7 +61,7 @@ const SidebarProvider = ({ sidebarCollapsed, onToggleCollapsed }: SidebarProvide
       collapsed={sidebarCollapsed}
       onToggleCollapsed={onToggleCollapsed}
       enabledPagesInternalUsers={enabledPagesInternalUsers}
-      enableProjectsUI={enableProjectsUI}
+      enableProjectsUI /* kept destination; the projects UI flag must not drop it */
       disableAgentsForInternalUsers={disableAgentsForInternalUsers}
       allowAgentsForTeamAdmins={allowAgentsForTeamAdmins}
       disableVectorStoresForInternalUsers={disableVectorStoresForInternalUsers}

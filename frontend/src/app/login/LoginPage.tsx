@@ -9,7 +9,6 @@ import { PasswordInput } from "@/components/shared/PasswordInput";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,7 +19,7 @@ import { isJwtExpired } from "@/utils/jwtUtils";
 import { consumeReturnUrl, getLoginUrl, getReturnUrl, isValidReturnUrl } from "@/utils/returnUrlUtils";
 import { CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { z } from "zod/v4";
 import { useWorker } from "@/hooks/useWorker";
 import { t, useI18n } from "@/i18n";
@@ -47,6 +46,42 @@ function SsoEnabledNotice() {
         </Button>
       </AlertAction>
     </Alert>
+  );
+}
+
+function LoginLogo() {
+  return (
+    <div data-testid="login-logo" className="mb-4 flex shrink-0 flex-col items-center gap-2">
+      <svg role="img" aria-label={t("site.logoAlt")} width="56" height="56" viewBox="0 0 84 84">
+        <rect width="84" height="84" rx="18" fill="#3c8dbc" />
+        <text x="42" y="54" textAnchor="middle" fontSize="36" fontWeight="700" fill="#ffffff">
+          X
+        </text>
+      </svg>
+      <div className="text-3xl font-semibold tracking-tight text-foreground">{t("site.product")}</div>
+    </div>
+  );
+}
+
+function LoginStage({ children }: { children: ReactNode }) {
+  return (
+    <div
+      data-testid="login-stage"
+      className="relative flex h-dvh max-h-dvh w-full items-center justify-center overflow-hidden bg-canvas px-4"
+    >
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      <div className="flex w-full max-w-xl flex-col items-center">
+        <LoginLogo />
+        <div
+          data-testid="login-card"
+          className="w-full rounded-md border border-border bg-card px-8 py-6 text-card-foreground shadow-[0_12px_32px_rgba(0,0,0,0.12)] sm:px-12"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -185,37 +220,26 @@ function LoginPageContent() {
 
   if (isConfigLoading || isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-muted">
-        <Card className="w-full max-w-lg shadow-md">
-          <CardContent>
-            <div className="flex w-full flex-col gap-4">
-              <div className="text-center">
-                <h2 className="text-3xl font-semibold text-foreground">🚅 {t("site.product")}</h2>
-              </div>
-              <div className="text-center">
-                <h3 className="text-2xl font-semibold text-foreground">{t("login.title")}</h3>
-                <p className="text-sm text-muted-foreground">{t("login.subtitle")}</p>
-              </div>
-              <LoadingScreen />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <LoginStage>
+        <div className="flex w-full flex-col gap-6 text-center">
+          <h1 className="text-3xl font-semibold text-foreground">{t("login.title")}</h1>
+          <p className="text-lg text-muted-foreground">{t("login.subtitle")}</p>
+          <LoadingScreen />
+        </div>
+      </LoginStage>
     );
   }
 
   // Show disabled message if admin UI is disabled
   if (uiConfig && uiConfig.admin_ui_disabled) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-muted">
-        <Card className="w-full max-w-lg shadow-md">
-          <CardContent>
-            <div className="flex w-full flex-col gap-4">
-              <div className="text-center">
-                <h2 className="text-3xl font-semibold text-foreground">🚅 {t("site.product")}</h2>
-              </div>
+      <LoginStage>
+        <div className="flex w-full flex-col gap-6">
+          <div className="text-center">
+            <h1 className="text-3xl font-semibold text-foreground">{t("login.title")}</h1>
+          </div>
 
-              <Alert variant="warning">
+          <Alert variant="warning">
                 <TriangleAlert />
                 <AlertTitle>{t("login.adminDisabled")}</AlertTitle>
                 <AlertDescription>
@@ -227,30 +251,19 @@ function LoginPageContent() {
                   </p>
                 </AlertDescription>
               </Alert>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        </div>
+      </LoginStage>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted">
-      <Card className="w-full max-w-lg shadow-md">
-        <CardContent>
-          <TooltipProvider>
-            <div className="flex w-full flex-col gap-4">
-              <div className="flex justify-end">
-                <LanguageSwitcher />
-              </div>
-              <div className="text-center">
-                <h2 className="text-3xl font-semibold text-foreground">🚅 {t("site.product")}</h2>
-              </div>
-
-              <div className="text-center">
-                <h3 className="text-2xl font-semibold text-foreground">{t("login.title")}</h3>
-                <p className="text-sm text-muted-foreground">{t("login.subtitle")}</p>
-              </div>
+    <LoginStage>
+      <TooltipProvider>
+        <div className="flex w-full flex-col gap-4">
+          <div className="text-center">
+            <h1 className="text-2xl font-semibold text-foreground">{t("login.title")}</h1>
+            <p className="mt-1 text-base text-muted-foreground">{t("login.subtitle")}</p>
+          </div>
 
               {!uiConfig?.hide_default_credentials_hint && (
                 <Alert variant="info">
@@ -273,7 +286,7 @@ function LoginPageContent() {
               )}
 
               <form onSubmit={form.handleSubmit(handleSubmit)}>
-                <FieldGroup>
+                <FieldGroup className="gap-4">
                   {uiConfig?.is_control_plane && workers.length > 0 && (
                     <Field>
                       <FieldLabel htmlFor={workerFieldId}>{t("login.worker")}</FieldLabel>
@@ -304,7 +317,7 @@ function LoginPageContent() {
                         placeholder={t("login.usernamePlaceholder")}
                         autoComplete="username"
                         disabled={isLoginLoading}
-                        className="h-10 rounded-md"
+                        className="h-11 rounded-sm border-input bg-background text-base"
                       />
                     )}
                   </FormField>
@@ -317,12 +330,17 @@ function LoginPageContent() {
                         placeholder={t("login.passwordPlaceholder")}
                         autoComplete="current-password"
                         disabled={isLoginLoading}
-                        groupClassName="h-10"
+                        groupClassName="h-11"
                       />
                     )}
                   </FormField>
 
-                  <Button type="submit" size="lg" disabled={isLoginLoading} className="w-full">
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={isLoginLoading}
+                    className="h-11 w-full rounded-sm bg-primary text-base font-semibold text-primary-foreground hover:bg-primary/80"
+                  >
                     {isLoginLoading && <UiLoadingSpinner className="size-4" role="img" aria-label={t("loading")} />}
                     {isLoginLoading ? t("login.submitting") : t("login.submit")}
                   </Button>
@@ -362,12 +380,10 @@ function LoginPageContent() {
                   )}
                 </FieldGroup>
               </form>
-            </div>
-            {uiConfig?.sso_configured && <SsoEnabledNotice />}
-          </TooltipProvider>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+        {uiConfig?.sso_configured && <SsoEnabledNotice />}
+      </TooltipProvider>
+    </LoginStage>
   );
 }
 

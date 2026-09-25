@@ -1,4 +1,4 @@
-import { BarChart3, Bot, Building2, Globe, LineChart, ShoppingCart, Tags, User, Users } from "lucide-react";
+import { BarChart3, Building2, Globe, ShoppingCart, Tags, User, Users } from "lucide-react";
 import React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,9 +12,7 @@ export type UsageOption =
   | "team"
   | "customer"
   | "tag"
-  | "agent"
-  | "user"
-  | "user-agent-activity";
+  | "user";
 export interface UsageViewSelectProps {
   value: UsageOption;
   onChange: (value: UsageOption) => void;
@@ -84,24 +82,10 @@ const OPTIONS: OptionConfig[] = [
     adminOnly: true,
   },
   {
-    value: "agent",
-    labelKey: "pages.usage.agent",
-    descriptionKey: "pages.usage.agentDesc",
-    icon: <Bot className="size-4" />,
-    capability: "viewAgentUsage",
-  },
-  {
     value: "user",
     labelKey: "pages.usage.user",
     descriptionKey: "pages.usage.userDesc",
     icon: <User className="size-4" />,
-    adminOnly: true,
-  },
-  {
-    value: "user-agent-activity",
-    labelKey: "pages.usage.userAgentActivity",
-    descriptionKey: "pages.usage.userAgentActivityDesc",
-    icon: <LineChart className="size-4" />,
     adminOnly: true,
   },
 ];

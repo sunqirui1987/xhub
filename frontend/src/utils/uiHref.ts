@@ -17,7 +17,13 @@ export function uiHref(routeSegment: string): string {
 
 /** First route segment under the UI base, e.g. "/ui/api-reference/" -> "api-reference" and "/ui/" -> "". */
 export function routeSegmentForPathname(pathname: string): string {
-  const base = uiBase();
-  const relative = pathname.startsWith(base) ? pathname.slice(base.length) : pathname;
+  const bases = [uiBase(), "/ui"].filter((base, index, all) => base.length > 0 && all.indexOf(base) === index);
+  let relative = pathname;
+  for (const base of bases) {
+    if (pathname === base || pathname.startsWith(`${base}/`)) {
+      relative = pathname.slice(base.length);
+      break;
+    }
+  }
   return relative.replace(/^\/+/, "").split("/")[0];
 }

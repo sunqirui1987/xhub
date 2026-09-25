@@ -24,6 +24,9 @@ import PromptsPage from "./prompts/page";
 import TransformRequestPage from "./transform-request/page";
 import TagManagementPage from "./tag-management/page";
 import OldUsagePage from "./old-usage/page";
+import BudgetsPage from "./budgets/page";
+import AdminPanelPage from "./admin-panel/page";
+import UIThemePage from "./ui-theme/page";
 import PublicModelHubPage from "../model_hub/page";
 import { dashboardAppPath } from "@/middleware";
 
@@ -45,6 +48,9 @@ const removedPages = [
   ["transform-request", TransformRequestPage],
   ["tag-management", TagManagementPage],
   ["old-usage", OldUsagePage],
+  ["budgets", BudgetsPage],
+  ["admin-panel", AdminPanelPage],
+  ["ui-theme", UIThemePage],
 ] as const;
 
 describe("removed dashboard pages", () => {
@@ -70,6 +76,9 @@ describe("removed dashboard pages", () => {
       "/transform-request",
       "/tag-management",
       "/old-usage",
+      "/budgets",
+      "/admin-panel",
+      "/ui-theme",
       "/model_hub",
     ]) {
       expect(dashboardAppPath(path), path).toBeNull();

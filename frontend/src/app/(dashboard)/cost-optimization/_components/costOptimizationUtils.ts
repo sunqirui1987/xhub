@@ -1,6 +1,9 @@
 import { DailyData, SpendMetrics } from "@/components/UsagePage/types";
 import { ToolSpendDailyEntry, ToolSpendEntry } from "@/components/networking";
+import { getActiveLocale } from "@/i18n";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
+
+const dateLocale = (): string => (getActiveLocale() === "zh-CN" ? "zh-CN" : "en-US");
 
 export const usd = (value: number): string => {
   // Sized and signed off the magnitude: a driver can come out negative, and a small
@@ -20,7 +23,7 @@ export const classificationRatePer1kTurns = (classifierCost: number, turns: numb
 export const pct = (ratio: number): string => `${formatNumberWithCommas(ratio * 100, 1)}%`;
 
 export const shortDate = (iso: string): string =>
-  new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  new Date(`${iso}T00:00:00`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
 
 export const compressionOf = (m: SpendMetrics): number => m.compression_savings_spend ?? 0;
 export const cachingOf = (m: SpendMetrics): number => m.prompt_caching_savings_spend ?? 0;
@@ -266,7 +269,7 @@ export const withStartAnchor = (cumulative: readonly SavingsPoint[], startLabel:
 /** "Jul 16 – Jul 23", collapsing to a single date when the range is one day. */
 export const formatRangeLabel = (from: Date | undefined, to: Date | undefined): string => {
   if (!from || !to) return "";
-  const short = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const short = (d: Date) => d.toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
   const start = short(from);
   const end = short(to);
   return start === end ? start : `${start} – ${end}`;

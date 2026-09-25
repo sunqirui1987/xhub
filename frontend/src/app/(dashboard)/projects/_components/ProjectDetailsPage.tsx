@@ -41,7 +41,7 @@ export function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
 
   if (isLoading) {
     return (
-      <div className="p-6 px-12">
+      <div className="w-full">
         <div
           role="status"
           aria-busy="true"
@@ -56,7 +56,7 @@ export function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
 
   if (!project) {
     return (
-      <div className="p-6 px-12">
+      <div className="w-full">
         <Button variant="ghost" size="icon" aria-label={t("Back")} onClick={onBack} className="mb-4">
           <ArrowLeftIcon className="size-4" />
         </Button>
@@ -66,7 +66,7 @@ export function ProjectDetail({ projectId, onBack }: ProjectDetailProps) {
   }
 
   return (
-    <div className="p-6 px-12">
+    <div className="w-full">
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" aria-label={t("Back")} onClick={onBack}>

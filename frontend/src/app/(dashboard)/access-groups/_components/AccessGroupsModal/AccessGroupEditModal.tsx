@@ -11,9 +11,7 @@ import { AccessGroupResponse } from "@/app/(dashboard)/hooks/accessGroups/useAcc
 import {
   AccessGroupBaseForm,
   accessGroupFormSchema,
-  AGENTS_TAB,
   GENERAL_TAB,
-  MCP_SERVERS_TAB,
   MODELS_TAB,
   type AccessGroupFormValues,
 } from "./AccessGroupBaseForm";
@@ -52,8 +50,6 @@ function AccessGroupEditForm({ accessGroup, onCancel, onSuccess }: Omit<AccessGr
         access_group_name: values.name,
         description: values.description,
         access_model_names: visitedTabs.has(MODELS_TAB) ? values.modelIds : undefined,
-        access_mcp_server_ids: visitedTabs.has(MCP_SERVERS_TAB) ? values.mcpServerIds : undefined,
-        access_agent_ids: visitedTabs.has(AGENTS_TAB) ? values.agentIds : undefined,
       };
 
       editMutation.mutate(

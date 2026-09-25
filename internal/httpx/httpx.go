@@ -1,3 +1,4 @@
+// 写 JSON 和错误信封，并给响应带上调用 ID。推理路径用厂商各自的错误形状。
 package httpx
 
 import (
@@ -9,20 +10,24 @@ import (
 	"strings"
 )
 
+// 生成 32 位十六进制调用 ID。
 func CallID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
 
+// 设置 x-litellm-call-id。已有值时由调用方决定是否覆盖。
 func SetCallID(w http.ResponseWriter, id string) {
 	w.Header().Set("x-litellm-call-id", id)
 }
 
+// 写通用 JSON 错误。推理路径应改用 WriteTypedError，以便换成厂商信封。
 func WriteError(w http.ResponseWriter, status int, typ, msg string) {
 	WriteTypedError(w, "", status, typ, msg)
 }
 
+// 按路径选择错误信封。429 会带 Retry-After: 1。没有调用 ID 时补一个。
 func WriteTypedError(w http.ResponseWriter, path string, status int, typ, msg string) {
 	if w.Header().Get("x-litellm-call-id") == "" {
 		SetCallID(w, CallID())
@@ -65,6 +70,7 @@ func WriteTypedError(w http.ResponseWriter, path string, status int, typ, msg st
 	}
 }
 
+// 路径是否走 Anthropic 错误信封，而不是 OpenAI 的 error 对象。
 func isAnthropicMessagesPath(p string) bool {
 	if strings.Contains(p, "chat") || strings.Contains(p, "/threads") {
 		return false
@@ -72,12 +78,14 @@ func isAnthropicMessagesPath(p string) bool {
 	return strings.Contains(p, "/messages")
 }
 
+// 路径是否走 Gemini 原生错误形状。
 func isGeminiNativePath(p string) bool {
 	return strings.Contains(p, "generatecontent") ||
 		strings.Contains(p, "streamgeneratecontent") ||
 		(strings.Contains(p, "counttokens") && !strings.Contains(p, "/messages"))
 }
 
+// 把 HTTP 状态码映射成 Google RPC 状态名。
 func googleRPCStatus(code int) string {
 	switch code {
 	case 401:
@@ -100,6 +108,7 @@ func googleRPCStatus(code int) string {
 	}
 }
 
+// 写 JSON 并设置状态码。编码失败时不再改状态码。
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	if w.Header().Get("x-litellm-call-id") == "" {
 		SetCallID(w, CallID())

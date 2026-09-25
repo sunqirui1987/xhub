@@ -1,11 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import AgentBuilderView from "@/app/(dashboard)/playground/components/chat_ui/AgentBuilderView";
 import ChatUI from "@/app/(dashboard)/playground/components/chat_ui/ChatUI";
 import CompareUI from "@/app/(dashboard)/playground/components/compareUI/CompareUI";
-import ComplianceUI from "@/app/(dashboard)/playground/components/complianceUI/ComplianceUI";
-import { DeprecationBanner } from "@/components/DeprecationBanner";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { fetchProxySettings } from "@/utils/proxyUtils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -48,18 +45,12 @@ export default function PlaygroundPage() {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <Tabs defaultValue="chat" className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden">
-        <TabsList variant="line" className="w-full shrink-0 justify-start overflow-x-auto pb-1">
-          <TabsTrigger value="chat" className="flex-none">
+        <TabsList variant="line" className="h-12 w-full shrink-0 justify-start gap-2 overflow-x-auto border-b border-border bg-card px-2">
+          <TabsTrigger value="chat" className="h-10 flex-none px-4 text-base">
             {t("pages.playground.chat")}
           </TabsTrigger>
-          <TabsTrigger value="compare" className="flex-none">
+          <TabsTrigger value="compare" className="h-10 flex-none px-4 text-base">
             {t("pages.playground.compare")}
-          </TabsTrigger>
-          <TabsTrigger value="compliance" className="flex-none">
-            {t("pages.playground.compliance")}
-          </TabsTrigger>
-          <TabsTrigger value="agent-builder" className="flex-none">
-            {t("pages.playground.agentBuilder")}
           </TabsTrigger>
         </TabsList>
         <TabsContent
@@ -78,21 +69,6 @@ export default function PlaygroundPage() {
         </TabsContent>
         <TabsContent value="compare" className="mt-0 h-full data-hidden:hidden" keepMounted>
           <CompareUI accessToken={accessToken} disabledPersonalKeyCreation={disabledPersonalKeyCreation} />
-        </TabsContent>
-        <TabsContent value="compliance" className="mt-0 h-full data-hidden:hidden" keepMounted>
-          <ComplianceUI accessToken={accessToken} disabledPersonalKeyCreation={disabledPersonalKeyCreation} />
-        </TabsContent>
-        <TabsContent value="agent-builder" className="mt-0 h-full data-hidden:hidden" keepMounted>
-          <DeprecationBanner featureName="The Playground's Agent Builder" />
-          <AgentBuilderView
-            accessToken={accessToken}
-            token={token}
-            userID={userId}
-            userRole={userRole}
-            disabledPersonalKeyCreation={disabledPersonalKeyCreation}
-            proxySettings={proxySettings}
-            customProxyBaseUrl={proxySettings?.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings?.PROXY_BASE_URL}
-          />
         </TabsContent>
       </Tabs>
     </div>

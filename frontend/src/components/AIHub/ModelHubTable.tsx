@@ -196,30 +196,6 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
     }
   }, [publicPage, accessToken]);
 
-  // Fetch MCP Hub data
-  useEffect(() => {
-    const fetchMcpData = async () => {
-      if (!accessToken) {
-        setMcpLoading(false);
-        return;
-      }
-
-      try {
-        setMcpLoading(true);
-        const response = await fetchMCPServers(accessToken);
-        setMcpHubData(response);
-      } catch (error) {
-        console.error("There was an error fetching the MCP server data", error);
-      } finally {
-        setMcpLoading(false);
-      }
-    };
-
-    if (!publicPage) {
-      fetchMcpData();
-    }
-  }, [publicPage, accessToken]);
-
   // Fetch Skill Hub data — all skills for admins, enabled-only for public page
   useEffect(() => {
     const fetchSkillData = async () => {
@@ -440,9 +416,6 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
               <TabsTrigger value="agents" className="flex-none rounded-none px-4 py-2">
                 {t("Agent Hub")}
               </TabsTrigger>
-              <TabsTrigger value="mcp" className="flex-none rounded-none px-4 py-2">
-                {t("MCP Hub")}
-              </TabsTrigger>
               <TabsTrigger value="skills" className="flex-none rounded-none px-4 py-2">
                 {t("Skill Hub")}
               </TabsTrigger>
@@ -557,44 +530,6 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
                 <div className="mt-4 text-center space-y-2">
                   <p className="text-sm text-muted-foreground">
                     {t("Showing {value0} of {value1} agents", { value0: (filteredAgentData.length), value1: (agentHubData?.length || 0) })}</p>
-                </div>
-              </TabsContent>
-
-              {/* MCP Hub Tab */}
-              <TabsContent value="mcp" keepMounted>
-                <Card className="px-6">
-                  {/* Header with Make Public Button */}
-                  {publicPage == false && canModify && (
-                    <div className="flex justify-end mb-4">
-                      <Button onClick={() => handleMakeMcpPublicPage()}>{t("Select MCP Servers to Make Public")}</Button>
-                    </div>
-                  )}
-
-                  {/* MCP Server Table */}
-                  <DataTable
-                    data={mcpHubData || []}
-                    paginationMode="client"
-                    columns={mcpColumns}
-                    getRowId={(server, index) => server.server_id || String(index)}
-                    sortingMode="client"
-                    sorting={mcpSorting}
-                    onSortingChange={setMcpSorting}
-                    isLoading={mcpLoading}
-                    loadingMessage={t("Loading MCP servers…")}
-                    noDataMessage={
-                      <HubEmptyState
-                        title={t("No MCP servers yet")}
-                        body="MCP servers added to this proxy will appear here."
-                      />
-                    }
-                    size="compact"
-                  />
-                </Card>
-
-                <div className="mt-4 text-center space-y-2">
-                  <p className="text-sm text-muted-foreground">
-                    {t("Showing {value0} MCP server{value1}", { value0: (mcpHubData?.length || 0), value1: (mcpHubData?.length !== 1 ? "s" : "") })}
-                  </p>
                 </div>
               </TabsContent>
 

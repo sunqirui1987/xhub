@@ -1,17 +1,7 @@
-import { getAgentsList } from "@/components/networking";
 import { AgentsResponse } from "@/components/agents/types";
-import { useQuery } from "@tanstack/react-query";
-import { createQueryKeys } from "../common/queryKeysFactory";
-import { all_admin_roles } from "@/utils/roles";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 
-const agentsKeys = createQueryKeys("agents");
-
+// Agents are not part of this gateway. Callers keep a stable empty result and never hit /v1/agents.
 export const useAgents = () => {
-  const { accessToken, userRole } = useAuthorized();
-  return useQuery<AgentsResponse>({
-    queryKey: agentsKeys.list({}),
-    queryFn: async () => await getAgentsList(accessToken!),
-    enabled: Boolean(accessToken) && all_admin_roles.includes(userRole || ""),
-  });
+  const data: AgentsResponse = { agents: [] };
+  return { data, isLoading: false, isError: false, error: null, refetch: async () => ({ data }) };
 };

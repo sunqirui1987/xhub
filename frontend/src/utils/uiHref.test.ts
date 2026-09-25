@@ -52,4 +52,10 @@ describe("routeSegmentForPathname", () => {
     expect(routeSegmentForPathname("/logs")).toBe("logs");
     expect(routeSegmentForPathname("/")).toBe("");
   });
+
+  it("still reads the /ui prefix when next dev is opened at that URL", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    expect(routeSegmentForPathname("/ui")).toBe("");
+    expect(routeSegmentForPathname("/ui/playground")).toBe("playground");
+  });
 });

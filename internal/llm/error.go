@@ -1,3 +1,4 @@
+// 把上游 HTTP 状态码映射成 LiteLLM 风格的异常名。不发请求。
 package llm
 
 // ExceptionForStatus 把上游 HTTP 状态收成 LiteLLM 的异常类名。

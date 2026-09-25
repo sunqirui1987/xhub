@@ -1,5 +1,5 @@
 import { useAccessGroupDetails } from "@/app/(dashboard)/hooks/accessGroups/useAccessGroupDetails";
-import { ArrowLeftIcon, BotIcon, EditIcon, KeyIcon, LayersIcon, ServerIcon, UsersIcon } from "lucide-react";
+import { ArrowLeftIcon, EditIcon, KeyIcon, LayersIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 import DefaultProxyAdminTag from "@/components/common_components/DefaultProxyAdminTag";
 import { BadgeLink } from "@/components/shared/BadgeLink";
@@ -74,7 +74,7 @@ export function AccessGroupDetail({ accessGroupId, onBack }: AccessGroupDetailPr
 
   if (isLoading) {
     return (
-      <div className="p-6 px-12">
+      <div className="w-full">
         <div className="flex min-h-[300px] items-center justify-center">
           <UiLoadingSpinner className="size-8 text-primary" />
         </div>
@@ -84,7 +84,7 @@ export function AccessGroupDetail({ accessGroupId, onBack }: AccessGroupDetailPr
 
   if (!accessGroup) {
     return (
-      <div className="p-6 px-12">
+      <div className="w-full">
         <Button variant="ghost" size="icon" aria-label={t("Back")} onClick={onBack} className="mb-4">
           <ArrowLeftIcon className="size-4" />
         </Button>
@@ -94,8 +94,7 @@ export function AccessGroupDetail({ accessGroupId, onBack }: AccessGroupDetailPr
   }
 
   const models = accessGroup.access_model_names.map((id) => ({ id, name: null }));
-  const mcpServers = accessGroup.access_mcp_servers;
-  const agents = accessGroup.access_agents;
+
   const keys = accessGroup.assigned_keys;
   const teams = accessGroup.assigned_teams;
 
@@ -103,7 +102,7 @@ export function AccessGroupDetail({ accessGroupId, onBack }: AccessGroupDetailPr
   const displayedTeams = showAllTeams ? teams : teams.slice(0, MAX_PREVIEW);
 
   return (
-    <div className="p-6 px-12">
+    <div className="w-full">
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" aria-label={t("Back")} onClick={onBack}>
@@ -222,25 +221,9 @@ export function AccessGroupDetail({ accessGroupId, onBack }: AccessGroupDetailPr
                 {t("Models")}
                 <Badge variant="secondary">{models.length}</Badge>
               </TabsTrigger>
-              <TabsTrigger value="mcp" className="flex-none gap-2 rounded-none px-4 py-2">
-                <ServerIcon className="size-4" />
-                {t("MCP Servers")}
-                <Badge variant="secondary">{mcpServers.length}</Badge>
-              </TabsTrigger>
-              <TabsTrigger value="agents" className="flex-none gap-2 rounded-none px-4 py-2">
-                <BotIcon className="size-4" />
-                {t("Agents")}
-                <Badge variant="secondary">{agents.length}</Badge>
-              </TabsTrigger>
             </TabsList>
             <TabsContent value="models" className="pt-4">
               <ResourceList items={models} emptyMessage={t("No models assigned to this group")} />
-            </TabsContent>
-            <TabsContent value="mcp" className="pt-4">
-              <ResourceList items={mcpServers} emptyMessage={t("No MCP servers assigned to this group")} />
-            </TabsContent>
-            <TabsContent value="agents" className="pt-4">
-              <ResourceList items={agents} emptyMessage={t("No agents assigned to this group")} />
             </TabsContent>
           </Tabs>
         </CardContent>

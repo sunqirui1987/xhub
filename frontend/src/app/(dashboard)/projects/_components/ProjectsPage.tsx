@@ -55,7 +55,7 @@ export function ProjectsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="w-full">
       <PageHeader
         icon={<Folder />}
         title={t("pages.projects.title")}

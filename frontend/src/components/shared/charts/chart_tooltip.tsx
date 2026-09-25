@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import type { TooltipContentProps, TooltipValueType } from "recharts";
+import { t } from "@/i18n";
 
 export type ChartTooltipProps = Pick<
   TooltipContentProps<TooltipValueType, string | number>,
@@ -10,13 +11,15 @@ export type ChartTooltipProps = Pick<
 
 export type ChartTooltipComponent = React.ComponentType<ChartTooltipProps>;
 
-export const formatCategoryName = (name: string): string =>
-  name
+export const formatCategoryName = (name: string): string => {
+  const label = name
     .replace("metrics.", "")
     .replace(/_/g, " ")
     .split(" ")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+  return t(label);
+};
 
 export const ValueTooltip = ({
   active,

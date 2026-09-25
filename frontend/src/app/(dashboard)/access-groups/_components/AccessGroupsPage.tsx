@@ -60,7 +60,7 @@ export function AccessGroupsPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="w-full">
       <PageHeader
         icon={<Boxes />}
         title={t("pages.accessGroups.title")}

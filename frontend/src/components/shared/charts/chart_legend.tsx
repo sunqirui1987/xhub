@@ -15,7 +15,7 @@ export const CustomLegend = ({
     {categories.map((category, idx) => (
       <div key={category} className="flex items-center space-x-2">
         <span
-          className="h-2 w-2 shrink-0 rounded-full ring-4 ring-white"
+          className="h-2 w-2 shrink-0 rounded-full ring-4 ring-card"
           style={{ backgroundColor: chartColorValue(colors[idx % colors.length]) }}
         />
         <p className="text-sm text-muted-foreground">{formatCategoryName(category)}</p>

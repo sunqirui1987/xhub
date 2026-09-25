@@ -154,7 +154,7 @@ const CacheDashboard: React.FC<CachePageProps> = ({ accessToken, token, userRole
   ];
 
   return (
-    <Tabs defaultValue="analytics" className="mt-2 mb-8 w-full gap-2 p-8">
+    <Tabs defaultValue="analytics" className="mb-8 w-full gap-2">
       <div className="mt-2 flex w-full items-center justify-between border-b">
         <TabsList variant="line" className="h-auto rounded-none p-0">
           <TabsTrigger value="analytics" className="flex-none rounded-none px-4 py-2">

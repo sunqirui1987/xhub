@@ -1,12 +1,10 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { BotIcon, InfoIcon, LayersIcon, ServerIcon } from "lucide-react";
+import { InfoIcon, LayersIcon } from "lucide-react";
 import * as React from "react";
 
 import { accessGroupKeys } from "@/app/(dashboard)/hooks/accessGroups/useAccessGroups";
-import { useAgents } from "@/app/(dashboard)/hooks/agents/useAgents";
-import { useMCPServers } from "@/app/(dashboard)/hooks/mcpServers/useMCPServers";
 import { ModelSelect } from "@/components/ModelSelect/ModelSelect";
 import { toast } from "@/lib/toast";
 import { FieldGroup } from "@/components/ui/field";
@@ -93,18 +91,6 @@ export const AccessGroupCreateDialog = ({
   const form = useZodForm(accessGroupCreateSchema, { defaultValues: emptyAccessGroupFormValues });
   const [activeTab, setActiveTab] = React.useState(GENERAL_TAB);
 
-  const { data: agentsData } = useAgents();
-  const { data: mcpServersData } = useMCPServers();
-
-  const mcpServerOptions = (mcpServersData ?? []).map((server) => ({
-    value: server.server_id,
-    label: server.server_name ?? server.server_id,
-  }));
-  const agentOptions = (agentsData?.agents ?? []).map((agent) => ({
-    value: agent.agent_id,
-    label: agent.agent_name,
-  }));
-
   const closeAndReset = () => {
     form.reset(emptyAccessGroupFormValues);
     setActiveTab(GENERAL_TAB);
@@ -158,14 +144,6 @@ export const AccessGroupCreateDialog = ({
                 <LayersIcon />
                 {t("common.models")}
               </TabsTrigger>
-              <TabsTrigger value="mcp-servers">
-                <ServerIcon />
-                {t("common.mcpServers")}
-              </TabsTrigger>
-              <TabsTrigger value="agents">
-                <BotIcon />
-                {t("common.agents")}
-              </TabsTrigger>
             </TabsList>
 
             <TabsContent value={GENERAL_TAB} className="pt-4">
@@ -192,37 +170,6 @@ export const AccessGroupCreateDialog = ({
               </FormField>
             </TabsContent>
 
-            <TabsContent value="mcp-servers" className="pt-4">
-              <FormField control={form.control} name="mcpServerIds" label={t("pages.accessGroups.allowedMcp")}>
-                {({ id, value, onChange, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy }) => (
-                  <MultiSelect
-                    id={id}
-                    value={value}
-                    onChange={onChange}
-                    options={mcpServerOptions}
-                    placeholder={t("pages.accessGroups.selectMcp")}
-                    aria-invalid={ariaInvalid}
-                    aria-describedby={ariaDescribedBy}
-                  />
-                )}
-              </FormField>
-            </TabsContent>
-
-            <TabsContent value="agents" className="pt-4">
-              <FormField control={form.control} name="agentIds" label={t("pages.accessGroups.allowedAgents")}>
-                {({ id, value, onChange, "aria-invalid": ariaInvalid, "aria-describedby": ariaDescribedBy }) => (
-                  <MultiSelect
-                    id={id}
-                    value={value}
-                    onChange={onChange}
-                    options={agentOptions}
-                    placeholder={t("pages.accessGroups.selectAgents")}
-                    aria-invalid={ariaInvalid}
-                    aria-describedby={ariaDescribedBy}
-                  />
-                )}
-              </FormField>
-            </TabsContent>
           </Tabs>
 
           <DialogFooter className="mt-6">

@@ -184,7 +184,6 @@ describe("Sidebar (leftnav)", () => {
       "Internal Users",
       "Organizations",
       "Access Groups",
-      "Budgets",
       "Settings",
     ];
 
@@ -500,15 +499,16 @@ describe("Sidebar (leftnav)", () => {
       "Transform Request",
       "Tag Management",
       "Old Usage",
+      "Budgets",
     ];
     for (const label of gone) {
       expect(screen.queryByText(label), label).not.toBeInTheDocument();
     }
     const pages = menuGroups.flatMap((group) => group.items.flatMap((item) => [item.page, ...(item.children ?? []).map((child) => child.page)]));
-    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage"]) {
+    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage", "budgets", "admin-panel", "ui-theme"]) {
       expect(pages, id).not.toContain(id);
     }
-    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "budgets", "settings"]) {
+    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "settings"]) {
       expect(pages, id).toContain(id);
     }
   });
@@ -538,13 +538,13 @@ describe("Sidebar (leftnav)", () => {
     expect(label).toHaveClass("group-data-[collapsed=true]/sidebar:hidden");
   });
 
-  it("shows Cost Optimization with a Beta badge and no feature-flag gate", () => {
+  it("shows Cost Optimization without a Beta badge and no feature-flag gate", () => {
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI={false} />);
 
     const costOptimization = container.querySelector('a[href*="cost-optimization"]');
     expect(costOptimization).not.toBeNull();
     expect(costOptimization!).toHaveTextContent(/Cost Optimization/);
-    expect(costOptimization!).toHaveTextContent(/Beta/);
+    expect(costOptimization!).not.toHaveTextContent(/Beta/);
 
     expect(container.querySelector('a[href*="projects"]')).toBeNull();
   });

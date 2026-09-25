@@ -1,3 +1,4 @@
+// 判断模型名是否落在密钥或实体的允许列表里。空列表表示不限制。
 package llm
 
 import "net/http"

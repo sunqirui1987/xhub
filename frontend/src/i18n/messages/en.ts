@@ -15,7 +15,7 @@ export const en = {
   },
   login: {
     title: "Login",
-    subtitle: "Access your XHub Admin UI.",
+    subtitle: "Sign in to start your session",
     defaultCredentials: "Default Credentials",
     defaultCredentialsBody:
       "By default, Username is {admin} and Password is your set {masterKey}.",

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react";
-import { Plus, ChevronDown, Check, X } from "lucide-react";
+import { ChevronDown, Check, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,7 +12,6 @@ import { useRouter } from "next/navigation";
 import { useChatShell } from "@/contexts/ChatShellContext";
 import { getChatRoutes } from "@/components/chat/ChatShell";
 import ChatMessages from "@/components/chat/ChatMessages";
-import MCPConnectPicker from "@/components/chat/MCPConnectPicker";
 import { fetchAvailableModels } from "@/components/llm_calls/fetch_models";
 import { makeOpenAIResponsesRequest } from "@/components/llm_calls/responses_api";
 import type { TokenUsage } from "@/components/chat_ui/ResponseMetrics";
@@ -56,8 +55,6 @@ export default function ChatConversationPage() {
     accessToken,
     userId,
     userEmail,
-    selectedMCPServers,
-    setSelectedMCPServers,
     activeConversationId,
     activeConversation,
     storageUnavailable,
@@ -78,7 +75,6 @@ export default function ChatConversationPage() {
   const [prevConversationIdForSessionReset, setPrevConversationIdForSessionReset] = useState(activeConversationId);
   const [isStreaming, setIsStreaming] = useState(false);
   const [inputText, setInputText] = useState("");
-  const [mcpPopoverOpen, setMcpPopoverOpen] = useState(false);
   const [storageBannerDismissed, setStorageBannerDismissed] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -210,7 +206,7 @@ export default function ChatConversationPage() {
           undefined,
           undefined,
           undefined,
-          selectedMCPServers.length > 0 ? selectedMCPServers : undefined,
+          undefined,
           previousResponseId,
           (id: string) => setResponsesSessionId(id),
           (event: MCPEvent) => {
@@ -252,7 +248,6 @@ export default function ChatConversationPage() {
       activeConversationId,
       activeConversation,
       selectedModel,
-      selectedMCPServers,
       accessToken,
       createConversation,
       appendMessage,
@@ -465,33 +460,9 @@ export default function ChatConversationPage() {
       >
         <div className="flex items-center gap-2 min-w-0">
           {modelSelectorTrigger}
-          <Popover open={mcpPopoverOpen} onOpenChange={setMcpPopoverOpen}>
-            <PopoverTrigger
-              render={
-                <Button variant="outline" size="sm" className="gap-1 px-2.5 text-muted-foreground">
-                  <Plus className="h-3.5 w-3.5" />
-                  {selectedMCPServers.length > 0 && (
-                    <span className="text-xs text-primary font-medium">{selectedMCPServers.length}</span>
-                  )}
-                </Button>
-              }
-            />
-            <PopoverContent side="top" align="start" className="p-0 w-auto">
-              <MCPConnectPicker
-                accessToken={accessToken}
-                selectedServers={selectedMCPServers}
-                onChange={setSelectedMCPServers}
-              />
-            </PopoverContent>
-          </Popover>
         </div>
 
         <div className="flex items-center gap-2">
-          {inConversation && selectedMCPServers.length > 0 && (
-            <span className="text-xs text-muted-foreground max-w-[160px] overflow-hidden text-ellipsis whitespace-nowrap">
-              {selectedMCPServers.length} tool{selectedMCPServers.length > 1 ? "s" : ""} connected
-            </span>
-          )}
           {isStreaming ? (
             <Button variant="outline" size="icon-sm" onClick={handleStop} className="rounded-full shrink-0">
               <div className="w-2.5 h-2.5 bg-foreground rounded-[2px]" />

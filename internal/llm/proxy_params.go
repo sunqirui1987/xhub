@@ -1,3 +1,4 @@
+// 从发给上游的正文里去掉只属于网关的字段，避免厂商接口报未知参数。
 package llm
 
 // proxyParams 是 LiteLLM all_litellm_params 的完整名单。

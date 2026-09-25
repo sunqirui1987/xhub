@@ -61,7 +61,7 @@ describe("UsageViewSelect", () => {
     expect(offers(container, translate("en", "pages.usage.tag"))).toBe(false);
   });
 
-  it.each(["pages.usage.organization", "pages.usage.agent"] as const)("should show %s to an admin", async (key) => {
+  it.each(["pages.usage.organization"] as const)("should show %s to an admin", async (key) => {
     const user = userEvent.setup();
     const { container } = render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
 
@@ -69,7 +69,7 @@ describe("UsageViewSelect", () => {
     expect(offers(container, translate("en", key))).toBe(true);
   });
 
-  it.each(["pages.usage.organization", "pages.usage.agent"] as const)(
+  it.each(["pages.usage.organization"] as const)(
     "should hide %s from an internal user",
     async (key) => {
     const user = userEvent.setup();
@@ -86,10 +86,7 @@ describe("UsageViewSelect", () => {
   // internal user. Organization Usage must open for them, and only that option:
   // the proxy serves them /organization/daily/activity scoped to the orgs they
   // administer, but still refuses the agent usage route.
-  it.each([
-    ["pages.usage.organization", true],
-    ["pages.usage.agent", false],
-  ] as const)("should offer %s to an org admin: %s", async (key, expected) => {
+  it.each([["pages.usage.organization", true]] as const)("should offer %s to an org admin: %s", async (key, expected) => {
     const user = userEvent.setup();
     const { container } = render(
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" isOrgAdmin={true} />,

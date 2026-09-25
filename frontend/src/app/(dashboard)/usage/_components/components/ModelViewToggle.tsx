@@ -1,9 +1,9 @@
 import { t } from "@/i18n";
 export type ModelViewType = "groups" | "individual";
 
-const MODEL_VIEW_OPTIONS: readonly { value: ModelViewType; label: string }[] = [
-  { value: "groups", label: t("Public Model Name") },
-  { value: "individual", label: t("Litellm Model Name") },
+const MODEL_VIEW_OPTIONS: readonly { value: ModelViewType; labelKey: string }[] = [
+  { value: "groups", labelKey: "Public Model Name" },
+  { value: "individual", labelKey: "Litellm Model Name" },
 ];
 
 interface ModelViewToggleProps {
@@ -22,7 +22,7 @@ export default function ModelViewToggle({ value, onChange }: ModelViewToggleProp
           }`}
           onClick={() => onChange(option.value)}
         >
-          {option.label}
+          {t(option.labelKey)}
         </button>
       ))}
     </div>

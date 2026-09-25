@@ -278,130 +278,13 @@ describe("UserInfoView", () => {
     });
   });
 
-  it("should keep the Details panel state while the Overview tab is shown", async () => {
-    const user = userEvent.setup();
+  it("does not show MCP permissions on the user details tab", async () => {
     render(<UserInfoView {...defaultProps} userRole="proxy_admin" initialTab={1} />);
 
-    await user.click(await screen.findByText("GitHub MCP (srv-1)"));
-    expect(await screen.findByText("list_issues")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Overview" }));
-    expect(await screen.findByText(/of \$100\.00/)).toBeVisible();
-    await user.click(screen.getByRole("tab", { name: "Details" }));
-
-    expect(screen.getByText("list_issues")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "test@example.com" })).toBeInTheDocument();
+    expect(screen.queryByText("MCP Permissions")).not.toBeInTheDocument();
   });
 
-  describe("MCP permissions", () => {
-    it("should render the user's MCP entitlements in read mode", async () => {
-      const user = userEvent.setup();
-      render(<UserInfoView {...defaultProps} userRole="proxy_admin" initialTab={1} />);
-
-      await waitFor(() => {
-        expect(screen.getByText("MCP Permissions")).toBeInTheDocument();
-      });
-
-      const grantedServer = await screen.findByText("GitHub MCP (srv-1)");
-      expect(screen.getByText("dev-group")).toBeInTheDocument();
-      expect(screen.queryByText("list_issues")).not.toBeInTheDocument();
-
-      await user.click(grantedServer);
-
-      expect(await screen.findByText("list_issues")).toBeInTheDocument();
-    });
-
-    it("should nest MCP entitlements under object_permission when an admin saves", async () => {
-      const user = userEvent.setup();
-      render(<UserInfoView {...defaultProps} userRole="proxy_admin" initialTab={1} startInEditMode />);
-
-      const saveButton = await screen.findByText("Save Changes");
-      await user.click(saveButton);
-
-      await waitFor(() => {
-        expect(mockUserUpdateUserCall).toHaveBeenCalledTimes(1);
-      });
-
-      const [token, payload, roleArg] = mockUserUpdateUserCall.mock.calls[0];
-      expect(token).toBe("test-token");
-      expect(roleArg).toBeNull();
-      expect(payload.user_id).toBe("user-123");
-      const expectedObjectPermission = {
-        mcp_servers: ["srv-1"],
-        mcp_access_groups: ["dev-group"],
-        mcp_toolsets: [],
-        mcp_tool_permissions: { "srv-1": ["list_issues"] },
-      };
-      expect(payload.object_permission).toEqual(expectedObjectPermission);
-      expect(payload).not.toHaveProperty("mcp_servers_and_groups");
-      expect(payload).not.toHaveProperty("mcp_tool_permissions");
-      expect(payload).not.toHaveProperty("mcp_servers");
-    });
-
-    it("should send tool selections made in the edit form", async () => {
-      const user = userEvent.setup();
-      render(<UserInfoView {...defaultProps} userRole="proxy_admin" initialTab={1} startInEditMode />);
-
-      await screen.findByText("Save Changes");
-      await waitFor(() => {
-        expect(mockListMCPTools).toHaveBeenCalledWith("test-token", "srv-1");
-      });
-      await waitFor(() => {
-        expect(screen.queryByText("Loading tools...")).not.toBeInTheDocument();
-      });
-
-      await user.click(screen.getByRole("button", { name: "Deselect All" }));
-      await user.click(screen.getByText("Save Changes"));
-
-      await waitFor(() => {
-        expect(mockUserUpdateUserCall).toHaveBeenCalledTimes(1);
-      });
-
-      const [, payload] = mockUserUpdateUserCall.mock.calls[0];
-      expect(payload.object_permission.mcp_tool_permissions).toEqual({ "srv-1": [] });
-    });
-
-    it("should preserve every tool allowlist when the granted servers are unchanged", async () => {
-      const user = userEvent.setup();
-      mockUserGetInfoV2.mockResolvedValue({
-        ...MOCK_USER_DATA,
-        object_permission: {
-          mcp_servers: ["srv-1"],
-          mcp_access_groups: ["group-a"],
-          mcp_tool_permissions: { "srv-1": ["list_issues"], "srv-via-group": ["read_only"] },
-        },
-      });
-      render(<UserInfoView {...defaultProps} userRole="proxy_admin" initialTab={1} startInEditMode />);
-
-      const saveButton = await screen.findByText("Save Changes");
-      await user.click(saveButton);
-
-      await waitFor(() => {
-        expect(mockUserUpdateUserCall).toHaveBeenCalledTimes(1);
-      });
-
-      const [, payload] = mockUserUpdateUserCall.mock.calls[0];
-      expect(payload.object_permission.mcp_tool_permissions).toEqual({
-        "srv-1": ["list_issues"],
-        "srv-via-group": ["read_only"],
-      });
-    });
-
-    it("should not send object_permission for a non-admin editor", async () => {
-      const user = userEvent.setup();
-      render(<UserInfoView {...defaultProps} userRole="Internal User" initialTab={1} startInEditMode />);
-
-      const saveButton = await screen.findByText("Save Changes");
-      await user.click(saveButton);
-
-      await waitFor(() => {
-        expect(mockUserUpdateUserCall).toHaveBeenCalledTimes(1);
-      });
-
-      const [, payload] = mockUserUpdateUserCall.mock.calls[0];
-      expect(payload).not.toHaveProperty("object_permission");
-      expect(screen.queryByText("MCP Servers / Access Groups")).not.toBeInTheDocument();
-    });
-  });
 });
 
 describe("extractMcpEntitlement", () => {

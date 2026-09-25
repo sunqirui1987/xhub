@@ -9,8 +9,8 @@ describe("sidebarMenuButtonVariants", () => {
   it("emits its base classes rather than the names of its own config keys", () => {
     const emitted = sidebarMenuButtonVariants({}).split(" ");
 
-    expect(emitted).toContain("rounded-md");
-    expect(emitted).toContain("text-sidebar-foreground/70");
+    expect(emitted).toContain("rounded-sm");
+    expect(emitted).toContain("text-sidebar-foreground");
     expect(CVA_CONFIG_KEYS.filter((key) => emitted.includes(key))).toEqual([]);
   });
 
@@ -18,7 +18,7 @@ describe("sidebarMenuButtonVariants", () => {
     const active = sidebarMenuButtonVariants({ isActive: true }).split(" ");
 
     expect(active).toContain("bg-sidebar-accent");
-    expect(active).toContain("rounded-md");
+    expect(active).toContain("rounded-sm");
     expect(sidebarMenuButtonVariants({ isActive: false }).split(" ")).not.toContain("bg-sidebar-accent");
   });
 });
@@ -28,7 +28,7 @@ describe("SidebarMenuButton", () => {
     render(<SidebarMenuButton isActive>Keys</SidebarMenuButton>);
     const button = screen.getByRole("button", { name: "Keys" });
 
-    expect(button).toHaveClass("bg-sidebar-accent", "rounded-md");
+    expect(button).toHaveClass("bg-sidebar-accent", "rounded-sm");
     for (const key of CVA_CONFIG_KEYS) {
       expect(button).not.toHaveClass(key);
     }

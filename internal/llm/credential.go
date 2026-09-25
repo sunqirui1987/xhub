@@ -1,3 +1,4 @@
+// 把密钥库里的 credential_values 填进部署参数。缺的字段保持原值。
 package llm
 
 import (
@@ -102,6 +103,7 @@ func expandEnv(s string) string {
 	return s
 }
 
+// 判断凭证值是否空白。空白字段不覆盖部署上已经写好的值。
 func blank(v any) bool {
 	if v == nil {
 		return true

@@ -1,3 +1,4 @@
+// 在同一个模型名的多个部署之间排序。冷却中的部署只要还有别的可用就会被跳过。
 package router
 
 import (
@@ -9,10 +10,12 @@ import (
 	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
+// 同一个对外模型名下的全部部署，尚未按策略排序。
 func All(list []config.ModelEntry, alias string) []config.ModelEntry {
 	return matchDeployments(list, alias)
 }
 
+// 路由器看到的运行时状态。零值表示只用进程内 Busy，不读冷却和延迟。
 // State is the Redis-backed view of deployments. Zero values keep the old
 // in-process behavior (busy map only).
 type State struct {
@@ -22,6 +25,7 @@ type State struct {
 	Usage    map[string]float64
 }
 
+// 按策略把可用部署排成尝试顺序。冷却中的部署只要还有其它部署就不会排在前面。
 func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry {
 	pool := All(list, alias)
 	first := Pick(list, alias, strategy, st)
@@ -38,6 +42,7 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 	return out
 }
 
+// Order 的第一个部署。没有可用部署时返回 nil。
 func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry {
 	pool := matchDeployments(list, alias)
 	if len(pool) == 0 {
@@ -142,6 +147,7 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 	}
 }
 
+// 找出对外模型名能匹配上的部署，含通配符。还不排序。
 // matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM
 // wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
 func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntry {
@@ -196,6 +202,7 @@ func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntr
 	return nil
 }
 
+// 通配符越少、字面段越长越优先。
 func patternSpecificity(pattern string) (int, int) {
 	complexity := 0
 	for _, c := range "*+?\\^$|()" {
@@ -204,6 +211,7 @@ func patternSpecificity(pattern string) (int, int) {
 	return len(pattern), complexity
 }
 
+// 把模型通配符编译成正则。非法模式得到不会匹配的表达式。
 func wildcardRegexp(pattern string) *regexp.Regexp {
 	// re.match: anchored at the start, not the end. QuoteMeta then restore '*'.
 	expr := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `(.*)`)
@@ -214,6 +222,7 @@ func wildcardRegexp(pattern string) *regexp.Regexp {
 	return re
 }
 
+// 用请求里的捕获组替换上游模型名中的星号。
 func applyWildcardModel(upstream, request string, groups []string) string {
 	if !strings.Contains(upstream, "*") {
 		return upstream
@@ -227,10 +236,12 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
+// 部署身份，格式是 api_base|模型参数。Redis 的冷却和用量都用这个 id。
 func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 }
 
+// 从部署参数取浮点数。缺失时用 fallback。
 func paramFloat(e config.ModelEntry, key string, fallback float64) float64 {
 	if e.LiteLLMParams == nil {
 		return fallback
@@ -272,8 +283,10 @@ var errUnknownStrategy = strategyError("unknown routing strategy")
 
 type strategyError string
 
+// 未知路由策略的错误文本。
 func (e strategyError) Error() string { return string(e) }
 
+// 把策略别名收成内部名字。连字符会先变成下划线。认不出时 ok 为 false。
 func strategyKind(strategy string) (string, bool) {
 	s := strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_")
 	switch s {

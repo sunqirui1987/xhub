@@ -1,3 +1,4 @@
+// 聊天消息在 OpenAI 形状和供应商形状之间的转换。
 package llm
 
 import "strings"
@@ -60,6 +61,7 @@ func ShapeResponsesMessage(message map[string]any) map[string]any {
 	return out
 }
 
+// 消息内容里是否至少有一段文本。纯工具调用不算文本。
 func hasChatText(content []any) bool {
 	for _, part := range content {
 		item, ok := part.(map[string]any)
@@ -74,6 +76,7 @@ func hasChatText(content []any) bool {
 	return false
 }
 
+// 把一段内容收成输入文本。不是文本时保持原样交给上层决定。
 func asInputText(part any) any {
 	item, ok := part.(map[string]any)
 	if !ok {

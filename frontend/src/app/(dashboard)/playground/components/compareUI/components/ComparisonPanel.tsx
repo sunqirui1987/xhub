@@ -4,7 +4,7 @@ import { ComparisonInstance } from "../CompareUI";
 import { MessageDisplay } from "./MessageDisplay";
 import { UnifiedSelector } from "./UnifiedSelector";
 import TagSelector from "@/components/tag_management/TagSelector";
-import VectorStoreSelector from "@/components/vector_store_management/VectorStoreSelector";
+
 import GuardrailSelector from "@/components/guardrails/GuardrailSelector";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -131,14 +131,6 @@ export function ComparisonPanel({
               <TagSelector
                 value={comparison.tags}
                 onChange={(value) => handleSettingChange("tags", value)}
-                accessToken={apiKey}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">{t("Vector Stores")}</label>
-              <VectorStoreSelector
-                value={comparison.vectorStores}
-                onChange={(value) => handleSettingChange("vectorStores", value)}
                 accessToken={apiKey}
               />
             </div>

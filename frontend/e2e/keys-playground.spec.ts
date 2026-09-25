@@ -84,12 +84,3 @@ test("Organizations create lists the new org", async ({ page }) => {
   await expect(page.getByText("e2e-org").first()).toBeVisible({ timeout: 15_000 });
 });
 
-test("Budgets create lists the new budget", async ({ page }) => {
-  await loginAdmin(page);
-  await page.goto(uiPath("/budgets"));
-  await page.getByRole("button", { name: t("pages.budgets.create") }).click();
-  await expect(page.getByRole("heading", { name: t("pages.budgets.create") })).toBeVisible();
-  await page.getByLabel(t("Budget ID")).fill("e2e-budget");
-  await page.getByRole("dialog").getByRole("button", { name: t("pages.budgets.create") }).click();
-  await expect(page.getByText("e2e-budget").first()).toBeVisible({ timeout: 15_000 });
-});

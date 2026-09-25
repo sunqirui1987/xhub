@@ -124,7 +124,8 @@ describe("ComparisonPanel", () => {
     expect(screen.getByText("General Settings")).toBeInTheDocument();
     expect(screen.getByText("Advanced Settings")).toBeInTheDocument();
     expect(screen.getByTestId("tag-selector")).toBeInTheDocument();
-    expect(screen.getByTestId("vector-store-selector")).toBeInTheDocument();
+    expect(screen.queryByTestId("vector-store-selector")).not.toBeInTheDocument();
+    expect(screen.queryByText("Vector Stores")).not.toBeInTheDocument();
     expect(screen.getByTestId("guardrail-selector")).toBeInTheDocument();
   });
 

@@ -298,90 +298,10 @@ describe("AccessGroupDetail", () => {
     expect(screen.getByText("model-2")).toBeInTheDocument();
   });
 
-  describe("MCP Servers tab", () => {
-    it("should show server names instead of ids", async () => {
-      const user = userEvent.setup();
-      renderWithProviders(<AccessGroupDetail accessGroupId={accessGroupId} onBack={mockOnBack} />);
-
-      await user.click(screen.getByRole("tab", { name: /MCP Servers/i }));
-
-      expect(screen.getByText("GitHub MCP")).toBeInTheDocument();
-      expect(screen.queryByText("mcp-1")).not.toBeInTheDocument();
-    });
-
-    it("should reveal the server id in a tooltip when hovering the name", async () => {
-      const user = userEvent.setup();
-      renderWithProviders(<AccessGroupDetail accessGroupId={accessGroupId} onBack={mockOnBack} />);
-
-      await user.click(screen.getByRole("tab", { name: /MCP Servers/i }));
-      await user.hover(screen.getByText("GitHub MCP"));
-
-      expect(await screen.findByText("mcp-1")).toBeInTheDocument();
-    });
-
-    it("should fall back to the id when the server has no name", async () => {
-      const user = userEvent.setup();
-      renderWith({ access_mcp_servers: unnamed(["mcp-deleted"]) });
-
-      await user.click(screen.getByRole("tab", { name: /MCP Servers/i }));
-
-      expect(screen.getByText("mcp-deleted")).toBeInTheDocument();
-    });
-
-    it("should show empty state when none assigned", async () => {
-      const user = userEvent.setup();
-      renderWith({ access_mcp_servers: [] });
-
-      await user.click(screen.getByRole("tab", { name: /MCP Servers/i }));
-
-      expect(screen.getByText("No MCP servers assigned to this group")).toBeInTheDocument();
-    });
-  });
-
-  describe("Agents tab", () => {
-    it("should show agent names instead of ids", async () => {
-      const user = userEvent.setup();
-      renderWithProviders(<AccessGroupDetail accessGroupId={accessGroupId} onBack={mockOnBack} />);
-
-      await user.click(screen.getByRole("tab", { name: /Agents/i }));
-
-      expect(screen.getByText("Support Agent")).toBeInTheDocument();
-      expect(screen.queryByText("agent-1")).not.toBeInTheDocument();
-    });
-
-    it("should fall back to the id when the agent has no name", async () => {
-      const user = userEvent.setup();
-      renderWith({ access_agents: unnamed(["agent-deleted"]) });
-
-      await user.click(screen.getByRole("tab", { name: /Agents/i }));
-
-      expect(screen.getByText("agent-deleted")).toBeInTheDocument();
-    });
-
-    it("should show empty state when none assigned", async () => {
-      const user = userEvent.setup();
-      renderWith({ access_agents: [] });
-
-      await user.click(screen.getByRole("tab", { name: /Agents/i }));
-
-      expect(screen.getByText("No agents assigned to this group")).toBeInTheDocument();
-    });
-  });
-
   it("should show empty state in Models tab when no models assigned", () => {
     renderWith({ access_model_names: [] });
 
     expect(screen.getByText("No models assigned to this group")).toBeInTheDocument();
-  });
-
-  it("should count resources from the resolved lists in the tab badges", () => {
-    renderWith({
-      access_mcp_servers: unnamed(["m1", "m2", "m3"]),
-      access_agents: unnamed(["a1", "a2"]),
-    });
-
-    expect(screen.getByRole("tab", { name: /MCP Servers/i })).toHaveTextContent("3");
-    expect(screen.getByRole("tab", { name: /Agents/i })).toHaveTextContent("2");
   });
 
   it("should display created and last updated timestamps", () => {

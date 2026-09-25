@@ -273,26 +273,26 @@ const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, user
   return (
     <div className="w-full">
       <Tabs defaultValue="loadbalancing" className="h-[75vh] w-full">
-        <TabsList variant="line" className="mx-8 mt-4">
+        <TabsList variant="line">
           <TabsTrigger value="loadbalancing">{t("pages.routerSettings.loadbalancing")}</TabsTrigger>
           <TabsTrigger value="routing-groups">{t("pages.routerSettings.routingGroups")}</TabsTrigger>
           <TabsTrigger value="fallbacks">{t("pages.routerSettings.fallbacks")}</TabsTrigger>
           <TabsTrigger value="prompt-caching">{t("pages.routerSettings.promptCaching")}</TabsTrigger>
           <TabsTrigger value="general">{t("pages.routerSettings.general")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="loadbalancing" className="px-8 py-6" keepMounted>
+        <TabsContent value="loadbalancing" className="pt-6" keepMounted>
           <RouterSettings accessToken={accessToken} userRole={userRole} userID={userID} />
         </TabsContent>
-        <TabsContent value="routing-groups" className="px-8 py-6" keepMounted>
+        <TabsContent value="routing-groups" className="pt-6" keepMounted>
           <RoutingGroups />
         </TabsContent>
-        <TabsContent value="fallbacks" className="px-8 py-6" keepMounted>
+        <TabsContent value="fallbacks" className="pt-6" keepMounted>
           <Fallbacks accessToken={accessToken} userRole={userRole} userID={userID} />
         </TabsContent>
-        <TabsContent value="prompt-caching" className="px-8 py-6" keepMounted>
+        <TabsContent value="prompt-caching" className="pt-6" keepMounted>
           <PromptCachingPanel accessToken={accessToken} settings={generalSettings} onChange={handleInputChange} />
         </TabsContent>
-        <TabsContent value="general" className="px-8 py-6" keepMounted>
+        <TabsContent value="general" className="pt-6" keepMounted>
           <Card>
             <CardContent>
               <Table>

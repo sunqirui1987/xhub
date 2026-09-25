@@ -1,8 +1,14 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import moment from "moment";
+import "moment/locale/zh-cn";
 import { defaultLocale, LOCALE_COOKIE, parseLocale, translate, type Locale, type TFunction, type TranslateVars } from "./translate";
 import { getActiveLocale, setActiveLocale, t as runtimeT } from "./runtime";
+
+function applyMomentLocale(locale: Locale) {
+  moment.locale(locale === "zh-CN" ? "zh-cn" : "en");
+}
 
 type I18nContextValue = {
   locale: Locale;
@@ -46,6 +52,7 @@ export function I18nProvider({
   const [locale, setLocaleState] = useState<Locale>(() => {
     const next = initialLocale ?? readStoredLocale() ?? getActiveLocale() ?? defaultLocale;
     setActiveLocale(next);
+    applyMomentLocale(next);
     return next;
   });
 
@@ -60,12 +67,14 @@ export function I18nProvider({
 
   const setLocale = useCallback((next: Locale) => {
     setActiveLocale(next);
+    applyMomentLocale(next);
     persistLocale(next);
     setLocaleState(next);
   }, []);
 
   useEffect(() => {
     setActiveLocale(locale);
+    applyMomentLocale(locale);
   }, [locale]);
 
   const t = useCallback<TFunction>((key: string, vars?: TranslateVars) => translate(locale, key, vars), [locale]);

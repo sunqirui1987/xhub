@@ -458,33 +458,14 @@ describe("publicMCPHubColumns", () => {
 });
 
 describe("public hub MCP details modal", () => {
-  it("does not show the upstream url when a server is opened", async () => {
+  it("does not offer an MCP Hub tab", async () => {
     const networkingModule = await import("./networking");
     vi.mocked(networkingModule.mcpHubPublicServersCall).mockResolvedValue([mockMcpServer]);
 
     renderHub();
 
-    fireEvent.click(await screen.findByRole("tab", { name: /MCP Hub/i }));
-    fireEvent.click(await screen.findByRole("button", { name: "exa_test" }));
-
-    // "Server Overview" only exists inside the opened MCP details modal,
-    // so finding it proves the modal rendered and the url assertion is not vacuous.
-    await screen.findByText("Server Overview");
-    expect(screen.queryByText(PUBLIC_SERVER_URL)).not.toBeInTheDocument();
-  });
-
-  it("closes the server details modal from its close control", async () => {
-    const networkingModule = await import("./networking");
-    vi.mocked(networkingModule.mcpHubPublicServersCall).mockResolvedValue([mockMcpServer]);
-
-    renderHub();
-
-    fireEvent.click(await screen.findByRole("tab", { name: /MCP Hub/i }));
-    fireEvent.click(await screen.findByRole("button", { name: "exa_test" }));
-    await screen.findByText("Server Overview");
-
-    fireEvent.click(screen.getByRole("button", { name: /close/i }));
-
-    await waitFor(() => expect(screen.queryByText("Server Overview")).not.toBeInTheDocument());
+    expect(await screen.findByRole("tab", { name: /Model Hub/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /MCP Hub/i })).not.toBeInTheDocument();
+    expect(networkingModule.mcpHubPublicServersCall).not.toHaveBeenCalled();
   });
 });

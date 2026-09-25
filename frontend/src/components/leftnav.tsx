@@ -6,7 +6,6 @@ import { useLogout } from "@/app/(dashboard)/hooks/useLogout";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
   SidebarFooter,
@@ -32,7 +31,6 @@ import {
   HeartPulse,
   KeyRound,
   Network,
-  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   PiggyBank,
@@ -42,7 +40,6 @@ import {
   Shield,
   User,
   Users,
-  Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -140,7 +137,6 @@ const menuGroups: MenuGroup[] = [
         icon: <PiggyBank {...ICON} />,
         roles: [...all_admin_roles, ...internalUserRoles],
         label: "nav.costOptimization",
-        beta: true,
       },
       { key: "logs", page: "logs", label: "nav.logs", icon: <Activity {...ICON} /> },
       {
@@ -179,7 +175,6 @@ const menuGroups: MenuGroup[] = [
         icon: <Boxes {...ICON} />,
         roles: all_admin_roles,
       },
-      { key: "budgets", page: "budgets", label: "nav.budgets", icon: <Wallet {...ICON} />, roles: all_admin_roles },
     ],
   },
   {
@@ -208,20 +203,12 @@ const menuGroups: MenuGroup[] = [
             roles: all_admin_roles,
           },
           {
-            key: "admin-panel",
-            page: "admin-panel",
-            label: "nav.adminPanel",
-            icon: <SettingsIcon {...ICON} />,
-            roles: all_admin_roles,
-          },
-          {
             key: "cost-tracking",
             page: "cost-tracking",
             label: "nav.costTracking",
             icon: <BarChart3 {...ICON} />,
             roles: all_admin_roles,
           },
-          { key: "ui-theme", page: "ui-theme", label: "nav.uiTheme", icon: <Palette {...ICON} />, roles: all_admin_roles },
         ],
       },
     ],
@@ -463,8 +450,11 @@ const Sidebar_: React.FC<SidebarProps> = ({
   const darkLogoSrc = reachableDarkLogo || logoUrl;
 
   return (
-    <Sidebar collapsed={collapsed}>
-      <SidebarHeader className="h-14 border-b border-border group-data-[collapsed=true]/sidebar:h-auto">
+    <Sidebar
+      collapsed={collapsed}
+      className="border-r-0 bg-[#343a40] text-[#c2c7d0] shadow-[2px_0_8px_rgba(0,0,0,0.15)]"
+    >
+      <SidebarHeader className="h-16 justify-center border-b border-sidebar-border bg-sidebar px-4 group-data-[collapsed=true]/sidebar:h-auto">
         <div className="flex items-center justify-between gap-2 group-data-[collapsed=true]/sidebar:flex-col">
           <div className="flex min-w-0 items-center gap-2">
             <Link href={uiHref("")} className="flex min-w-0 items-center" aria-label={t("site.homeAria")}>
@@ -480,7 +470,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
                   />
                 </>
               ) : (
-                <span className="truncate text-base font-semibold tracking-tight text-sidebar-foreground group-data-[collapsed=true]/sidebar:hidden">
+                <span className="truncate text-lg font-semibold tracking-tight text-sidebar-foreground group-data-[collapsed=true]/sidebar:hidden">
                   {t("site.product")}
                 </span>
               )}
@@ -488,7 +478,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
             {version && (
               <Badge
                 variant="outline"
-                className="px-1.5 py-0 font-mono text-[10px] font-medium text-muted-foreground group-data-[collapsed=true]/sidebar:hidden"
+                className="border-sidebar-border px-1.5 py-0 font-mono text-[10px] font-medium text-sidebar-foreground group-data-[collapsed=true]/sidebar:hidden"
               >
                 v{version}
               </Badge>
@@ -500,7 +490,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
               size="icon-sm"
               onClick={onToggleCollapsed}
               aria-label={collapsed ? t("header.expandSidebar") : t("header.collapseSidebar")}
-              className="flex-none text-muted-foreground"
+              className="flex-none text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             >
               {collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
             </Button>
@@ -508,8 +498,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
         </div>
       </SidebarHeader>
 
-      <ScrollArea className="min-h-0 flex-1">
-        <nav className="flex flex-col gap-0.5 px-3 pb-3">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2 [scrollbar-color:#4b545c_transparent]">
           {visibleGroups.map((group, gi) => (
             <SidebarGroup key={group.groupLabel}>
               {gi > 0 && <SidebarSeparator className="hidden group-data-[collapsed=true]/sidebar:block" />}
@@ -517,8 +506,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
               <SidebarMenu>{group.items.map((item) => renderItem(item))}</SidebarMenu>
             </SidebarGroup>
           ))}
-        </nav>
-      </ScrollArea>
+      </nav>
 
       <SidebarFooter>
         {isAdminRole(userRole) && (

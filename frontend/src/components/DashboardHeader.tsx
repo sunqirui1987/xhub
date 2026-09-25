@@ -22,8 +22,8 @@ import { clearTokenCookies } from "@/utils/cookieUtils";
 import { clearStoredReturnUrl, getLoginUrl } from "@/utils/returnUrlUtils";
 import { usePathname } from "next/navigation";
 
-// Top bar for the dashboard shell. Sits only over the content column (the brand
-// lives in the sidebar header); mirrors the design's breadcrumb-left / tools-right layout.
+// Top bar over the content column. The product name lives in the sidebar, so this
+// bar starts with the view switcher and the current page.
 export function DashboardHeader() {
   const { title } = getBreadcrumb(usePathname(), t);
   const { isControlPlane, selectedWorker } = useWorker();
@@ -38,15 +38,18 @@ export function DashboardHeader() {
   };
 
   return (
-    <header className="flex h-14 flex-none items-center justify-between gap-4 border-b border-border bg-background px-4">
-      <Breadcrumb className="min-w-0">
-        <BreadcrumbList className="flex-nowrap">
+    <header
+      data-testid="admin-header"
+      className="flex h-16 flex-none items-center justify-between gap-6 border-b border-border bg-card px-5 shadow-sm"
+    >
+      <Breadcrumb className="min-w-0 flex-1">
+        <BreadcrumbList className="flex-nowrap items-center gap-3 text-base">
           <BreadcrumbItem className="flex-none">
             <ViewSwitcher />
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem className="min-w-0">
-            <BreadcrumbPage className="truncate">{title}</BreadcrumbPage>
+            <BreadcrumbPage className="truncate text-lg font-semibold text-foreground">{title}</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>

@@ -79,8 +79,6 @@ describe("AccessGroupEditModal submit payload", () => {
       access_group_name: "Engineering",
       description: "Engineers",
       access_model_names: undefined,
-      access_mcp_server_ids: undefined,
-      access_agent_ids: undefined,
     });
   });
 
@@ -89,8 +87,7 @@ describe("AccessGroupEditModal submit payload", () => {
     renderModal();
     await screen.findByDisplayValue("Engineering");
 
-    await user.click(screen.getByRole("tab", { name: /MCP Servers/ }));
-    await user.click(screen.getByRole("tab", { name: /Agents/ }));
+    await user.click(screen.getByRole("tab", { name: /Models/ }));
     await user.click(screen.getByRole("tab", { name: /General Info/ }));
     await save(user);
 
@@ -98,9 +95,7 @@ describe("AccessGroupEditModal submit payload", () => {
     expect(variables().params).toStrictEqual({
       access_group_name: "Engineering",
       description: "Engineers",
-      access_model_names: undefined,
-      access_mcp_server_ids: ["srv-1"],
-      access_agent_ids: ["agent-1"],
+      access_model_names: [],
     });
   });
 

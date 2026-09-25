@@ -1,3 +1,4 @@
+// 原样转发的路径如何拼到上游。不改写已经是厂商协议的正文。
 package llm
 
 import (
@@ -47,6 +48,7 @@ func PassthroughSubpath(base, subpath string, include bool) string {
 	return base + safe
 }
 
+// 拼接上游基址和端点路径。避免出现双斜杠或丢掉基址上的前缀。
 func joinBaseAndEndpoint(basePath, endpointPath string) string {
 	trailing := strings.HasSuffix(endpointPath, "/")
 	if basePath == "" || basePath == "/" {

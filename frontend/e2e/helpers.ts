@@ -80,10 +80,7 @@ export const DASHBOARD_PAGES = [
   "/users",
   "/organizations",
   "/access-groups",
-  "/budgets",
   "/router-settings",
   "/logging-and-alerts",
-  "/admin-panel",
   "/cost-tracking",
-  "/ui-theme",
 ];

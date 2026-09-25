@@ -119,6 +119,21 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument();
     });
+
+    const stage = screen.getByTestId("login-stage");
+    const logo = screen.getByTestId("login-logo");
+    const card = screen.getByTestId("login-card");
+    expect(stage.className).toMatch(/h-dvh/);
+    expect(stage.className).toMatch(/overflow-hidden/);
+    expect(stage).toContainElement(card);
+    expect(logo.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("img", { name: "XHub" })).toBeInTheDocument();
+    expect(screen.getByText("Sign in to start your session")).toBeInTheDocument();
+    expect(screen.getByLabelText("Username")).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Login", exact: true });
+    expect(submit).toHaveClass("w-full");
+    expect(card).toContainElement(submit);
   });
 
   it("renders Simplified Chinese chrome when locale is zh-CN", async () => {

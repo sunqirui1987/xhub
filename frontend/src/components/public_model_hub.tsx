@@ -33,7 +33,6 @@ import {
   getProxyBaseUrl,
   getPublicModelHubInfo,
   getUiConfig,
-  mcpHubPublicServersCall,
 } from "./networking";
 import { Plugin } from "./claude_code_plugins/types";
 import SkillHubDashboard from "./AIHub/SkillHubDashboard";
@@ -118,18 +117,6 @@ const PublicModelHub: React.FC<PublicModelHubProps> = ({ accessToken, isEmbedded
         }
       };
 
-      const fetchMcpData = async () => {
-        try {
-          setMcpLoading(true);
-          const _mcpHubData = await mcpHubPublicServersCall();
-          setMcpHubData(Array.isArray(_mcpHubData) ? _mcpHubData : []);
-        } catch (error) {
-          console.error("There was an error fetching the public MCP server data", error);
-        } finally {
-          setMcpLoading(false);
-        }
-      };
-
       const fetchPublicModelHubInfo = async () => {
         const publicModelHubInfo = await getPublicModelHubInfo();
         setPageTitle(scrubBrand(publicModelHubInfo.docs_title || "XHub"));
@@ -155,7 +142,6 @@ const PublicModelHub: React.FC<PublicModelHubProps> = ({ accessToken, isEmbedded
       fetchPublicModelHubInfo();
 
       fetchAgentData();
-      fetchMcpData();
       fetchSkillData();
     };
 
@@ -378,7 +364,6 @@ const PublicModelHub: React.FC<PublicModelHubProps> = ({ accessToken, isEmbedded
                 <TabsList>
                   <TabsTrigger value="models">{t("Model Hub")}</TabsTrigger>
                   {hasAgents && <TabsTrigger value="agents">{t("Agent Hub")}</TabsTrigger>}
-                  {hasMcpServers && <TabsTrigger value="mcp">{t("MCP Hub")}</TabsTrigger>}
                   <TabsTrigger value="skills">{t("Skill Hub")}</TabsTrigger>
                 </TabsList>
 
@@ -574,72 +559,6 @@ const PublicModelHub: React.FC<PublicModelHubProps> = ({ accessToken, isEmbedded
                     <div className="mt-8 text-center">
                       <p className="text-sm text-muted-foreground">
                         {t("Showing {value0} of {value1} agents", { value0: (filteredAgentData.length), value1: (agentHubData?.length || 0) })}</p>
-                    </div>
-                  </TabsContent>
-                )}
-
-                {/* MCP Servers Tab */}
-                {hasMcpServers && (
-                  <TabsContent value="mcp">
-                    <div className="flex justify-between items-center mb-8">
-                      <h2 className="text-2xl font-semibold text-foreground">{t("Available MCP Servers")}</h2>
-                    </div>
-
-                    {/* Filters */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 p-6 bg-muted rounded-lg border border-border">
-                      <div>
-                        <div className="flex items-center space-x-2 mb-3">
-                          <p className="text-sm font-medium text-foreground">{t("Search MCP Servers:")}</p>
-                          <Tooltip>
-                            <TooltipTrigger render={<Info className="w-4 h-4 text-muted-foreground cursor-help" />} />
-                            <TooltipContent side="top">{t("Search MCP servers by name or description")}</TooltipContent>
-                          </Tooltip>
-                        </div>
-                        <div className="relative">
-                          <SearchIcon className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 transform -translate-y-1/2" />
-                          <input
-                            type="text"
-                            placeholder={t("Search MCP server names or descriptions...")}
-                            value={mcpSearchTerm}
-                            onChange={(e) => setMcpSearchTerm(e.target.value)}
-                            className="border border-border rounded-lg pl-10 pr-4 py-2 w-full text-sm focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-transparent bg-card"
-                          />
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium mb-3 text-foreground">{t("Transport:")}</p>
-                        <MultiSelect
-                          options={mcpTransportOptions}
-                          value={selectedMcpTransports}
-                          onValueChange={setSelectedMcpTransports}
-                          placeholder={t("Select transport types")}
-                          className="w-full"
-                        />
-                      </div>
-                    </div>
-
-                    <DataTable
-                      data={filteredMcpData}
-                      paginationMode="client"
-                      columns={mcpColumns}
-                      getRowId={(server, index) => server.server_id || String(index)}
-                      sortingMode="client"
-                      sorting={mcpSorting}
-                      onSortingChange={setMcpSorting}
-                      isLoading={mcpLoading}
-                      loadingMessage={t("Loading MCP servers…")}
-                      noDataMessage={
-                        <PublicHubEmptyState
-                          title={t("No matching MCP servers")}
-                          body="Adjust the search or transport filter to see more servers."
-                        />
-                      }
-                      size="compact"
-                    />
-
-                    <div className="mt-8 text-center">
-                      <p className="text-sm text-muted-foreground">
-                        {t("Showing {value0} of {value1} MCP servers", { value0: (filteredMcpData.length), value1: (mcpHubData?.length || 0) })}</p>
                     </div>
                   </TabsContent>
                 )}

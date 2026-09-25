@@ -34,7 +34,7 @@ const CostOptimizationView: React.FC<CostOptimizationViewProps> = ({ accessToken
   };
 
   return (
-    <main className="w-full p-8">
+    <main className="w-full">
       <Tabs defaultValue="usage" onValueChange={handleTabChange} className="gap-6">
         <PageHeader
           icon={<PiggyBank />}

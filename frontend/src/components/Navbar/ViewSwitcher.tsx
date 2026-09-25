@@ -93,15 +93,13 @@ export default function ViewSwitcher() {
         render={
           <button
             type="button"
-            className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-background pl-1.5 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+            className="flex h-10 max-w-[240px] items-center gap-2 rounded-sm px-2 text-base font-medium text-foreground transition-colors hover:bg-accent"
           />
         }
       >
-        <span className="flex size-5 flex-none items-center justify-center rounded bg-muted text-muted-foreground">
-          <LayoutGrid className="size-[13px]" />
-        </span>
+        <LayoutGrid className="size-4 flex-none text-primary" />
         <span className="truncate">{activeLabel}</span>
-        <ChevronsUpDown className="size-3.5 flex-none text-muted-foreground" />
+        <ChevronsUpDown className="size-4 flex-none text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-auto">
         {items.map((item) => (

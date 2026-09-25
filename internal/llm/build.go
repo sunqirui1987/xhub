@@ -1,3 +1,4 @@
+// 把一次调用编成上游 URL、请求头和正文。不发 HTTP，也不读数据库。
 package llm
 
 import (
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sunqirui1987/xhub/internal/llm/protocol"
+
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"google.golang.org/genai"
@@ -16,7 +19,7 @@ import (
 // Request 是一次上游调用要决定的全部输入。
 //
 // Op 与数据面的操作名一致（chat、embeddings、images…）。
-// Provider 必须是 ProtocolGroup 里的 136 个包名之一。
+// Provider 必须是 protocol.ProtocolGroup 里的 136 个包名之一。不在表里的名字由调用方跳过。
 // APIBase 与 APIKey 已经由凭证层填好，本函数不把空地址改成官方域名。
 type Request struct {
 	Op             string
@@ -50,7 +53,7 @@ func Build(ctx context.Context, in Request) (Upstream, error) {
 		ctx = context.Background()
 	}
 	provider := strings.ToLower(strings.TrimSpace(in.Provider))
-	group, ok := ProtocolGroup(provider)
+	group, ok := protocol.ProtocolGroup(provider)
 	if !ok {
 		return Upstream{}, errUnknownProvider
 	}
@@ -102,6 +105,7 @@ var (
 
 type errString string
 
+// 编码失败时的错误文本。未知供应商和已废弃供应商用固定句子。
 func (e errString) Error() string { return string(e) }
 
 // ChatProbeUsesFixture 表示标准测试上游能回答这次聊天。
@@ -109,7 +113,7 @@ func (e errString) Error() string { return string(e) }
 // 这些供应商的聊天 URL 以 /chat/completions、/v1/messages 或 :generateContent 结尾。
 // 其余协议组必须看 Build 的 URL 和正文，不能靠同一条 OpenAI 路径判成功。
 func ChatProbeUsesFixture(provider string) bool {
-	group, ok := ProtocolGroup(strings.ToLower(strings.TrimSpace(provider)))
+	group, ok := protocol.ProtocolGroup(strings.ToLower(strings.TrimSpace(provider)))
 	if !ok {
 		return false
 	}
@@ -121,6 +125,7 @@ func ChatProbeUsesFixture(provider string) bool {
 	}
 }
 
+// 按 OpenAI 兼容协议组出上游 URL、请求头和正文。大多数供应商走这里，而不是各自复制一份。
 func buildOpenAIWire(ctx context.Context, in Request) (Upstream, error) {
 	op := in.Op
 	if op == "" || op == OpChat || op == "gemini" {
@@ -133,6 +138,7 @@ func buildOpenAIWire(ctx context.Context, in Request) (Upstream, error) {
 	return legacy(in)
 }
 
+// 按 Azure 部署路径组请求。模型名放在 URL 的 deployment 段，不放在正文的 model 字段里。
 func buildAzure(ctx context.Context, in Request) (Upstream, error) {
 	// Azure OpenAI 的路径把模型放进部署名，鉴权是 api-key，不是 Bearer 打到 /chat/completions。
 	body, err := openAIChatBody(ctx, in.APIBase, in.APIKey, in.Model, in.Body)
@@ -150,6 +156,7 @@ func buildAzure(ctx context.Context, in Request) (Upstream, error) {
 	return Upstream{URL: u, Header: h, Body: body}, nil
 }
 
+// 按 Azure AI 的地址规则组请求。密钥来源和 Azure OpenAI 不同。
 func buildAzureAI(ctx context.Context, in Request) (Upstream, error) {
 	// Foundry 不是公有 Azure 部署路径。聊天走 /openai/v1/chat/completions，并带 azure-ai 头。
 	body, err := openAIChatBody(ctx, in.APIBase, in.APIKey, in.Model, in.Body)
@@ -163,6 +170,7 @@ func buildAzureAI(ctx context.Context, in Request) (Upstream, error) {
 	return Upstream{URL: base + "/openai/v1/chat/completions", Header: h, Body: body}, nil
 }
 
+// 把聊天请求改写成 Anthropic Messages API 的正文和请求头。
 func buildAnthropic(in Request) (Upstream, error) {
 	// Messages API：路径 {api_base}/v1/messages。
 	// LiteLLM 把字符串 content 收成 [{type:text,text}]，头是 x-api-key 与 anthropic-version: 2023-06-01。
@@ -186,6 +194,7 @@ func RealtimeClientSecretsURL(apiBase string) string {
 	return base + "/v1/realtime/client_secrets"
 }
 
+// 按 Cohere 的协议组请求。聊天和补全的路径不同。
 func buildCohere(in Request) (Upstream, error) {
 	if in.Op == OpRerank {
 		return buildCohereRerank(in)
@@ -249,6 +258,7 @@ func buildCohereRerank(in Request) (Upstream, error) {
 	return Upstream{URL: base, Header: Headers(in.APIKey), Body: raw}, nil
 }
 
+// 从 OpenAI 形状的正文抽出 Anthropic 需要的 messages 和 system。
 func anthropicBody(body map[string]any) map[string]any {
 	msgs, ok := body["messages"].([]any)
 	if !ok {
@@ -271,6 +281,7 @@ func anthropicBody(body map[string]any) map[string]any {
 	return body
 }
 
+// 按 Bedrock 的模型路径组请求。区域和密钥不在这个函数里读取环境变量。
 func buildBedrock(in Request) (Upstream, error) {
 	// Bedrock InvokeModel 用模型 ID 放进路径，并用 AWS SigV4 头，而不是 Bearer + /chat/completions。
 	// 这里组装签名头的凭证范围；不连接 AWS。
@@ -291,6 +302,7 @@ func buildBedrock(in Request) (Upstream, error) {
 	return Upstream{URL: base + "/model/" + in.Model + "/invoke", Header: h, Body: payload}, nil
 }
 
+// 组搜索类上游请求。正文仍由调用方传入，这里只决定地址和头。
 func buildSearch(in Request) (Upstream, error) {
 	// 搜索供应商收 query，不收 chat messages。
 	q := str(in.Body["query"])
@@ -308,6 +320,7 @@ func buildSearch(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组图像生成或编辑的上游地址。
 func buildImageHost(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{
 		"model":  in.Model,
@@ -323,6 +336,7 @@ func buildImageHost(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组语音合成或转写的上游地址。
 func buildAudioHost(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"model": in.Model, "text": firstText(in.Body)})
 	if err != nil {
@@ -335,6 +349,7 @@ func buildAudioHost(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组向量嵌入的上游地址。
 func buildEmbedHost(in Request) (Upstream, error) {
 	// DashScope / Jina / Voyage 的嵌入路径不是 OpenAI /embeddings。
 	payload, err := json.Marshal(map[string]any{"model": in.Model, "input": in.Body["input"]})
@@ -348,6 +363,7 @@ func buildEmbedHost(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组向量库相关调用的上游地址。
 func buildVector(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"provider": in.Provider, "query": firstText(in.Body)})
 	if err != nil {
@@ -360,6 +376,7 @@ func buildVector(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组沙箱或代码执行类调用的上游地址。
 func buildSandbox(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"code": firstText(in.Body)})
 	if err != nil {
@@ -372,6 +389,7 @@ func buildSandbox(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组 OCR 调用的上游地址。
 func buildOCR(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"document": in.Body["document"], "model": in.Model})
 	if err != nil {
@@ -384,6 +402,7 @@ func buildOCR(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 组本进程自定义协议的上游请求。未知字段不会在这里丢弃。
 func buildOwn(in Request) (Upstream, error) {
 	// 这些包的主操作不是 OpenAI Chat。ollama 用 /api/chat，其余用 /invoke。
 	path := "/invoke"
@@ -400,11 +419,13 @@ func buildOwn(in Request) (Upstream, error) {
 	return Upstream{URL: strings.TrimRight(in.APIBase, "/") + path, Header: Headers(in.APIKey), Body: payload}, nil
 }
 
+// 几个协议组共用的地址拼接。具体协议差异在各自的 build 函数里。
 func buildShared(in Request) (Upstream, error) {
 	// base_llm / custom_httpx / pass_through 不是可调用的供应商 URL。
 	return Upstream{}, errUnknownProvider
 }
 
+// 旧路径的编码入口。新调用不应再依赖这里的字段名。
 func legacy(in Request) (Upstream, error) {
 	raw, err := Encode(in.Op, in.Provider, cloneMap(in.Body), in.Model)
 	if err != nil {
@@ -417,6 +438,7 @@ func legacy(in Request) (Upstream, error) {
 	}, nil
 }
 
+// 用官方 SDK 组一版 OpenAI 聊天请求，供测试对比 URL 和正文。不真正拨号。
 func captureOpenAIChat(ctx context.Context, base, apiKey, model string, body map[string]any) (Upstream, error) {
 	raw, err := openAIChatBody(ctx, base, apiKey, model, body)
 	if err != nil {
@@ -440,6 +462,7 @@ func captureOpenAIChat(ctx context.Context, base, apiKey, model string, body map
 	return Upstream{URL: cap.req.URL.String(), Header: cap.req.Header.Clone(), Body: raw}, nil
 }
 
+// 把聊天正文编码成 OpenAI SDK 会发出的 JSON。
 func openAIChatBody(ctx context.Context, base, apiKey, model string, body map[string]any) ([]byte, error) {
 	cap := &capture{}
 	client := openai.NewClient(
@@ -478,6 +501,7 @@ func openAIChatBody(ctx context.Context, base, apiKey, model string, body map[st
 	return json.Marshal(doc)
 }
 
+// 把 map 正文转成 SDK 的聊天参数。无法表示的字段不会偷偷改成零值成功。
 func chatParams(model string, body map[string]any) openai.ChatCompletionNewParams {
 	var msgs []openai.ChatCompletionMessageParamUnion
 	if raw, ok := body["messages"].([]any); ok {
@@ -507,6 +531,7 @@ func chatParams(model string, body map[string]any) openai.ChatCompletionNewParam
 	}
 }
 
+// 组 Gemini 或 Vertex generateContent 请求。
 func buildGemini(ctx context.Context, in Request) (Upstream, error) {
 	cap := &capture{}
 	cfg := &genai.ClientConfig{
@@ -563,6 +588,7 @@ func buildGemini(ctx context.Context, in Request) (Upstream, error) {
 	return up, nil
 }
 
+// 把 Gemini 响应收成 LiteLLM 习惯的 JSON 形状。
 func geminiLiteLLMBody(raw []byte) []byte {
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
@@ -583,6 +609,7 @@ func geminiLiteLLMBody(raw []byte) []byte {
 	return out
 }
 
+// 把数字收成 int32。类型不对时 ok 为 false，调用方不要当成 0。
 func asInt32(v any) (int32, bool) {
 	switch n := v.(type) {
 	case int:
@@ -602,6 +629,7 @@ func asInt32(v any) (int32, bool) {
 	}
 }
 
+// 把消息列表转成 Gemini 的 Content。空内容时仍给出一条用户消息，避免上游拒收空 contents。
 func geminiContents(body map[string]any) []*genai.Content {
 	if raw, ok := body["contents"].([]any); ok && len(raw) > 0 {
 		var out []*genai.Content
@@ -652,6 +680,7 @@ type capture struct {
 	body []byte
 }
 
+// 测试用的 RoundTripper，记下请求并返回固定的成功 JSON。
 func (c *capture) RoundTrip(r *http.Request) (*http.Response, error) {
 	b, _ := io.ReadAll(r.Body)
 	c.body = b
@@ -666,6 +695,7 @@ func (c *capture) RoundTrip(r *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+// 浅拷贝 map。调用方随后改副本不会改到原表。
 func cloneMap(in map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range in {
@@ -674,6 +704,7 @@ func cloneMap(in map[string]any) map[string]any {
 	return out
 }
 
+// 从正文里取出第一段文本，供没有 messages 的供应商使用。
 func firstText(body map[string]any) string {
 	if s := str(body["prompt"]); s != "" {
 		return s
@@ -692,6 +723,7 @@ func firstText(body map[string]any) string {
 	return ""
 }
 
+// 把值当成字符串。不是字符串时返回空串，不 panic。
 func str(v any) string {
 	s, _ := v.(string)
 	return s

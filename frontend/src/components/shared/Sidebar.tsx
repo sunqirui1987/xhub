@@ -84,7 +84,7 @@ const SidebarGroupLabel = React.forwardRef<HTMLDivElement, React.ComponentPropsW
       ref={ref}
       data-slot="sidebar-group-label"
       className={cn(
-        "px-2 pt-3 pb-1.5 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase group-data-[collapsed=true]/sidebar:hidden",
+        "px-3 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-sidebar-foreground/60 uppercase group-data-[collapsed=true]/sidebar:hidden",
         className,
       )}
       {...props}
@@ -139,8 +139,8 @@ SidebarMenuBadge.displayName = "SidebarMenuBadge";
 
 const sidebarMenuButtonVariants = cva(
   [
-    "group/menu-btn relative flex w-full items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-[13px] font-medium no-underline",
-    "text-sidebar-foreground/70 outline-none transition-colors",
+    "group/menu-btn relative flex w-full items-center gap-2.5 overflow-hidden rounded-sm px-3 text-left text-sm font-medium no-underline",
+    "text-sidebar-foreground outline-none transition-colors",
     "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
     "focus-visible:ring-2 focus-visible:ring-sidebar-ring",
     "disabled:pointer-events-none disabled:opacity-50",
@@ -150,12 +150,12 @@ const sidebarMenuButtonVariants = cva(
   {
     variants: {
       isActive: {
-        true: "bg-sidebar-accent text-sidebar-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-sidebar-primary group-data-[collapsed=true]/sidebar:before:hidden",
+        true: "bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_3px_0_0_var(--sidebar-primary)] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         false: "",
       },
       size: {
-        default: "h-[34px]",
-        sub: "h-[34px]",
+        default: "h-10",
+        sub: "h-9",
       },
     },
     defaultVariants: { isActive: false, size: "default" },

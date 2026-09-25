@@ -98,7 +98,7 @@ const isValidReloadInterval = (value: number) => {
 };
 
 const formatDateTime = (dateTimeString: string | null) => {
-  if (!dateTimeString) return "Never";
+  if (!dateTimeString) return t("Never");
   const parsed = new Date(dateTimeString);
   return Number.isNaN(parsed.getTime()) ? dateTimeString : parsed.toLocaleString();
 };
@@ -289,9 +289,9 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
   };
 
   const getStatusText = () => {
-    if (!reloadStatus?.scheduled) return "Not scheduled";
-    if (!reloadStatus.last_run) return "Ready";
-    return "Active";
+    if (!reloadStatus?.scheduled) return t("Not scheduled");
+    if (!reloadStatus.last_run) return t("Ready");
+    return t("Active");
   };
 
   return (

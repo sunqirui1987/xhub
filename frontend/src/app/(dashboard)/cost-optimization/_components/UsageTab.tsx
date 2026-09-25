@@ -85,10 +85,10 @@ const UsageTab: React.FC<UsageTabProps> = ({ accessToken, activity }) => {
     return withStartAnchor(toCumulative(perInterval), startLabel);
   }, [accumulation, perInterval, startTime]);
 
-  const intervalLabel = "Per day";
+  const intervalLabel = t("Per day");
   const rangeLabel = formatRangeLabel(startTime ?? undefined, endTime ?? undefined);
   const savingsSubtitle = [
-    accumulation === "cumulative" ? "Running total saved" : `Saved ${intervalLabel.toLowerCase()}`,
+    accumulation === "cumulative" ? t("Running total saved") : t("Saved per day"),
     rangeLabel && `${rangeLabel} (UTC)`,
   ]
     .filter(Boolean)

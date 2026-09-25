@@ -560,7 +560,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
   ];
 
   return (
-    <main className={selectedTeamId ? "px-12 py-6" : "flex h-full flex-col p-8"}>
+    <main className="flex h-full min-h-0 flex-col">
       {selectedTeamId ? (
         <TeamInfoView
           teamId={selectedTeamId}

@@ -18,7 +18,6 @@ import { Card as ShadcnCard, CardContent, CardHeader, CardTitle } from "@/compon
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { useAgents } from "@/app/(dashboard)/hooks/agents/useAgents";
 import { useCustomers } from "@/app/(dashboard)/hooks/customers/useCustomers";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import useIsOrgAdmin from "@/app/(dashboard)/hooks/useIsOrgAdmin";
@@ -43,7 +42,6 @@ import {
 import AdvancedDatePicker from "@/components/shared/advanced_date_picker";
 import { ChartLoader } from "@/components/shared/chart_loader";
 import { Tag } from "@/components/tag_management/types";
-import UserAgentActivity from "@/components/user_agent_activity";
 import ViewUserSpend from "@/components/view_user_spend";
 import { usePaginatedDailyActivity } from "../hooks/usePaginatedDailyActivity";
 import { keyActivityLabel } from "@/components/UsagePage/keyActivityLabel";
@@ -103,13 +101,11 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   // No [] default: an unresolved query must stay undefined so the customer
   // filter reads as loading rather than as a range with no customers.
   const { data: customers } = useCustomers();
-  const { data: agentsResponse } = useAgents();
   const { data: currentUser } = useCurrentUser();
   const isAdmin = all_admin_roles.includes(userRole || "");
   const canViewTagUsage = isAdmin || internalUserRoles.includes(userRole || "");
   const isOrgAdmin = useIsOrgAdmin();
   const canViewOrganizationUsage = hasCapability(userRole, "viewOrganizationUsage", isOrgAdmin);
-  const canViewAgentUsage = hasCapability(userRole, "viewAgentUsage");
 
   // For admins: null means global view (all users), a string means filter by that user
   // For non-admins: always set to their own user ID
@@ -467,13 +463,9 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
     [userSpendData, modelViewType, teams],
   );
   const keyMetrics = useMemo(() => processActivityData(userSpendData, "api_keys", teams), [userSpendData, teams]);
-  const mcpServerMetrics = useMemo(
-    () => processActivityData(userSpendData, "mcp_servers", teams),
-    [userSpendData, teams],
-  );
 
   return (
-    <div style={{ width: "100%" }} className="p-8 relative">
+    <div style={{ width: "100%" }} className="relative">
       {/* Global Date Picker and Tabs - Single Row */}
       <div className="flex items-end justify-between gap-6 mb-6">
         <div className="flex-1">
@@ -513,9 +505,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                     </TabsTrigger>
                     <TabsTrigger value="keys" className="flex-none px-3">
                       {t("pages.usage.keyActivity")}
-                    </TabsTrigger>
-                    <TabsTrigger value="mcp" className="flex-none px-3">
-                      {t("pages.usage.mcpActivity")}
                     </TabsTrigger>
                     <TabsTrigger value="endpoints" className="flex-none px-3">
                       {t("pages.usage.endpointActivity")}
@@ -886,9 +875,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                 <TabsContent value="keys" keepMounted>
                   <KeyActivityPanel keyMetrics={keyMetrics} />
                 </TabsContent>
-                <TabsContent value="mcp" keepMounted>
-                  <ActivityMetrics modelMetrics={mcpServerMetrics} />
-                </TabsContent>
                 <TabsContent value="endpoints" keepMounted>
                   <EndpointUsage userSpendData={userSpendData} />
                 </TabsContent>
@@ -984,19 +970,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
               />
             </>
           )}
-          {usageView === "agent" && canViewAgentUsage && (
-            <EntityUsage
-              accessToken={accessToken}
-              entityType="agent"
-              userID={userID}
-              userRole={userRole}
-              entityList={
-                agentsResponse?.agents?.map((agent) => ({ label: agent.agent_name, value: agent.agent_id })) || null
-              }
-              premiumUser={premiumUser}
-              dateValue={dateValue}
-            />
-          )}
           {/* User Usage Panel */}
           {usageView === "user" && (
             <EntityUsage
@@ -1010,9 +983,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
             />
           )}
           {/* User Agent Activity Panel */}
-          {usageView === "user-agent-activity" && (
-            <UserAgentActivity accessToken={accessToken} userRole={userRole} dateValue={dateValue} />
-          )}
         </div>
       </div>
 

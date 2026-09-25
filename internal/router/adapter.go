@@ -1,3 +1,4 @@
+// 选中部署之后，把操作和供应商交给 llm 编码或解码。本文件不挑选部署。
 package router
 
 import "github.com/sunqirui1987/xhub/internal/llm"

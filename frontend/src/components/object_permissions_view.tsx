@@ -1,6 +1,5 @@
 import React from "react";
 import VectorStorePermissions from "./permissions/VectorStorePermissions";
-import MCPServerPermissions from "./permissions/MCPServerPermissions";
 import AgentPermissions from "./permissions/AgentPermissions";
 import type { ObjectPermission } from "./object_permission_types";
 import type { InheritedGrant } from "./permissions/inheritedGrants";
@@ -24,10 +23,6 @@ export function ObjectPermissionsView({
   accessToken,
 }: ObjectPermissionsViewProps) {
   const vectorStores = objectPermission?.vector_stores || [];
-  const mcpServers = objectPermission?.mcp_servers || [];
-  const mcpAccessGroups = objectPermission?.mcp_access_groups || [];
-  const mcpToolPermissions = objectPermission?.mcp_tool_permissions || {};
-  const mcpToolsets = objectPermission?.mcp_toolsets || [];
   const agents = objectPermission?.agents || [];
   const agentAccessGroups = objectPermission?.agent_access_groups || [];
   const searchTools = objectPermission?.search_tools || [];
@@ -36,14 +31,6 @@ export function ObjectPermissionsView({
   const content = (
     <div className={variant === "card" ? "grid grid-cols-1 @xl:grid-cols-2 @4xl:grid-cols-3 gap-6" : "space-y-4"}>
       <VectorStorePermissions vectorStores={vectorStores} accessToken={accessToken} />
-      <MCPServerPermissions
-        mcpServers={mcpServers}
-        mcpAccessGroups={mcpAccessGroups}
-        mcpToolPermissions={mcpToolPermissions}
-        mcpToolsets={mcpToolsets}
-        inheritedMcpServers={inheritedMcpServers}
-        accessToken={accessToken}
-      />
       <AgentPermissions
         agents={agents}
         agentAccessGroups={agentAccessGroups}
@@ -79,7 +66,6 @@ export function ObjectPermissionsView({
         <div className="flex items-center gap-2 mb-6">
           <div>
             <p className="font-semibold text-foreground">{t("Object Permissions")}</p>
-            <p className="text-xs text-muted-foreground">{t("Access control for Vector Stores and MCP Servers")}</p>
           </div>
         </div>
         {content}

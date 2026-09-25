@@ -97,7 +97,7 @@ export function AgentControlPlaneView() {
   );
 }
 
-function DashboardShell({ children }: { children: React.ReactNode }) {
+export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { mode } = usePluginMode();
@@ -123,19 +123,19 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Standard app shell: the viewport is fixed height and never scrolls. The
-  // sidebar owns its own scroll and the content column scrolls independently,
-  // so the page can't be dragged past the end of the nav.
+  // Admin shell: a full-height sidebar beside a column of navbar and padded content. Both follow the active theme.
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div data-testid="admin-shell" className="flex h-screen overflow-hidden bg-canvas">
       <SidebarProvider sidebarCollapsed={sidebarCollapsed} onToggleCollapsed={() => setSidebarCollapsed((v) => !v)} />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DashboardHeader />
         <DebugWarningBanner accessToken={accessToken} />
         <NoRedisWarningBanner accessToken={accessToken} />
         <EnvCredentialLoginWarningBanner accessToken={accessToken} />
         <UserBanner accessToken={accessToken} />
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        <main data-testid="admin-content" className="min-w-0 flex-1 overflow-y-auto bg-canvas p-6">
+          {children}
+        </main>
       </div>
     </div>
   );

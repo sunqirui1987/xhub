@@ -1,3 +1,4 @@
+// Gemini 与 Vertex generateContent 的请求和响应改写。
 package llm
 
 import (
@@ -110,8 +111,10 @@ type stringsBuilder struct {
 	buf []byte
 }
 
+// 把字符串追加到 Gemini 请求的缓冲区。
 func (b *stringsBuilder) WriteString(s string) {
 	b.buf = append(b.buf, s...)
 }
 
+// 返回已经拼好的 Gemini 请求文本。
 func (b *stringsBuilder) String() string { return string(b.buf) }

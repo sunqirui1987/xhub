@@ -148,8 +148,8 @@ describe("AccessGroupsPage", () => {
     // ag-1 has 2 models, 1 mcp server, 1 agent.
     const adminRow = screen.getByText("ag-1").closest("tr") as HTMLElement;
     expect(within(adminRow).getByTitle("2 Models")).toHaveTextContent("2");
-    expect(within(adminRow).getByTitle("1 MCP Servers")).toHaveTextContent("1");
-    expect(within(adminRow).getByTitle("1 Agents")).toHaveTextContent("1");
+    expect(within(adminRow).queryByTitle("1 MCP Servers")).not.toBeInTheDocument();
+    expect(within(adminRow).queryByTitle("1 Agents")).not.toBeInTheDocument();
   });
 
   it("shows the expected column headers", () => {

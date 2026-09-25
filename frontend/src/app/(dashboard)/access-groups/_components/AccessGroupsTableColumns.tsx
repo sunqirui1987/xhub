@@ -1,7 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { Bot, Layers, MoreHorizontal, Server, Trash2 } from "lucide-react";
+import { Layers, MoreHorizontal, Trash2 } from "lucide-react";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { DateCell, IdentityCell } from "@/components/shared/table_cells";
@@ -22,22 +22,12 @@ interface ResourceTone {
   className: string;
 }
 
-const RESOURCE_TONES: Record<"models" | "mcpServers" | "agents", ResourceTone> = {
+const RESOURCE_TONES: Record<"models", ResourceTone> = {
   models: { icon: Layers, className: "bg-info/10 text-info ring-blue-600/20" },
-  mcpServers: { icon: Server, className: "bg-info/10 text-info ring-cyan-600/20" },
-  agents: {
-    icon: Bot,
-    className:
-      "bg-purple-50 text-purple-700 ring-purple-600/20 dark:bg-purple-950 dark:text-purple-300 dark:ring-purple-400/30",
-  },
 };
 
 function ResourcesCell({ group }: { group: AccessGroup }) {
-  const items = [
-    { key: "models" as const, label: t("common.models"), count: group.modelIds.length },
-    { key: "mcpServers" as const, label: t("common.mcpServers"), count: group.mcpServerIds.length },
-    { key: "agents" as const, label: t("common.agents"), count: group.agentIds.length },
-  ];
+  const items = [{ key: "models" as const, label: t("common.models"), count: group.modelIds.length }];
 
   return (
     <div className="flex items-center gap-1.5">

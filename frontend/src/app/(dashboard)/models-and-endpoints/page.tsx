@@ -158,8 +158,8 @@ export default function ModelsAndEndpointsPage() {
   }
 
   return (
-    <div className="mx-4">
-      <div className="mt-2 flex w-full flex-col gap-2 p-8">
+    <div className="w-full">
+      <div className="flex w-full flex-col gap-2">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">{t("Model Management")}</h2>

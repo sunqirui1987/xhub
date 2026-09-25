@@ -519,8 +519,8 @@ const Settings: React.FC<SettingsPageProps> = ({ accessToken, userRole, userID, 
   }
 
   return (
-    <div className="mx-4">
-      <div className="grid grid-cols-1 gap-2 p-8 w-full mt-2">
+    <div className="w-full">
+      <div className="grid w-full grid-cols-1 gap-2">
         <Tabs defaultValue="logging-callbacks">
           <TabsList variant="line">
             <TabsTrigger value="logging-callbacks">{t("pages.loggingAndAlerts.loggingCallbacks")}</TabsTrigger>
@@ -552,7 +552,7 @@ const Settings: React.FC<SettingsPageProps> = ({ accessToken, userRole, userID, 
             />
           </TabsContent>
           <TabsContent value="cloudzero-cost-tracking" keepMounted>
-            <div className="p-8">
+            <div className="w-full">
               <CloudZeroCostTracking />
             </div>
           </TabsContent>

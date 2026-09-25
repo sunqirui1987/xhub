@@ -137,7 +137,7 @@ const AgentsPanel: React.FC<AgentsPanelProps> = ({ accessToken, userRole, teams 
   };
 
   return (
-    <div className="w-full mx-auto flex-auto overflow-y-auto m-8 p-2">
+    <div className="w-full">
       <div className="flex flex-col gap-2 mb-4">
         <h1 className="text-2xl font-bold">{t("pages.agents.title")}</h1>
         <p className="text-sm text-muted-foreground">{t("pages.agents.subtitle")}</p>

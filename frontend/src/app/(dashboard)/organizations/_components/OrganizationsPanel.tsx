@@ -61,14 +61,18 @@ const OrganizationsPanel: React.FC<OrganizationsPanelProps> = ({ userRole, acces
 
     try {
       setIsDeleting(true);
-      await organizationDeleteCall(accessToken, orgToDelete);
+      const result = await organizationDeleteCall(accessToken, orgToDelete);
+      const removed = result && typeof result === "object" && "deleted" in result ? Number(result.deleted) : 1;
+      if (removed < 1) {
+        throw new Error(t("Organization could not be deleted"));
+      }
       toast.success(t("Organization deleted successfully"));
 
       setIsDeleteModalOpen(false);
       setOrgToDelete(null);
       await refetchOrganizations();
     } catch (error) {
-      console.error("Error deleting organization:", error);
+      toast.fromError(error);
     } finally {
       setIsDeleting(false);
     }
@@ -94,7 +98,7 @@ const OrganizationsPanel: React.FC<OrganizationsPanelProps> = ({ userRole, acces
   }
 
   return (
-    <div className="mx-4 mt-4 flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {(userRole === "Admin" || userRole === "Org Admin") && (
         <Button className="w-fit" onClick={() => setIsOrgModalVisible(true)}>
           + {t("pages.organizations.create")}

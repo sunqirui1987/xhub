@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,13 +67,10 @@ const props = {
   userRole: "Admin",
 };
 
-const controlUnder = (label: string): HTMLElement =>
-  within(screen.getByText(label).parentElement!).getByRole("combobox");
-
 const renderView = () => render(<AgentBuilderView {...props} />);
 
 const waitForRoster = async () => {
-  await screen.findByRole("button", { name: "support-agent litellm_agent" });
+  await screen.findByRole("button", { name: "support-agent Agent" });
 };
 
 beforeEach(() => {
@@ -126,7 +123,7 @@ describe("AgentBuilderView", () => {
     renderView();
     await waitForRoster();
 
-    expect(screen.getByRole("button", { name: "research-agent litellm_agent" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "research-agent Agent" })).toBeInTheDocument();
     expect(screen.getByText("Agent Builder")).toBeInTheDocument();
     expect(await screen.findByDisplayValue("support-agent")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Be helpful.")).toBeInTheDocument();
@@ -138,7 +135,7 @@ describe("AgentBuilderView", () => {
     renderView();
     await waitForRoster();
 
-    await user.click(screen.getByRole("button", { name: "research-agent litellm_agent" }));
+    await user.click(screen.getByRole("button", { name: "research-agent Agent" }));
 
     expect(await screen.findByDisplayValue("research-agent")).toBeInTheDocument();
   });
@@ -283,24 +280,13 @@ describe("AgentBuilderView", () => {
     expect(await screen.findByLabelText("batch scratch")).toHaveValue("seven cases");
   });
 
-  it("attaches the MCP servers the agent should reach", async () => {
-    const user = userEvent.setup();
-    fetchMCPServers.mockResolvedValue([{ server_id: "srv-1", alias: "github", server_name: "github-mcp" }]);
+  it("does not ask for MCP servers when configuring an agent", async () => {
     renderView();
     await waitForRoster();
     await screen.findByDisplayValue("support-agent");
 
-    await user.click(controlUnder("MCP servers"));
-    const options = await screen.findAllByText("github");
-    await user.click(options[options.length - 1]);
-    await user.keyboard("{Escape}");
-
-    await user.click(screen.getByRole("button", { name: /Update Agent/i }));
-
-    await waitFor(() => expect(modelPatchUpdateCall).toHaveBeenCalled());
-    expect(modelPatchUpdateCall.mock.calls[0][1].litellm_params.tools).toEqual([
-      { type: "mcp", server_label: "litellm", server_url: "litellm_proxy/mcp/github", require_approval: "never" },
-    ]);
+    expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
+    expect(fetchMCPServers).not.toHaveBeenCalled();
   });
 
   it("warns that the builder is experimental", async () => {

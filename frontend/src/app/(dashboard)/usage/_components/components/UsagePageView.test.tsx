@@ -768,31 +768,7 @@ describe("UsagePage", () => {
     expect(entityUsage).toHaveAttribute("data-entity-list", "null");
   });
 
-  it("should show agent usage view for admins", async () => {
-    mockUseAgents.mockReturnValue({
-      data: { agents: mockAgents },
-      isLoading: false,
-      error: null,
-    } as any);
-
-    renderWithProviders(<UsagePage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    const usageSelect = screen.getByTestId("usage-view-select");
-    act(() => {
-      fireEvent.change(usageSelect, { target: { value: "agent" } });
-    });
-
-    await waitFor(() => {
-      const entityUsageElements = screen.getAllByText("Entity Usage");
-      expect(entityUsageElements.length).toBeGreaterThan(0);
-    });
-  });
-
-  it.each(["organization", "agent"])("should not render the %s usage view for an internal user", async (usageView) => {
+  it.each(["organization"])("should not render the %s usage view for an internal user", async (usageView) => {
     mockUseAuthorized.mockReturnValue(nonAdminSession);
 
     renderWithProviders(<UsagePage {...defaultProps} organizations={mockOrganizations} />);
@@ -1141,40 +1117,6 @@ describe("UsagePage", () => {
     });
   });
 
-  describe("MCP Server Activity tab", () => {
-    it("should render MCP Server Activity tab", async () => {
-      renderWithProviders(<UsagePage {...defaultProps} />);
-
-      await waitFor(() => {
-        expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-      });
-
-      // The tab list should contain MCP Server Activity
-      expect(screen.getByText("MCP Server Activity")).toBeInTheDocument();
-    });
-  });
-
-  describe("User Agent Activity view", () => {
-    it("should render User Agent Activity component when view is selected", async () => {
-      renderWithProviders(<UsagePage {...defaultProps} />);
-
-      await waitFor(() => {
-        expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-      });
-
-      const usageSelect = screen.getByTestId("usage-view-select");
-      act(() => {
-        fireEvent.change(usageSelect, { target: { value: "user-agent-activity" } });
-      });
-
-      await waitFor(() => {
-        // "User Agent Activity" appears both in the select option and in the rendered component
-        const elements = screen.getAllByText("User Agent Activity");
-        expect(elements.length).toBeGreaterThanOrEqual(2);
-      });
-    });
-  });
-
   describe("Export Data button", () => {
     it("should render Export Data button in global view for admin", async () => {
       renderWithProviders(<UsagePage {...defaultProps} />);
@@ -1325,32 +1267,6 @@ describe("UsagePage", () => {
     });
   });
 
-  describe("agent usage banner", () => {
-    it("should show agent usage banner with A2A info", async () => {
-      mockUseAgents.mockReturnValue({
-        data: { agents: mockAgents },
-        isLoading: false,
-        error: null,
-      } as any);
-
-      renderWithProviders(<UsagePage {...defaultProps} />);
-
-      await waitFor(() => {
-        expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-      });
-
-      const usageSelect = screen.getByTestId("usage-view-select");
-      act(() => {
-        fireEvent.change(usageSelect, { target: { value: "agent" } });
-      });
-
-      await waitFor(() => {
-        const entityUsageElements = screen.getAllByText("Entity Usage");
-        expect(entityUsageElements.length).toBeGreaterThan(0);
-      });
-    });
-  });
-
   describe("tab navigation in global view", () => {
     it("should render all expected tabs", async () => {
       renderWithProviders(<UsagePage {...defaultProps} />);
@@ -1362,7 +1278,7 @@ describe("UsagePage", () => {
       expect(screen.getByText(translate("en", "pages.usage.cost"))).toBeInTheDocument();
       expect(screen.getByText(translate("en", "pages.usage.modelActivity"))).toBeInTheDocument();
       expect(screen.getByText(translate("en", "pages.usage.keyActivity"))).toBeInTheDocument();
-      expect(screen.getByText(translate("en", "pages.usage.mcpActivity"))).toBeInTheDocument();
+      expect(screen.queryByText(translate("en", "pages.usage.mcpActivity"))).not.toBeInTheDocument();
       expect(screen.getByText(translate("en", "pages.usage.endpointActivity"))).toBeInTheDocument();
     });
   });

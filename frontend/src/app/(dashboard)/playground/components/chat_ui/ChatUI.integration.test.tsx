@@ -281,36 +281,6 @@ describe("ChatUI", () => {
     });
   });
 
-  it("should enable the MCP tools selector for chat completions", async () => {
-    render(
-      <ChatUI
-        accessToken="1234567890"
-        token="1234567890"
-        userRole="user"
-        userID="1234567890"
-        disabledPersonalKeyCreation={false}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText("Test Key")).toBeInTheDocument();
-    });
-
-    const mcpInput = () => screen.getByLabelText("Select MCP servers");
-
-    await selectComboboxOption("Select an endpoint", "/v1/embeddings");
-
-    await waitFor(() => {
-      expect(mcpInput()).toBeDisabled();
-    });
-
-    await selectComboboxOption("Select an endpoint", "/v1/chat/completions");
-
-    await waitFor(() => {
-      expect(mcpInput()).toBeEnabled();
-    });
-  });
-
   it("should show Simulate failure to test fallbacks in Model Settings when chat endpoint is selected", async () => {
     const user = userEvent.setup();
     render(
@@ -560,8 +530,7 @@ describe("ChatUI", () => {
     expect(customProxyInput).toHaveValue(testProxyUrl);
   });
 
-  it("should enable search functionality for MCP server selector", async () => {
-    const user = userEvent.setup();
+  it("does not offer MCP servers in the playground sidebar", async () => {
     render(
       <ChatUI
         accessToken="1234567890"
@@ -576,17 +545,9 @@ describe("ChatUI", () => {
       expect(screen.getByText("Test Key")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("MCP Servers")).toBeInTheDocument();
-
-    const mcpInput = screen.getByLabelText("Select MCP servers");
-    expect(mcpInput).toBeInTheDocument();
-    expect(mcpInput).toBeEnabled();
-
-    await user.click(mcpInput);
-
-    await waitFor(() => {
-      expect(screen.getByText("All MCP Servers")).toBeInTheDocument();
-    });
+    expect(screen.queryByText("MCP Servers")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Select MCP servers")).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "/mcp-rest/tools/call" })).not.toBeInTheDocument();
   });
 
   it("should keep the chosen endpoint when a model that endpoint can serve is picked", async () => {
