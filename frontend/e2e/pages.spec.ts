@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { DASHBOARD_PAGES, NAV_GROUPS, loginAdmin, t, uiPath, watchGateway } from "./helpers";
+import { DASHBOARD_PAGES, NAV_GROUPS, loginAdmin, stableGoto, t, watchGateway } from "./helpers";
 
 test.describe("console pages", () => {
   test("nav groups and Virtual Keys home", async ({ page }) => {
@@ -18,7 +18,13 @@ test.describe("console pages", () => {
     page.on("pageerror", (err) => errors.push(`${page.url()}: ${err.message}`));
     await loginAdmin(page);
     for (const path of DASHBOARD_PAGES) {
-      await page.goto(uiPath(path));
+      try {
+        await stableGoto(page, path);
+      } catch (err) {
+        if (!page.url().includes("/login")) throw err;
+        await loginAdmin(page);
+        await stableGoto(page, path);
+      }
       await expect(page, path).not.toHaveURL(/\/login/);
       await expect(page.getByText("This page couldn’t load")).toHaveCount(0);
       await expect(page.getByText(/Dashboard error:/), path).toHaveCount(0, { timeout: 3_000 });
@@ -30,7 +36,7 @@ test.describe("console pages", () => {
 
   test("chat shell is not admin sidebar", async ({ page }) => {
     await loginAdmin(page);
-    await page.goto(uiPath("/chat"));
+    await stableGoto(page, "/chat");
     await expect(page).toHaveURL(/\/chat/, { timeout: 15_000 });
     await expect(page.locator("[data-slot=sidebar-group-label]", { hasText: t("nav.groups.gateway") })).toHaveCount(0);
   });

@@ -1,4 +1,4 @@
-// 按 LiteLLM 的资源族生成管理接口和推理接口的响应形状。
+// Package family builds management and inference response shapes by LiteLLM resource family.
 package family
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 目录里的推理路径。能识别的操作进入数据面，其余按资源读写处理。
+// ServeDataPlane handles inference paths in the catalog. A recognized operation enters the data plane. The rest are resource reads and writes.
 func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 	p := s.RequireLLM(w, r)
 	if p == nil {
@@ -49,12 +49,12 @@ func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 	resourceCRUD(s, w, r, path, raw)
 }
 
-// Responses API 入口，固定走数据面的 responses 操作。
+// Responses is the Responses API entry and always uses the data-plane responses operation.
 func Responses(s Host, w http.ResponseWriter, r *http.Request) {
 	s.DataPlane(w, r, "responses")
 }
 
-// 正文没有 model 时，从 URL 的 engines、deployments 或 models 段补上。
+// injectModel fills model from the engines, deployments, or models segment of the URL when the body has none.
 func injectModel(path string, raw []byte) []byte {
 	var body map[string]any
 	if len(raw) > 0 {
@@ -75,7 +75,7 @@ func injectModel(path string, raw []byte) []byte {
 	return out
 }
 
-// 从路径里抽出模型或部署名。没有这些段时返回空串。
+// modelFromPath returns the model or deployment name from the path. With none of those segments it returns an empty string.
 func modelFromPath(path string) string {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	for i, p := range parts {
@@ -90,7 +90,7 @@ func modelFromPath(path string) string {
 	return ""
 }
 
-// 把路径归成数据面操作名。归不出时返回空串，调用方不要当成聊天。
+// inferenceOp classifies a path as a data-plane operation name. An unrecognized path returns an empty string and must not be treated as chat.
 func inferenceOp(path string) string {
 	p := strings.ToLower(path)
 	switch {
@@ -132,7 +132,7 @@ func inferenceOp(path string) string {
 	return ""
 }
 
-// 对尚未进入通用数据面的操作写原生形状的响应。
+// writeInferenceNative writes the native response shape for an operation that has not entered the general data plane.
 func writeInferenceNative(w http.ResponseWriter, op string, body map[string]any) {
 	id := httpx.CallID()
 	model := str(body["model"])
@@ -235,7 +235,7 @@ func writeInferenceNative(w http.ResponseWriter, op string, body map[string]any)
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 目录管理资源的列表、读取和写入。未知 id 按该资源的 404 形状返回。
+// resourceCRUD lists, reads, and writes a catalog resource stored as key-value JSON. files and batches return 404 when the id is missing.
 func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, raw []byte) {
 	kind := resourceKind(path)
 	var body map[string]any
@@ -295,7 +295,7 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 	}
 }
 
-// 从路径判断资源种类，例如 key、team、credential。
+// resourceKind reads the resource kind from the path, such as files, batches, or assistants. An unrecognized path is resources.
 func resourceKind(path string) string {
 	p := strings.ToLower(path)
 	switch {
@@ -344,7 +344,7 @@ func resourceKind(path string) string {
 	}
 }
 
-// 从路径取出资源 id。集合路径没有 id。
+// resourcePathID reads the resource id from the path. A collection path has no id.
 func resourcePathID(path string) string {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	if len(parts) == 0 {
@@ -369,7 +369,7 @@ func resourcePathID(path string) string {
 	return last
 }
 
-// 按资源种类补上对外 JSON 需要的默认字段。
+// nativeResource fills the default fields the public JSON for this resource kind needs.
 func nativeResource(kind string, body map[string]any) map[string]any {
 	id := str(body["id"])
 	if id == "" {
@@ -489,7 +489,7 @@ func nativeResource(kind string, body map[string]any) map[string]any {
 	return obj
 }
 
-// 集合名对应的单数资源名。
+// singular is the singular resource name for a collection name.
 func singular(kind string) string {
 	switch kind {
 	case "files":
@@ -518,7 +518,7 @@ func singular(kind string) string {
 	}
 }
 
-// 已下线栏目的目录路径。最终仍是 404，不恢复旧实现。
+// ServeMixed accepts a management or inference identity, then reads or writes the catalog through writeCatalogPersist.
 func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireMixed(w, r) == nil {
 		return
@@ -526,7 +526,7 @@ func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 	writeCatalogPersist(s, w, r, readMap(r))
 }
 
-// 管理面目录路径。需要管理身份，再按资源种类读写。
+// ServeMgmt handles management catalog paths. It requires a management identity, then reads or writes by resource kind.
 func ServeMgmt(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -534,7 +534,7 @@ func ServeMgmt(s Host, w http.ResponseWriter, r *http.Request) {
 	writeCatalogPersist(s, w, r, readMap(r))
 }
 
-// 把目录上的写入落到键值或实体表。敏感字段按种类做遮罩。
+// writeCatalogPersist lists, reads, and writes catalog rows in the key-value table. Credential secrets are masked, and JSON-RPC or token paths return their own JSON.
 func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body map[string]any) {
 	path := r.URL.Path
 	if _, ok := body["jsonrpc"]; ok {
@@ -554,10 +554,11 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		return
 	}
 	kind, action, id := parseMgmt(r.Method, path, body)
-	if id == "" {
-		id = str(body[idField(kind)])
-		if id == "" {
-			id = str(body["id"])
+	if id == "" || ((action == "update" || action == "delete") && (id == kind || id == singular(kind))) {
+		if alt := str(body[idField(kind)]); alt != "" {
+			id = alt
+		} else if alt := str(body["id"]); alt != "" && id == "" {
+			id = alt
 		}
 	}
 	switch action {
@@ -618,6 +619,11 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		_ = s.DB().PutKV(kind, id, string(b))
 		httpx.WriteJSON(w, 200, redactCredentialObject(kind, m, true))
 	default:
+		if id == "" && kind == "memory" {
+			if k := str(body["key"]); k != "" {
+				id = k
+			}
+		}
 		if id == "" {
 			id = singular(kind) + "_" + httpx.CallID()[:12]
 		}
@@ -656,9 +662,9 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 	}
 }
 
-// mergeCredentialPatch 按 LiteLLM update_db_credential 合并凭证。
-// 新的 credential_values 叠到已有字段上。打码后的密钥（含连续 *）不覆盖原值，
-// 否则编辑时表单把掩码传回来会把真密钥写成星号。
+// mergeCredentialPatch merges a credential the way LiteLLM update_db_credential does.
+// Incoming credential_values overlay the existing fields. A masked secret that contains a run of * does not overwrite the original,
+// or an edit form that sends the mask back would store the real secret as asterisks.
 func mergeCredentialPatch(dst, body map[string]any) {
 	for k, v := range body {
 		if k == "password" || k == "credential_values" {
@@ -686,7 +692,7 @@ func mergeCredentialPatch(dst, body map[string]any) {
 	dst["credential_values"] = cur
 }
 
-// 遮罩凭证对象里的秘密字段。showValues 为假时不返回原文。
+// redactCredentialObject masks secret fields on a credential object. When showValues is false the original text is not returned.
 func redactCredentialObject(kind string, obj map[string]any, showValues bool) map[string]any {
 	if kind != "credentials" && kind != "credential" {
 		return obj
@@ -708,7 +714,7 @@ func redactCredentialObject(kind string, obj map[string]any, showValues bool) ma
 	return out
 }
 
-// 对凭证列表逐条遮罩。
+// redactCredentialList masks each credential in a list.
 func redactCredentialList(kind string, list []map[string]any, showValues bool) []map[string]any {
 	if kind != "credentials" && kind != "credential" {
 		return list
@@ -720,7 +726,7 @@ func redactCredentialList(kind string, list []map[string]any, showValues bool) [
 	return out
 }
 
-// 字段名是否像密钥、令牌或口令。这类字段默认遮罩。
+// isSensitiveCredentialKey reports whether a field name looks like a key, token, or password. Those fields are masked by default.
 func isSensitiveCredentialKey(k string) bool {
 	l := strings.ToLower(k)
 	for _, w := range []string{"authorization", "token", "key", "secret", "password", "passwd", "credential"} {
@@ -731,9 +737,9 @@ func isSensitiveCredentialKey(k string) bool {
 	return false
 }
 
-// maskCredentialValues 对齐 LiteLLM _get_masked_values 的列表默认值。
-// 含 key/secret/token 的字段只留头尾各 2 个字符，其余换成 *。短于 4 个字符的写成 *****。
-// api_base 这类地址原样返回，编辑表单才能看到上次保存的地址。
+// maskCredentialValues matches the list defaults of LiteLLM _get_masked_values.
+// A field whose name contains key, secret, or token keeps two characters at each end and replaces the middle with *. A value shorter than 4 characters becomes *****.
+// An address such as api_base is returned unchanged so an edit form can show the address that was saved.
 func maskCredentialValues(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for k, v := range in {
@@ -747,7 +753,7 @@ func maskCredentialValues(in map[string]any) map[string]any {
 	return out
 }
 
-// 只保留秘密的前后少量字符。空串仍然返回空串。
+// maskSecret keeps a few characters at each end of a secret. An empty string stays empty.
 func maskSecret(v string) string {
 	const unmasked = 4
 	if len(v) <= unmasked {
@@ -757,7 +763,7 @@ func maskSecret(v string) string {
 	return v[:head] + strings.Repeat("*", len(v)-unmasked) + v[len(v)-head:]
 }
 
-// 补上该资源族对外契约要求的字段，已有值不覆盖。
+// Freeze fills fields the public contract for this resource family requires. An existing value is not overwritten.
 func Freeze(kind string, obj map[string]any) {
 	delete(obj, "password")
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1007,14 +1013,14 @@ func Freeze(kind string, obj map[string]any) {
 	}
 }
 
-// 键不存在时才写入默认值。
+// setDefault writes a default only when the key is absent.
 func setDefault(obj map[string]any, key string, val any) {
 	if obj[key] == nil {
 		obj[key] = val
 	}
 }
 
-// 从方法和路径解析资源种类、动作和 id。
+// parseMgmt reads the resource kind, action, and id from the method and path.
 func parseMgmt(method, path string, body map[string]any) (kind, action, id string) {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	filtered := []string{}
@@ -1087,7 +1093,7 @@ func parseMgmt(method, path string, body map[string]any) (kind, action, id strin
 	return kind, action, id
 }
 
-// 路径最后一段是否表示集合而不是具体 id。
+// catalogCollectionLast reports whether the last path segment names a collection rather than a concrete id.
 func catalogCollectionLast(last string) bool {
 	switch last {
 	case "server", "servers", "plugins", "health", "access_groups", "submissions", "available_providers",
@@ -1098,7 +1104,7 @@ func catalogCollectionLast(last string) bool {
 	return false
 }
 
-// 按资源种类包装列表 JSON。有的种类要分页字段，有的是纯数组。
+// catalogListBody wraps a list as the JSON for this resource kind. Some kinds need paging fields and some are a plain array.
 func catalogListBody(kind, path string, list []map[string]any) any {
 	if list == nil {
 		list = []map[string]any{}
@@ -1209,7 +1215,7 @@ func catalogListBody(kind, path string, list []map[string]any) any {
 	}
 }
 
-// 该资源用来标识一行的字段名。
+// idField is the field name this resource uses to identify a row.
 func idField(kind string) string {
 	switch kind {
 	case "credentials", "credential":
@@ -1249,7 +1255,7 @@ func idField(kind string) string {
 	}
 }
 
-// 该资源的展示名字段。没有别名的种类返回空串。
+// aliasField is the display-name field for this resource. A kind with no alias returns an empty string.
 func aliasField(kind string) string {
 	switch kind {
 	case "guardrails":
@@ -1269,7 +1275,7 @@ func aliasField(kind string) string {
 	}
 }
 
-// 按 page 和 size 切片并带上 total。
+// pagedListBody slices by page and size and includes the total.
 func pagedListBody(path string, list []map[string]any, page, size int) map[string]any {
 	if list == nil {
 		list = []map[string]any{}

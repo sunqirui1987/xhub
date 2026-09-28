@@ -1,4 +1,4 @@
-// 估算 token，并列出某个模型声明支持的 OpenAI 参数。
+// Package estimate counts tokens and lists the OpenAI parameters a model claims to support.
 package estimate
 
 import (
@@ -7,9 +7,9 @@ import (
 	"github.com/tiktoken-go/tokenizer"
 )
 
-// CountTokens 对齐 LiteLLM token_counter 对 OpenAI 聊天模型的本地计数。
-// prompt 走纯文本。messages 每条先加 tokens_per_message，再数 role 和 content，最后加 3 个回复起始 token。
-// tokenizer_type 与 LiteLLM _select_tokenizer 的 openai_tokenizer 相同。
+// CountTokens matches the local LiteLLM token_counter for OpenAI chat models.
+// A prompt is counted as plain text. Each message adds tokens_per_message, then the role and content, and the total adds 3 reply-priming tokens.
+// The returned tokenizer type is the openai_tokenizer selected by LiteLLM.
 func CountTokens(model, prompt string, messages []map[string]any) (int, string, error) {
 	codec, err := tokenizer.ForModel(tokenizer.Model(model))
 	if err != nil {
@@ -45,8 +45,8 @@ func CountTokens(model, prompt string, messages []map[string]any) (int, string, 
 	return n, "openai_tokenizer", nil
 }
 
-// OpenAISupportedParams 对齐 OpenAIGPTConfig.get_supported_openai_params。
-// gpt-4 与 gpt-3.5-turbo-16k 没有 response_format。目录里的 OpenAI 模型多一个 user。
+// OpenAISupportedParams matches OpenAIGPTConfig.get_supported_openai_params.
+// gpt-4 and gpt-3.5-turbo-16k omit response_format. OpenAI models listed in the catalog also include user.
 func OpenAISupportedParams(model string, catalog bool) []string {
 	params := []string{
 		"frequency_penalty",
@@ -89,7 +89,7 @@ func OpenAISupportedParams(model string, catalog bool) []string {
 	return params
 }
 
-// ModelUsedForCount 在部署的 model 带供应商前缀时去掉第一段，和 LiteLLM token_counter 一样。
+// ModelUsedForCount drops the provider prefix from a deployment model, matching LiteLLM token_counter.
 func ModelUsedForCount(requestModel, deploymentModel string) string {
 	model := strings.TrimSpace(deploymentModel)
 	if model == "" {

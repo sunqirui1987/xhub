@@ -1,4 +1,4 @@
-// 原样转发的路径如何拼到上游。不改写已经是厂商协议的正文。
+// Package llm joins passthrough paths onto an upstream base. It does not rewrite a body that is already in the provider protocol.
 package llm
 
 import (
@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// PassthroughURL 是 LiteLLM _join_url_paths 的出站地址。
-// 先用 join_base_and_endpoint_path 把子路径接在 api_base 的 path 上，并挡住 ".."。
-// OpenAI 的结果里如果还没有 /v1/，会在 api.openai.com/ 后面插入 v1。
+// PassthroughURL is the outbound address produced by LiteLLM _join_url_paths.
+// It first joins the subpath onto the api_base path and rejects "..".
+// If an OpenAI result still has no /v1/, v1 is inserted after api.openai.com/.
 func PassthroughURL(base, endpoint, provider string) string {
 	u, err := url.Parse(base)
 	if err != nil {
@@ -27,8 +27,8 @@ func PassthroughURL(base, endpoint, provider string) string {
 	return out
 }
 
-// PassthroughSubpath 是 HttpPassThroughEndpointHelpers.construct_target_url_with_subpath。
-// include 为 false，或子路径为空时，原样返回 base。否则规范化子路径再拼接。
+// PassthroughSubpath matches HttpPassThroughEndpointHelpers.construct_target_url_with_subpath.
+// When include is false or the subpath is empty, base is returned unchanged. Otherwise the subpath is normalized and joined.
 func PassthroughSubpath(base, subpath string, include bool) string {
 	if !include || subpath == "" {
 		return base
@@ -48,7 +48,7 @@ func PassthroughSubpath(base, subpath string, include bool) string {
 	return base + safe
 }
 
-// 拼接上游基址和端点路径。避免出现双斜杠或丢掉基址上的前缀。
+// joinBaseAndEndpoint joins an upstream base and an endpoint path without a double slash and without dropping a prefix already on the base.
 func joinBaseAndEndpoint(basePath, endpointPath string) string {
 	trailing := strings.HasSuffix(endpointPath, "/")
 	if basePath == "" || basePath == "/" {

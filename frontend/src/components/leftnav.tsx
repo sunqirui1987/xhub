@@ -460,7 +460,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
   return (
     <Sidebar
       collapsed={collapsed}
-      className="border-r-0 bg-[#343a40] text-[#c2c7d0] shadow-[2px_0_8px_rgba(0,0,0,0.15)]"
+      className="border-r-0 shadow-[2px_0_8px_rgba(0,0,0,0.15)]"
     >
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border bg-sidebar px-4 group-data-[collapsed=true]/sidebar:h-auto">
         <div className="flex items-center justify-between gap-2 group-data-[collapsed=true]/sidebar:flex-col">
@@ -506,7 +506,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
         </div>
       </SidebarHeader>
 
-      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2 [scrollbar-color:#4b545c_transparent]">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2 [scrollbar-color:var(--sidebar-border)_transparent]">
           {visibleGroups.map((group, gi) => (
             <SidebarGroup key={group.groupLabel}>
               {gi > 0 && <SidebarSeparator className="hidden group-data-[collapsed=true]/sidebar:block" />}

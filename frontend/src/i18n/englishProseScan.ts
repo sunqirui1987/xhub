@@ -738,7 +738,7 @@ function isFunctionBoundary(node: ts.Node): boolean {
 function isInsideCallArgument(node: ts.Node): boolean {
   let current: ts.Node | undefined = node;
   while (current) {
-    const parent = current.parent;
+    const parent: ts.Node | undefined = current.parent;
     if (!parent) return false;
     if (ts.isCallExpression(parent) && parent.arguments.some((arg) => arg === current)) return true;
     if (ts.isJsxExpression(parent) || ts.isJsxElement(parent) || ts.isJsxFragment(parent) || isFunctionBoundary(parent)) return false;
@@ -791,7 +791,7 @@ function isInsideEventHandler(node: ts.Node): boolean {
 function isToastArg(node: ts.Node): boolean {
   let current: ts.Node | undefined = node;
   while (current) {
-    const parent = current.parent;
+    const parent: ts.Node | undefined = current.parent;
     if (!parent) break;
     if (ts.isCallExpression(parent) && parent.arguments.length > 0) {
       const arg = parent.arguments[0];
@@ -908,7 +908,7 @@ function isUiErrorBinding(node: ts.Node): boolean {
   let owner: ts.Node | undefined;
   let current: ts.Node | undefined = node;
   while (current) {
-    const parent = current.parent;
+    const parent: ts.Node | undefined = current.parent;
     if (!parent) break;
     if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name) && /^(message|errorMessage|errMsg|errorText)$/.test(parent.name.text)) {
       const init = parent.initializer;
@@ -967,7 +967,7 @@ function isUiErrorBinding(node: ts.Node): boolean {
 function isErrorMessage(node: ts.Node): boolean {
   let current: ts.Node | undefined = node;
   while (current) {
-    const parent = current.parent;
+    const parent: ts.Node | undefined = current.parent;
     if (!parent) break;
     if (ts.isNewExpression(parent) && parent.arguments && parent.arguments.length > 0) {
       const arg = parent.arguments[0];

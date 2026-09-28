@@ -136,6 +136,30 @@ describe("UsageTab", () => {
     mockGetToolSpend.mockReset();
   });
 
+  it("charts recorded spend ahead of the savings tiles when the activity has a cost", () => {
+    renderWith([
+      day("2026-07-13", { spend: 0.25 }),
+      day("2026-07-12", { spend: 1.5, api_requests: 3 }),
+    ]);
+
+    const spendChart = screen
+      .getAllByTestId("bar-chart")
+      .find((el) => el.getAttribute("data-categories") === "spend");
+    expect(spendChart).toBeTruthy();
+    expect(readSeries(spendChart as HTMLElement)).toEqual([
+      { date: "Jul 12", spend: 1.5 },
+      { date: "Jul 13", spend: 0.25 },
+    ]);
+    expect(screen.getByText("$1.75")).toBeInTheDocument();
+  });
+
+  it("does not add a spend chart when every day billed nothing", () => {
+    renderWith([day("2026-07-12", { compression_savings_spend: 0.04 })]);
+    expect(
+      screen.queryAllByTestId("bar-chart").some((el) => el.getAttribute("data-categories") === "spend"),
+    ).toBe(false);
+  });
+
   it("sums compression and caching dollars across days into the summary cards", () => {
     // Total caching and the XHub-injected share deliberately differ so these
     // assertions pin which one each figure uses: the caching headline and the

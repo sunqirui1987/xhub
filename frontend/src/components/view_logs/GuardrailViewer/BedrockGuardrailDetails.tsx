@@ -417,13 +417,13 @@ export const BedrockGuardrailDetails: React.FC<{ response: BedrockGuardrailRespo
                   <div className="mb-3">
                     <h6 className="font-medium mb-2">{t("Topic Policy")}</h6>
                     <div className="flex flex-wrap gap-2">
-                      {assess.topicPolicy.topics!.map((t, i) => (
+                      {assess.topicPolicy.topics!.map((topic, i) => (
                         <div key={i} className="px-3 py-1.5 bg-muted rounded-md text-xs">
                           <div className="flex items-center gap-2">
-                            {chip(t.action ?? "N/A", t.detected ? "red" : "slate")}
-                            <span className="font-medium">{t.name ?? t("topic")}</span>
-                            {t.type && chip(t.type, "slate")}
-                            {boolPill(t.detected)}
+                            {chip(topic.action ?? "N/A", topic.detected ? "red" : "slate")}
+                            <span className="font-medium">{topic.name ?? t("topic")}</span>
+                            {topic.type && chip(topic.type, "slate")}
+                            {boolPill(topic.detected)}
                           </div>
                         </div>
                       ))}

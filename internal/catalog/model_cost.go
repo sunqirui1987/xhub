@@ -1,4 +1,4 @@
-// 加载内置模型价格表，并按供应商列出模型。sample_spec 不是模型。
+// Package catalog loads the built-in model price map and lists models by provider. sample_spec is not a model.
 package catalog
 
 import (
@@ -22,13 +22,13 @@ var (
 
 var bedrockPricingOnly = regexp.MustCompile(`^bedrock/[a-zA-Z0-9_-]+/.+$`)
 
-// 包初始化时加载本包依赖的内置数据。解析失败时退回空表，不让进程起不来。
+// init loads the embedded data this package depends on. A parse failure falls back to an empty map so the process can still start.
 func init() {
 	loadModelCatalog()
 	modelCostMapLoadedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
-// 把内置价格表拆成按供应商索引的模型集合。sample_spec 不进入模型集合。
+// loadModelCatalog parses the embedded price map and indexes model ids by provider. sample_spec is not added to a model set.
 func loadModelCatalog() {
 	var raw map[string]any
 	if err := json.Unmarshal(modelCostMapJSON, &raw); err != nil {
@@ -406,12 +406,12 @@ func loadModelCatalog() {
 	}
 }
 
-// 是否为 OpenAI 微调模型名。这类名字不放进 openai_chat 集合。
+// isOpenAIFinetuneModel reports an OpenAI fine-tune model name. Those names are not placed in the openai_chat set.
 func isOpenAIFinetuneModel(key string) bool {
 	return strings.HasPrefix(key, "ft:") && strings.Count(key, ":") <= 1
 }
 
-// 是否只出现在 Bedrock 价格表、不能当成可调用部署的名字。
+// isBedrockPricingOnlyModel reports a name that appears only in the Bedrock price map and cannot be treated as a callable deployment.
 func isBedrockPricingOnlyModel(key string) bool {
 	if strings.Contains(key, "month-commitment") {
 		return true
@@ -419,12 +419,12 @@ func isBedrockPricingOnlyModel(key string) bool {
 	return bedrockPricingOnly.MatchString(key)
 }
 
-// 转调 catalog.ProviderModels。
+// providerModels returns the model ids indexed for that provider. A missing provider returns nil.
 func providerModels(provider string) []string {
 	return modelsByProvider[provider]
 }
 
-// modelCostMapCount 是当前加载的价格表条目数。sample_spec 是字段说明，不计入模型。
+// modelCostMapCount is the number of entries in the loaded price map. sample_spec is field documentation and is not counted as a model.
 func modelCostMapCount() int {
 	raw, ok := modelCostMapValue.(map[string]any)
 	if !ok {
@@ -437,7 +437,7 @@ func modelCostMapCount() int {
 	return n
 }
 
-// 是否强制只用内置价格表。
+// localCostMapForced reports whether only the built-in price map may be used.
 func localCostMapForced() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("LITELLM_LOCAL_MODEL_COST_MAP")), "true")
 }
@@ -479,10 +479,71 @@ var knownLLMProviders = map[string]struct{}{
 	"bedrock_mantle": {}, "gdc": {},
 }
 
-// Raw 返回内置价格表的原始 JSON 对象。sample_spec 仍在里面。
+// Raw returns the raw JSON object of the built-in price map. sample_spec is still inside it.
 func Raw() any { return modelCostMapValue }
 
-// CostMap 把价格表收成模型名到字段的映射。不是对象的条目会被丢掉。
+// TokenRates returns the per-token input and output prices for one model in the built-in price map.
+// The name is matched as stored, and if that misses, the provider prefix before the first slash is dropped.
+// A missing name, sample_spec, or a row with no per-token prices returns ok false.
+func TokenRates(model string) (input, output float64, ok bool) {
+	raw, isMap := modelCostMapValue.(map[string]any)
+	if !isMap {
+		return 0, 0, false
+	}
+	model = strings.TrimSpace(model)
+	if model == "" || model == "sample_spec" {
+		return 0, 0, false
+	}
+	if row, found := priceRow(raw, model); found {
+		return tokenRatesFrom(row)
+	}
+	if i := strings.Index(model, "/"); i > 0 {
+		if row, found := priceRow(raw, model[i+1:]); found {
+			return tokenRatesFrom(row)
+		}
+	}
+	return 0, 0, false
+}
+
+// priceRow reads one object from the price map. A missing key or a non-object returns ok false.
+func priceRow(raw map[string]any, key string) (map[string]any, bool) {
+	row, ok := raw[key].(map[string]any)
+	if ok {
+		return row, true
+	}
+	lower := strings.ToLower(key)
+	if lower == key {
+		return nil, false
+	}
+	row, ok = raw[lower].(map[string]any)
+	return row, ok
+}
+
+// tokenRatesFrom reads input_cost_per_token and output_cost_per_token. Both missing returns ok false. A missing side is zero.
+func tokenRatesFrom(row map[string]any) (input, output float64, ok bool) {
+	in, inOK := floatField(row["input_cost_per_token"])
+	out, outOK := floatField(row["output_cost_per_token"])
+	if !inOK && !outOK {
+		return 0, 0, false
+	}
+	return in, out, true
+}
+
+// floatField reads a JSON number. A missing or non-numeric value returns ok false.
+func floatField(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// CostMap turns the price map into a model-name to fields map. An entry that is not an object is dropped.
 func CostMap() map[string]map[string]any {
 	raw, ok := modelCostMapValue.(map[string]any)
 	if !ok {
@@ -498,18 +559,18 @@ func CostMap() map[string]map[string]any {
 	return out
 }
 
-// Count 是价格表里的模型条数。sample_spec 是字段说明，不计入。
+// Count is the number of models in the price map. sample_spec is field documentation and is not counted.
 func Count() int { return modelCostMapCount() }
 
-// LoadedAt 是进程加载这份内置价格表的 UTC 时间，RFC3339。
+// LoadedAt is the UTC time, in RFC3339, when the process loaded this built-in price map.
 func LoadedAt() string {
 	modelCostMu.RLock()
 	defer modelCostMu.RUnlock()
 	return modelCostMapLoadedAt
 }
 
-// MarkReloaded 把加载时间更新为现在，并返回当前模型条数。
-// 价格表来自内置文件，重新加载不会改条目，只让控制台看到新的加载时间。
+// MarkReloaded sets the load time to now and returns the current model count.
+// The price map comes from an embedded file. Reloading does not change the entries. It only shows the dashboard a new load time.
 func MarkReloaded() int {
 	modelCostMu.Lock()
 	defer modelCostMu.Unlock()
@@ -517,15 +578,15 @@ func MarkReloaded() int {
 	return modelCostMapCount()
 }
 
-// EnvForced 表示 LITELLM_LOCAL_MODEL_COST_MAP 被设成 true（大小写不敏感）。
-// 为真时网关只用内置表，不再尝试远程价格源。
+// EnvForced reports that LITELLM_LOCAL_MODEL_COST_MAP is set to true, ignoring case.
+// When it is true the gateway uses only the built-in map and does not try a remote price source.
 func EnvForced() bool { return localCostMapForced() }
 
-// ProviderModels 返回某个供应商在内置表里的模型 id。未知供应商得到 nil。
+// ProviderModels returns the model ids for one provider in the built-in map. An unknown provider returns nil.
 func ProviderModels(provider string) []string { return providerModels(provider) }
 
-// KnownProvider 表示这段前缀是 LiteLLM 的供应商名，而不是组织 id。
-// 通配符展开时，只有已知供应商前缀会被剥掉再接上调用方的前缀。
+// KnownProvider reports that this prefix is a LiteLLM provider name rather than an organization id.
+// While expanding a wildcard, only a known provider prefix is stripped and then joined with the caller's prefix.
 func KnownProvider(name string) bool {
 	_, ok := knownLLMProviders[name]
 	return ok

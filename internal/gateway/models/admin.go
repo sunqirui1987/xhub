@@ -1,4 +1,4 @@
-// 模型的创建、更新、删除和屏蔽。数据库里的模型会覆盖同名 YAML。
+// Package models creates, updates, deletes, and blocks models. A model stored in the database overrides YAML with the same name.
 package models
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 模型的对外 JSON。参数里的密钥会被遮罩。
+// Public is the model JSON shown to callers. Secrets inside the parameters are masked.
 func Public(m config.ModelEntry) map[string]any {
 	info := m.ModelInfo
 	if info == nil {
@@ -26,7 +26,7 @@ func Public(m config.ModelEntry) map[string]any {
 	if v, ok := info["blocked"].(bool); ok {
 		blocked = v
 	}
-	// 配置文件里的模型没有 db_model。控制台据此禁用删除和保存。
+	// A model from the config file has no db_model. The dashboard uses that to disable delete and save.
 	if _, ok := info["db_model"].(bool); !ok {
 		info["db_model"] = false
 	}
@@ -38,7 +38,7 @@ func Public(m config.ModelEntry) map[string]any {
 	}
 }
 
-// 遮罩 litellm 参数中的密钥字段。
+// redactLiteLLMParams masks secret fields inside litellm parameters.
 func redactLiteLLMParams(in map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range in {
@@ -52,7 +52,7 @@ func redactLiteLLMParams(in map[string]any) map[string]any {
 	return out
 }
 
-// 创建数据库模型。同名 YAML 模型之后以数据库行为准。
+// New creates a database model. A YAML model with the same name is then overridden by the database row.
 func New(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -70,7 +70,7 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 	if str(info["id"]) == "" {
 		info["id"] = "model_" + httpx.CallID()[:12]
 	}
-	// 页面创建的模型进数据库。重启后 LoadStored 会把它加回来，并标成 db_model。
+	// A model created from the page is stored in the database. After a restart LoadStored adds it back and marks it db_model.
 	info["db_model"] = true
 	if str(info["created_at"]) == "" {
 		info["created_at"] = time.Now().UTC().Format(time.RFC3339)
@@ -86,7 +86,7 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Public(entry))
 }
 
-// 更新数据库模型。只改请求里出现的字段。
+// Update changes a database model. Only fields present on the request are changed.
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -147,7 +147,7 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Public(m))
 }
 
-// 删除数据库模型。删不掉只存在于 YAML 的模型。
+// Delete removes a database model. A model that exists only in YAML cannot be deleted.
 func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -183,17 +183,17 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 屏蔽模型。
+// Block marks a model blocked.
 func Block(s Host, w http.ResponseWriter, r *http.Request) {
 	setBlocked(s, w, r, true)
 }
 
-// 取消屏蔽模型。
+// Unblock clears a model block.
 func Unblock(s Host, w http.ResponseWriter, r *http.Request) {
 	setBlocked(s, w, r, false)
 }
 
-// 设置模型屏蔽标志。
+// setBlocked sets the model blocked flag.
 func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -233,7 +233,7 @@ func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 	httpx.WriteJSON(w, 200, Public(m))
 }
 
-// 返回价格表来源、是否强制内置表、加载时间和模型数量。
+// CostMapSource returns the price-map source, whether the built-in map is forced, the load time, and the model count.
 func CostMapSource(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -250,7 +250,7 @@ func CostMapSource(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 返回一个对外模型名下的部署信息。
+// GroupInfo returns the deployments under one public model name.
 func GroupInfo(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -290,7 +290,7 @@ func GroupInfo(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"data": data})
 }
 
-// 模型是否来自数据库而不是 YAML。
+// modelIsDB reports whether the model came from the database rather than YAML.
 func modelIsDB(m config.ModelEntry) bool {
 	if m.ModelInfo == nil {
 		return false
@@ -299,7 +299,7 @@ func modelIsDB(m config.ModelEntry) bool {
 	return ok && v
 }
 
-// 把配置里的模型收成可以入库的一行。
+// proxyModel turns a configured model into a row that can be stored.
 func proxyModel(m config.ModelEntry) store.ProxyModel {
 	id := ""
 	if m.ModelInfo != nil {
@@ -308,8 +308,8 @@ func proxyModel(m config.ModelEntry) store.ProxyModel {
 	return store.ProxyModel{ID: id, ModelName: m.ModelName, Params: m.LiteLLMParams, Info: m.ModelInfo}
 }
 
-// loadStoredState 把数据库里的模型并进本次进程的模型表。
-// 配置文件里的模型不在这张表里，所以重启后仍然只来自 yaml，页面上删不掉。
+// LoadStored merges database models into this process's model table.
+// Entries that exist only in the config file are not in this table, so after a restart they still come only from YAML and cannot be deleted from the page.
 func LoadStored(s Host) {
 	if s.DB() == nil {
 		return
@@ -333,7 +333,7 @@ func LoadStored(s Host) {
 	}
 }
 
-// findByID 按 id 找模型。请求路径上调用方必须已持有模型锁；启动合并时还没有并发请求。
+// findByID finds a model by id. On a request path the caller must already hold the model lock. The startup merge has no concurrent requests.
 func findByID(list []config.ModelEntry, id string) (int, config.ModelEntry, bool) {
 	for i, m := range list {
 		if m.ModelInfo != nil && str(m.ModelInfo["id"]) == id {
@@ -343,7 +343,7 @@ func findByID(list []config.ModelEntry, id string) (int, config.ModelEntry, bool
 	return -1, config.ModelEntry{}, false
 }
 
-// findModel 按对外名字或 id 找模型。请求路径上调用方必须已持有模型锁。
+// findModel finds a model by public name or id. On a request path the caller must already hold the model lock.
 func findModel(list []config.ModelEntry, id string) (int, config.ModelEntry, bool) {
 	for i, m := range list {
 		if m.ModelName == id {

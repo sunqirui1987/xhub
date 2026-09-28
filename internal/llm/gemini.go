@@ -1,4 +1,4 @@
-// Gemini 与 Vertex generateContent 的请求和响应改写。
+// Package llm rewrites Gemini and Vertex generateContent requests and responses.
 package llm
 
 import (
@@ -6,8 +6,8 @@ import (
 	"fmt"
 )
 
-// decodeGemini 把 generateContent 的 candidates 收成对外的聊天、消息或向量响应。
-// 用量字段从 usageMetadata 的驼峰名改成 OpenAI 的 prompt/completion/total。
+// decodeGemini turns generateContent candidates into the public chat, message, or embedding response.
+// Usage fields are renamed from usageMetadata camel case to OpenAI prompt, completion, and total.
 func decodeGemini(op, alias string, raw []byte) []byte {
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
@@ -82,9 +82,9 @@ func decodeGemini(op, alias string, raw []byte) []byte {
 	return encoded
 }
 
-// textOf 把消息 content 收成纯文本。
-// 字符串原样返回。内容块列表只拼接 type 无关的 text 字段，和提示词模板里
-// 「列表内容变成一段文字」的规则相同。其他类型用默认格式，避免静默丢字段。
+// textOf flattens a message content value into plain text.
+// A string is returned as itself. A list of content blocks concatenates text fields regardless of type, matching the prompt-template rule
+// that list content becomes one paragraph. Other types use the default format so a field is not dropped silently.
 func textOf(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -106,15 +106,15 @@ func textOf(v any) string {
 	}
 }
 
-// stringsBuilder 是局部拼接器，避免 gemini.go 再引 strings 只为了 Builder。
+// stringsBuilder is a local concatenator so gemini.go does not import strings only for Builder.
 type stringsBuilder struct {
 	buf []byte
 }
 
-// 把字符串追加到 Gemini 请求的缓冲区。
+// WriteString appends a string to the Gemini request buffer.
 func (b *stringsBuilder) WriteString(s string) {
 	b.buf = append(b.buf, s...)
 }
 
-// 返回已经拼好的 Gemini 请求文本。
+// String returns the Gemini request text accumulated so far.
 func (b *stringsBuilder) String() string { return string(b.buf) }

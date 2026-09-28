@@ -1,4 +1,4 @@
-// 用户、团队、组织和项目的 HTTP 接口。路由仍由 gateway 注册，本包不引用 gateway。
+// Package identity serves HTTP for users, teams, organizations, and projects. The gateway still registers the routes. This package does not import gateway.
 package identity
 
 import (
@@ -16,27 +16,36 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 返回空的成功 JSON。用于还没有数据的列表或已接受的空操作。
+// EmptyOK writes an empty success JSON body. It is used for a list that has no data yet or for an accepted no-op.
 func EmptyOK(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 }
 
-// 返回控制台需要的 UI 设置。不包含主密钥和数据库地址。
+// UiSettings returns the UI settings the dashboard needs. It does not include the master key or the database address.
 func UiSettings(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
+	values := map[string]any{
+		"enabled_ui_pages_internal_users":          nil,
+		"enable_projects_ui":                       true,
+		"enable_chat_ui":                           true,
+		"disable_agents_for_internal_users":        false,
+		"allow_agents_for_team_admins":             true,
+		"disable_vector_stores_for_internal_users": false,
+		"allow_vector_stores_for_team_admins":      true,
+	}
+	if saved, err := s.DB().GetKV("ui_settings", "values"); err == nil {
+		for k, v := range saved {
+			if k == "id" || k == "kind" {
+				continue
+			}
+			values[k] = v
+		}
+	}
 	httpx.WriteJSON(w, 200, map[string]any{
-		"status": "ok",
-		"values": map[string]any{
-			"enabled_ui_pages_internal_users":          nil,
-			"enable_projects_ui":                       true,
-			"enable_chat_ui":                           true,
-			"disable_agents_for_internal_users":        false,
-			"allow_agents_for_team_admins":             true,
-			"disable_vector_stores_for_internal_users": false,
-			"allow_vector_stores_for_team_admins":      true,
-		},
-		"enabled_ui_pages_internal_users": nil,
+		"status":                          "ok",
+		"values":                          values,
+		"enabled_ui_pages_internal_users": values["enabled_ui_pages_internal_users"],
 		"logo_url":                        "",
 		"primary_color":                   "",
 		"enabled_pages":                   []string{},
@@ -44,7 +53,21 @@ func UiSettings(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// userNew 创建用户。需要管理身份。缺 user_id 时生成 user_ 前缀。密码只存哈希。角色缺省是 internal_user。auto_create_key 为真时顺便发一把密钥，明文只在这次响应里。
+// UpdateUISettings stores the dashboard page-visibility payload and returns it.
+func UpdateUISettings(s Gate, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	body := readMap(r)
+	raw, _ := json.Marshal(body)
+	if err := s.DB().PutKV("ui_settings", "values", string(raw)); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "values": body})
+}
+
+// UserNew creates a user. It requires a management identity. A missing user_id is generated with a user_ prefix. The password is stored only as a hash. The default role is internal_user. When auto_create_key is true it also issues a key, and the plaintext appears only in this response.
 func UserNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -104,7 +127,7 @@ func UserNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, pub)
 }
 
-// userList 分页列出用户，并带上每人的密钥数量。可用 search、user_email、role 过滤。page 缺省 1，page_size 缺省 25、最大 100。需要管理身份。响应不含密码哈希。
+// UserList lists users one page at a time and includes each user's key count. search, user_email, and role filter the rows. page defaults to 1 and page_size defaults to 25 with a maximum of 100. It requires a management identity. The response does not include password hashes.
 func UserList(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -148,7 +171,29 @@ func UserList(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// availableUsers 列出全部用户的公开字段，供下拉选择。需要管理身份。不分页，也不含密码哈希。
+// UserFilterUI returns a user array matched by a partial email or user id. The dashboard maps over the result when adding a member, so this is not a paged object.
+// team_id is only a hint for the caller's organization scope. It does not exclude users who have not joined that team yet.
+func UserFilterUI(s Gate, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	list, _ := s.DB().ListUsers()
+	email := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_email")))
+	idq := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_id")))
+	out := []map[string]any{}
+	for _, e := range list {
+		if email != "" && !strings.Contains(strings.ToLower(e.Email), email) {
+			continue
+		}
+		if idq != "" && !strings.Contains(strings.ToLower(e.ID), idq) {
+			continue
+		}
+		out = append(out, userPublic(e))
+	}
+	httpx.WriteJSON(w, 200, out)
+}
+
+// AvailableUsers returns every user as public fields for the picker. It requires a management identity, is not paged, and does not include password hashes.
 func AvailableUsers(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -161,7 +206,7 @@ func AvailableUsers(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按查询参数或当前身份找用户。找不到时返回 nil，由调用方写 404。
+// lookupUser looks up a user from the query or the current identity. A database miss still returns a public placeholder built from that id and role.
 func lookupUser(s Gate, r *http.Request, p *auth.Principal) map[string]any {
 	id := r.URL.Query().Get("user_id")
 	if id == "" {
@@ -187,7 +232,7 @@ func lookupUser(s Gate, r *http.Request, p *auth.Principal) map[string]any {
 	return userPublic(store.Entity{ID: id, Email: id, Role: role, Alias: id, CreatedAt: time.Now().UTC()})
 }
 
-// userInfo 读取一个用户，并套上 user_info、空的 keys 和 teams。查询参数 user_id 在库里不存在时返回 404。没传 user_id 时用当前身份推导一个占位用户，而不是 404。
+// UserInfo reads one user and wraps it with user_info plus empty keys and teams. A user_id query that is not in the database returns 404. With no user_id it derives a placeholder from the current identity instead of returning 404.
 func UserInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	p := s.RequireManage(w, r)
 	if p == nil {
@@ -208,7 +253,7 @@ func UserInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// userInfoV2 与 userInfo 同一用户，但响应就是用户公开对象，不包 user_info。user_id 不存在时同样 404。
+// UserInfoV2 reads the same user as UserInfo, but the response is the public user object without a user_info wrapper. A missing user_id is still 404.
 func UserInfoV2(s Gate, w http.ResponseWriter, r *http.Request) {
 	p := s.RequireManage(w, r)
 	if p == nil {
@@ -223,7 +268,7 @@ func UserInfoV2(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, lookupUser(s, r, p))
 }
 
-// userUpdate 按 user_id 更新用户。缺 user_id 返回 400，用户不存在返回 404。只改请求里出现的字段。新密码会重新哈希，空密码不改原哈希。
+// UserUpdate updates a user by user_id. A missing user_id returns 400 and a missing user returns 404. Only fields present on the request change. A new password is hashed again. An empty password leaves the old hash.
 func UserUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -270,7 +315,7 @@ func UserUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, userPublic(*e))
 }
 
-// userDelete 按 user_ids 或 user_id 删除用户。某个 id 不存在时跳过并继续。不级联删除该用户的密钥。需要管理身份。
+// UserDelete deletes users by user_ids or user_id. A missing id is skipped and the rest continue. It does not cascade-delete that user's keys. It requires a management identity.
 func UserDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -286,7 +331,7 @@ func UserDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": deleted, "user_ids": ids})
 }
 
-// teamNew 创建团队。需要管理身份。缺 team_id 时生成。创建者会写进成员列表。
+// TeamNew creates a team. It requires a management identity. A missing team_id is generated. The creator is written into the member list.
 func TeamNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	p := s.RequireManage(w, r)
 	if p == nil {
@@ -318,7 +363,7 @@ func TeamNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, decorateTeam(s, teamPublic(e)))
 }
 
-// teamList 列出当前身份能看到的团队。管理员看全部，其它身份只看自己所属的。
+// TeamList lists the teams the current identity can see. An admin sees all of them. Any other identity sees only teams they belong to.
 func TeamList(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -326,7 +371,7 @@ func TeamList(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, listTeamsFiltered(s, r))
 }
 
-// teamListV2 分页列出团队。page 从 1 开始。过滤规则与 teamList 相同。
+// TeamListV2 lists teams one page at a time. page starts at 1. The filter rules match TeamList.
 func TeamListV2(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -351,7 +396,7 @@ func TeamListV2(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// teamAvailable 列出可以分配给密钥或用户的团队。非管理员不会看到无关团队。
+// TeamAvailable lists teams that can be assigned to a key or a user. A non-admin does not see unrelated teams.
 func TeamAvailable(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -359,7 +404,7 @@ func TeamAvailable(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, listTeamsFiltered(s, r))
 }
 
-// teamInfo 按 team_id 读取团队。找不到返回 404。需要管理身份。
+// TeamInfo reads a team by team_id. The response includes team_info and team_memberships, which the dashboard detail page renders. A miss returns 404. It requires a management identity.
 func TeamInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -375,10 +420,15 @@ func TeamInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pub := decorateTeam(s, teamPublic(*e))
-	httpx.WriteJSON(w, 200, mergeMaps(pub, map[string]any{"info": pub}))
+	// The dashboard reads team_info and the members page reads team_memberships. info is kept for callers that already read that field.
+	httpx.WriteJSON(w, 200, mergeMaps(pub, map[string]any{
+		"info":             pub,
+		"team_info":        pub,
+		"team_memberships": teamMemberships(pub),
+	}))
 }
 
-// teamUpdate 按 team_id 更新团队。没出现的预算、模型和成员保持原值。团队不存在返回 404。
+// TeamUpdate updates a team by team_id. Budget, models, and members that are absent keep their previous values. A missing team returns 404.
 func TeamUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -414,7 +464,7 @@ func TeamUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, decorateTeam(s, teamPublic(*e)))
 }
 
-// teamDelete 按 team_ids 或 team_id 删除团队。不存在的 id 跳过。不自动删除成员密钥。
+// TeamDelete deletes teams by team_ids or team_id. A missing id is skipped. Member keys are not deleted automatically.
 func TeamDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -430,7 +480,7 @@ func TeamDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": deleted, "team_ids": ids})
 }
 
-// orgNew 创建组织。需要管理身份。缺 organization_id 时生成。
+// OrgNew creates an organization. It requires a management identity. A missing organization_id is generated.
 func OrgNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -455,7 +505,7 @@ func OrgNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, orgPublic(e))
 }
 
-// orgList 列出组织。需要管理身份。
+// OrgList lists organizations. It requires a management identity.
 func OrgList(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -468,7 +518,7 @@ func OrgList(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// orgInfo 按 organization_id 读取组织。找不到返回 404。
+// OrgInfo reads an organization by organization_id. A miss returns 404.
 func OrgInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -487,7 +537,7 @@ func OrgInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, mergeMaps(pub, map[string]any{"info": pub}))
 }
 
-// orgUpdate 按 organization_id 更新组织。只改请求里出现的字段。不存在返回 404。
+// OrgUpdate updates an organization by organization_id. Only fields present on the request change. A missing organization returns 404.
 func OrgUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -520,7 +570,7 @@ func OrgUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, orgPublic(*e))
 }
 
-// orgDelete 按 organization_ids 或 organization_id 删除组织。不存在的 id 跳过。不级联删除其团队。
+// OrgDelete deletes organizations by organization_ids or organization_id. A missing id is skipped. Teams are not cascade-deleted.
 func OrgDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -542,7 +592,7 @@ func OrgDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": deleted, "organization_ids": ids})
 }
 
-// projectNew 创建项目并挂到请求里的团队或组织。需要管理身份。缺 project_id 时生成。
+// ProjectNew creates a project and attaches it to the team or organization on the request. It requires a management identity. A missing project_id is generated.
 func ProjectNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -564,7 +614,7 @@ func ProjectNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, projectPublic(e))
 }
 
-// projectList 列出项目。需要管理身份。
+// ProjectList lists projects. It requires a management identity.
 func ProjectList(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -580,7 +630,7 @@ func ProjectList(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// projectInfo 按 project_id 读取项目。找不到返回 404。
+// ProjectInfo reads a project by project_id. A miss returns 404.
 func ProjectInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -602,7 +652,7 @@ func ProjectInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, projectPublic(*e))
 }
 
-// projectUpdate 按 project_id 更新项目。没出现的字段保持原值。不存在返回 404。
+// ProjectUpdate updates a project by project_id. Fields that are absent keep their previous values. A missing project returns 404.
 func ProjectUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -640,7 +690,7 @@ func ProjectUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, projectPublic(*e))
 }
 
-// projectDelete 按 project_ids 或 project_id 删除项目。不存在的 id 跳过。
+// ProjectDelete deletes projects by project_ids or project_id. A missing id is skipped.
 func ProjectDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -656,7 +706,7 @@ func ProjectDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": deleted, "project_ids": ids})
 }
 
-// 项目的对外 JSON。
+// projectPublic is the project JSON shown to callers.
 func projectPublic(e store.Entity) map[string]any {
 	created := e.CreatedAt.UTC().Format(time.RFC3339)
 	if e.CreatedAt.IsZero() {
@@ -689,7 +739,7 @@ func projectPublic(e store.Entity) map[string]any {
 	return m
 }
 
-// budgetNew 创建命名预算。需要管理身份。金额缺省保持无效，不写成 0。缺 budget_id 时生成。
+// BudgetNew creates a named budget. It requires a management identity. A missing amount stays invalid and is not written as 0. A missing budget_id is generated.
 func BudgetNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -709,7 +759,7 @@ func BudgetNew(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, got.Public())
 }
 
-// budgetList 列出全部预算的公开 JSON。需要管理身份。
+// BudgetList lists the public JSON of every budget. It requires a management identity.
 func BudgetList(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -718,7 +768,7 @@ func BudgetList(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"data": list})
 }
 
-// budgetListPaged 分页列出预算。page 缺省 1。需要管理身份。
+// BudgetListPaged lists budgets one page at a time. page defaults to 1. It requires a management identity.
 func BudgetListPaged(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -732,17 +782,17 @@ func BudgetListPaged(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, pagedListBody(r.URL.Path, list, page, size))
 }
 
-// spendLogEndUsers 花费日志里出现过的终端用户 id。需要管理身份。没有日志时为空列表。
+// SpendLogEndUsers returns end-user ids that have appeared in spend logs. It requires a management identity. With no logs it returns an empty list.
 func SpendLogEndUsers(s Gate, w http.ResponseWriter, r *http.Request) {
 	spendLogFacet(s, w, r, "end_user")
 }
 
-// spendLogUsers 花费日志里出现过的用户 id。需要管理身份。
+// SpendLogUsers returns user ids that have appeared in spend logs. It requires a management identity.
 func SpendLogUsers(s Gate, w http.ResponseWriter, r *http.Request) {
 	spendLogFacet(s, w, r, "user")
 }
 
-// 按用户或终端用户聚合花费日志的一个维度。
+// spendLogFacet lists distinct user or end-user ids from spend logs and returns a paged body.
 func spendLogFacet(s Gate, w http.ResponseWriter, r *http.Request, kind string) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -774,7 +824,7 @@ func spendLogFacet(s Gate, w http.ResponseWriter, r *http.Request, kind string) 
 	httpx.WriteJSON(w, 200, pagedListBody(r.URL.Path, out, page, size))
 }
 
-// budgetInfo 按 budget_id 读取预算。找不到返回 404。需要管理身份。
+// BudgetInfo reads a budget by budget_id. A miss returns 404. It requires a management identity.
 func BudgetInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -790,7 +840,7 @@ func BudgetInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"data": out})
 }
 
-// budgetUpdate 按 budget_id 更新预算。只改请求里出现的限额、时长和模型预算。不存在返回 404。
+// BudgetUpdate updates a budget by budget_id. Only limits, duration, and model budgets present on the request change. A missing budget returns 404.
 func BudgetUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -841,7 +891,7 @@ func BudgetUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, b.Public())
 }
 
-// budgetSettings 返回预算表单的字段定义。传了 budget_id 且能找到时带上当前值，否则字段值为空。需要管理身份。
+// BudgetSettings returns the field definitions for the budget form. When budget_id is present and found, the current values are included. Otherwise the field values are empty. It requires a management identity.
 func BudgetSettings(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -876,7 +926,7 @@ func BudgetSettings(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 用请求体组装预算。缺少的金额保持无效，不写成 0。
+// budgetFromBody builds a budget from the request body. A missing amount stays invalid and is not written as 0.
 func budgetFromBody(id string, body map[string]any) store.Budget {
 	dur := str(body["budget_duration"])
 	b := store.Budget{
@@ -896,7 +946,7 @@ func budgetFromBody(id string, body map[string]any) store.Budget {
 	return b
 }
 
-// budgetDelete 按 budget_ids、budget_id 或 id 删除预算。某个 id 失败时继续删其余的，响应里的 deleted 是成功条数。
+// BudgetDelete deletes budgets by budget_ids, budget_id, or id. A failed id does not stop the rest, and deleted in the response is the success count.
 func BudgetDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -915,7 +965,7 @@ func BudgetDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": deleted})
 }
 
-// spendLogs 分页花费日志。可用 start_date、end_date、model、request_id 过滤。page 缺省 1，page_size 缺省 50。需要管理身份。
+// SpendLogs lists spend logs one page at a time. start_date, end_date, model, and request_id filter the rows. page defaults to 1 and page_size defaults to 50. It requires a management identity.
 func SpendLogs(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -965,7 +1015,7 @@ func SpendLogs(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// globalSpend 全部花费日志及其合计。合计只加类型为 float64 的 spend。需要管理身份。
+// GlobalSpend returns every spend log and their total. The total adds only spend values that are float64. It requires a management identity.
 func GlobalSpend(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -980,29 +1030,69 @@ func GlobalSpend(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"spend": total, "data": list})
 }
 
-// ModelInfo 返回当前进程里的全部模型。litellm 参数里的密钥已遮罩。需要管理身份。这里不按查询参数过滤，空列表也是 200。
+// ModelInfo returns models in the current process. Secrets inside litellm parameters are masked. It requires a management identity.
+// modelId, model, and search narrow the list. page and size paginate when either is present. An empty list is still 200.
 func ModelInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
 	}
+	q := r.URL.Query()
+	wantID := q.Get("modelId")
+	wantName := q.Get("model")
+	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+	excludeAuto := q.Get("exclude_auto_routers") == "true"
 	var data []map[string]any
-	list := s.ModelList()
-	for _, m := range list {
-		data = append(data, s.ModelPublic(m))
+	for _, m := range s.ModelList() {
+		pub := s.ModelPublic(m)
+		info, _ := pub["model_info"].(map[string]any)
+		params, _ := pub["litellm_params"].(map[string]any)
+		if wantID != "" && str(info["id"]) != wantID {
+			continue
+		}
+		if wantName != "" && m.ModelName != wantName {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(m.ModelName), search) {
+			continue
+		}
+		if excludeAuto {
+			model, _ := params["model"].(string)
+			if strings.HasPrefix(model, "auto_router/") {
+				continue
+			}
+		}
+		data = append(data, pub)
+	}
+	total := len(data)
+	page, size := 1, total
+	if q.Get("page") != "" || q.Get("size") != "" {
+		page = queryInt(r, "page", 1, 0)
+		size = queryInt(r, "size", 50, 1000)
+		data = sliceMaps(data, page, size)
 	}
 	if data == nil {
 		data = []map[string]any{}
 	}
+	pages := 1
+	if size > 0 {
+		pages = total / size
+		if total%size != 0 {
+			pages++
+		}
+		if pages < 1 {
+			pages = 1
+		}
+	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"data":         data,
-		"total_count":  len(data),
-		"current_page": 1,
-		"total_pages":  1,
-		"size":         len(data),
+		"total_count":  total,
+		"current_page": page,
+		"total_pages":  pages,
+		"size":         size,
 	})
 }
 
-// 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -1013,7 +1103,7 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// 用户的对外 JSON。密码哈希不会出现。
+// userPublic is the user JSON shown to callers. The password hash is not included.
 func userPublic(e store.Entity) map[string]any {
 	created := e.CreatedAt.UTC().Format(time.RFC3339)
 	if e.CreatedAt.IsZero() {
@@ -1059,7 +1149,7 @@ func userPublic(e store.Entity) map[string]any {
 	return m
 }
 
-// 团队的对外 JSON。
+// teamPublic is the team JSON shown to callers.
 func teamPublic(e store.Entity) map[string]any {
 	created := e.CreatedAt.UTC().Format(time.RFC3339)
 	if e.CreatedAt.IsZero() {
@@ -1104,7 +1194,7 @@ func teamPublic(e store.Entity) map[string]any {
 	return m
 }
 
-// 组织的对外 JSON。
+// orgPublic is the organization JSON shown to callers.
 func orgPublic(e store.Entity) map[string]any {
 	created := e.CreatedAt.UTC().Format(time.RFC3339)
 	if e.CreatedAt.IsZero() {
@@ -1154,7 +1244,7 @@ func orgPublic(e store.Entity) map[string]any {
 	return m
 }
 
-// 从正文读取 id 列表。复数键优先，否则用单数字段。
+// idsFrom reads an id list from the body. The plural key wins, otherwise the singular field is used.
 func idsFrom(body map[string]any, plural, singular string) []string {
 	var out []string
 	switch v := body[plural].(type) {
@@ -1173,7 +1263,7 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 	return out
 }
 
-// 用 extra 覆盖 base 的同名键。extra 没有的键保留。
+// mergeMaps overwrites keys in base that also appear in extra. Keys absent from extra stay.
 func mergeMaps(base, extra map[string]any) map[string]any {
 	out := cloneMap(base)
 	for k, v := range extra {
@@ -1182,7 +1272,7 @@ func mergeMaps(base, extra map[string]any) map[string]any {
 	return out
 }
 
-// 读取整数查询参数。非法或超过上限时用 def 或上限。
+// queryInt reads an integer query parameter. An illegal value uses def, and a value above the cap uses the cap.
 func queryInt(r *http.Request, key string, def, max int) int {
 	n, err := strconv.Atoi(r.URL.Query().Get(key))
 	if err != nil || n < 1 {
@@ -1194,7 +1284,7 @@ func queryInt(r *http.Request, key string, def, max int) int {
 	return n
 }
 
-// 按页切片。页码从 1 开始，越界得到空切片。
+// sliceMaps returns one page. Page numbers start at 1. A page past the end returns an empty slice.
 func sliceMaps(list []map[string]any, page, size int) []map[string]any {
 	if size < 1 {
 		size = 50
@@ -1213,7 +1303,7 @@ func sliceMaps(list []map[string]any, page, size int) []map[string]any {
 	return list[start:end]
 }
 
-// 按查询条件列出团队。非管理员只能看到自己相关的团队。
+// listTeamsFiltered lists teams that match the query. A non-admin sees only teams related to themselves.
 func listTeamsFiltered(s Gate, r *http.Request) []map[string]any {
 	list, _ := s.DB().ListTeams()
 	org := r.URL.Query().Get("organization_id")
@@ -1245,7 +1335,40 @@ func listTeamsFiltered(s Gate, r *http.Request) []map[string]any {
 	return out
 }
 
-// 给团队 JSON 补上成员数等派生字段。
+// teamMemberships turns the member list into the team_memberships the dashboard expects. Without a separate budget table the limits stay empty.
+func teamMemberships(pub map[string]any) []any {
+	raw, _ := pub["members_with_roles"].([]any)
+	out := make([]any, 0, len(raw))
+	tid := str(pub["team_id"])
+	for _, item := range raw {
+		member, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, map[string]any{
+			"user_id":     str(member["user_id"]),
+			"team_id":     tid,
+			"budget_id":   str(member["budget_id"]),
+			"spend":       member["spend"],
+			"total_spend": member["total_spend"],
+			"litellm_budget_table": map[string]any{
+				"budget_id":             str(member["budget_id"]),
+				"soft_budget":           nil,
+				"max_budget":            member["max_budget_in_team"],
+				"max_parallel_requests": nil,
+				"tpm_limit":             member["tpm_limit"],
+				"rpm_limit":             member["rpm_limit"],
+				"model_max_budget":      nil,
+				"budget_duration":       member["budget_duration"],
+				"budget_reset_at":       member["budget_reset_at"],
+				"allowed_models":        member["allowed_models"],
+			},
+		})
+	}
+	return out
+}
+
+// decorateTeam adds derived fields such as the member count to the team JSON.
 func decorateTeam(s Gate, row map[string]any) map[string]any {
 	tid := str(row["team_id"])
 	keys, _ := s.DB().ListKeys()
@@ -1259,7 +1382,7 @@ func decorateTeam(s Gate, row map[string]any) map[string]any {
 	return row
 }
 
-// 每个用户拥有的虚拟密钥数量。
+// keyCountByUser counts the virtual keys each user owns.
 func keyCountByUser(s Gate) map[string]int {
 	out := map[string]int{}
 	keys, _ := s.DB().ListKeys()

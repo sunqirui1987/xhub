@@ -1,4 +1,4 @@
-// 从请求里解析调用方身份。主密钥、虚拟密钥和会话的权限不同。
+// Package auth resolves the caller of an HTTP request. The master key, a virtual key, and a session do not grant the same rights.
 package auth
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 一次请求的调用方。Kind 为 master、virtual 或 session。主密钥默认不能打推理，除非配置允许。
+// Principal is the caller of one request. Kind is master, virtual, or session. The master key cannot call inference unless configuration allows it.
 type Principal struct {
 	Kind     string // master | virtual | session
 	Master   bool
@@ -23,7 +23,7 @@ type Principal struct {
 	Hash     string
 }
 
-// 去掉 Bearer 前缀和空白。没有前缀时返回去掉空白后的原文。
+// stripBearer removes a Bearer prefix and surrounding space. Without that prefix it returns the trimmed text.
 func stripBearer(v string) string {
 	v = strings.TrimSpace(v)
 	if len(v) >= 7 && strings.EqualFold(v[:7], "bearer ") {
@@ -32,7 +32,7 @@ func stripBearer(v string) string {
 	return v
 }
 
-// 按 LiteLLM 的顺序取密钥：x-litellm-api-key，其次 Authorization，再是 api-key 和 x-api-key。
+// APIKeyFrom reads the credential in LiteLLM order: x-litellm-api-key, then Authorization, then api-key and x-api-key.
 func APIKeyFrom(r *http.Request) string {
 	// Same precedence as LiteLLM user_api_key_auth: x-litellm-api-key wins,
 	// then Authorization, then the Azure/OpenAI api-key headers.
@@ -62,7 +62,7 @@ func APIKeyFrom(r *http.Request) string {
 	return ""
 }
 
-// 把请求解析成身份。密钥被屏蔽或过期时返回错误，不返回一个不能用的 Principal。
+// Resolve turns the request into a Principal. A blocked or expired key returns an error instead of a Principal that cannot be used.
 func Resolve(cfg *config.Config, st *store.Store, r *http.Request) (*Principal, error) {
 	plain := APIKeyFrom(r)
 	if plain == "" {
@@ -85,7 +85,7 @@ func Resolve(cfg *config.Config, st *store.Store, r *http.Request) (*Principal, 
 	return &Principal{Kind: "virtual", Key: k, Plain: plain, Hash: hash}, nil
 }
 
-// 主密钥，以及 key_type 为 management 或 default 的虚拟密钥，可以调用管理接口。
+// CanManage reports whether this caller may use management routes. The master key may. A virtual key may when its type is management or default.
 func (p *Principal) CanManage() bool {
 	if p == nil {
 		return false
@@ -99,7 +99,7 @@ func (p *Principal) CanManage() bool {
 	return false
 }
 
-// 会话在非只读时可以推理。主密钥只有 AllowMasterKeyLLM 为真时可以。管理密钥不行。
+// CanLLM reports whether this caller may send inference. A session may when it is not view-only. The master key may only when AllowMasterKeyLLM is set. A management key may not.
 func (p *Principal) CanLLM(cfg *config.Config) bool {
 	if p == nil {
 		return false
@@ -123,7 +123,7 @@ func (p *Principal) CanLLM(cfg *config.Config) bool {
 
 type authErr string
 
-// 身份错误的文本，例如 invalid_api_key、key_blocked 或 key_expired。
+// Error returns the authentication failure text, such as invalid_api_key, key_blocked, or key_expired.
 func (e authErr) Error() string { return string(e) }
 
 var (
@@ -132,7 +132,7 @@ var (
 	errExpired = authErr("key_expired")
 )
 
-// 是否为密钥缺失、屏蔽或过期。其它错误不能当成 401 的身份失败。
+// IsAuthErr reports a missing, blocked, or expired key. Other errors must not be treated as a 401 authentication failure.
 func IsAuthErr(err error) bool {
 	_, ok := err.(authErr)
 	return ok

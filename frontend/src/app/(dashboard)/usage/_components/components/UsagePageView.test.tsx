@@ -414,6 +414,24 @@ describe("UsagePage", () => {
     } as any);
   });
 
+  it("keeps the daily spend loader up until the activity request resolves", async () => {
+    let resolveActivity: (value: typeof mockSpendData) => void = () => {};
+    mockUserDailyActivityAggregatedCall.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveActivity = resolve;
+        }),
+    );
+    renderWithProviders(<UsagePage {...defaultProps} />);
+    expect((await screen.findAllByText("Loading chart data...")).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("daily-spend-settled")).not.toBeInTheDocument();
+    await act(async () => {
+      resolveActivity(mockSpendData);
+    });
+    expect(await screen.findByTestId("daily-spend-settled")).toBeInTheDocument();
+    expect(screen.queryByText("Loading chart data...")).not.toBeInTheDocument();
+  });
+
   it("should render and fetch usage data on mount", async () => {
     renderWithProviders(<UsagePage {...defaultProps} />);
 

@@ -1,4 +1,4 @@
-// 打开带缓存的 xorm 引擎，并按测试 schema 隔离表。
+// Package store opens a cached xorm engine and can isolate tables in a test schema.
 package store
 
 import (
@@ -20,45 +20,45 @@ type stmtLog struct {
 	lvl  log.LogLevel
 }
 
-// SQL 开始前不记数。
+// BeforeSQL does not count. The statement has not been sent yet.
 func (l *stmtLog) BeforeSQL(log.LogContext) {}
 
-// 每条真正发到数据库的语句加一。缓存命中不会走到这里。
+// AfterSQL increments once for each statement actually sent to the database. A cache hit does not reach here.
 func (l *stmtLog) AfterSQL(log.LogContext) {
 	atomic.AddInt64(l.n, 1)
 }
 
-// 调试日志丢掉，避免把 SQL 文本再打一遍。
+// Debugf discards debug logs so SQL text is not printed again.
 func (l *stmtLog) Debugf(string, ...interface{}) {}
 
-// 错误日志丢掉，计数只看 AfterSQL。
+// Errorf discards error logs. The statement count looks only at AfterSQL.
 func (l *stmtLog) Errorf(string, ...interface{}) {}
 
-// 信息日志丢掉。
+// Infof discards info logs.
 func (l *stmtLog) Infof(string, ...interface{}) {}
 
-// 警告日志丢掉。
+// Warnf discards warning logs.
 func (l *stmtLog) Warnf(string, ...interface{}) {}
 
-// 调试日志丢掉。
+// Debug discards debug logs.
 func (l *stmtLog) Debug(...interface{}) {}
 
-// 信息日志丢掉。
+// Info discards info logs.
 func (l *stmtLog) Info(...interface{}) {}
 
-// 警告日志丢掉。
+// Warn discards warning logs.
 func (l *stmtLog) Warn(...interface{}) {}
 
-// 错误日志丢掉。
+// Error discards error logs.
 func (l *stmtLog) Error(...interface{}) {}
 
-// 返回当前日志级别。
+// Level returns the current log level.
 func (l *stmtLog) Level() log.LogLevel { return l.lvl }
 
-// 设置日志级别。
+// SetLevel sets the log level.
 func (l *stmtLog) SetLevel(v log.LogLevel) { l.lvl = v }
 
-// 打开 SQL 记录。不传参数时视为打开。
+// ShowSQL turns SQL recording on. With no argument it is treated as on.
 func (l *stmtLog) ShowSQL(show ...bool) {
 	if len(show) == 0 {
 		l.show = true
@@ -67,10 +67,10 @@ func (l *stmtLog) ShowSQL(show ...bool) {
 	l.show = show[0]
 }
 
-// 是否记录 SQL。关闭后 AfterSQL 不会被调用。
+// IsShowSQL reports whether SQL is recorded. When it is off, AfterSQL is not called.
 func (l *stmtLog) IsShowSQL() bool { return l.show }
 
-// 连接 PostgreSQL，打开缓存，并把结构体同步成表。
+// openEngine connects to PostgreSQL, turns the cache on, and syncs structs into tables.
 func openEngine(databaseURL string) (*xorm.Engine, *sql.DB, *int64, error) {
 	schema, err := ensureSchema(databaseURL)
 	if err != nil {
@@ -99,7 +99,7 @@ func openEngine(databaseURL string) (*xorm.Engine, *sql.DB, *int64, error) {
 		engine.Close()
 		return nil, nil, nil, err
 	}
-	// 控制台 projects 上的 UNIQUE 约束不能被 Sync 删掉，否则进程起不来。结构体里没有声明唯一索引，所以这里不增删约束。
+	// Sync must not drop the UNIQUE constraint on dashboard projects, or the process cannot start. The structs declare no unique index, so this sync does not add or drop constraints.
 	if _, err := engine.SyncWithOptions(xorm.SyncOptions{IgnoreConstrains: true},
 		new(userRow), new(teamRow), new(orgRow), new(projectRow), new(budgetRow),
 		new(kvRow), new(tokenRow), new(spendRow), new(proxyModelRow), new(configRow),
@@ -110,7 +110,7 @@ func openEngine(databaseURL string) (*xorm.Engine, *sql.DB, *int64, error) {
 	return engine, engine.DB().DB, counter, nil
 }
 
-// 连接串里有 search_path 时先建好这个 schema。没有则用 public。
+// ensureSchema creates the schema named by search_path when the connection string has one. Otherwise it uses public.
 func ensureSchema(databaseURL string) (string, error) {
 	u, err := url.Parse(databaseURL)
 	if err != nil {
@@ -136,7 +136,7 @@ func ensureSchema(databaseURL string) (string, error) {
 	return schema, err
 }
 
-// 把 search_path 写进连接参数。空格用 %20，避免被当成加号。
+// dsnWithSearchPath writes search_path into the connection parameters. A space is encoded as %20 so it is not treated as a plus.
 func dsnWithSearchPath(databaseURL, schema string) (string, error) {
 	u, err := url.Parse(databaseURL)
 	if err != nil {

@@ -1,4 +1,4 @@
-// 密钥、花费日志、代理模型和配置的读写。
+// Package store reads and writes keys, spend logs, proxy models, and configuration rows.
 package store
 
 import (
@@ -9,7 +9,7 @@ import (
 	"xorm.io/builder"
 )
 
-// 把密钥转成表行。空模型列表和时间会补上默认值。
+// tokenTo turns a key into a table row. An empty model list and a zero time are filled with defaults.
 func tokenTo(k Key) tokenRow {
 	if k.ModelsJSON == "" {
 		k.ModelsJSON = "[]"
@@ -43,7 +43,7 @@ func tokenTo(k Key) tokenRow {
 	return row
 }
 
-// 把表行转回密钥。
+// tokenFrom turns a table row back into a key.
 func tokenFrom(r tokenRow) Key {
 	k := Key{
 		TokenHash: r.Token, KeyAlias: r.KeyAlias, KeyName: r.KeyName, UserID: r.UserID,
@@ -66,14 +66,14 @@ func tokenFrom(r tokenRow) Key {
 	return k
 }
 
-// 插入一把密钥，并清掉密钥缓存。
+// InsertKey inserts a key and clears the key cache.
 func (s *Store) InsertKey(k Key) error {
 	_, err := s.Engine.Insert(tokenTo(k))
 	s.bust(new(tokenRow))
 	return err
 }
 
-// 按哈希更新密钥上可改的字段。找不到返回无行。
+// UpdateKey updates the mutable fields of a key by hash. A missing row returns a no-rows error.
 func (s *Store) UpdateKey(k Key) error {
 	row := tokenTo(k)
 	n, err := s.Engine.ID(k.TokenHash).Cols(
@@ -85,7 +85,7 @@ func (s *Store) UpdateKey(k Key) error {
 	return rowsAffected(n, err)
 }
 
-// 按哈希读取密钥。没有这一行时返回无行错误。
+// GetByHash reads a key by hash. A missing row returns a no-rows error.
 func (s *Store) GetByHash(hash string) (*Key, error) {
 	var r tokenRow
 	ok, err := s.one(&r, hash)
@@ -99,7 +99,7 @@ func (s *Store) GetByHash(hash string) (*Key, error) {
 	return &k, nil
 }
 
-// 按创建时间从新到旧列出密钥。
+// ListKeys lists keys from newest creation time to oldest.
 func (s *Store) ListKeys() ([]Key, error) {
 	var rows []tokenRow
 	if err := s.Engine.Desc("created_at").Find(&rows); err != nil {
@@ -112,14 +112,14 @@ func (s *Store) ListKeys() ([]Key, error) {
 	return out, nil
 }
 
-// 按哈希删除密钥，并清掉缓存。
+// DeleteHash deletes a key by hash and clears the cache.
 func (s *Store) DeleteHash(hash string) error {
 	_, err := s.Engine.ID(hash).Delete(&tokenRow{})
 	s.bust(new(tokenRow))
 	return err
 }
 
-// 设置密钥是否屏蔽。
+// SetBlocked sets whether a key is blocked.
 func (s *Store) SetBlocked(hash string, blocked bool) error {
 	v := boolInt(blocked)
 	_, err := s.Engine.ID(hash).Cols("blocked").Update(&tokenRow{Blocked: &v})
@@ -127,21 +127,21 @@ func (s *Store) SetBlocked(hash string, blocked bool) error {
 	return err
 }
 
-// 给这把密钥加上一笔花费。密钥不存在时返回无行。
+// AddSpend adds a spend delta to this key. A missing key returns a no-rows error.
 func (s *Store) AddSpend(hash string, delta float64) error {
 	n, err := s.Engine.ID(hash).Incr("spend", delta).Update(&tokenRow{})
 	s.bust(new(tokenRow))
 	return rowsAffected(n, err)
 }
 
-// 把密钥花费设成给定值。密钥不存在时返回无行。
+// SetSpend sets the key spend to the given value. A missing key returns a no-rows error.
 func (s *Store) SetSpend(hash string, spend float64) error {
 	n, err := s.Engine.ID(hash).Cols("spend").Update(&tokenRow{Spend: spend})
 	s.bust(new(tokenRow))
 	return rowsAffected(n, err)
 }
 
-// 写入一条请求花费日志。状态为空时记成成功。
+// InsertSpendLog writes one request spend log. An empty status is recorded as success.
 func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status string) error {
 	if status == "" {
 		status = "success"
@@ -157,7 +157,7 @@ func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, pr
 	return err
 }
 
-// 列出花费日志，并带上总 token 和耗时。
+// ListSpendLogs lists spend logs and includes total tokens and latency.
 func (s *Store) ListSpendLogs() ([]map[string]any, error) {
 	var rows []spendRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -186,7 +186,7 @@ func (s *Store) ListSpendLogs() ([]map[string]any, error) {
 	return out, nil
 }
 
-// 按 id 更新代理模型，没有这一行就插入。
+// UpsertProxyModel updates a proxy model by id, or inserts it when the row is missing.
 func (s *Store) UpsertProxyModel(m ProxyModel) error {
 	if m.Params == nil {
 		m.Params = map[string]any{}
@@ -216,7 +216,7 @@ func (s *Store) UpsertProxyModel(m ProxyModel) error {
 	return nil
 }
 
-// 列出全部代理模型。
+// ListProxyModels lists every proxy model.
 func (s *Store) ListProxyModels() ([]ProxyModel, error) {
 	var rows []proxyModelRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -238,14 +238,14 @@ func (s *Store) ListProxyModels() ([]ProxyModel, error) {
 	return out, nil
 }
 
-// 按 id 删除代理模型，并清掉缓存。
+// DeleteProxyModel deletes a proxy model by id and clears the cache.
 func (s *Store) DeleteProxyModel(id string) error {
 	_, err := s.Engine.ID(id).Delete(&proxyModelRow{})
 	s.bust(new(proxyModelRow))
 	return err
 }
 
-// 写入一条命名空间配置。已有则更新，没有则插入。
+// PutConfig writes one namespaced configuration row. An existing row is updated and a missing row is inserted.
 func (s *Store) PutConfig(namespace, key string, value any) error {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -265,14 +265,14 @@ func (s *Store) PutConfig(namespace, key string, value any) error {
 	return nil
 }
 
-// 删除一条命名空间配置，并清掉缓存。
+// DeleteConfig deletes one namespaced configuration row and clears the cache.
 func (s *Store) DeleteConfig(namespace, key string) error {
 	_, err := s.Engine.ID(coreIDs(namespace, key)).Delete(&configRow{})
 	s.bust(new(configRow))
 	return err
 }
 
-// 读出某个命名空间下的全部配置。
+// ListConfig reads every configuration row in one namespace.
 func (s *Store) ListConfig(namespace string) (map[string]any, error) {
 	var rows []configRow
 	if err := s.Engine.Where(builder.Eq{"namespace": namespace}).Find(&rows); err != nil {

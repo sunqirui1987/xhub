@@ -1,4 +1,4 @@
-// 用户批量更新，以及团队和组织成员的增删改。
+// Package identity bulk-updates users and adds, updates, and deletes team and organization members.
 package identity
 
 import (
@@ -8,7 +8,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 返回当前身份可以分配的用户角色。
+// UserAvailableRoles returns the user roles the current identity may assign.
 func UserAvailableRoles(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -33,7 +33,7 @@ func UserAvailableRoles(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 批量更新用户。某一行失败时返回错误，不承诺其余行已提交。
+// UserBulkUpdate updates many users. When one row fails it returns an error and does not promise that the other rows were committed.
 func UserBulkUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -93,7 +93,7 @@ func UserBulkUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 向团队添加成员。
+// TeamMemberAdd adds a member to a team.
 func TeamMemberAdd(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -139,7 +139,7 @@ func TeamMemberAdd(s Gate, w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// 从团队移除成员。
+// TeamMemberDelete removes a member from a team.
 func TeamMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -172,7 +172,7 @@ func TeamMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, teamPublic(*e))
 }
 
-// 更新团队成员的角色。
+// TeamMemberUpdate changes a team member's role.
 func TeamMemberUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -220,17 +220,17 @@ func TeamMemberUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 屏蔽整个团队。成员密钥随后不能推理。
+// TeamBlock blocks a whole team. Member keys can no longer call inference.
 func TeamBlock(s Gate, w http.ResponseWriter, r *http.Request) {
 	setTeamBlocked(s, w, r, true)
 }
 
-// 取消团队屏蔽。
+// TeamUnblock clears a team block.
 func TeamUnblock(s Gate, w http.ResponseWriter, r *http.Request) {
 	setTeamBlocked(s, w, r, false)
 }
 
-// 设置团队屏蔽标志。
+// setTeamBlocked sets the team blocked flag.
 func setTeamBlocked(s Gate, w http.ResponseWriter, r *http.Request, blocked bool) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -254,7 +254,7 @@ func setTeamBlocked(s Gate, w http.ResponseWriter, r *http.Request, blocked bool
 	httpx.WriteJSON(w, 200, teamPublic(*e))
 }
 
-// 向组织添加成员。
+// OrgMemberAdd adds a member to an organization.
 func OrgMemberAdd(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -291,7 +291,7 @@ func OrgMemberAdd(s Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 从组织移除成员。
+// OrgMemberDelete removes a member from an organization.
 func OrgMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -324,7 +324,7 @@ func OrgMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, orgPublic(*e))
 }
 
-// 更新组织成员角色。
+// OrgMemberUpdate changes an organization member's role.
 func OrgMemberUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -358,7 +358,7 @@ func OrgMemberUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, orgPublic(*e))
 }
 
-// 在团队的成员列表里追加一条。已存在的用户改为更新角色。
+// addTeamMember appends one entry to the team member list. A user who is already a member has their role updated instead.
 func addTeamMember(s Gate, tid string, mem map[string]any) (map[string]any, error) {
 	e, err := s.DB().GetTeam(tid)
 	if err != nil {
@@ -387,7 +387,7 @@ func addTeamMember(s Gate, tid string, mem map[string]any) (map[string]any, erro
 	return teamPublic(*e), nil
 }
 
-// 把请求里的成员字段收成对象列表。
+// parseMembers turns the member field on the request into a list of objects.
 func parseMembers(v any) []map[string]any {
 	out := []map[string]any{}
 	switch t := v.(type) {
@@ -403,7 +403,7 @@ func parseMembers(v any) []map[string]any {
 	return out
 }
 
-// 把正文中列出的键写进实体 extra，其它 extra 键保留。
+// applyEntityExtra writes the named keys from the body into the entity extra JSON and keeps the other extra keys.
 func applyEntityExtra(e *store.Entity, body map[string]any, keys ...string) {
 	if e == nil {
 		return
@@ -417,7 +417,7 @@ func applyEntityExtra(e *store.Entity, body map[string]any, keys ...string) {
 	e.SetExtra(m)
 }
 
-// 创建用户时是否同时生成一把密钥。缺省不生成。
+// autoCreateKey reports whether creating a user should also generate a key. A missing auto_create_key field defaults to true.
 func autoCreateKey(body map[string]any) bool {
 	if v, ok := body["auto_create_key"].(bool); ok {
 		return v

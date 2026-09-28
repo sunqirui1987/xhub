@@ -1,22 +1,22 @@
-// 花费日志和用量汇总的 HTTP 接口。数字来自 PostgreSQL，不是现场重算。
+// Package usage serves spend logs and usage summaries over HTTP. The numbers come from PostgreSQL and are not recomputed on the request.
 package usage
 
 import (
 	"net/http"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/gateway/identity"
 	"github.com/sunqirui1987/xhub/internal/httpx"
-	"github.com/sunqirui1987/xhub/internal/spend"
 )
 
-// 花费日志的分页接口。
+// LogsV2 is the paged spend-log API.
 func LogsV2(s identity.Gate, w http.ResponseWriter, r *http.Request) {
 	identity.SpendLogs(s, w, r)
 }
 
-// 按请求 id 读取一条花费日志。
+// LogByID reads one spend log by request id.
 func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -32,7 +32,7 @@ func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"request_id": id, "spend": 0, "model": "", "prompt_tokens": 0, "completion_tokens": 0})
 }
 
-// 全局用量时间序列。
+// Activity returns the global usage time series.
 func Activity(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -68,7 +68,7 @@ func Activity(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 按模型拆开的全局用量。
+// ActivityModel returns global usage split by model.
 func ActivityModel(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -105,7 +105,7 @@ func ActivityModel(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 缓存命中的全局用量。
+// ActivityCacheHits returns global usage for cache hits.
 func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -140,7 +140,7 @@ func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 全局花费日志列表。
+// SpendLogs returns the global spend-log list.
 func SpendLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -160,7 +160,7 @@ func SpendLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按密钥汇总花费。
+// SpendKeys totals spend by key.
 func SpendKeys(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -178,7 +178,7 @@ func SpendKeys(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按模型汇总花费。
+// SpendModels totals spend by model.
 func SpendModels(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -198,7 +198,7 @@ func SpendModels(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按供应商汇总花费。
+// SpendProvider totals spend by provider.
 func SpendProvider(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -224,7 +224,7 @@ func SpendProvider(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按团队汇总花费。
+// SpendTeams totals spend by team.
 func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -247,7 +247,7 @@ func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 按标签汇总花费。这是用量接口，不是已删除的标签管理。
+// SpendTags totals spend by tag. This is a usage API, not the removed tag-management page.
 func SpendTags(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -255,7 +255,7 @@ func SpendTags(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
 }
 
-// 出现过的标签名。
+// SpendTagNames returns tag names that have appeared.
 func SpendTagNames(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -263,7 +263,7 @@ func SpendTagNames(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"tag_names": []any{}})
 }
 
-// 按终端用户汇总花费。
+// SpendEndUsers totals spend by end user.
 func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -271,7 +271,7 @@ func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, []any{})
 }
 
-// 按模型和 token 估算花费，不写库。不认识的模型返回错误而不是 0。
+// Calculate estimates spend from a model and token counts and does not write the database. An unknown model returns an error instead of 0.
 func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -288,19 +288,19 @@ func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 			completion = asInt(u["completion_tokens"])
 		}
 	}
-	total, _, _, ok := spend.Cost(model, prompt, completion)
+	total, _, _, ok := catalog.Cost(model, prompt, completion)
 	if !ok {
 		total = 0
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"cost": total})
 }
 
-// 当前身份可见的密钥花费。
+// Keys returns key spend visible to the current identity.
 func Keys(s Host, w http.ResponseWriter, r *http.Request) {
 	SpendKeys(s, w, r)
 }
 
-// 按用户汇总花费。
+// Users totals spend by user.
 func Users(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -313,7 +313,32 @@ func Users(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// 按标签汇总花费。
+// TagList returns the tag catalog read by the usage filter, the key form, and the tag page.
+// Keys are tag names. An empty catalog is an empty object.
+func TagList(s Host, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	out := map[string]any{}
+	if list, err := s.DB().ListKV("tag"); err == nil {
+		for _, item := range list {
+			name := str(item["name"])
+			if name == "" {
+				name = str(item["tag_name"])
+			}
+			if name == "" {
+				name = str(item["description"])
+			}
+			if name == "" {
+				continue
+			}
+			out[name] = item
+		}
+	}
+	httpx.WriteJSON(w, 200, out)
+}
+
+// Tags totals spend by tag.
 func Tags(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -321,7 +346,7 @@ func Tags(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
 }
 
-// 探测上游或依赖是否连通。失败时在 JSON 里写原因，不一定是 500。
+// HealthTestConnection checks whether an upstream or dependency is reachable. A failure writes the reason in JSON and is not always a 500.
 func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -346,7 +371,7 @@ func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 依赖服务的健康列表。
+// HealthServices returns the health list for dependent services.
 func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -358,13 +383,13 @@ func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 对指定目标做一次健康测试。
+// HealthTest runs one health test against the named target.
 func HealthTest(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "LiteLLM Proxy is running"})
 }
 
-// spendDay 从时间戳取出日期，供按天过滤。空时间用当前 UTC 日期，认不出的格式保留前 10 个字符。
+// spendDay takes the date from a timestamp for day filters. An empty time uses today's UTC date. An unrecognized format keeps the first 10 characters.
 func spendDay(ts string) string {
 	if ts == "" {
 		return time.Now().UTC().Format("2006-01-02")
@@ -381,7 +406,7 @@ func spendDay(ts string) string {
 	return ts
 }
 
-// spendInRange 判断日期是否落在查询区间里。缺少 start_date 或 end_date 时那一侧不限制。
+// spendInRange reports whether a date falls in the query window. A missing start_date or end_date does not limit that side.
 func spendInRange(day string, r *http.Request) bool {
 	start := r.URL.Query().Get("start_date")
 	end := r.URL.Query().Get("end_date")

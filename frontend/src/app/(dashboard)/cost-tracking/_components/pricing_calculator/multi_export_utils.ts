@@ -259,10 +259,10 @@ export const exportMultiToCSV = (multiResult: MultiModelResult): void => {
   // Summary section
   rows.push(
     ["COMBINED TOTALS"],
-    ["Total Per Request", multiResult.totals.cost_per_request.toString()],
+    ["Total Per Request", multiResult.totals.cost_per_request?.toString() ?? "-"],
     ["Total Daily", multiResult.totals.daily_cost?.toString() || "-"],
     ["Total Monthly", multiResult.totals.monthly_cost?.toString() || "-"],
-    ["Margin Per Request", multiResult.totals.margin_per_request.toString()],
+    ["Margin Per Request", multiResult.totals.margin_per_request?.toString() ?? "-"],
     ["Daily Margin", multiResult.totals.daily_margin?.toString() || "-"],
     ["Monthly Margin", multiResult.totals.monthly_margin?.toString() || "-"],
     [""],
@@ -290,16 +290,16 @@ export const exportMultiToCSV = (multiResult: MultiModelResult): void => {
     rows.push([
       r.model,
       r.provider || "-",
-      r.input_tokens.toString(),
-      r.output_tokens.toString(),
+      r.input_tokens?.toString() ?? "-",
+      r.output_tokens?.toString() ?? "-",
       r.num_requests_per_day?.toString() || "-",
       r.num_requests_per_month?.toString() || "-",
-      r.cost_per_request.toString(),
+      r.cost_per_request?.toString() ?? "-",
       r.daily_cost?.toString() || "-",
       r.monthly_cost?.toString() || "-",
-      r.input_cost_per_request.toString(),
-      r.output_cost_per_request.toString(),
-      r.margin_cost_per_request.toString(),
+      r.input_cost_per_request?.toString() ?? "-",
+      r.output_cost_per_request?.toString() ?? "-",
+      r.margin_cost_per_request?.toString() ?? "-",
     ]);
   }
 

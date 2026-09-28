@@ -1,4 +1,4 @@
-// 推理成功后的花费、响应头和进程内并发。Redis 在时不在请求里写 PostgreSQL。
+// Package gateway records spend, response headers, and in-process concurrency after a successful inference. When Redis is set, the request does not write PostgreSQL.
 package gateway
 
 import (
@@ -9,26 +9,26 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/router"
-	"github.com/sunqirui1987/xhub/internal/spend"
 )
 
-// 部署的进程内并发加一。
+// incBusy increments the in-process concurrency count for a deployment.
 func (s *Server) incBusy(id string) {
 	s.mu.Lock()
 	s.Busy[id]++
 	s.mu.Unlock()
 }
 
-// 部署的进程内并发减一。
+// decBusy decrements the in-process concurrency count for a deployment.
 func (s *Server) decBusy(id string) {
 	s.mu.Lock()
 	s.Busy[id]--
 	s.mu.Unlock()
 }
 
-// 设置模型名、花费和耗时等响应头。
+// setChatHeaders sets response headers such as the model name, spend, and latency.
 func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias, apiBase string) {
 	w.Header().Set("x-litellm-model-name", alias)
 	w.Header().Set("x-litellm-model-api-base", apiBase)
@@ -41,34 +41,34 @@ func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 			w.Header().Set("x-litellm-key-rpm-limit", strconv.FormatInt(p.Key.RPMLimit.Int64, 10))
 		}
 		if p.Key.MaxBudget.Valid {
-			w.Header().Set("x-litellm-key-max-budget", spend.Format(p.Key.MaxBudget.Float64))
+			w.Header().Set("x-litellm-key-max-budget", catalog.Format(p.Key.MaxBudget.Float64))
 		}
-		w.Header().Set("x-litellm-key-spend", spend.Format(p.Key.Spend))
+		w.Header().Set("x-litellm-key-spend", catalog.Format(p.Key.Spend))
 	}
 }
 
-// 记录本次花费。配置了 Redis 时只改热路径并排队日志，不在请求里写 PostgreSQL。
+// recordSpend records this call's spend. With Redis it updates the hot path and queues a log instead of writing PostgreSQL inside the request.
 func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string) {
 	if usage == nil {
 		usage = map[string]any{}
 	}
 	pt := asInt(usage["prompt_tokens"])
 	ct := asInt(usage["completion_tokens"])
-	total, in, out, okc := spend.Cost(alias, pt, ct)
+	total, in, out, okc := catalog.Cost(alias, pt, ct)
 	// LiteLLM stores response_cost or 0.0. Unknown models still get a row, with spend 0.
 	logged := sql.NullFloat64{Float64: 0, Valid: true}
 	if okc {
 		logged = sql.NullFloat64{Float64: total, Valid: true}
-		w.Header().Set("x-litellm-response-cost", spend.Format(total))
-		w.Header().Set("x-litellm-response-cost-original", spend.Format(total))
-		w.Header().Set("x-litellm-response-cost-input", spend.Format(in))
-		w.Header().Set("x-litellm-response-cost-output", spend.Format(out))
+		w.Header().Set("x-litellm-response-cost", catalog.Format(total))
+		w.Header().Set("x-litellm-response-cost-original", catalog.Format(total))
+		w.Header().Set("x-litellm-response-cost-input", catalog.Format(in))
+		w.Header().Set("x-litellm-response-cost-output", catalog.Format(out))
 		if p.Key != nil {
 			shown := p.Key.Spend + total
 			if s.Live != nil {
 				shown = p.Key.Spend + s.Live.HotSpend(p.Hash) + total
 			}
-			w.Header().Set("x-litellm-key-spend", spend.Format(shown))
+			w.Header().Set("x-litellm-key-spend", catalog.Format(shown))
 		}
 	}
 	hash := ""
@@ -103,7 +103,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	s.persistSpend(hash, teamID, userID, orgID, callID, alias, pt, ct, logged, start, end, cacheHit, total, okc && hash != "")
 }
 
-// 同步把花费写入 PostgreSQL。没有 Redis 时请求走这里。
+// persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
 func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string, pt, ct int, logged sql.NullFloat64, start, end time.Time, cacheHit bool, total float64, charge bool) {
 	if charge {
 		_ = s.Store.AddSpend(hash, total)
@@ -120,7 +120,7 @@ func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string,
 	_ = s.Store.InsertSpendLog(callID, "chat", alias, hash, pt, ct, logged, start, end, cacheHit, "success")
 }
 
-// 返回缓存命中并记一笔缓存命中日志。
+// writeCacheHit returns a cached body and records a cache-hit spend log.
 func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck string, hit []byte, start time.Time) {
 	w.Header().Set("cache_hit", "true")
 	w.Header().Set("x-litellm-cache-hit", "true")
@@ -139,7 +139,7 @@ func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID,
 	_, _ = w.Write(hit)
 }
 
-// 把上游 JSON 写回客户端并记花费。
+// writeChatJSON writes the upstream JSON back to the client and records the spend.
 func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string) {
 	if op == "audio_speech" {
 		s.recordSpend(w, p, callID, alias, map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}, start, false, depID)

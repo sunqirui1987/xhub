@@ -1,4 +1,4 @@
-// 模型接口共用的 JSON 读取。空正文得到空表，不把解析失败当成 400。
+// Package models shares JSON readers for model handlers. An empty body becomes an empty map, and a parse failure is not treated as 400.
 package models
 
 import (
@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -18,7 +18,7 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// str 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s

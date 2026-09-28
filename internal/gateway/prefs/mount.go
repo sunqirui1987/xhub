@@ -1,15 +1,15 @@
-// 设置模块的路由。数据库键覆盖 YAML 的规则在处理函数里，不在注册这层。
+// Package prefs registers settings routes. The rule that a database key overrides YAML lives in the handlers, not in this registration.
 package prefs
 
 import (
 	"net/http"
 
-	"github.com/sunqirui1987/xhub/internal/gateway/module"
+	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// Module 是路由设置和通用设置的读写。
-func Module(h Host) module.Module {
-	return module.Bind("prefs", func(reg module.Registrar) {
+// Module reads and writes router settings and general settings.
+func Module(h Host) httpx.Module {
+	return httpx.Bind("prefs", func(reg httpx.Registrar) {
 		reg.Handle("GET /router/settings", func(w http.ResponseWriter, r *http.Request) { Page(h, w, r) })
 		reg.Handle("GET /router/fields", func(w http.ResponseWriter, r *http.Request) { Page(h, w, r) })
 		reg.Handle("GET /get/config/callbacks", func(w http.ResponseWriter, r *http.Request) { Callbacks(h, w, r) })

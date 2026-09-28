@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { gotoLogin, loginAdmin, uiPath, watchGateway } from "./helpers";
+import { recordPage } from "./report";
 import { translate } from "../src/i18n/translate";
 
 const t = (key: string) => translate("zh-CN", key);
@@ -13,6 +14,7 @@ test.describe("login", () => {
     await page.getByRole("button", { name: t("login.submit"), exact: true }).click();
     await expect(page.getByText(t("login.passwordRequired"))).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
+    recordPage("/login", "pass");
   });
 
   test("wrong password shows error", async ({ page }) => {

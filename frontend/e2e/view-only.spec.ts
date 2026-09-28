@@ -28,5 +28,13 @@ test.describe("view-only", () => {
     await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("link", { name: t("nav.playground"), exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: t("pages.apiKeys.create") })).toHaveCount(0);
+    const viewerCookies = await page.context().cookies();
+    const viewerToken = viewerCookies.find((c) => c.name === "token")?.value;
+    const viewerPayload = JSON.parse(Buffer.from(viewerToken!.split(".")[1], "base64url").toString());
+    const denied = await page.request.post("http://127.0.0.1:4000/key/generate", {
+      headers: { Authorization: `Bearer ${viewerPayload.key}`, "Content-Type": "application/json" },
+      data: { key_alias: "viewer-should-fail" },
+    });
+    expect(denied.status()).toBe(403);
   });
 });

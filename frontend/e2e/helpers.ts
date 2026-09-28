@@ -40,8 +40,28 @@ export function uiPath(path: string): string {
   return `/ui${withSlash}${query}`;
 }
 
+export async function stableGoto(page: Page, path: string) {
+  const target = uiPath(path);
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.goto(target, { waitUntil: "commit" });
+      await page.waitForLoadState("domcontentloaded");
+      if (!page.url().includes("/login") || path === "/login") return;
+    } catch (err) {
+      last = err;
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+      if (page.url().includes(path) && !page.url().includes("/login")) return;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes("interrupted") && attempt === 2) throw err;
+    }
+  }
+  if (page.url().includes(path) && !page.url().includes("/login")) return;
+  throw last ?? new Error(`navigation to ${path} ended on ${page.url()}`);
+}
+
 export async function gotoLogin(page: Page) {
-  await page.goto(uiPath("/login"));
+  await stableGoto(page, "/login");
   await expect(page.getByRole("heading", { name: t("login.title") })).toBeVisible({ timeout: 20_000 });
 }
 

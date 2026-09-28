@@ -1,4 +1,4 @@
-// 按调用方身份列出可见模型，并展开 openai/* 这类通配符。
+// Package models lists the models a caller may see and expands wildcards such as openai/*.
 package models
 
 import (
@@ -21,7 +21,7 @@ const (
 	noDefaultModels = "no-default-models"
 )
 
-// listModels GET /v1/models。推理身份或管理身份都可以。scope 只接受空或 expand，其它值返回 400。created 使用固定的 LiteLLM 默认时间，不是模型入库时间。
+// List serves GET /v1/models. Either an inference identity or a management identity is accepted. scope accepts only empty or expand; any other value returns 400. created uses the fixed LiteLLM default time, not the time the model was stored.
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p, err := s.Resolve(r)
@@ -48,7 +48,7 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
 
-// availableModelNames 按密钥和团队的允许列表计算可见模型名。管理员在 scope=expand 时忽略密钥限制，看到全部未全部屏蔽的部署。only_model_access_groups 只留访问组名。
+// availableNames computes visible model names from the key and team allow-lists. An admin with scope=expand ignores the key restriction and sees every deployment that is not fully blocked. only_model_access_groups keeps only access-group names.
 func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	q := r.URL.Query()
 	includeGroups := queryBool(q.Get("include_model_access_groups"))
@@ -108,7 +108,7 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	return dedupeModels(expandWildcardNames(base, list, returnWild))
 }
 
-// hasAdminModelView 主密钥、proxy_admin 和 proxy_admin_viewer 可以在 scope=expand 时越过密钥的模型限制。普通身份不行。
+// hasAdminModelView reports that the master key, proxy_admin, and proxy_admin_viewer may bypass the key model restriction when scope=expand. An ordinary identity may not.
 func hasAdminModelView(p *auth.Principal) bool {
 	if p == nil {
 		return false
@@ -119,7 +119,7 @@ func hasAdminModelView(p *auth.Principal) bool {
 	return false
 }
 
-// queryBool 查询参数 1、true、yes、on（不区分大小写）为真。其余，包括空串，都是假。
+// queryBool treats the query values 1, true, yes, and on as true, ignoring case. Everything else, including an empty string, is false.
 func queryBool(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "1", "true", "yes", "on":
@@ -129,7 +129,7 @@ func queryBool(v string) bool {
 	}
 }
 
-// proxyModelNames 对外模型名，保持配置里的出现顺序。某个名字下的部署全部 blocked 时，这个名字不出现。
+// proxyModelNames returns public model names in config order. A name whose deployments are all blocked is omitted.
 func proxyModelNames(list []config.ModelEntry) []string {
 	total := map[string]int{}
 	blocked := map[string]int{}
@@ -158,7 +158,7 @@ func proxyModelNames(list []config.ModelEntry) []string {
 	return out
 }
 
-// modelBlocked 读 model_info.blocked。字段缺失或不是布尔时视为未屏蔽，不修改配置。
+// modelBlocked reads model_info.blocked. A missing or non-boolean field counts as not blocked and does not change the config.
 func modelBlocked(m config.ModelEntry) bool {
 	if m.ModelInfo == nil {
 		return false
@@ -167,7 +167,7 @@ func modelBlocked(m config.ModelEntry) bool {
 	return b
 }
 
-// modelAccessGroups 从各部署的 model_info.access_groups 建访问组到模型名的映射。没有该字段的部署被跳过。
+// modelAccessGroups maps access-group names to model names from each deployment's model_info.access_groups. A deployment without that field is skipped.
 func modelAccessGroups(list []config.ModelEntry) map[string][]string {
 	groups := map[string][]string{}
 	for _, m := range list {
@@ -181,7 +181,7 @@ func modelAccessGroups(list []config.ModelEntry) map[string][]string {
 	return groups
 }
 
-// groupKeys 返回访问组名字。map 迭代顺序不稳定，调用方需要稳定顺序时要再排序。
+// groupKeys returns the access-group names. Map iteration order is not stable, so a caller that needs a stable order must sort.
 func groupKeys(groups map[string][]string) []string {
 	out := make([]string, 0, len(groups))
 	for k := range groups {
@@ -190,7 +190,7 @@ func groupKeys(groups map[string][]string) []string {
 	return out
 }
 
-// stringList 把 []string 或 []any 收成字符串列表。非字符串元素和空串被丢掉。其它类型返回 nil。
+// stringList turns a []string or []any into a string list. Non-string elements and empty strings are dropped. Any other type returns nil.
 func stringList(v any) []string {
 	switch t := v.(type) {
 	case []string:
@@ -208,7 +208,7 @@ func stringList(v any) []string {
 	}
 }
 
-// expandGrantedModels 展开 all-proxy-models 和 all-team-models。只有密钥上的 all-team-models 会先落到团队列表，再落到全部部署。空授权返回 nil，表示调用方改用全部代理模型。
+// expandGrantedModels expands all-proxy-models and all-team-models. Only all-team-models on a key falls through to the team list and then to every deployment. An empty grant returns nil, which tells the caller to use every proxy model.
 // expandGrantedModels mirrors get_key_models / get_team_models.
 // keyPass distinguishes the all-team-models sentinel, which only keys honor
 // before falling through to the proxy list.
@@ -236,7 +236,7 @@ func expandGrantedModels(granted, teamModels, proxy []string, groups map[string]
 	return modelsFromAccessGroups(all, groups, include, proxy)
 }
 
-// modelsFromAccessGroups 把授权里的访问组展开成成员模型名。include 为假时，未部署的组名本身被丢掉，成员模型仍然加入。
+// modelsFromAccessGroups expands access groups in a grant into member model names. When include is false, an undeployed group name itself is dropped, but member models are still added.
 func modelsFromAccessGroups(all []string, groups map[string][]string, include bool, proxy []string) []string {
 	deployed := map[string]struct{}{}
 	for _, name := range proxy {
@@ -259,7 +259,7 @@ func modelsFromAccessGroups(all []string, groups map[string][]string, include bo
 	return append(kept, members...)
 }
 
-// expandWildcardNames 把带 * 的模型名展开成价格表里的具体模型。returnWild 为真时保留通配符原文。没有匹配部署时按供应商前缀查内置表。
+// expandWildcardNames expands model names that contain * into concrete models from the price map. When returnWild is true the wildcard text is kept. With no matching deployment it looks up the built-in table by provider prefix.
 func expandWildcardNames(models []string, list []config.ModelEntry, returnWild bool) []string {
 	var out []string
 	var extra []string
@@ -283,7 +283,7 @@ func expandWildcardNames(models []string, list []config.ModelEntry, returnWild b
 	return append(out, extra...)
 }
 
-// deploymentsNamed 返回对外名字恰好等于 name 的部署。通配符不在这里展开。
+// deploymentsNamed returns deployments whose public name equals name. Wildcards are not expanded here.
 func deploymentsNamed(list []config.ModelEntry, name string) []config.ModelEntry {
 	var out []config.ModelEntry
 	for _, m := range list {
@@ -294,7 +294,7 @@ func deploymentsNamed(list []config.ModelEntry, name string) []config.ModelEntry
 	return out
 }
 
-// knownModelsFromWildcard 用 openai/* 这类前缀到内置价格表里取模型。组织 id 前缀（不是已知供应商）会保留在模型名里。没有斜杠的通配符返回 nil。
+// knownModelsFromWildcard looks up models for a prefix such as openai/* in the built-in price map. An organization-id prefix that is not a known provider stays on the model name. A wildcard with no slash returns nil.
 func knownModelsFromWildcard(wildcard, litellmModel string) []string {
 	toExpand := wildcard
 	if wildcard == "*" && strings.Contains(litellmModel, "*") && strings.Contains(litellmModel, "/") {
@@ -357,7 +357,7 @@ func knownModelsFromWildcard(wildcard, litellmModel string) []string {
 	return out
 }
 
-// dedupeModels 去掉空名、重复名和 no-default-models。保留第一次出现的顺序。
+// dedupeModels drops empty names, duplicates, and no-default-models. The first occurrence keeps its order.
 func dedupeModels(in []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(in))
@@ -374,7 +374,7 @@ func dedupeModels(in []string) []string {
 	return out
 }
 
-// containsStr 列表里是否有完全相等的字符串。不忽略大小写。
+// containsStr reports whether the list has a string that is exactly equal. Case is not ignored.
 func containsStr(list []string, want string) bool {
 	for _, s := range list {
 		if s == want {
@@ -384,7 +384,7 @@ func containsStr(list []string, want string) bool {
 	return false
 }
 
-// removeStr 去掉所有等于 drop 的项，保留其余顺序。
+// removeStr removes every item equal to drop and keeps the order of the rest.
 func removeStr(list []string, drop string) []string {
 	out := make([]string, 0, len(list))
 	for _, s := range list {

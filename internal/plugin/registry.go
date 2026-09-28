@@ -1,4 +1,4 @@
-// 推理发出前的扩展契约。实现按稳定名字注册，本包不引用任何实现，实现也不必引用网关进程。
+// Package plugin defines the extension contract that runs before an inference call reaches the upstream. Implementations register by a stable name. This package does not import those implementations, and they do not have to import the gateway process.
 package plugin
 
 import (
@@ -6,15 +6,14 @@ import (
 	"sync"
 )
 
-// Call 是扩展能读到的这次推理。数据面在访问上游之前填好它。
+// Call is the inference attempt an extension can read. The data plane fills it before contacting the upstream.
 type Call struct {
 	Op    string
 	Model string
 	Path  string
 }
 
-// Decision 是扩展的结论。Refuse 为真时数据面不读缓存、也不访问上游。
-// Header 会写到响应上；继续放行时也保留，方便调用方看到这个扩展确实跑过。
+// Decision is an extension's result. When Refuse is true the data plane skips the cache and does not contact the upstream. Header is copied onto the response even when the call is allowed, so the caller can see that the extension ran.
 type Decision struct {
 	Refuse  bool
 	Status  int
@@ -23,25 +22,25 @@ type Decision struct {
 	Header  map[string]string
 }
 
-// Extension 是一个具名扩展。Name 在同一张注册表里必须唯一。
+// Extension is one named pre-call check. Name must be unique in a registry.
 type Extension interface {
 	Name() string
 	BeforeUpstream(call Call) Decision
 }
 
-// Registry 按注册顺序保存扩展。零值不能用，请用 New。
+// Registry stores extensions in registration order. The zero value is not usable; call New.
 type Registry struct {
 	mu    sync.Mutex
 	order []Extension
 	by    map[string]Extension
 }
 
-// New 返回一张空表。没有注册项时 Run 直接放行。
+// New returns an empty registry. Run allows the call when nothing is registered.
 func New() *Registry {
 	return &Registry{by: map[string]Extension{}}
 }
 
-// Register 把扩展加到表尾。名字为空或重复时返回错误，不改已有顺序。
+// Register appends an extension. An empty or duplicate name returns an error and leaves the existing order unchanged.
 func (r *Registry) Register(ext Extension) error {
 	if r == nil {
 		return fmt.Errorf("plugin registry is nil")
@@ -60,7 +59,7 @@ func (r *Registry) Register(ext Extension) error {
 	return nil
 }
 
-// Names 按注册顺序返回名字的副本。调用方改这个切片不会改表。
+// Names returns a copy of the registered names in order. Changing the slice does not change the registry.
 func (r *Registry) Names() []string {
 	if r == nil {
 		return nil
@@ -74,7 +73,7 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-// Invoke 按注册时的名字调用一个扩展。没有这个名字时返回错误，不调用其他扩展。
+// Invoke runs the extension registered under name. A missing name returns an error and does not call any other extension.
 func (r *Registry) Invoke(name string, call Call) (Decision, error) {
 	if r == nil {
 		return Decision{}, fmt.Errorf("plugin %q is not registered", name)
@@ -88,8 +87,7 @@ func (r *Registry) Invoke(name string, call Call) (Decision, error) {
 	return ext.BeforeUpstream(call), nil
 }
 
-// Run 按注册顺序调用全部扩展。第一个拒绝会停住后面的扩展，并带上已经写下的响应头。
-// 没有注册项时返回零值，数据面照常往下走。
+// Run calls every extension in registration order. The first refusal stops the rest and keeps headers already set. An empty registry returns a zero Decision so the data plane continues.
 func (r *Registry) Run(call Call) Decision {
 	if r == nil {
 		return Decision{}

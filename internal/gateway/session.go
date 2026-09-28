@@ -1,4 +1,4 @@
-// 登录、会话和身份门槛。虚拟密钥的解析仍交给 auth 包。
+// Package gateway handles login, sessions, and the identity gate. Virtual-key resolution stays in the auth package.
 package gateway
 
 import (
@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -21,7 +22,7 @@ const (
 	invalidUserPassword  = "Invalid credentials used to access UI. Check the password set for your user"
 )
 
-// 用户名密码登录。环境凭证登录被关掉时只接受库存用户。
+// login accepts a username and password. When environment-credential login is disabled, only a stored user is accepted.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	var body struct {
@@ -48,12 +49,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, 401, "auth_error", s.invalidCredentialsMessage())
 }
 
-// 是否允许用环境里的控制台账号登录。
+// envCredentialLoginEnabled reports whether the console account from the environment may log in.
 func (s *Server) envCredentialLoginEnabled() bool {
 	return !s.Cfg.GeneralSettings.DisableEnvCredentialLogin
 }
 
-// 登录失败时的统一文案，不区分用户不存在和密码错误。
+// invalidCredentialsMessage is the single login-failure text. It does not say whether the user was missing or the password was wrong.
 func (s *Server) invalidCredentialsMessage() string {
 	if s.envCredentialLoginEnabled() {
 		return invalidUICredentials
@@ -61,7 +62,7 @@ func (s *Server) invalidCredentialsMessage() string {
 	return invalidUserPassword
 }
 
-// 从主密钥推导默认控制台账号。没有单独配置时用户名是 admin。
+// uiEnvCredentials derives the default console account from the master key. With no separate configuration the username is admin.
 func uiEnvCredentials(master string) (username, password string) {
 	username = os.Getenv("UI_USERNAME")
 	if username == "" {
@@ -74,7 +75,7 @@ func uiEnvCredentials(master string) (username, password string) {
 	return username, password
 }
 
-// 用户名和密码是否与环境凭证一致。比较时不提前返回长度差异以外的信息。
+// envCredentialsMatch reports whether the username and password match the environment credentials. The comparison does not return early in a way that reveals more than a length difference.
 func (s *Server) envCredentialsMatch(username, password string) bool {
 	if !s.envCredentialLoginEnabled() {
 		return false
@@ -83,12 +84,12 @@ func (s *Server) envCredentialsMatch(username, password string) bool {
 	return credsEqual(username, wantUser) && credsEqual(password, wantPass)
 }
 
-// 常量时间比较两段字符串，避免用普通相等泄露密码长度以外的差异。
+// credsEqual compares two strings in constant time so a normal equality check cannot leak more than the length difference.
 func credsEqual(a, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
 }
 
-// 写下登录成功的会话和用户信息。
+// loginSuccess writes the session and user info for a successful login.
 func (s *Server) loginSuccess(w http.ResponseWriter, userID, role string) {
 	s.ensureUser(userID, role)
 	sess := "sess-" + httpx.CallID()
@@ -104,7 +105,7 @@ func (s *Server) loginSuccess(w http.ResponseWriter, userID, role string) {
 	})
 }
 
-// 签发会话 JWT。密钥来自配置，不写进响应以外的日志。
+// signSessionJWT issues a session JWT. The signing key comes from configuration and is not written to logs beyond the response.
 func signSessionJWT(sess, userID, role, secret string) string {
 	if secret == "" {
 		secret = "xhub"
@@ -125,14 +126,14 @@ func signSessionJWT(sess, userID, role, secret string) string {
 	return header + "." + pl + "." + sig
 }
 
-// ClearSessions 清空内存里的登录会话。测试用它表示进程重启后会话不再保留。
+// ClearSessions drops the in-memory login sessions. A caller uses it to represent a process restart after which sessions are gone.
 func (s *Server) ClearSessions() {
 	s.mu.Lock()
 	s.sessions = map[string]sessionRec{}
 	s.mu.Unlock()
 }
 
-// 把会话放进进程内表。重启后会话失效。
+// rememberSession stores a session in the process table. A restart invalidates it.
 func (s *Server) rememberSession(sess, userID, role string) {
 	s.mu.Lock()
 	s.sessions[sess] = sessionRec{Role: role, UserID: userID}
@@ -144,7 +145,7 @@ func (s *Server) rememberSession(sess, userID, role string) {
 	_ = s.Store.PutKV("ui_session", sess, string(body))
 }
 
-// 按令牌找会话。找不到时 ok 为 false。
+// lookupSession looks up a session by token in memory, then a JWT, then the key-value table. A miss returns ok false.
 func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	s.mu.Lock()
 	rec, ok := s.sessions[tok]
@@ -171,7 +172,7 @@ func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	return rec, true
 }
 
-// 从请求解析调用方身份，含会话 JWT 和虚拟密钥。失败时返回错误，由上层写 401。
+// resolve resolves the caller from the request, including a session JWT and a virtual key. On failure it returns an error and the caller writes the 401.
 func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	tok := auth.APIKeyFrom(r)
 	rec, ok := s.lookupSession(tok)
@@ -185,7 +186,7 @@ func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	return auth.Resolve(s.Cfg, s.Store, r)
 }
 
-// 校验会话 JWT。签名不对或过期时 ok 为 false。
+// verifySessionJWT checks a session JWT. A bad signature or an expired token returns ok false.
 func verifySessionJWT(tok, secret string) (role, sess, userID string, ok bool) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
@@ -217,7 +218,7 @@ func verifySessionJWT(tok, secret string) (role, sess, userID string, ok bool) {
 	return role, sess, userID, true
 }
 
-// 要求管理身份。失败时写 401 并返回 nil。
+// requireManage requires a management identity. On failure it writes 401 and returns nil.
 func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -235,7 +236,7 @@ func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Pri
 	return p
 }
 
-// 管理身份或推理身份都可以。两者都不是时写 401。
+// requireMixed accepts either a management identity or an inference identity. If it is neither, it writes 401.
 func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -253,21 +254,23 @@ func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Prin
 	return p
 }
 
-// 要求可以推理的身份。主密钥默认不行。
+// requireLLMPrincipal requires an identity that may call inference. The master key may not by default.
 func (s *Server) requireLLMPrincipal(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
+		log.Printf("error auth %s %s no api key", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 		return nil
 	}
 	if !p.CanLLM(s.Cfg) {
+		log.Printf("error auth %s %s master key cannot call llm", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Master key cannot call /v1/chat/completions")
 		return nil
 	}
 	return p
 }
 
-// 保证用户行存在。已存在时不覆盖角色以外的字段。
+// ensureUser makes sure the user row exists. An existing row does not have fields other than the role overwritten.
 func (s *Server) ensureUser(id, role string) {
 	if id == "" {
 		return

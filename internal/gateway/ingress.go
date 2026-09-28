@@ -1,4 +1,4 @@
-// 把路由注册到 Gin。专用 handler 先挂，目录里剩下的路径后挂。
+// Package gateway registers routes on Gin. Dedicated handlers are mounted first, and the remaining catalog paths are mounted after them.
 package gateway
 
 import (
@@ -11,10 +11,10 @@ import (
 	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
-// handle 把一条「方法 + 路径」挂到 Gin。
+// handle mounts one "METHOD /path" pattern on Gin.
 //
-// 路径里的 {param} 按段收成 :pN，同一位置的参数名一致，避免 Gin 的通配符冲突。
-// 已经挂过的方法+模式直接跳过，因此专用 handler 先注册时不会被 catalog 覆盖。
+// A {param} in the path becomes :pN per segment. The same position keeps the same parameter name so Gin wildcards do not conflict.
+// A method and pattern that is already mounted is skipped, so a dedicated handler registered first is not overwritten by the catalog.
 func (s *Server) handle(pattern string, h http.HandlerFunc) {
 	method, path, ok := strings.Cut(pattern, " ")
 	if !ok || h == nil || removedColumnRoute(path) {
@@ -27,7 +27,7 @@ func (s *Server) handle(pattern string, h http.HandlerFunc) {
 	}
 	s.registered[key] = struct{}{}
 	s.engine.Handle(method, gp, func(c *gin.Context) {
-		// 专用 handler 用 PathValue("key") 读路径参数。Gin 的参数名是段序号，这里写回原名。
+		// A dedicated handler reads a path parameter with PathValue("key"). Gin names parameters by segment index, and this writes the original name back.
 		for i, name := range names {
 			if name == "" {
 				continue
@@ -40,8 +40,8 @@ func (s *Server) handle(pattern string, h http.HandlerFunc) {
 	})
 }
 
-// mountCatalog 为 routes.json 里的每一条路由注册 Gin 模式。
-// 未出现在这张表里的路径不会命中这些模式，由 NoRoute 返回 404。
+// mountCatalog registers a Gin pattern for every route in routes.json.
+// A path that is not in this table does not match these patterns and gets a 404 from NoRoute.
 func (s *Server) mountCatalog() {
 	for _, rt := range s.catalog {
 		if removedColumnRoute(rt.P) {
@@ -51,8 +51,8 @@ func (s *Server) mountCatalog() {
 	}
 }
 
-// handlerFor 按 catalog 路径选择家族处理函数。
-// 图像、重排、音频、审核、视频、responses、文件、realtime、透传都有自己的入口。
+// handlerFor chooses the family handler for a catalog path.
+// Images, rerank, audio, moderations, videos, responses, files, realtime, and passthrough each have their own entry.
 func (s *Server) handlerFor(path string) http.HandlerFunc {
 	p := strings.ToLower(path)
 	switch {
@@ -79,7 +79,7 @@ func (s *Server) handlerFor(path string) http.HandlerFunc {
 	}
 }
 
-// 这条目录路径是否按原样转发，而不是走推理数据面。
+// passthroughPattern reports whether this catalog path is forwarded as-is instead of entering the inference data plane.
 func passthroughPattern(path string) bool {
 	switch {
 	case strings.HasPrefix(path, "/openai/{"), strings.HasPrefix(path, "/openai_passthrough/"):
@@ -93,7 +93,7 @@ func passthroughPattern(path string) bool {
 	}
 }
 
-// 把目录模板收成 Gin 能注册的模式，并列出参数名。
+// ginPathNames turns a catalog template into a pattern Gin can register and lists the parameter names.
 func ginPathNames(p string) (string, []string) {
 	if p == "" || p == "/" {
 		return "/", nil
@@ -124,8 +124,8 @@ func ginPathNames(p string) (string, []string) {
 	return out, names
 }
 
-// imagesContract 是 Images 家族的 HTTP 契约。
-// POST 生成与编辑进入数据面的 images / images_edits 操作，由协议编解码打上游。
+// imagesContract is the HTTP contract for the Images family.
+// POST generate and edit enter the data-plane images and images_edits operations, and the protocol codec calls the upstream.
 func (s *Server) imagesContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		op := "images"
@@ -138,8 +138,8 @@ func (s *Server) imagesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// rerankContract 是 Rerank 家族的 HTTP 契约。
-// POST /v1/rerank、/rerank、/v2/rerank 进入数据面，不再依赖 "/" 兜底才认得出操作。
+// rerankContract is the HTTP contract for the Rerank family.
+// POST /v1/rerank, /rerank, and /v2/rerank enter the data plane. They do not depend on a "/" catch-all to recognize the operation.
 func (s *Server) rerankContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "rerank")
@@ -148,7 +148,7 @@ func (s *Server) rerankContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// audioContract 是 Audio 家族的 HTTP 契约：speech、transcriptions、translations。
+// audioContract is the HTTP contract for the Audio family: speech, transcriptions, and translations.
 func (s *Server) audioContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		p := strings.ToLower(r.URL.Path)
@@ -165,7 +165,7 @@ func (s *Server) audioContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// moderationsContract 是 Moderations 家族的 HTTP 契约。
+// moderationsContract is the HTTP contract for the Moderations family.
 func (s *Server) moderationsContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "moderations")
@@ -174,7 +174,7 @@ func (s *Server) moderationsContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// videosContract 是 Videos 家族的 HTTP 契约。
+// videosContract is the HTTP contract for the Videos family.
 func (s *Server) videosContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "videos")
@@ -183,7 +183,7 @@ func (s *Server) videosContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// responsesContract 是 Responses 家族除已专用注册的两条主路径之外的别名。
+// responsesContract is the alias for the Responses family besides the two main paths that are registered separately.
 func (s *Server) responsesContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "responses")
@@ -192,16 +192,16 @@ func (s *Server) responsesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// filesContract 是 Files 家族的 HTTP 契约。
-// 创建、读取、删除都落在 SQLite 的 files 行上，响应是 file 对象而不是请求体回显。
+// filesContract is the HTTP contract for the Files family.
+// Create, read, and delete persist file rows. The response is a file object rather than an echo of the request body.
 func (s *Server) filesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// realtimeContract 是 Realtime 家族的 HTTP 契约。
-// 客户端必须发起 WebSocket 升级。普通 POST/GET 得到 426，而不是一段占位 JSON。
+// realtimeContract is the HTTP contract for the Realtime family.
+// The client must start a WebSocket upgrade. An ordinary POST or GET gets 426 instead of a placeholder JSON body.
 func (s *Server) realtimeContract(w http.ResponseWriter, r *http.Request) {
-	// client_secrets、calls 是普通 JSON。只有通道本身要求升级。
+	// client_secrets and calls are ordinary JSON. Only the channel itself requires an upgrade.
 	if strings.Contains(r.URL.Path, "/realtime/") || strings.Contains(r.URL.Path, "/live/") {
 		s.serveFamilyRoute(w, r)
 		return
@@ -230,9 +230,9 @@ func (s *Server) realtimeContract(w http.ResponseWriter, r *http.Request) {
 	_ = buf.Flush()
 }
 
-// passthroughContract 是供应原样转发前缀的 HTTP 契约。
-// 前缀决定供应商。出站 URL 用 LiteLLM 的 _join_url_paths：接上剩余路径，OpenAI 补 /v1/。
-// 这里只算出将要访问的地址，不向厂商拨号。
+// passthroughContract is the HTTP contract for a provider prefix that is forwarded as-is.
+// The prefix chooses the provider. The outbound URL uses LiteLLM _join_url_paths: the remaining path is joined, and OpenAI gains /v1/.
+// This only computes the address that would be called. It does not dial the provider.
 func (s *Server) passthroughContract(w http.ResponseWriter, r *http.Request) {
 	if s.requireLLMPrincipal(w, r) == nil {
 		return
@@ -260,7 +260,7 @@ func (s *Server) passthroughContract(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// passthroughAPIBase 是环境变量未设置时 LiteLLM 透传路由使用的官方根地址。
+// passthroughAPIBase is the official root LiteLLM passthrough routes use when the environment variable is unset.
 func passthroughAPIBase(provider string) string {
 	switch provider {
 	case "openai", "openai_passthrough":
@@ -276,27 +276,27 @@ func passthroughAPIBase(provider string) string {
 	}
 }
 
-// 聊天补全入口，转给数据面的 chat 操作。
+// chat is the chat-completions entry and forwards to the data-plane chat operation.
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "chat")
 }
 
-// 向量接口入口，转给数据面的 embeddings 操作。
+// embeddings is the embeddings entry and forwards to the data-plane embeddings operation.
 func (s *Server) embeddings(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "embeddings")
 }
 
-// 文本补全入口，转给数据面。
+// completions is the text-completions entry and forwards to the data plane.
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "completions")
 }
 
-// Anthropic Messages 入口，转给数据面。
+// messages is the Anthropic Messages entry and forwards to the data plane.
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "messages")
 }
 
-// 语音翻译入口，转给数据面。
+// audioTranslations is the audio-translation entry and forwards to the data plane.
 func (s *Server) audioTranslations(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "audio_translation")
 }

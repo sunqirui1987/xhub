@@ -1,4 +1,4 @@
-// 请求发出前的护栏。命中拦截时数据面不再访问上游。
+// Package guard runs content rules before a request is sent upstream. A blocking match stops the data plane from calling the provider.
 package guard
 
 import (
@@ -8,7 +8,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// Host 是试跑护栏和读取护栏配置时要问进程要的东西。实现是 *gateway.Server。本包不引用 gateway。
+// Host is what a guardrail trial and a config read ask the process for. *gateway.Server implements it. This package does not import gateway.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store

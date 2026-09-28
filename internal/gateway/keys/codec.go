@@ -1,4 +1,4 @@
-// 虚拟密钥组装用的 JSON 读取。空正文得到空表，坏数字保持无效，不写成 0。
+// Package keys shares JSON readers used while assembling a virtual key. An empty body becomes an empty map, and a bad number stays invalid instead of becoming 0.
 package keys
 
 import (
@@ -9,7 +9,7 @@ import (
 	"strconv"
 )
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -20,13 +20,13 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// str 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// boolOf 把布尔、字符串 true/1 或非零数字收成布尔。其余类型，包括缺省，都是 false。
+// boolOf accepts a bool, the strings true and 1, or a non-zero number. Every other value, including a missing one, is false.
 func boolOf(v any) bool {
 	switch t := v.(type) {
 	case bool:
@@ -40,7 +40,7 @@ func boolOf(v any) bool {
 	}
 }
 
-// idsFrom 从正文读取 id 列表。复数键优先，单数字段有值时再追加。
+// idsFrom reads an id list from the body. The plural key wins, and a non-empty singular field is appended.
 func idsFrom(body map[string]any, plural, singular string) []string {
 	var out []string
 	switch v := body[plural].(type) {
@@ -59,7 +59,7 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 	return out
 }
 
-// nullFloatMap 把可空浮点变成 JSON 数字或 null。
+// nullFloatMap turns a nullable float into a JSON number or null.
 func nullFloatMap(v sql.NullFloat64) any {
 	if !v.Valid {
 		return nil
@@ -67,7 +67,7 @@ func nullFloatMap(v sql.NullFloat64) any {
 	return v.Float64
 }
 
-// nullIntMap 把可空整数变成 JSON 数字或 null。
+// nullIntMap turns a nullable integer into a JSON number or null.
 func nullIntMap(v sql.NullInt64) any {
 	if !v.Valid {
 		return nil
@@ -75,7 +75,7 @@ func nullIntMap(v sql.NullInt64) any {
 	return v.Int64
 }
 
-// emptyNil 把空字符串变成 null，便于对外 JSON 区分未设置。
+// emptyNil turns an empty string into null so public JSON can tell an unset field from an empty one.
 func emptyNil(s string) any {
 	if s == "" {
 		return nil
@@ -83,7 +83,7 @@ func emptyNil(s string) any {
 	return s
 }
 
-// encodeModels 把模型列表收成库存的 JSON 字符串。无法识别的类型写成空数组。
+// encodeModels stores a model list as a JSON string. An unrecognized type becomes an empty array.
 func encodeModels(v any) string {
 	switch t := v.(type) {
 	case []any:
@@ -97,7 +97,7 @@ func encodeModels(v any) string {
 	}
 }
 
-// parseNullFloat 把 JSON 数字或数字字符串收成可空浮点。空串和无法解析的值保持无效，不写成 0。
+// parseNullFloat converts a JSON number or numeric string into a nullable float. An empty or unparseable value stays invalid and is not written as 0.
 func parseNullFloat(v any) sql.NullFloat64 {
 	switch t := v.(type) {
 	case float64:
@@ -116,7 +116,7 @@ func parseNullFloat(v any) sql.NullFloat64 {
 	}
 }
 
-// parseNullInt 把 JSON 数字收成可空整数。float64 会截断小数。其它类型保持无效。
+// parseNullInt converts a JSON number into a nullable integer. A float64 is truncated. Any other type stays invalid.
 func parseNullInt(v any) sql.NullInt64 {
 	switch t := v.(type) {
 	case float64:

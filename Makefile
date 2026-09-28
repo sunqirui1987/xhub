@@ -16,4 +16,5 @@ tidy:
 e2e:
 	python3 e2e/free_ports.py
 	cd frontend && npm run build
+	python3 e2e/free_ports.py
 	cd frontend && npx playwright test

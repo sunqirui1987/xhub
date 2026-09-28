@@ -112,8 +112,9 @@ describe("ai-gateway admin shell", () => {
     expect(screen.queryByTestId("header-brand")).not.toBeInTheDocument();
     expect(sidebar).not.toBeNull();
     expect(sidebar?.tagName).toBe("ASIDE");
-    expect(sidebar?.className).toMatch(/bg-\[#343a40\]/);
-    expect(sidebar?.className).toMatch(/text-\[#c2c7d0\]/);
+    expect(sidebar?.className).toMatch(/\bbg-sidebar\b/);
+    expect(sidebar?.className).toMatch(/\btext-sidebar-foreground\b/);
+    expect(sidebar?.className).not.toMatch(/bg-\[#343a40\]/);
     expect(shell).toContainElement(header);
     expect(shell).toContainElement(sidebar as HTMLElement);
     expect(content).toHaveTextContent("dashboard body");

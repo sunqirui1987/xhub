@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
@@ -20,13 +22,13 @@ export default defineConfig({
       command: "bash ../e2e/start-gateway.sh",
       url: "http://127.0.0.1:4000/health/liveliness",
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
     },
     {
       command: "npx next start -p 3000",
       url: "http://127.0.0.1:3000/ui/login/",
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 180_000,
     },
   ],
 });

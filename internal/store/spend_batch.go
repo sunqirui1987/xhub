@@ -1,4 +1,4 @@
-// 把 Redis 里的花费批次写入 PostgreSQL。同一请求重放不会再次累加。
+// Package store writes a Redis spend batch into PostgreSQL. Replaying the same request does not add the amount again.
 package store
 
 import (
@@ -10,11 +10,11 @@ import (
 	"xorm.io/xorm"
 )
 
-// orgSpendMu 把组织 extra_json 里的花费读改写串起来。
-// xorm 的 ForUpdate 只对 MySQL 生成锁，PostgreSQL 上两路同时刷会丢掉增量。
+// orgSpendMu serializes the read-modify-write of organization spend stored in extra_json.
+// xorm ForUpdate emits a lock only for MySQL. Two PostgreSQL flushes at once would drop a delta, so this mutex covers that race.
 var orgSpendMu sync.Mutex
 
-// 一批请求日志里的一行。从 Redis 刷进 PostgreSQL。
+// SpendLogRow is one request log in a batch flushed from Redis into PostgreSQL.
 type SpendLogRow struct {
 	RequestID  string
 	CallType   string
@@ -32,7 +32,7 @@ type SpendLogRow struct {
 	OrgID      string
 }
 
-// 返回打开引擎以来真正执行过的 SQL 条数。
+// Statements returns how many SQL statements have actually run since the engine was opened.
 func (s *Store) Statements() int64 {
 	if s == nil || s.stmts == nil {
 		return 0
@@ -40,7 +40,7 @@ func (s *Store) Statements() int64 {
 	return atomic.LoadInt64(s.stmts)
 }
 
-// 把 SQL 计数清零，用来观察下一次读取有没有打到数据库。
+// ResetStatements zeroes the SQL counter so the next read can show whether it hit the database.
 func (s *Store) ResetStatements() {
 	if s == nil || s.stmts == nil {
 		return
@@ -48,7 +48,7 @@ func (s *Store) ResetStatements() {
 	atomic.StoreInt64(s.stmts, 0)
 }
 
-// 写入还没见过的请求日志，并把花费加到密钥、团队、用户和组织上。
+// ApplySpendBatch inserts request logs that have not been seen and adds their spend onto the key, team, user, and organization.
 func (s *Store) ApplySpendBatch(rows []SpendLogRow) error {
 	if s == nil {
 		return sql.ErrConnDone
@@ -125,7 +125,7 @@ func (s *Store) ApplySpendBatch(rows []SpendLogRow) error {
 	return nil
 }
 
-// 在当前事务里按汇总结果增加花费。组织花费写在 extra_json 里。
+// addMappedSpend adds the summarized spend inside the current transaction. Organization spend is stored in extra_json.
 func addMappedSpend(sess *xorm.Session, keys, teams, users, orgs map[string]float64) error {
 	for id, delta := range keys {
 		if _, err := sess.ID(id).Incr("spend", delta).Update(&tokenRow{}); err != nil {

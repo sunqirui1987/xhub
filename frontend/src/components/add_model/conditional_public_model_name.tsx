@@ -8,6 +8,7 @@ import { validatorRules } from "../common_components/formRules";
 import { MountedFormField, type MountedFormValues } from "../common_components/MountedFormField";
 import { Providers } from "../provider_info_helpers";
 import { t } from "@/i18n";
+import { withPublicName } from "./public_model_name";
 
 interface ModelMapping {
   public_name: string;
@@ -80,7 +81,7 @@ const PublicNameInput: React.FC<{ readonly index: number; readonly value: string
     );
   };
 
-  return <Input value={value} onChange={handleChange} />;
+  return <Input data-testid="public-model-name-input" value={value} onChange={handleChange} />;
 };
 
 /**
@@ -127,16 +128,9 @@ const ConditionalPublicModelName: React.FC = () => {
       const currentMappings = (form.getValues("model_mappings") as ModelMapping[]) || [];
       const updatedMappings = currentMappings.map((mapping) => {
         if (mapping.public_name === "custom" || mapping.litellm_model === "custom") {
-          if (selectedProvider === Providers.Azure) {
-            return {
-              public_name: customModelName,
-              litellm_model: `azure/${customModelName}`,
-            };
-          }
-          return {
-            public_name: customModelName,
-            litellm_model: customModelName,
-          };
+          const litellmModel =
+            selectedProvider === Providers.Azure ? `azure/${customModelName}` : customModelName;
+          return withPublicName(mapping, customModelName, litellmModel);
         }
         return mapping;
       });
@@ -169,28 +163,21 @@ const ConditionalPublicModelName: React.FC = () => {
 
       if (shouldUpdateMappings) {
         const mappings = selectedModels.map((model: string) => {
-          if (model === "custom" && customModelName) {
-            if (selectedProvider === Providers.Azure) {
-              return {
-                public_name: customModelName,
-                litellm_model: `azure/${customModelName}`,
-              };
+          const existing = currentMappings.find((mapping) => {
+            if (model === "custom") {
+              return mapping.public_name === "custom" || mapping.litellm_model === "custom" || mapping.litellm_model === customModelName;
             }
-            return {
-              public_name: customModelName,
-              litellm_model: customModelName,
-            };
+            return mapping.litellm_model === model || mapping.litellm_model === `azure/${model}`;
+          });
+          if (model === "custom" && customModelName) {
+            const litellmModel =
+              selectedProvider === Providers.Azure ? `azure/${customModelName}` : customModelName;
+            return withPublicName(existing, customModelName, litellmModel);
           }
           if (selectedProvider === Providers.Azure) {
-            return {
-              public_name: model,
-              litellm_model: `azure/${model}`,
-            };
+            return withPublicName(existing, model, `azure/${model}`);
           }
-          return {
-            public_name: model,
-            litellm_model: model,
-          };
+          return withPublicName(existing, model, model);
         });
 
         form.setValue("model_mappings", mappings);

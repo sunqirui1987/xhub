@@ -1,8 +1,8 @@
-// 从发给上游的正文里去掉只属于网关的字段，避免厂商接口报未知参数。
+// Package llm removes gateway-only fields from the body before it is sent upstream, so a provider does not reject an unknown parameter.
 package llm
 
-// proxyParams 是 LiteLLM all_litellm_params 的完整名单。
-// filter_out_litellm_params 用它把代理字段从供应商正文里去掉。
+// proxyParams is the full LiteLLM all_litellm_params name list.
+// The filter that drops proxy fields from a provider body uses this list.
 var proxyParams = map[string]struct{}{
 	"_agentic_loop_api_surface":                       {},
 	"_agentic_loop_depth":                             {},
@@ -277,7 +277,7 @@ var proxyParams = map[string]struct{}{
 	"weight":                                                 {},
 }
 
-// StripProxyParams 去掉 LiteLLM 代理字段，留下供应商认识的正文。
+// StripProxyParams deletes LiteLLM proxy fields and leaves the body the provider understands.
 func StripProxyParams(body map[string]any) {
 	for key := range body {
 		if _, ok := proxyParams[key]; ok {

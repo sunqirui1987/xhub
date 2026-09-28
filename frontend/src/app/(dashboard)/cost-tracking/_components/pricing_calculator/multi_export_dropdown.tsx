@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MultiModelResult } from "./types";
 import { exportMultiToPDF, exportMultiToCSV } from "./multi_export_utils";
+import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 
 interface MultiExportDropdownProps {
@@ -33,7 +34,16 @@ const MultiExportDropdown: React.FC<MultiExportDropdownProps> = ({ multiResult }
           <FileText />
           {t("Export as PDF")}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => exportMultiToCSV(multiResult)}>
+        <DropdownMenuItem
+          onClick={() => {
+            try {
+              exportMultiToCSV(multiResult);
+              toast.success(t("Exported CSV"));
+            } catch (error) {
+              toast.fromError(t("Failed to export CSV: ") + (error instanceof Error ? error.message : String(error)));
+            }
+          }}
+        >
           <FileSpreadsheet />
           {t("Export as CSV")}
         </DropdownMenuItem>

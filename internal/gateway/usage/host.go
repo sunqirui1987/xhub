@@ -1,4 +1,4 @@
-// 花费报表和自动路由基准需要的进程能力。数字来自 PostgreSQL，本包不写花费日志。
+// Package usage defines what spend reports and auto-router benchmarks ask the process for. Numbers come from PostgreSQL. This package does not write spend logs.
 package usage
 
 import (
@@ -9,10 +9,10 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// Host 是用量接口要问进程要的东西。实现是 *gateway.Server。本包不引用 gateway。
+// Host is what the usage handlers ask the process for. *gateway.Server implements it. This package does not import gateway.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store
-	// ModelList 返回当前模型表的副本。基准接口只用它找出策略路由器的名字，没有样本时不编造分数。
+	// ModelList returns a copy of the current model table. Benchmarks use it only to find strategy-router names. They do not invent scores when there is no sample.
 	ModelList() []config.ModelEntry
 }

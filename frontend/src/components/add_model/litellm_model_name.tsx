@@ -7,6 +7,7 @@ import { labelWithHint } from "@/components/shared/form/LabelWithHint";
 import { MountedFormField, type MountedFormValues } from "../common_components/MountedFormField";
 import { Providers } from "../provider_info_helpers";
 import { t } from "@/i18n";
+import { withPublicName, type NameMapping } from "./public_model_name";
 
 interface LiteLLMModelNameFieldProps {
   selectedProvider: string | null;
@@ -81,19 +82,11 @@ const LiteLLMModelNameField: React.FC<LiteLLMModelNameFieldProps> = ({
     const customName = e.target.value;
 
     // Immediately update the model mappings
-    const currentMappings = (form.getValues("model_mappings") as any[]) || [];
-    const updatedMappings = currentMappings.map((mapping: any) => {
+    const currentMappings = (form.getValues("model_mappings") as NameMapping[]) || [];
+    const updatedMappings = currentMappings.map((mapping) => {
       if (mapping.public_name === "custom" || mapping.litellm_model === "custom") {
-        if (selectedProvider === Providers.Azure) {
-          return {
-            public_name: customName,
-            litellm_model: `azure/${customName}`,
-          };
-        }
-        return {
-          public_name: customName,
-          litellm_model: customName,
-        };
+        const litellmModel = selectedProvider === Providers.Azure ? `azure/${customName}` : customName;
+        return withPublicName(mapping, customName, litellmModel);
       }
       return mapping;
     });

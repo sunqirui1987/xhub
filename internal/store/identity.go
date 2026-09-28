@@ -1,4 +1,4 @@
-// 用户、团队、组织、项目和预算的表。花费累加和模型允许列表也在这里。
+// Package store holds users, teams, organizations, projects, and budgets. Spend increments and model allow-lists live here too.
 package store
 
 import (
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// 用户、团队、组织或项目的一行。额外字段在 JSON，不拆成固定列。
+// Entity is one user, team, organization, or project row. Extra fields stay in JSON instead of fixed columns.
 type Entity struct {
 	ID         string
 	Alias      string
@@ -23,7 +23,7 @@ type Entity struct {
 	CreatedAt  time.Time
 }
 
-// 解析额外 JSON。空或损坏时返回空表，不返回 nil 给调用方遍历。
+// Extra parses the extra JSON. An empty or corrupt value returns an empty map, not nil, so the caller can range over it.
 func (e Entity) Extra() map[string]any {
 	m := map[string]any{}
 	if e.ExtraJSON != "" {
@@ -35,7 +35,7 @@ func (e Entity) Extra() map[string]any {
 	return m
 }
 
-// 整体替换额外 JSON。
+// SetExtra replaces the extra JSON as a whole. A nil map clears ExtraJSON.
 func (e *Entity) SetExtra(m map[string]any) {
 	if m == nil {
 		e.ExtraJSON = ""
@@ -45,20 +45,20 @@ func (e *Entity) SetExtra(m map[string]any) {
 	e.ExtraJSON = string(b)
 }
 
-// 只改额外 JSON 里的一个键，其它键保留。
+// PutExtra changes one key in the extra JSON and keeps the other keys.
 func (e *Entity) PutExtra(key string, val any) {
 	m := e.Extra()
 	m[key] = val
 	e.SetExtra(m)
 }
 
-// 读取额外 JSON 里的布尔值。缺失时为 false。
+// ExtraBool reads a boolean from the extra JSON. A missing value is false.
 func (e Entity) ExtraBool(key string) bool {
 	v, _ := e.Extra()[key].(bool)
 	return v
 }
 
-// 读取额外 JSON 里的列表。缺失或类型不对时为空切片。
+// ExtraList reads a list from the extra JSON. A missing or wrong-typed value is an empty slice.
 func (e Entity) ExtraList(key string) []any {
 	v, _ := e.Extra()[key].([]any)
 	if v == nil {
@@ -67,7 +67,7 @@ func (e Entity) ExtraList(key string) []any {
 	return v
 }
 
-// 命名预算。金额用 DOUBLE PRECISION，避免 PostgreSQL 的 REAL 把花费比歪。
+// Budget is a named budget. Amounts use DOUBLE PRECISION so PostgreSQL REAL does not skew the spend.
 type Budget struct {
 	ID           string
 	MaxBudget    sql.NullFloat64
@@ -81,7 +81,7 @@ type Budget struct {
 	CreatedAt    time.Time
 }
 
-// 实体允许的模型名。空列表表示不限制。
+// Models returns the model names this entity allows. An empty list means no restriction.
 func (e Entity) Models() []string {
 	var m []string
 	_ = json.Unmarshal([]byte(e.ModelsJSON), &m)
@@ -91,7 +91,7 @@ func (e Entity) Models() []string {
 	return m
 }
 
-// 实体是否允许这个模型。空列表允许全部。
+// AllowsModel reports whether this entity allows the model. An empty list allows every model.
 func (e Entity) AllowsModel(alias string) bool {
 	ms := e.Models()
 	if len(ms) == 0 {
@@ -105,12 +105,12 @@ func (e Entity) AllowsModel(alias string) bool {
 	return false
 }
 
-// 预算的对外 JSON。内部空值用 null，而不是省略字段。
+// Public is the budget JSON shown to callers. An internal null stays null instead of omitting the field.
 func (b Budget) Public() map[string]any {
 	return budgetMap(b)
 }
 
-// 预算的内部 map。对外仍用 Public。
+// budgetMap is the internal budget map. Callers outside the package still use Public.
 func budgetMap(b Budget) map[string]any {
 	created := time.Now().UTC().Format(time.RFC3339)
 	if !b.CreatedAt.IsZero() {

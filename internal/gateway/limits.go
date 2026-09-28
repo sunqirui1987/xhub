@@ -1,4 +1,4 @@
-// 调用上游前的预算、速率和凭证填充。真正发请求的循环在 dataplane 包。
+// Package gateway checks budget and rate and fills credentials before an upstream call. The send loop itself lives in the dataplane package.
 package gateway
 
 import (
@@ -12,15 +12,15 @@ import (
 	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
-// 把这次推理交给 dataplane.Serve。身份、预算和上游循环不在这个包装里重写。
+// dataPlane hands this inference call to dataplane.Serve. Identity, budget, and the upstream loop are not reimplemented in this wrapper.
 func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 	dataplane.Serve(s, w, r, op)
 }
 
-// 转调 dataplane.EstimateTokens，给预算和 TPM 一个上界。
+// estimateTokens calls dataplane.EstimateTokens so budget and TPM checks have an upper bound.
 func estimateTokens(body map[string]any) int { return dataplane.EstimateTokens(body) }
 
-// 按部署上的 credential 名字把密钥库中的值填进参数。没有名字时原样返回。
+// withCredential fills deployment parameters from the credential store using the deployment's credential name. With no name the deployment is returned unchanged.
 func (s *Server) withCredential(dep config.ModelEntry) config.ModelEntry {
 	name := dep.ParamString("litellm_credential_name", "")
 	var values map[string]any
@@ -34,7 +34,7 @@ func (s *Server) withCredential(dep config.ModelEntry) config.ModelEntry {
 	return out
 }
 
-// 检查模型允许列表、预算和速率。拒绝时已经写好响应并返回 false。
+// enforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false.
 func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool {
 	if p.Key != nil && p.Hash != "" {
 		if k, err := s.Store.GetByHash(p.Hash); err == nil {
@@ -95,7 +95,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	return true
 }
 
-// Redis 里还没落库的花费。没有 Redis 时为 0，预算只看 PostgreSQL。
+// hotSpend is spend still sitting in Redis. Without Redis it is 0 and the budget check uses PostgreSQL only.
 func (s *Server) hotSpend(id string) float64 {
 	if s.Live == nil {
 		return 0
@@ -103,7 +103,7 @@ func (s *Server) hotSpend(id string) float64 {
 	return s.Live.HotSpend(id)
 }
 
-// 有 Redis 时用分钟桶，否则用进程内滑窗。超限返回 false 并写 429。
+// enforceRateLimits uses the Redis minute bucket when Redis is set, otherwise a process-local sliding window. Over the limit it writes 429 and returns false.
 func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
 	if p.Key == nil {
 		return true
@@ -149,7 +149,7 @@ func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.P
 	return true
 }
 
-// 用 Redis 分钟桶检查 RPM/TPM。限额为 0 也视为超限。
+// enforceRedisRateLimits checks RPM and TPM against the Redis minute bucket. A limit of 0 is treated as already exceeded.
 func (s *Server) enforceRedisRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
 	if p.Key.RPMLimit.Valid {
 		n, err := s.Live.HitRPM(p.Hash)

@@ -1,4 +1,4 @@
-// 内置的路由清单、公开字段和模型价格表。这些 JSON 随二进制发布，不读磁盘。
+// Package catalog ships the route list, public field definitions, and model price map inside the binary so the process does not read those files from disk.
 package catalog
 
 import _ "embed"

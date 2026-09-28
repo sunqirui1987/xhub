@@ -1,4 +1,4 @@
-// 数据面依赖的网关能力。本包不引用 server，避免和 HTTP 注册循环依赖。
+// Package dataplane depends on gateway capabilities through Host. It does not import the server type, so HTTP registration and this package do not import each other.
 package dataplane
 
 import (
@@ -15,8 +15,8 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// Host 是数据面需要的网关能力。实现留在 HTTP 进程里，本包不反向引用 server，避免循环依赖。
-// 预算、限流和花费落库仍由 Host 完成；本包只决定这次请求打到哪个部署、报文怎么送出去。
+// Host is the gateway capability the data plane needs. The HTTP process implements it. This package does not import the server, which avoids an import cycle.
+// Budget, rate limits, and spend persistence stay on Host. This package only chooses the deployment and how the bytes are sent.
 type Host interface {
 	RequireLLMPrincipal(w http.ResponseWriter, r *http.Request) *auth.Principal
 	ResolveRequest(r *http.Request) (*auth.Principal, error)
@@ -24,7 +24,7 @@ type Host interface {
 	HTTPClient() *http.Client
 	ResponseCache() *cache.DualCache
 	HookEngine() *hooks.Engine
-	// Extensions 是推理发出前的扩展表。没有注册项时数据面照常访问上游。
+	// Extensions is the registry that runs before inference. With nothing registered, the data plane still calls the upstream.
 	Extensions() *plugin.Registry
 	RouteState() router.State
 	RouterDocument() map[string]any

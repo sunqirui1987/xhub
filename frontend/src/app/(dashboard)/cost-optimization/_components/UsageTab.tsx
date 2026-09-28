@@ -77,6 +77,21 @@ const UsageTab: React.FC<UsageTabProps> = ({ accessToken, activity }) => {
 
   const perInterval = useMemo<SavingsPoint[]>(() => savingsSeriesOf(results), [results]);
 
+  // Savings stay at zero until compression, caching, or the auto-router record a
+  // discount. Spend is already on the same daily rows, so the page can show the
+  // cost that was actually billed instead of an empty savings chart.
+  const recordedSpend = useMemo(
+    () =>
+      [...results]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((day) => ({ date: shortDate(day.date), spend: day.metrics.spend ?? 0 })),
+    [results],
+  );
+  const recordedSpendTotal = useMemo(
+    () => recordedSpend.reduce((sum, point) => sum + point.spend, 0),
+    [recordedSpend],
+  );
+
   // Cumulative anchors on a synthetic $0 point at the range start so a short
   // range (down to a single day) rises from zero instead of floating as one dot.
   const overTime = useMemo(() => {
@@ -130,6 +145,25 @@ const UsageTab: React.FC<UsageTabProps> = ({ accessToken, activity }) => {
         <span className="text-sm text-muted-foreground">{t("Spend is bucketed by UTC day")}</span>
         <AdvancedDatePicker value={dateValue} onValueChange={onDateChange} />
       </div>
+
+      {recordedSpendTotal > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("Daily Spend")}</CardTitle>
+            <CardDescription>{usd(recordedSpendTotal)}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BarChart
+              data={recordedSpend}
+              index="date"
+              categories={["spend"]}
+              colors={["cyan"]}
+              valueFormatter={usd}
+              showLegend={false}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <SavingsTiles results={results} isLoading={loading || isFetchingMore} />
 

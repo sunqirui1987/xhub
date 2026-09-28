@@ -17,6 +17,8 @@ trap cleanup EXIT
 python3 "$ROOT/e2e/fake_upstream.py" --port "$UP_PORT" >"$DIR/up.log" 2>&1 &
 echo $! > "$DIR/up.pid"
 
+docker exec xhub-postgres psql -U xhub -d xhub -v ON_ERROR_STOP=1 -c 'DROP SCHEMA IF EXISTS e2e CASCADE; CREATE SCHEMA e2e;'
+
 cat > "$DIR/c.yaml" <<YAML
 model_list:
   - model_name: gpt-4o-mini
@@ -30,11 +32,25 @@ router_settings:
   timeout: 15
 general_settings:
   master_key: ${MASTER}
-  database_url: sqlite://${DIR}/e2e.db
+  database_url: "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable&search_path=e2e"
 YAML
 
+# The console write APIs must be registered. Wait if a concurrent edit put them back on the removed list.
+mounted=0
+for _ in $(seq 1 200); do
+  if ! grep -q '"/v1/agents"' "$ROOT/internal/gateway/removed.go"; then
+    mounted=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$mounted" != 1 ]]; then
+  echo "refusing to build gateway while /v1/agents is unregistered" >&2
+  exit 1
+fi
+
 (cd "$ROOT" && go build -o "$DIR/xhub" ./cmd/gateway)
-rm -f "$DIR/e2e.db" "$DIR/e2e.db-shm" "$DIR/e2e.db-wal"
+(cd "$ROOT" && go build -o "$DIR/livesweep" ./e2e/livesweep)
 
 "$DIR/xhub" -config "$DIR/c.yaml" -addr ":$GW_PORT" >"$DIR/gw.log" 2>&1 &
 echo $! > "$DIR/gw.pid"

@@ -1,7 +1,7 @@
-// 控制台保存的模型。和配置文件同名时以数据库这一行为准。
+// Package store persists gateway records in PostgreSQL. Dashboard-saved models override a YAML entry with the same name.
 package store
 
-// ProxyModel 是控制台写进数据库的模型。和 YAML 同名时数据库行优先。
+// ProxyModel is a model the dashboard stored in the database. When the name also exists in YAML, this row wins.
 type ProxyModel struct {
 	ID        string
 	ModelName string

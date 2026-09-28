@@ -11,7 +11,7 @@ test("Create New Key issues a secret and lists the alias", async ({ page }) => {
   await loginAdmin(page);
   await page.getByTestId("create-key-button").click();
   await expect(page.getByRole("heading", { name: t("pages.apiKeys.create") })).toBeVisible();
-  await page.getByLabel(/Key Name/).fill("e2e-virtual-key");
+  await page.getByLabel(t("Key Name")).fill("e2e-virtual-key");
   await page.getByRole("button", { name: t("pages.apiKeys.createSubmit"), exact: true }).click();
   await expect(page.getByText(t("pages.apiKeys.saveKey"))).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ })).toBeVisible();

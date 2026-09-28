@@ -1,9 +1,9 @@
-// 测试库用的 schema 名字。只接受安全的标识符。
+// Package store persists gateway records in PostgreSQL. Schema names used by tests are quoted only when they are safe identifiers.
 package store
 
 import "fmt"
 
-// 给 schema 名加引号。空、过长或带符号的名字直接拒绝。
+// quoteIdent quotes a schema name. An empty, too-long, or symbolic name is rejected.
 func quoteIdent(name string) (string, error) {
 	if name == "" || len(name) > 63 {
 		return "", fmt.Errorf("invalid schema name")

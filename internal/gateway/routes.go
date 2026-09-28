@@ -1,4 +1,4 @@
-// 模块装载。每个功能实现 module.Module，自己声明路径；这里只按名字把内置模块装上。
+// Package gateway loads modules. Each feature implements httpx.Module and declares its own paths. This file only mounts the built-in modules by name.
 package gateway
 
 import (
@@ -10,17 +10,17 @@ import (
 	"github.com/sunqirui1987/xhub/internal/gateway/identity"
 	"github.com/sunqirui1987/xhub/internal/gateway/keys"
 	"github.com/sunqirui1987/xhub/internal/gateway/models"
-	"github.com/sunqirui1987/xhub/internal/gateway/module"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/gateway/usage"
+	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// Handle 满足 module.Registrar。pattern 是「方法 路径」。已挂过的模式不会被后来的模块覆盖。
+// Handle implements httpx.Registrar. pattern is "METHOD /path". A pattern already mounted is not replaced by a later module.
 func (s *Server) Handle(pattern string, h http.HandlerFunc) { s.handle(pattern, h) }
 
-// Use 按名字装上一个模块。同名再次装入会失败，已挂上的路径保持不变。
-// 进程已经对外服务时，新模块会立刻挂上；还在 New 里时先记下，等 mountModules 一起挂。
-func (s *Server) Use(m module.Module) error {
+// Use mounts a module by name. Mounting the same name again fails, and paths already mounted stay as they are.
+// If the process is already serving, the new module is mounted immediately. During New it is recorded and mounted later with the others.
+func (s *Server) Use(m httpx.Module) error {
 	if m == nil || m.Name() == "" {
 		return fmt.Errorf("module name is required")
 	}
@@ -36,7 +36,7 @@ func (s *Server) Use(m module.Module) error {
 	return nil
 }
 
-// ModuleNames 按装入顺序返回模块名的副本。
+// ModuleNames returns a copy of the module names in mount order.
 func (s *Server) ModuleNames() []string {
 	out := make([]string, len(s.modules))
 	for i, m := range s.modules {
@@ -45,9 +45,9 @@ func (s *Server) ModuleNames() []string {
 	return out
 }
 
-// installModules 装上进程自带的模块。新增功能优先用 Use，不必改这些名字。
+// installModules mounts the modules the process ships with. A new feature should call Use instead of editing this list.
 func (s *Server) installModules() {
-	builtins := []module.Module{
+	builtins := []httpx.Module{
 		healthModule(s),
 		sessionModule(s),
 		keys.Module(s),
@@ -68,7 +68,7 @@ func (s *Server) installModules() {
 	}
 }
 
-// mountModules 把已经装入、但还没挂路由的模块挂到 Gin。
+// mountModules attaches modules that were recorded but not yet mounted onto Gin.
 func (s *Server) mountModules() {
 	for _, m := range s.modules {
 		m.Mount(s)
@@ -76,9 +76,9 @@ func (s *Server) mountModules() {
 	s.modulesReady = true
 }
 
-// healthModule 是存活、就绪和控制台启动配置。
-func healthModule(s *Server) module.Module {
-	return module.Bind("health", func(reg module.Registrar) {
+// healthModule serves liveness, readiness, and the dashboard startup config.
+func healthModule(s *Server) httpx.Module {
+	return httpx.Bind("health", func(reg httpx.Registrar) {
 		reg.Handle("GET /health/liveliness", s.healthLive)
 		reg.Handle("GET /health/liveness", s.healthLive)
 		reg.Handle("GET /health/readiness", s.healthReady)
@@ -89,27 +89,49 @@ func healthModule(s *Server) module.Module {
 	})
 }
 
-// sessionModule 是用户名密码登录和 SSO 换会话。
-func sessionModule(s *Server) module.Module {
-	return module.Bind("session", func(reg module.Registrar) {
+// sessionModule serves username-password login and the SSO session exchange.
+func sessionModule(s *Server) httpx.Module {
+	return httpx.Bind("session", func(reg httpx.Registrar) {
 		reg.Handle("POST /login", s.login)
 		reg.Handle("POST /v2/login", s.login)
 		reg.Handle("POST /v3/login", s.login)
 		reg.Handle("POST /v3/login/exchange", s.loginExchange)
+		reg.Handle("GET /onboarding/get_token", s.onboardingGetToken)
+		reg.Handle("POST /onboarding/claim_token", s.onboardingClaim)
+		reg.Handle("GET /authorize/flow", s.authorizeFlow)
+		reg.Handle("POST /authorize/complete", s.authorizeComplete)
+		reg.Handle("POST /v1/mcp/server/oauth/{server_id}/token", s.mcpOAuthToken)
+		reg.Handle("GET /public/v1/model_hub", s.publicModelHub)
+		reg.Handle("GET /public/v1/model_hub/{facet}", s.publicModelHubFacet)
+		reg.Handle("GET /public/model_hub", s.publicModelHub)
+		reg.Handle("GET /public/model_hub/info", s.publicModelHubInfo)
+		reg.Handle("GET /model_hub", s.publicModelHub)
+		reg.Handle("GET /model_hub/{facet}", s.publicModelHubFacet)
+		reg.Handle("POST /model_hub/update_useful_links", s.updateUsefulLinks)
+		reg.Handle("GET /config_overrides/cyberark", s.configOverride)
+		reg.Handle("POST /config_overrides/cyberark", s.configOverride)
+		reg.Handle("DELETE /config_overrides/cyberark", s.configOverride)
+		reg.Handle("POST /config_overrides/cyberark/test_connection", s.configOverride)
+		reg.Handle("GET /config_overrides/hashicorp_vault", s.configOverride)
+		reg.Handle("POST /config_overrides/hashicorp_vault", s.configOverride)
+		reg.Handle("DELETE /config_overrides/hashicorp_vault", s.configOverride)
+		reg.Handle("POST /config_overrides/hashicorp_vault/test_connection", s.configOverride)
+		reg.Handle("GET /auto_router/shadow_eval", s.shadowEvalList)
 	})
 }
 
-// tokensModule 是本地 token 计数和支持的参数。
-func tokensModule(s *Server) module.Module {
-	return module.Bind("tokens", func(reg module.Registrar) {
+// tokensModule serves the local token counter and the supported-parameter list.
+func tokensModule(s *Server) httpx.Module {
+	return httpx.Bind("tokens", func(reg httpx.Registrar) {
 		reg.Handle("POST /utils/token_counter", s.tokenCounter)
 		reg.Handle("GET /utils/supported_openai_params", s.supportedOpenAIParams)
+		reg.Handle("POST /utils/transform_request", s.transformRequest)
 	})
 }
 
-// ingressModule 是聊天、嵌入、补全、消息和语音翻译的入口。
-func ingressModule(s *Server) module.Module {
-	return module.Bind("ingress", func(reg module.Registrar) {
+// ingressModule is the entry for chat, embeddings, completions, messages, and audio translation.
+func ingressModule(s *Server) httpx.Module {
+	return httpx.Bind("ingress", func(reg httpx.Registrar) {
 		reg.Handle("POST /v1/chat/completions", s.chat)
 		reg.Handle("POST /chat/completions", s.chat)
 		reg.Handle("POST /v1/embeddings", s.embeddings)
@@ -122,9 +144,9 @@ func ingressModule(s *Server) module.Module {
 	})
 }
 
-// accessModule 是 SSO、邮件事件、缓存探测、客户和 SCIM。
-func accessModule(s *Server) module.Module {
-	return module.Bind("access", func(reg module.Registrar) {
+// accessModule serves SSO, email events, cache probes, customers, and SCIM.
+func accessModule(s *Server) httpx.Module {
+	return httpx.Bind("access", func(reg httpx.Registrar) {
 		reg.Handle("GET /sso/key/generate", s.ssoGenerate)
 		reg.Handle("GET /email/event_settings", s.emailEventSettings)
 		reg.Handle("PATCH /email/event_settings", s.emailEventSettings)
@@ -132,6 +154,14 @@ func accessModule(s *Server) module.Module {
 		reg.Handle("POST /flushall", s.flushCache)
 		reg.Handle("GET /cache/settings", s.cacheSettings)
 		reg.Handle("POST /cache/settings", s.cacheSettings)
+		reg.Handle("GET /get/allowed_ips", s.allowedIPRoute)
+		reg.Handle("POST /add/allowed_ip", s.allowedIPRoute)
+		reg.Handle("POST /delete/allowed_ip", s.allowedIPRoute)
+		reg.Handle("GET /get/ui_theme_settings", s.uiTheme)
+		reg.Handle("PATCH /update/ui_theme_settings", s.uiTheme)
+		reg.Handle("POST /upload/logo", s.uiTheme)
+		reg.Handle("POST /prompts/test", s.promptTest)
+		reg.Handle("POST /search_tools/test_connection", s.searchToolTest)
 		reg.Handle("GET /cache/ping", s.cachePing)
 		reg.Handle("GET /ping", s.cachePing)
 		reg.Handle("POST /config/callback/delete", s.callbackDelete)

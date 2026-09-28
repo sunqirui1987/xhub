@@ -81,8 +81,8 @@ describe("AdminPanel", () => {
       expect(screen.getByRole("tab", { name: /logging settings/i })).toBeInTheDocument();
       expect(screen.getByRole("tab", { name: /^plugins$/i })).toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: /ui settings/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: /hashicorp vault/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: /cyberark/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /hashicorp vault/i })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /cyberark/i })).toBeInTheDocument();
     });
 
     it("should display Security Settings content when Security Settings tab is clicked", async () => {

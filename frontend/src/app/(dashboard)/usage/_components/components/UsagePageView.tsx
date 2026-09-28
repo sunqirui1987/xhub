@@ -81,7 +81,8 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   // fallback is read, and a flag left over from the previous range would let
   // that fallback's own leftover rows through.
   const [aggregatedFailure, setAggregatedFailure] = useState<FetchedForRange<true> | null>(null);
-  const [aggregatedLoading, setAggregatedLoading] = useState(false);
+  // True until the spend request for this range finishes. False on the first paint would draw an empty chart before that request starts.
+  const [aggregatedLoading, setAggregatedLoading] = useState(true);
   const [gatewayActivityData, setGatewayActivityData] = useState<FetchedGatewayActivity | null>(null);
 
   // Separate loading states for better UX
@@ -704,6 +705,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                           {loading ? (
                             <ChartLoader isDateChanging={isDateChanging} />
                           ) : (
+                            <div data-testid="daily-spend-settled">
                             <BarChart
                               data={sortedDailyResults}
                               index="date"
@@ -729,6 +731,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                                 );
                               }}
                             />
+                            </div>
                           )}
                         </CardContent>
                       </ShadcnCard>

@@ -217,7 +217,7 @@ export const MemoryView: React.FC<MemoryViewProps> = ({ accessToken }) => {
       {/* Create / edit modal */}
       <MemoryEditModal
         open={isCreateOpen || !!editRow}
-        mode={editRow ? t("edit") : t("create")}
+        mode={editRow ? "edit" : "create"}
         initialRow={editRow ?? undefined}
         onClose={() => {
           setIsCreateOpen(false);

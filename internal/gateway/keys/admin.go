@@ -1,4 +1,4 @@
-// 虚拟密钥的生成、轮换、花费重置和批量更新。
+// Package keys generates, rotates, resets spend on, and bulk-updates virtual keys.
 package keys
 
 import (
@@ -12,8 +12,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 从正文读取可空布尔。字段不存在时保持无效。
-// nullBoolFrom leaves the field unset when the client omitted it.
+// nullBoolFrom reads a nullable bool from the body. A missing field stays invalid.
 // LiteLLM stores that as JSON null, not false.
 func nullBoolFrom(body map[string]any, key string) sql.NullBool {
 	v, ok := body[key]
@@ -23,7 +22,7 @@ func nullBoolFrom(body map[string]any, key string) sql.NullBool {
 	return sql.NullBool{Bool: boolOf(v), Valid: true}
 }
 
-// 可空布尔的 JSON 形式。无效时为 null。
+// NullBoolJSON is the JSON form of a nullable bool. An invalid value is null.
 func NullBoolJSON(v sql.NullBool) any {
 	if !v.Valid {
 		return nil
@@ -31,7 +30,7 @@ func NullBoolJSON(v sql.NullBool) any {
 	return v.Bool
 }
 
-// 为服务账号生成密钥。明文只返回一次。
+// ServiceAccount generates a key for a service account. The plaintext is returned once.
 func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -55,7 +54,7 @@ func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(k, plain, true))
 }
 
-// 轮换密钥明文。旧明文立即失效。
+// Regenerate rotates the key plaintext. The old plaintext stops working immediately.
 func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -90,7 +89,7 @@ func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*k, newPlain, true))
 }
 
-// 把密钥花费清零。不删除历史日志。
+// ResetSpend sets the key spend back to zero. Historical logs are not deleted.
 func ResetSpend(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -123,7 +122,7 @@ func ResetSpend(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*k, "", false))
 }
 
-// 列出密钥别名，供控制台选择。
+// Aliases lists key aliases for the dashboard pickers.
 func Aliases(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -155,7 +154,7 @@ func Aliases(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 检查一把密钥是否仍能通过身份和预算校验。
+// Health checks whether a key still passes the identity and budget checks.
 func Health(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireMixed(w, r) == nil {
@@ -167,7 +166,7 @@ func Health(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 批量更新密钥。
+// BulkUpdate updates many keys in one request.
 func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -192,7 +191,7 @@ func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"updated": n, "keys": out})
 }
 
-// 用明文和正文组装要入库的密钥。模型列表非法时返回错误。
+// FromBody builds the key to store from the plaintext and the body. An illegal model list returns an error.
 func FromBody(plain string, body map[string]any) (store.Key, error) {
 	if body == nil {
 		body = map[string]any{}
@@ -235,7 +234,7 @@ func FromBody(plain string, body map[string]any) (store.Key, error) {
 	return k, nil
 }
 
-// 把补丁应用到密钥。没出现的限额保持原值。
+// applyKeyPatch applies a patch onto a key. Limits that are absent keep their previous value.
 func applyKeyPatch(k *store.Key, body map[string]any) {
 	if v, ok := body["key_alias"].(string); ok {
 		k.KeyAlias = v
@@ -301,7 +300,7 @@ func applyKeyPatch(k *store.Key, body map[string]any) {
 	}
 }
 
-// 如果值已经是 JSON 文本则保留，否则编码成 JSON。
+// encodeMaybeJSON keeps a value that is already JSON text and otherwise encodes it as JSON.
 func encodeMaybeJSON(v any) string {
 	if v == nil {
 		return ""
@@ -318,7 +317,7 @@ func encodeMaybeJSON(v any) string {
 	}
 }
 
-// 明文密钥的存储哈希。
+// hashKeyToken is the stored hash of a plaintext key. A value that does not start with sk- is kept as given.
 func hashKeyToken(plain string) string {
 	if strings.HasPrefix(plain, "sk-") {
 		return store.HashKey(plain)

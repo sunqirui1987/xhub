@@ -1,4 +1,4 @@
-// 一次推理的发送循环：选部署、编码请求、失败后换下一个。
+// Package dataplane sends one inference call: it picks a deployment, encodes the request, and moves to the next deployment after a failure.
 package dataplane
 
 import (
@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +18,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
-	"github.com/sunqirui1987/xhub/internal/llm/protocol"
+
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
@@ -25,10 +28,10 @@ var (
 	errEmptyUpstream  = errors.New("empty upstream stream")
 )
 
-// Serve 执行一次推理。它按路由策略挑部署，编码上游请求，失败时换下一个部署。
-// 身份、预算和限流不在这里实现，失败时 Host 已经写好响应。
-// 模型校验通过之后、读缓存和访问上游之前，按注册顺序跑扩展。拒绝则写错误并返回。
-// 扩展表为空时这一步直接放行。重试次数小于 1 时按 1 次。凭证或 api_base 为空的部署会被跳过。
+// Serve runs one inference. It picks deployments with the routing strategy, encodes the upstream request, and tries the next deployment after a failure.
+// Serve calls EnforceIdentityLimits for the model allow-list, budget, and rate. When that check returns false the response is already written. Budget and parallel refusals from the hook engine are written here as 429.
+// After those checks, and before the cache and the upstream, extensions run in registration order. A refusal writes an error and returns.
+// An empty extension registry allows the call. A retry count below 1 is treated as one attempt. An empty api_base uses the provider default when one exists. A deployment that still has no key or no base is skipped.
 func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	start := time.Now()
 	callID := httpx.CallID()
@@ -98,6 +101,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
 	if len(pool) == 0 {
+		log.Printf("error model %s %s model not found: %s", r.Method, r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
 	}
@@ -132,14 +136,25 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		}
 		provider = strings.ToLower(strings.TrimSpace(provider))
 		lastProvider = provider
-		if _, ok := protocol.ProtocolGroup(provider); !ok || provider == "" {
+		if _, ok := llm.ProtocolGroup(provider); !ok || provider == "" {
 			continue
 		}
 		apiBase := trimBase(dep.ParamString("api_base", ""))
+		usedDefaultBase := false
+		if apiBase == "" {
+			apiBase = llm.DefaultAPIBase(provider)
+			usedDefaultBase = apiBase != ""
+		}
 		apiKey := dep.ParamString("api_key", "")
 		if apiKey == "" || apiBase == "" {
 			missingCredential = true
+			log.Printf("debug skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, provider, realModel)
 			continue
+		}
+		if usedDefaultBase {
+			log.Printf("debug api_base empty path=%s provider=%s model=%s using default host", r.URL.Path, provider, realModel)
+		} else {
+			log.Printf("debug upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
 		}
 		did := dep.ParamString("api_base", "") + "|" + upstreamModel
 		built, err := llm.Build(r.Context(), llm.Request{
@@ -149,6 +164,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		})
 		if err != nil {
 			lastErr = err
+			log.Printf("error upstream encode path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
 			continue
 		}
 
@@ -159,6 +175,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			if err != nil {
 				h.DecBusy(did)
 				lastErr = err
+				log.Printf("error upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
 				continue
 			}
 			for key, values := range built.Header {
@@ -168,6 +185,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			if err != nil {
 				h.DecBusy(did)
 				lastErr = err
+				log.Printf("error upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
 				continue
 			}
 			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
@@ -177,6 +195,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 				h.NoteFailure(router.DeploymentID(rawDep))
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
+				log.Printf("error upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
 				continue
 			}
 
@@ -193,6 +212,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 					return
 				}
 				lastErr = errEmptyUpstream
+				log.Printf("error upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
 				continue
 			}
 			respBody, _ := io.ReadAll(resp.Body)
@@ -205,25 +225,30 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 
 	if !triedHTTP {
 		if lastProvider != "" || missingCredential {
+			log.Printf("error dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
 			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "Authentication Error, No api key passed in.")
 			return
 		}
+		log.Printf("error dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
 		return
 	}
 	if lastStatus > 0 {
+		log.Printf("error dataplane path=%s status=502 code=upstream_error detail=upstream %d", r.URL.Path, lastStatus)
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream "+strconv.Itoa(lastStatus))
 		return
 	}
 	if lastErr != nil {
+		log.Printf("error dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, safeErr(lastErr))
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", lastErr.Error())
 		return
 	}
+	log.Printf("error dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
 }
 
-// applyExtensions 在上游 HTTP 之前按注册顺序跑扩展。拒绝时已经写好响应并返回 true。
-// 状态码缺省 400，错误码缺省 extension_refused。没有注册项时返回 false。
+// applyExtensions runs extensions in registration order before the upstream HTTP call. A refusal has already written the response and returns true.
+// A missing status defaults to 400 and a missing error code defaults to extension_refused. With nothing registered it returns false.
 func applyExtensions(w http.ResponseWriter, r *http.Request, h Host, op, alias string) bool {
 	d := h.Extensions().Run(plugin.Call{Op: op, Model: alias, Path: r.URL.Path})
 	for k, v := range d.Header {
@@ -248,7 +273,7 @@ func applyExtensions(w http.ResponseWriter, r *http.Request, h Host, op, alias s
 	return true
 }
 
-// EstimateTokens 用请求体长度粗算预扣 token。它不是分词器，只给预算和 TPM 一个上界。
+// EstimateTokens estimates a token hold from the body length. It is not a tokenizer. It only gives budget and TPM checks an upper bound.
 func EstimateTokens(body map[string]any) int {
 	n := 32
 	if mt := asInt(body["max_tokens"]); mt > 0 {
@@ -273,13 +298,13 @@ func EstimateTokens(body map[string]any) int {
 	return n
 }
 
-// 把值当成字符串。不是字符串时返回空串。
+// textOf reads v as a string. A non-string returns an empty string.
 func textOf(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// 把 JSON 数字收成 int。float64 会截断小数。其它类型返回 0。
+// asInt converts a JSON number to int. A float64 is truncated. Any other type returns 0.
 func asInt(v any) int {
 	switch t := v.(type) {
 	case float64:
@@ -291,7 +316,33 @@ func asInt(v any) int {
 	}
 }
 
-// 去掉 api_base 末尾的斜杠，避免和端点路径拼出双斜杠。
+var secretInErr = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+|(?i)bearer\s+\S+`)
+
+// safeErr is an error string with URLs reduced to a host and secrets removed.
+func safeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := secretInErr.ReplaceAllString(err.Error(), "***")
+	return regexp.MustCompile(`https?://\S+`).ReplaceAllStringFunc(s, func(raw string) string {
+		host := baseHost(strings.TrimRight(raw, `",)`))
+		if host == "" {
+			return "***"
+		}
+		return host
+	})
+}
+
+// baseHost is the hostname of an upstream address. Userinfo, path, and query stay out of the log.
+func baseHost(apiBase string) string {
+	u, err := url.Parse(apiBase)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// trimBase removes a trailing slash from api_base so joining an endpoint path does not produce a double slash.
 func trimBase(s string) string {
 	for len(s) > 0 && s[len(s)-1] == '/' {
 		s = s[:len(s)-1]
@@ -299,7 +350,7 @@ func trimBase(s string) string {
 	return s
 }
 
-// 把上游 SSE 原样写给客户端，并尽量从流里抽出 usage。还没写出任何字节时返回 wrote=false。
+// pipeStream copies upstream SSE to the client and tries to extract usage from the stream. It returns wrote false when no byte has been written yet.
 func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]any) {
 	defer resp.Body.Close()
 	buf := make([]byte, 4096)
@@ -331,7 +382,7 @@ func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]an
 	}
 }
 
-// 从已经收到的 SSE 缓冲里找最后一次 usage。没有则沿用 prev。
+// streamUsage finds the last usage object in the SSE buffer already received. If none is present it keeps prev.
 func streamUsage(raw []byte, prev map[string]any) map[string]any {
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		line = bytes.TrimSpace(line)

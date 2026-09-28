@@ -1,14 +1,14 @@
-// 判断模型名是否落在密钥或实体的允许列表里。空列表表示不限制。
+// Package llm decides which URL paths may stay on the gateway process. Management routes are not part of that list.
 package llm
 
 import "net/http"
 
-// 这些名单来自 gateway/routes/allowlist.py。
-// 网关进程只保留模型数据面：聊天、向量、音频、文件、批次、微调、responses、
-// 重排、检索、视频、搜索、实时通道、MCP，以及 /health 和 /metrics。
-// 管理接口和界面不走同一条进程。
+// These lists come from gateway/routes/allowlist.py.
+// The gateway process keeps the model data plane: chat, embeddings, audio, files, batches, fine-tuning, responses,
+// rerank, retrieval, video, search, the realtime channel, MCP, plus /health and /metrics.
+// Management APIs and the dashboard UI are not served by this same filter.
 //
-// 不能用笼统的 /v1/ 前缀。那样会把 /v1/access_group 这类管理路由也放进来。
+// A broad /v1/ prefix cannot be used. It would also admit management routes such as /v1/access_group.
 var pathPrefixes = []string{
 	"/v1/chat/",
 	"/chat/",
@@ -110,23 +110,23 @@ var exactPaths = map[string]struct{}{
 	"/debug/memory/summary": {},
 }
 
-// mountPaths 只放行 Prometheus 的 /metrics 挂载。
-// 界面的静态目录也是挂载，但不在这张表里，所以会被丢掉。
+// mountPaths allows only the Prometheus /metrics mount.
+// The dashboard static directory is also a mount, but it is not in this table, so it is dropped.
 var mountPaths = map[string]struct{}{
 	"/metrics": {},
 }
 
-// PathPrefixes 按 allowlist.py 里的顺序返回前缀。测试用它和 Python 源码逐项比较。
+// PathPrefixes returns the prefixes in the allowlist.py order so a test can compare them with the Python source.
 func PathPrefixes() []string {
 	out := make([]string, len(pathPrefixes))
 	copy(out, pathPrefixes)
 	return out
 }
 
-// Allow 判断一条路径能不能留在网关进程上。
+// Allow reports whether a path may stay on the gateway process.
 //
-// mount 为真时只看挂载表，对应 FastAPI 的 Mount。普通路由先看精确路径，
-// 再看前缀。path 为空时不算数据面。比较用的是路由注册时的 path，不是带查询串的 URL。
+// When mount is true only the mount table is checked, matching a FastAPI Mount. An ordinary route checks an exact path first,
+// then a prefix. An empty path is not a data-plane path. The comparison uses the path from route registration, not a URL with a query string.
 func Allow(path string, mount bool) bool {
 	if path == "" {
 		return false
@@ -146,11 +146,11 @@ func Allow(path string, mount bool) bool {
 	return false
 }
 
-// Filter 在进程对外服务之前丢掉管理路由。
+// Filter drops management routes before the process serves them.
 //
-// Python 网关是在应用启动、路由注册完成之后再裁剪路由表。这里请求已经走到
-// 注册好的处理器上，用同一份名单决定放行还是 404，效果相同：数据面留下，
-// /key/generate 这类管理接口不出现在网关进程上。
+// The Python gateway trims the route table after startup, once registration is finished. Here the request has already reached
+// a registered handler, and the same list decides whether to allow it or return 404. The effect matches: the data plane stays,
+// and management routes such as /key/generate are not served by this filter.
 func Filter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

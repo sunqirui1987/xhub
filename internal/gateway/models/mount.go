@@ -1,15 +1,15 @@
-// 模型模块的路由。列表、写入和价格表来源都从这里挂上。
+// Package models registers model routes. The list, writes, and price-map source are mounted here.
 package models
 
 import (
 	"net/http"
 
-	"github.com/sunqirui1987/xhub/internal/gateway/module"
+	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// Module 是模型列表和管理写入。Host 由进程实现。
-func Module(h Host) module.Module {
-	return module.Bind("models", func(reg module.Registrar) {
+// Module is the model list and the management writes. The process implements Host.
+func Module(h Host) httpx.Module {
+	return httpx.Bind("models", func(reg httpx.Registrar) {
 		reg.Handle("GET /v1/models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /model/cost_map/source", func(w http.ResponseWriter, r *http.Request) { CostMapSource(h, w, r) })

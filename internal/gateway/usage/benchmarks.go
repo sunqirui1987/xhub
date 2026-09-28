@@ -1,4 +1,4 @@
-// 自动路由的基准数据。没有样本时返回空列表，不编造分数。
+// Package usage serves auto-router benchmarks. With no sample it returns an empty list and does not invent scores.
 package usage
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 返回自动路由基准。没有样本时各计数为 0，不编造延迟或命中率。
+// Benchmarks returns auto-router benchmark rows. With no sample every count is 0, and latency and hit rate are not invented.
 func Benchmarks(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -48,7 +48,7 @@ func Benchmarks(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 列出配置里的策略路由器及其空的基准桶。
+// idleRouters lists the strategy routers in the config together with an empty benchmark bucket.
 func idleRouters(s Host) []map[string]any {
 	list := s.ModelList()
 	type key struct{ name, kind string }
@@ -84,7 +84,7 @@ func idleRouters(s Host) []map[string]any {
 	return groups
 }
 
-// 从模型名识别策略路由器种类。认不出时 ok 为 false。
+// strategyRouterKind reads the strategy-router kind from a model name. An unrecognized name returns ok false.
 func strategyRouterKind(model string) (string, bool) {
 	const prefix = "auto_router/"
 	if !strings.HasPrefix(model, prefix) {
@@ -103,12 +103,12 @@ func strategyRouterKind(model string) (string, bool) {
 	}
 }
 
-// 一个全零的缓存统计桶，供还没有流量时的响应使用。
+// zeroCacheBucket is a zeroed cache-stat bucket used when the router has no traffic yet.
 func zeroCacheBucket() map[string]any {
 	return map[string]any{"turns": 0, "hits": 0, "hit_rate_pct": 0}
 }
 
-// 一组全零的基准合计。
+// zeroBenchmarkTotals is a zeroed benchmark total used before any sample exists.
 func zeroBenchmarkTotals() map[string]any {
 	return map[string]any{
 		"sessions":               0,

@@ -1,15 +1,16 @@
-// SSO、邮件事件、缓存探测、客户列表和 SCIM。这些不进推理循环。
+// Package gateway serves SSO, email events, cache probes, the customer list, and SCIM. These routes do not enter the inference loop.
 package gateway
 
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 签发一次性 SSO 码。需要管理身份。
+// ssoGenerate issues a one-time SSO code. It requires a management identity.
 func (s *Server) ssoGenerate(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	code := "sso-" + httpx.CallID()[:10]
@@ -27,7 +28,7 @@ func (s *Server) ssoGenerate(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"url": url, "login_url": url})
 }
 
-// 用 SSO 码换会话。码不存在或已使用时失败。
+// loginExchange trades an SSO code for a session. A missing or already used code fails.
 func (s *Server) loginExchange(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	var body struct {
@@ -54,7 +55,7 @@ type emailEventSetting struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// 邮件事件的默认开关。库里没有配置时用这份。
+// defaultEmailEventSettings is the default email-event switches used when the database has no configuration.
 func defaultEmailEventSettings() []emailEventSetting {
 	return []emailEventSetting{
 		{Event: "Virtual Key Created", Enabled: false},
@@ -65,7 +66,7 @@ func defaultEmailEventSettings() []emailEventSetting {
 	}
 }
 
-// 当前生效的邮件事件设置。
+// currentEmailEventSettings returns the email-event settings that are in effect. A nil slice falls back to defaultEmailEventSettings.
 func (s *Server) currentEmailEventSettings() []emailEventSetting {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -77,7 +78,7 @@ func (s *Server) currentEmailEventSettings() []emailEventSetting {
 	return out
 }
 
-// 读取或更新邮件事件设置。
+// emailEventSettings reads or updates the email-event settings.
 func (s *Server) emailEventSettings(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -97,7 +98,7 @@ func (s *Server) emailEventSettings(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"settings": s.currentEmailEventSettings()})
 }
 
-// 把邮件事件设置恢复成默认。
+// emailEventSettingsReset restores the email-event settings to the defaults.
 func (s *Server) emailEventSettingsReset(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -109,17 +110,114 @@ func (s *Server) emailEventSettingsReset(w http.ResponseWriter, r *http.Request)
 	httpx.WriteJSON(w, 200, map[string]any{"settings": settings})
 }
 
-// 清空进程内响应缓存。需要管理身份。
+// flushCache clears the in-process response cache. It requires a management identity.
 func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteError(w, 404, "not_found", "Not Found")
+	if s.requireManage(w, r) == nil {
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "cache flushed"})
 }
 
-// 返回缓存是否启用等设置。不返回缓存内容。
+// cacheSettings reads or stores cache settings. It does not return cached bodies.
 func (s *Server) cacheSettings(w http.ResponseWriter, r *http.Request) {
-	httpx.WriteError(w, 404, "not_found", "Not Found")
+	if s.requireManage(w, r) == nil {
+		return
+	}
+	if r.Method == http.MethodPost {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body == nil {
+			body = map[string]any{}
+		}
+		raw, _ := json.Marshal(body)
+		if err := s.Store.PutKV("cache", "settings", string(raw)); err != nil {
+			httpx.WriteError(w, 500, "internal", err.Error())
+			return
+		}
+		httpx.WriteJSON(w, 200, body)
+		return
+	}
+	saved, err := s.Store.GetKV("cache", "settings")
+	if err != nil {
+		httpx.WriteJSON(w, 200, map[string]any{"enabled": false})
+		return
+	}
+	httpx.WriteJSON(w, 200, saved)
 }
 
-// 列出客户。没有数据时为空列表而不是 404。
+// allowedIPRoute reads and edits the IP allow-list the admin panel shows. The list is stored as JSON and an empty list is data: [].
+func (s *Server) allowedIPRoute(w http.ResponseWriter, r *http.Request) {
+	if s.requireManage(w, r) == nil {
+		return
+	}
+	ips := s.readAllowedIPs()
+	if r.Method == http.MethodGet {
+		httpx.WriteJSON(w, 200, map[string]any{"data": ips})
+		return
+	}
+	var body struct {
+		IP string `json:"ip"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	ip := strings.TrimSpace(body.IP)
+	if ip == "" {
+		httpx.WriteError(w, 400, "invalid_request", "ip required")
+		return
+	}
+	if strings.Contains(r.URL.Path, "delete") {
+		kept := ips[:0]
+		for _, cur := range ips {
+			if cur != ip {
+				kept = append(kept, cur)
+			}
+		}
+		ips = kept
+	} else {
+		found := false
+		for _, cur := range ips {
+			if cur == ip {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ips = append(ips, ip)
+		}
+	}
+	s.writeAllowedIPs(ips)
+	httpx.WriteJSON(w, 200, map[string]any{"data": ips})
+}
+
+// readAllowedIPs returns the saved IP allow-list. A missing record is an empty slice.
+func (s *Server) readAllowedIPs() []string {
+	rec, err := s.Store.GetKV("allowed_ips", "list")
+	if err != nil {
+		return []string{}
+	}
+	raw, _ := rec["ips"].([]any)
+	out := []string{}
+	for _, v := range raw {
+		if s, ok := v.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// writeAllowedIPs stores the IP allow-list as one key-value document.
+func (s *Server) writeAllowedIPs(ips []string) {
+	if ips == nil {
+		ips = []string{}
+	}
+	vals := make([]any, len(ips))
+	for i, ip := range ips {
+		vals[i] = ip
+	}
+	raw, _ := json.Marshal(map[string]any{"ips": vals})
+	_ = s.Store.PutKV("allowed_ips", "list", string(raw))
+}
+
+// customerList lists customers. With no data it returns an empty list instead of 404.
 func (s *Server) customerList(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -142,7 +240,7 @@ func (s *Server) customerList(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": out, "customers": out, "end_users": out})
 }
 
-// 探测缓存是否可用。
+// cachePing checks whether the cache is usable.
 func (s *Server) cachePing(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -158,7 +256,7 @@ func (s *Server) cachePing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 删除一个回调配置。
+// callbackDelete deletes one callback configuration.
 func (s *Server) callbackDelete(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -191,7 +289,7 @@ func (s *Server) callbackDelete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SCIM 用户集合的最小实现。未实现的写操作返回明确错误。
+// scimUsers is the minimal SCIM user collection. A write that is not implemented returns a clear error.
 func (s *Server) scimUsers(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -212,7 +310,7 @@ func (s *Server) scimUsers(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, scimList("User", resources))
 }
 
-// SCIM 组集合的最小实现。
+// scimGroups is the minimal SCIM group collection.
 func (s *Server) scimGroups(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -231,7 +329,7 @@ func (s *Server) scimGroups(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, scimList("Group", resources))
 }
 
-// scimList 包成 SCIM ListResponse。resources 为 nil 时改成空数组，totalResults 用最终长度。startIndex 固定为 1，这里不分页。
+// scimList wraps resources as a SCIM ListResponse. A nil resources value becomes an empty array, totalResults is the final length, and startIndex stays 1 because this list is not paged.
 func scimList(resourceType string, resources []map[string]any) map[string]any {
 	if resources == nil {
 		resources = []map[string]any{}

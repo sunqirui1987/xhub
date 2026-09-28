@@ -2,6 +2,7 @@ import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-q
 
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { toast } from "@/lib/toast";
+import { t } from "@/i18n";
 import { $api, fetchClient } from "@/lib/http/api";
 
 import type { components } from "@/lib/http/schema";
@@ -67,7 +68,11 @@ const useShadowEvalMutation = <TVariables>(mutationFn: (variables: TVariables) =
 
 export const useStartShadowEval = () =>
   useShadowEvalMutation(async (body: StartShadowEvalRequest) => {
-    const { data } = await fetchClient.POST("/auto_router/shadow_eval/start", { body });
+    const { data, error } = await fetchClient.POST("/auto_router/shadow_eval/start", { body });
+    if (error) {
+      throw error;
+    }
+    toast.success(t("Shadow eval started"));
     return data;
   });
 

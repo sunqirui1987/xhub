@@ -1,5 +1,15 @@
-import { notFound } from "next/navigation";
-
-export default function RemovedDashboardPage() {
-  notFound();
+"use client";
+import React, { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import ModelHubTable from "@/components/AIHub/ModelHubTable";
+import { t } from "@/i18n";
+function PublicModelHubContent() {
+  const searchParams = useSearchParams()!;
+  const key = searchParams.get("key");
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  useEffect(() => { if (key) setAccessToken(key); }, [key]);
+  return <ModelHubTable accessToken={accessToken} publicPage={true} premiumUser={false} userRole={null} />;
+}
+export default function PublicModelHubPage() {
+  return (<Suspense fallback={<div className="flex items-center justify-center min-h-screen">{t("Loading...")}</div>}><PublicModelHubContent /></Suspense>);
 }

@@ -1,9 +1,9 @@
-// 控制台密码的哈希和校验。明文密码不入库。
+// Package store persists gateway records in PostgreSQL. Password helpers hash dashboard passwords so plaintext is never stored.
 package store
 
 import "golang.org/x/crypto/bcrypt"
 
-// 生成密码哈希。失败时不要把明文存进用户表。
+// HashPassword returns a bcrypt hash. On failure the caller must not store the plaintext password.
 func HashPassword(plain string) (string, error) {
 	if plain == "" {
 		return "", nil
@@ -15,7 +15,7 @@ func HashPassword(plain string) (string, error) {
 	return string(b), nil
 }
 
-// 校验密码。哈希格式不对时返回 false，不返回错误。
+// CheckPassword reports whether plain matches hash. A malformed hash returns false rather than an error.
 func CheckPassword(hash, plain string) bool {
 	if hash == "" || plain == "" {
 		return false

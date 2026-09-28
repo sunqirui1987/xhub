@@ -1,4 +1,4 @@
-// 目录路由的分发。匹配和价格表在 catalog 包，这里只决定交给哪一类 handler。
+// Package gateway dispatches catalog routes. Matching and the price map live in the catalog package. This file only chooses which kind of handler runs.
 package gateway
 
 import (
@@ -10,13 +10,13 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 这些名字留给本包和同包测试。实现在 catalog，避免目录匹配和价格表再堆在 HTTP 注册里。
+// These names stay for this package. The implementation is in catalog so route matching and the price map are not piled into HTTP registration.
 type catRoute = catalog.Route
 
-// 读取内置 routes.json。解析失败时得到空切片。
+// loadCatalog reads the embedded routes.json. A parse failure returns an empty slice.
 func loadCatalog() []catRoute { return catalog.Load() }
 
-// 按路径决定要管理身份、推理身份，还是两者都可能。
+// authClassOf decides whether a path needs a management identity, an inference identity, or either.
 func authClassOf(path string) authClass { return authClass(catalog.AuthOf(path)) }
 
 type authClass = catalog.AuthClass
@@ -27,50 +27,50 @@ const (
 	authMixed      = catalog.AuthMixed
 )
 
-// 是否为已下线的智能体、MCP、技能等路径。
+// isMixedPath reports a removed path such as agents, MCP, or skills.
 func isMixedPath(path string) bool { return catalog.IsMixedPath(path) }
 
-// GET/HEAD 是否不需要身份。
+// isPublicPath reports whether a GET or HEAD needs no identity.
 func isPublicPath(method, path string) bool { return catalog.IsPublicPath(method, path) }
 
-// 路径是否会进入推理数据面。
+// isDataPlanePath reports whether the path enters the inference data plane.
 func isDataPlanePath(path string) bool { return catalog.IsDataPlanePath(path) }
 
-// 是否为聊天、嵌入、图像等推理前缀。
+// isLLMPrefix reports a chat, embedding, image, or other inference prefix.
 func isLLMPrefix(path string) bool { return catalog.IsLLMPrefix(path) }
 
-// 路径前缀比较。末尾斜杠不参与，避免误匹配更长的单词。
+// hasPathPrefix compares path prefixes. A trailing slash is ignored so a longer word is not matched by mistake.
 func hasPathPrefix(path, prefix string) bool { return catalog.HasPrefix(path, prefix) }
 
-// 公开 GET 的固定 JSON。价格表和字段定义来自内置文件。
+// publicListBody is the fixed JSON for a public GET. The price map and field definitions come from embedded files.
 func publicListBody(path string) any { return catalog.PublicBody(path) }
 
-// 目录模板是否覆盖这条具体路径。
+// pathMatch reports whether a catalog template covers this concrete path.
 func pathMatch(pat, path string) bool { return catalog.PathMatch(pat, path) }
 
-// 转调 catalog.Split。空路径得到 nil。
+// split calls catalog.Split. An empty path returns nil.
 func split(p string) []string { return catalog.Split(p) }
 
-// 转调 catalog.ProviderModels。
+// providerModels calls catalog.ProviderModels.
 func providerModels(provider string) []string { return catalog.ProviderModels(provider) }
 
-// 内置价格表中的模型条数，不含 sample_spec。
+// modelCostMapCount is the number of models in the built-in price map, excluding sample_spec.
 func modelCostMapCount() int { return catalog.Count() }
 
-// 是否强制只用内置价格表。
+// localCostMapForced reports whether only the built-in price map may be used.
 func localCostMapForced() bool { return catalog.EnvForced() }
 
-// 模型名到价格字段的映射。
+// modelCostMap maps a model name to its price fields.
 func modelCostMap() map[string]map[string]any { return catalog.CostMap() }
 
-// modelCostMapValue 与 modelCostMapLoadedAt 保持同包测试的旧读法。
+// modelCostMapValue and modelCostMapLoadedAt keep the old read path used by callers in this package.
 var (
 	modelCostMapValue    = catalog.Raw()
 	modelCostMapLoadedAt = catalog.LoadedAt()
 )
 
-// serveFamilyRoute 处理已经在 Gin 上按路径注册、但没有更早专用 handler 的 catalog 路由。
-// 它不挂在 "/" 上。未注册的路径由引擎的 NoRoute 返回 404。
+// serveFamilyRoute handles a catalog route that was registered on Gin by path and has no earlier dedicated handler.
+// It is not mounted on "/". An unregistered path gets a 404 from the engine NoRoute.
 func (s *Server) serveFamilyRoute(w http.ResponseWriter, r *http.Request) {
 	if !s.matchCatalog(r.Method, r.URL.Path) {
 		httpx.WriteError(w, 404, "not_found", "Not Found")
@@ -91,7 +91,7 @@ func (s *Server) serveFamilyRoute(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// 当前请求是否落在内置目录的某一条上。混合前缀即使不在清单里也算匹配。
+// matchCatalog reports whether this request hits one embedded catalog route. A mixed prefix counts as a match even when it is not in the list.
 func (s *Server) matchCatalog(method, path string) bool {
 	path = strings.TrimSuffix(path, "/")
 	if path == "" {
@@ -105,6 +105,6 @@ func (s *Server) matchCatalog(method, path string) bool {
 			return true
 		}
 	}
-	// OpenAPI 清单不一定包含 /v1/mcp/server 这种子路由。
+	// The OpenAPI list does not always include a child route such as /v1/mcp/server.
 	return isMixedPath(path)
 }

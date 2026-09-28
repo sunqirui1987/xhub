@@ -71,6 +71,24 @@ describe("ConditionalPublicModelName", () => {
     expect(screen.queryByDisplayValue("custom")).not.toBeInTheDocument();
   });
 
+  it("keeps a typed public name when the custom model name arrives later", () => {
+    render(
+      <MountedFormHost
+        defaultValues={{
+          model: ["custom"],
+          custom_model_name: "openai/gpt-4o-mini",
+          model_mappings: [{ public_name: "e2e-added-model", litellm_model: "custom" }],
+        }}
+      >
+        <ConditionalPublicModelName />
+        <LoopGuard />
+      </MountedFormHost>,
+    );
+
+    expect(screen.getByTestId("public-model-name-input")).toHaveValue("e2e-added-model");
+    expect(screen.getByText("openai/gpt-4o-mini")).toBeInTheDocument();
+  });
+
   it("keeps the public name input focused across keystrokes", async () => {
     const user = userEvent.setup();
     render(

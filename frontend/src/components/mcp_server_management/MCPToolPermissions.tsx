@@ -62,8 +62,8 @@ const MCPToolPermissions: React.FC<MCPToolPermissionsProps> = ({
     data: allServers = [],
     isError: serversFailed,
     isLoading: serversLoading,
-    isSuccess: serversLoaded,
   } = useMCPServers();
+  const serversLoaded = !serversLoading && !serversFailed;
   const { data: populatedAccessGroups = [], isSuccess: accessGroupsLoaded } = useMCPAccessGroups();
   const { data: toolsets = [], isError: toolsetsFailed, isLoading: toolsetsLoading } = useMCPToolsets();
   const [serverTools, setServerTools] = useState<Record<string, MCPTool[]>>({});

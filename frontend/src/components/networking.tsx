@@ -1147,9 +1147,23 @@ export const userInfoCall = async (
   }
 };
 
+const teamInfoResponse = (data: any) => {
+  if (!data || typeof data !== "object") return data;
+  const teamInfo = data.team_info ?? data.info;
+  if (!teamInfo || typeof teamInfo !== "object") return data;
+  return {
+    ...data,
+    team_id: data.team_id ?? teamInfo.team_id,
+    team_info: teamInfo,
+    keys: Array.isArray(data.keys) ? data.keys : Array.isArray(teamInfo.keys) ? teamInfo.keys : [],
+    team_memberships: Array.isArray(data.team_memberships) ? data.team_memberships : [],
+  };
+};
+
 export const teamInfoCall = async (accessToken: string, teamID: string | null) => {
   try {
-    return await apiClient.get(`/team/info`, { accessToken, query: { team_id: teamID || undefined } });
+    const data = await apiClient.get(`/team/info`, { accessToken, query: { team_id: teamID || undefined } });
+    return teamInfoResponse(data);
   } catch (error) {
     console.error("Failed to create key:", error);
     throw error;

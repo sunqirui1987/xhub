@@ -1,4 +1,4 @@
-// 按路径判断公开、推理还是管理，并把目录模板匹配到具体 URL。
+// Package catalog classifies a path as public, inference, or management, and matches a catalog template to a concrete URL.
 package catalog
 
 import (
@@ -7,32 +7,32 @@ import (
 	"strings"
 )
 
-// Route 是 routes.json 里的一条方法加路径。路径可以含 {param}。
+// Route is one method and path from routes.json. The path may contain {param}.
 type Route struct {
 	M string `json:"m"`
 	P string `json:"p"`
 }
 
-// Load 读内置 routes.json。解析失败时返回 nil，调用方按空目录处理。
+// Load reads the embedded routes.json. A parse failure returns nil, and the caller treats that as an empty catalog.
 func Load() []Route {
 	var r []Route
 	_ = json.Unmarshal(routesJSON, &r)
 	return r
 }
 
-// AuthClass 是一条路径在网关里要求的身份。
+// AuthClass is the identity a path requires on the gateway.
 type AuthClass int
 
 const (
-	// AuthManagement 只接受管理密钥或会话。
+	// AuthManagement accepts only a management key or a session.
 	AuthManagement AuthClass = iota
-	// AuthData 是推理路径，只接受 LLM 密钥。
+	// AuthData is an inference path and accepts only an LLM key.
 	AuthData
-	// AuthMixed 是已经下线但仍留在目录里的旧路径，管理密钥和 LLM 密钥都能进到拒绝逻辑。
+	// AuthMixed is an old path that was removed but is still in the catalog. A management key and an LLM key both reach the rejection logic.
 	AuthMixed
 )
 
-// AuthOf 按路径前缀决定身份类别。混合前缀优先于推理前缀。
+// AuthOf chooses the identity class from the path prefix. A mixed prefix wins over an inference prefix.
 func AuthOf(path string) AuthClass {
 	if IsMixedPath(path) {
 		return AuthMixed
@@ -43,7 +43,7 @@ func AuthOf(path string) AuthClass {
 	return AuthManagement
 }
 
-// IsMixedPath 是智能体、MCP、技能等已经从产品拿掉、但目录里还留着的路径。
+// IsMixedPath reports paths such as agents, MCP, and skills that were removed from the product but remain in the catalog.
 func IsMixedPath(path string) bool {
 	for _, p := range []string{
 		"/v1/agents", "/v1beta/agents", "/v1/skills", "/v1/memory",
@@ -56,7 +56,7 @@ func IsMixedPath(path string) bool {
 	return false
 }
 
-// IsPublicPath 是不需要身份的 GET/HEAD。只有公开页、well-known 和模型中心入口。
+// IsPublicPath reports a GET or HEAD that needs no identity. Only public pages, well-known URLs, and the model-hub entry qualify.
 func IsPublicPath(method, path string) bool {
 	if method != http.MethodGet && method != http.MethodHead {
 		return false
@@ -73,12 +73,12 @@ func IsPublicPath(method, path string) bool {
 	return false
 }
 
-// IsDataPlanePath 是会进推理数据面的路径，含已下线的混合前缀。
+// IsDataPlanePath reports a path that enters the inference data plane, including removed mixed prefixes.
 func IsDataPlanePath(path string) bool {
 	return IsMixedPath(path) || IsLLMPrefix(path)
 }
 
-// IsLLMPrefix 是 OpenAI、Anthropic、Gemini 以及兼容端点的路径前缀。
+// IsLLMPrefix reports a path prefix for OpenAI, Anthropic, Gemini, and compatible endpoints.
 func IsLLMPrefix(path string) bool {
 	prefixes := []string{
 		"/v1/chat", "/v1/completions", "/v1/messages", "/v1/responses",
@@ -102,7 +102,7 @@ func IsLLMPrefix(path string) bool {
 	return false
 }
 
-// HasPrefix 比较路径前缀。末尾斜杠被忽略，避免 /v1/chat 误匹配 /v1/chatcompletions。
+// HasPrefix compares path prefixes. A trailing slash is ignored so /v1/chat does not match /v1/chatcompletions.
 func HasPrefix(path, prefix string) bool {
 	path = strings.TrimSuffix(path, "/")
 	prefix = strings.TrimSuffix(prefix, "/")
@@ -112,7 +112,7 @@ func HasPrefix(path, prefix string) bool {
 	return strings.HasPrefix(path, prefix+"/")
 }
 
-// PublicBody 是公开 GET 的固定响应。价格表和创建字段来自内置 JSON，其余是空列表。
+// PublicBody is the fixed response for a public GET. The price map and create fields come from embedded JSON. Everything else is an empty list.
 func PublicBody(path string) any {
 	p := strings.ToLower(path)
 	switch {
@@ -148,7 +148,7 @@ func PublicBody(path string) any {
 	}
 }
 
-// 解析 JSON。失败时用 fallback，不把错误抛给公开接口。
+// unmarshalOr parses JSON. On failure it uses fallback and does not surface the error on a public route.
 func unmarshalOr(raw []byte, fallback any) any {
 	var v any
 	if json.Unmarshal(raw, &v) == nil {
@@ -157,7 +157,7 @@ func unmarshalOr(raw []byte, fallback any) any {
 	return fallback
 }
 
-// PathMatch 判断目录模板是否覆盖具体路径。{name} 匹配一段，:path 和 {x:path} 匹配剩余部分。
+// PathMatch reports whether a catalog template covers a concrete path. {name} matches one segment. :path and {x:path} match the rest.
 func PathMatch(pat, path string) bool {
 	pat = strings.ReplaceAll(pat, ":path", "")
 	if pat == path {
@@ -187,7 +187,7 @@ func PathMatch(pat, path string) bool {
 	return true
 }
 
-// 比较路径模板和实际分段。花括号段匹配任意一段。
+// prefixMatch compares a path template with the actual segments. A brace segment matches any one segment.
 func prefixMatch(ps, xs []string) bool {
 	for i := range ps {
 		if strings.HasPrefix(ps[i], "{") {
@@ -200,7 +200,7 @@ func prefixMatch(ps, xs []string) bool {
 	return true
 }
 
-// Split 按斜杠拆路径。空路径得到 nil，而不是 [""]。
+// Split splits a path on slashes. An empty path returns nil, not a slice containing an empty string.
 func Split(p string) []string {
 	p = strings.Trim(p, "/")
 	if p == "" {
@@ -209,5 +209,5 @@ func Split(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// 转调 catalog.Split。空路径得到 nil。
+// split calls Split. An empty path returns nil.
 func split(p string) []string { return Split(p) }

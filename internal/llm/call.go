@@ -1,4 +1,4 @@
-// 描述一次上游调用要带的操作、地址、密钥和正文。
+// Package llm describes the operation, address, key, and body of one upstream call.
 package llm
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// 操作名与网关数据面的 op 一致。空字符串和 "chat" 都表示聊天补全。
+// Operation names match the data-plane op. An empty string and "chat" both mean chat completions.
 const (
 	OpChat               = "chat"
 	OpCompletions        = "completions"
@@ -25,11 +25,11 @@ const (
 	OpVideos             = "videos"
 )
 
-// Headers 是打到上游的最低请求头。
+// Headers is the minimum header set sent upstream.
 //
-// 密钥只放在 Authorization，不写进请求体，避免被日志或缓存键再次展开。
-// Content-Type 固定为 JSON。音频等多部分请求以后要换成对应的 Provider，
-// 不在这里猜测。
+// The key is placed only in Authorization and not in the body, so a log or a cache key does not expand it again.
+// Content-Type is fixed as JSON. Multipart requests such as audio should later use the matching provider,
+// and this function does not guess that shape.
 func Headers(apiKey string) http.Header {
 	h := make(http.Header)
 	h.Set("Authorization", "Bearer "+apiKey)
@@ -37,14 +37,35 @@ func Headers(apiKey string) http.Header {
 	return h
 }
 
-// Endpoint 返回这次操作的完整 URL。
+// DefaultAPIBase is the official root used when a deployment does not set api_base.
+// OpenAI chat joins /chat/completions onto https://api.openai.com/v1. An unknown provider returns an empty string.
+func DefaultAPIBase(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "openai":
+		return "https://api.openai.com/v1"
+	case "anthropic":
+		return "https://api.anthropic.com"
+	case "groq":
+		return "https://api.groq.com/openai/v1"
+	case "mistral":
+		return "https://api.mistral.ai/v1"
+	case "deepseek":
+		return "https://api.deepseek.com"
+	case "xai":
+		return "https://api.x.ai/v1"
+	default:
+		return ""
+	}
+}
+
+// Endpoint returns the full URL for this operation.
 //
-// apiBase 必须已经由凭证层解析好。本函数不把空地址改成 api.openai.com，
-// 否则未配置的部署会悄悄打到官方。调用方在地址或密钥为空时应直接返回
-// 认证错误。
+// apiBase must already be resolved by the credential layer. This function does not replace an empty address with api.openai.com,
+// or an unconfigured deployment would quietly call the official host. The caller should return
+// an authentication error when the address or the key is empty.
 //
-// 路径规则与 LiteLLM 各供应商的 get_complete_url 对齐，但合并成一张表：
-// OpenAI 兼容供应商共用默认分支，Azure / Anthropic / Gemini / Vertex 单独分支。
+// Path rules match each LiteLLM provider's get_complete_url, folded into one table:
+// OpenAI-compatible providers share the default branch, and Azure, Anthropic, Gemini, and Vertex have their own branches.
 func Endpoint(op, provider, apiBase, model string) string {
 	base := strings.TrimRight(apiBase, "/")
 	provider = strings.ToLower(strings.TrimSpace(provider))
@@ -61,8 +82,8 @@ func Endpoint(op, provider, apiBase, model string) string {
 		}
 		return base + "/completions"
 	case OpMessages:
-		// Gemini 没有 Anthropic Messages 路径。消息接口仍打 generateContent，
-		// 由 Decode 把候选结果收成 Messages 形状。
+		// Gemini has no Anthropic Messages path. The messages API still calls generateContent,
+		// and Decode turns the candidates into the Messages shape.
 		if provider == "gemini" || provider == "vertex_ai" {
 			return chatEndpoint(provider, base, model)
 		}
@@ -98,8 +119,8 @@ func Endpoint(op, provider, apiBase, model string) string {
 	}
 }
 
-// chatEndpoint 是聊天补全的供应商路径。
-// OpenAI 兼容供应商一律是 {base}/chat/completions。模型名在请求体里，不在路径里。
+// chatEndpoint is the provider path for chat completions.
+// Every OpenAI-compatible provider uses {base}/chat/completions. The model name is in the body, not in the path.
 func chatEndpoint(provider, base, model string) string {
 	switch provider {
 	case "anthropic":
@@ -109,23 +130,23 @@ func chatEndpoint(provider, base, model string) string {
 	case "gemini":
 		return base + "/v1beta/models/" + model + ":generateContent"
 	case "vertex_ai":
-		// 项目与区域来自部署。这里只给出未带参数时的路径形状，占位项目名已删除。
+		// The project and region come from the deployment. This is only the path shape without those parameters. The placeholder project name was removed.
 		return base + "/v1/projects/vertex-project/locations/us-central1/publishers/google/models/" + model + ":generateContent"
 	default:
 		return base + "/chat/completions"
 	}
 }
 
-// Encode 把对外请求收成上游请求体。
+// Encode turns the public request into the upstream body.
 //
-// 对外的 model 是路由别名。上游要的是部署里的真实模型名，所以这里覆盖 model。
-// 其余字段原样保留：温度、工具、流式开关都由调用方传入，本函数不补默认值，
-// 除了 Anthropic Messages 在缺少 max_tokens 时补 256。那是 Messages API 的必填项，
-// 缺了上游会直接 400。
+// The public model is the routing alias. The upstream wants the real model name from the deployment, so model is overwritten here.
+// Other fields are kept as they are. Temperature, tools, and the stream flag come from the caller. This function does not fill defaults,
+// except Anthropic Messages, which fills max_tokens with 256 when it is missing. That field is required by the Messages API,
+// and the upstream returns 400 without it.
 func Encode(op, provider string, body map[string]any, model string) ([]byte, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "gemini" || provider == "vertex_ai" {
-		// 正文由 google.golang.org/genai 生成，见 Build。
+		// The body is produced by google.golang.org/genai. See Build.
 		up, err := Build(context.Background(), Request{
 			Op: op, Provider: provider, APIBase: "https://generativelanguage.googleapis.com",
 			APIKey: "builder", Model: model, Body: body,
@@ -140,7 +161,7 @@ func Encode(op, provider string, body map[string]any, model string) ([]byte, err
 	for k, v := range body {
 		out[k] = v
 	}
-	// 代理字段不进供应商正文。规则与 litellm.utils.filter_out_litellm_params 相同。
+	// Proxy fields do not enter the provider body. The rule matches litellm.utils.filter_out_litellm_params.
 	StripProxyParams(out)
 	out["model"] = model
 	if op == OpResponses {
@@ -154,8 +175,8 @@ func Encode(op, provider string, body map[string]any, model string) ([]byte, err
 	return json.Marshal(out)
 }
 
-// shapeResponsesMessages 把聊天消息里的 type=text 收成 Responses API 的 input_text。
-// 助手消息保持原样。规则在 responses.ShapePromptManagedMessage。
+// shapeResponsesMessages turns type=text inside chat messages into the Responses API input_text.
+// Assistant messages stay as they are. The rule lives in responses.ShapePromptManagedMessage.
 func shapeResponsesMessages(body map[string]any) {
 	msgs, ok := body["messages"].([]any)
 	if !ok {
@@ -173,11 +194,11 @@ func shapeResponsesMessages(body map[string]any) {
 	body["messages"] = shaped
 }
 
-// Decode 把上游响应收成对外形状，并把 model 改回调用方使用的别名。
+// Decode turns an upstream response into the public shape and sets model back to the alias the caller used.
 //
-// 音频二进制没有 JSON 模型字段，原样返回。图像、重排和转写的 model 字段
-// 属于结果本身，不用别名覆盖。其余 JSON 对象把 model 改成别名。
-// Messages 操作再把 chat.completion 收成 Anthropic 的 message 对象。
+// Audio bytes have no JSON model field and are returned unchanged. The model field on images, rerank, and transcriptions
+// belongs to the result and is not overwritten with the alias. Other JSON objects set model to the alias.
+// A Messages operation then turns a chat.completion into an Anthropic message object.
 func Decode(op, provider, alias string, raw []byte) []byte {
 	if op == OpAudioSpeech {
 		return raw
@@ -203,8 +224,8 @@ func Decode(op, provider, alias string, raw []byte) []byte {
 	return encoded
 }
 
-// decodeMessages 把 OpenAI chat.completion 收成 Anthropic Messages 的对象。
-// content 已存在时不覆盖，避免上游本来就是 Messages 形状时被聊天字段冲掉。
+// decodeMessages turns an OpenAI chat.completion into an Anthropic Messages object.
+// Existing content is not overwritten, so an upstream body that is already a Messages shape is not replaced by chat fields.
 func decodeMessages(doc map[string]any) {
 	if _, ok := doc["content"]; !ok {
 		text := ""

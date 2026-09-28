@@ -1,4 +1,4 @@
-// 护栏接口共用的 JSON 读取。空正文得到空表。
+// Package guard shares JSON readers. An empty body becomes an empty map.
 package guard
 
 import (
@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -18,13 +18,13 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// str 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// boolOf 把布尔、字符串 true/1 或非零数字收成布尔。其余类型，包括缺省，都是 false。
+// boolOf accepts a bool, the strings true and 1, or a non-zero number. Every other value, including a missing one, is false.
 func boolOf(v any) bool {
 	switch t := v.(type) {
 	case bool:

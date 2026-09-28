@@ -1,4 +1,4 @@
-// 把密钥库里的 credential_values 填进部署参数。缺的字段保持原值。
+// Package llm fills deployment parameters from credential_values in the secret store. A missing field keeps its previous value.
 package llm
 
 import (
@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-// credentialFields 是命名凭证可以填进部署的字段。
+// credentialFields lists the fields a named credential may copy into a deployment.
 //
-// 来源是 LiteLLM 的 CredentialLiteLLMParams，再加上 custom_llm_provider。
-// 只复制这张表里的键。凭证里如果多带了别的字段，不能漏进一次模型调用，
-// 否则上游会收到它不认识的参数。
+// The source is LiteLLM CredentialLiteLLMParams plus custom_llm_provider.
+// Only keys in this list are copied. Extra fields on a credential must not leak into a model call,
+// or the upstream would receive a parameter it does not understand.
 var credentialFields = []string{
 	"api_key",
 	"api_base",
@@ -50,17 +50,17 @@ var credentialFields = []string{
 	"custom_llm_provider",
 }
 
-// Hydrate 用命名凭证补齐部署里还空着的参数。
+// Hydrate fills deployment parameters that are still empty from a named credential.
 //
-// LiteLLM 的 load_credentials_from_list 只在「键完全不存在」时写入。
-// 网关里部署经常把 api_key 存成空字符串（响应脱敏之后再读回来就是这样），
-// 所以空字符串也当成没填。部署上已经写了的非空值永远优先，凭证不能覆盖它。
+// LiteLLM load_credentials_from_list writes a value only when the key is entirely absent.
+// Deployments in this gateway often store api_key as an empty string after a redacted response is read back,
+// so an empty string also counts as unset. A non-empty value already on the deployment always wins and a credential cannot overwrite it.
 //
-// 字符串里的 os.environ/NAME 在这次调用时展开，不在保存凭证时展开。
-// 这样同一条凭证可以跟着进程环境走。custom_llm_provider 再转成小写，
-// 配置里的 OpenAI 和协议里的 openai 是同一个供应商。
+// os.environ/NAME inside a string is expanded on this call, not when the credential is saved.
+// The same credential can follow the process environment. custom_llm_provider is then lowercased,
+// so OpenAI in config and openai in the protocol name the same provider.
 //
-// 返回新的 map，不改调用方传入的部署参数。
+// Hydrate returns a new map and does not modify the deployment parameters the caller passed in.
 func Hydrate(params, credentialValues map[string]any) map[string]any {
 	out := map[string]any{}
 	for key, value := range params {
@@ -92,8 +92,8 @@ func Hydrate(params, credentialValues map[string]any) map[string]any {
 	return out
 }
 
-// expandEnv 识别配置里的 os.environ/NAME。
-// 没有这个前缀的字符串原样返回。变量不存在时得到空字符串，和 os.Getenv 一致。
+// expandEnv recognizes os.environ/NAME in a config string.
+// A string without that prefix is returned unchanged. A missing variable becomes an empty string, matching os.Getenv.
 func expandEnv(s string) string {
 	s = strings.TrimSpace(s)
 	const prefix = "os.environ/"
@@ -103,7 +103,7 @@ func expandEnv(s string) string {
 	return s
 }
 
-// 判断凭证值是否空白。空白字段不覆盖部署上已经写好的值。
+// blank reports whether a credential value is empty. A blank field does not overwrite a value already set on the deployment.
 func blank(v any) bool {
 	if v == nil {
 		return true

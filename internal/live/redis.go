@@ -1,4 +1,4 @@
-// 热路径上的 Redis。冷却、延迟、RPM/TPM 和花费增量都在这里，请求本身不写 PostgreSQL。
+// Package live is Redis for the hot path. Cooldown, latency, RPM, TPM, and spend deltas live here. The request itself does not write PostgreSQL.
 package live
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// 热路径 Redis。请求只更新这里，花费日志由定时刷盘写入 PostgreSQL。
+// Client is the hot-path Redis client. A request only updates it. Spend logs are written to PostgreSQL by the timed flush.
 // Client is the gateway hot path. Router cooldown, latency, and token counters
 // live here, as do RPM/TPM buckets and the spend delta. Spend logs are queued
 // and flushed to PostgreSQL by the server; the request does not insert them.
@@ -19,7 +19,7 @@ type Client struct {
 	rdb *redis.Client
 }
 
-// 解析 Redis URL 并 Ping。失败时关闭客户端并返回错误。
+// Open parses the Redis URL and pings it. On failure it closes the client and returns the error.
 func Open(url string) (*Client, error) {
 	opt, err := redis.ParseURL(url)
 	if err != nil {
@@ -35,7 +35,7 @@ func Open(url string) (*Client, error) {
 	return &Client{rdb: c}, nil
 }
 
-// 关闭 Redis。客户端为 nil 时不报错。
+// Close closes Redis. A nil client is not an error.
 func (c *Client) Close() error {
 	if c == nil || c.rdb == nil {
 		return nil
@@ -43,7 +43,7 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
-// 失败计数加一。达到 allowed 次后写入冷却键。allowed 小于 1 时什么都不做。
+// RecordFailure increments the failure count. After allowed failures it writes the cooldown key. An allowed below 1 does nothing.
 func (c *Client) RecordFailure(id string, allowed int, cooldown time.Duration) error {
 	if c == nil || id == "" || allowed < 1 {
 		return nil
@@ -60,7 +60,7 @@ func (c *Client) RecordFailure(id string, allowed int, cooldown time.Duration) e
 	return c.rdb.Set(ctx, "xhub:cooldown:"+id, "1", cooldown).Err()
 }
 
-// 哪些部署 id 仍在冷却。Redis 不可用时返回空表，调用方按没有冷却处理。
+// Cooled reports which deployment ids are still cooling down. If Redis is unavailable it returns an empty map and the caller treats that as no cooldown.
 func (c *Client) Cooled(ids []string) map[string]bool {
 	out := map[string]bool{}
 	if c == nil || len(ids) == 0 {
@@ -83,7 +83,7 @@ func (c *Client) Cooled(ids []string) map[string]bool {
 	return out
 }
 
-// 把一次延迟从左侧推入列表，只保留最近 20 条，一小时过期。
+// AddLatency pushes one latency onto the left of the list, keeps the latest 20, and expires the key after one hour.
 func (c *Client) AddLatency(id string, ms float64) error {
 	if c == nil || id == "" {
 		return nil
@@ -98,7 +98,7 @@ func (c *Client) AddLatency(id string, ms float64) error {
 	return err
 }
 
-// 每个部署最近延迟的平均值。没有样本的 id 不会出现。
+// Latencies returns the average of recent latencies for each deployment. An id with no sample is omitted.
 func (c *Client) Latencies(ids []string) map[string]float64 {
 	out := map[string]float64{}
 	if c == nil {
@@ -127,7 +127,7 @@ func (c *Client) Latencies(ids []string) map[string]float64 {
 	return out
 }
 
-// 把 token 加进当前分钟桶。
+// AddUsage adds tokens to the current minute bucket.
 func (c *Client) AddUsage(id string, tokens int) error {
 	if c == nil || id == "" || tokens == 0 {
 		return nil
@@ -140,7 +140,7 @@ func (c *Client) AddUsage(id string, tokens int) error {
 	return c.rdb.Expire(ctx, key, time.Minute).Err()
 }
 
-// 每个部署当前分钟的 token 用量。
+// Usages returns each deployment's token usage for the current minute.
 func (c *Client) Usages(ids []string) map[string]float64 {
 	out := map[string]float64{}
 	if c == nil || len(ids) == 0 {
@@ -165,20 +165,20 @@ func (c *Client) Usages(ids []string) map[string]float64 {
 	return out
 }
 
-// 当前分钟的 unix 分钟序号，用作 RPM/TPM 键的后缀。
+// minuteBucket is the current Unix minute, used as the suffix of RPM and TPM keys.
 func minuteBucket() int64 { return time.Now().Unix() / 60 }
 
-// 当前分钟的请求数加一，并返回加完后的值。
+// HitRPM increments the current minute's request count and returns the new value.
 func (c *Client) HitRPM(id string) (int64, error) {
 	return c.bump("xhub:rpm:"+id, 1)
 }
 
-// 当前分钟的 token 数增加 tokens，并返回加完后的值。
+// HitTPM adds tokens to the current minute and returns the new value.
 func (c *Client) HitTPM(id string, tokens int) (int64, error) {
 	return c.bump("xhub:tpm:"+id, int64(tokens))
 }
 
-// 把分钟计数器加上 n 并返回新值。键带分钟序号，过期后下一分钟从零开始。
+// bump adds n to a minute counter and returns the new value. The key includes the minute number, so the next minute starts at zero after expiry.
 func (c *Client) bump(prefix string, n int64) (int64, error) {
 	if c == nil {
 		return 0, nil
@@ -193,7 +193,7 @@ func (c *Client) bump(prefix string, n int64) (int64, error) {
 	return v, nil
 }
 
-// 把美元增量加到热花费，并把 id 放进待刷集合。
+// ChargeSpend adds a dollar delta to hot spend and puts the id in the set waiting to be flushed.
 func (c *Client) ChargeSpend(id string, usd float64) error {
 	if c == nil || id == "" || usd == 0 {
 		return nil
@@ -205,7 +205,7 @@ func (c *Client) ChargeSpend(id string, usd float64) error {
 	return c.rdb.SAdd(ctx, "xhub:spend:ids", id).Err()
 }
 
-// 还没刷进 PostgreSQL 的花费增量。没有这个 id 时为 0。
+// HotSpend is the spend delta not yet flushed to PostgreSQL. A missing id returns 0.
 func (c *Client) HotSpend(id string) float64 {
 	if c == nil || id == "" {
 		return 0
@@ -217,9 +217,7 @@ func (c *Client) HotSpend(id string) float64 {
 	return v
 }
 
-// 读出待刷花费，但不清掉。刷盘失败后还可以再读。
-// PeekSpend reads hot spend deltas without removing them.
-// AckSpend subtracts a delta only after PostgreSQL has committed it.
+// PeekSpend reads hot spend with GET and does not subtract or delete it. After a failed flush the same deltas can still be read.
 func (c *Client) PeekSpend() map[string]float64 {
 	out := map[string]float64{}
 	if c == nil {
@@ -240,7 +238,7 @@ func (c *Client) PeekSpend() map[string]float64 {
 	return out
 }
 
-// 确认一批花费已经入库，并从 Redis 减掉相应增量。
+// AckSpend subtracts a delta only after PostgreSQL has committed it. It decrements the Redis counters for the map it is given and does not read the database itself.
 func (c *Client) AckSpend(deltas map[string]float64) error {
 	if c == nil || len(deltas) == 0 {
 		return nil
@@ -257,7 +255,7 @@ func (c *Client) AckSpend(deltas map[string]float64) error {
 	return nil
 }
 
-// 清空待刷花费。只给测试或显式重置使用。
+// ClearSpendQueue drops spend waiting to be flushed. Use it only from a test or an explicit reset.
 func (c *Client) ClearSpendQueue() error {
 	if c == nil {
 		return nil
@@ -271,7 +269,7 @@ func (c *Client) ClearSpendQueue() error {
 	return c.rdb.Del(ctx, keys...).Err()
 }
 
-// 取出并清零待刷花费。和 Peek 不同，失败后增量已经不在 Redis。
+// TakeSpend reads and clears spend waiting to be flushed. Unlike Peek, a later failure no longer finds the delta in Redis.
 func (c *Client) TakeSpend() map[string]float64 {
 	out := map[string]float64{}
 	if c == nil {
@@ -297,7 +295,7 @@ func (c *Client) TakeSpend() map[string]float64 {
 	return out
 }
 
-// 排队等待写入 PostgreSQL 的一条花费日志。
+// SpendLog is one spend log waiting in the queue to be written to PostgreSQL.
 type SpendLog struct {
 	RequestID  string  `json:"request_id"`
 	CallType   string  `json:"call_type"`
@@ -316,7 +314,7 @@ type SpendLog struct {
 	OrgID      string  `json:"org_id"`
 }
 
-// 把日志放进 Redis 列表。请求路径只做这一步。
+// EnqueueLog pushes a log onto the Redis list. The request path does only this step.
 func (c *Client) EnqueueLog(row SpendLog) error {
 	if c == nil {
 		return nil
@@ -328,7 +326,7 @@ func (c *Client) EnqueueLog(row SpendLog) error {
 	return c.rdb.RPush(context.Background(), "xhub:spendlog", raw).Err()
 }
 
-// 从列表头部读出最多 n 条，不删除。返回解析后的行和原始字符串。
+// PeekLogs reads up to n items from the head of the list and does not delete them. It returns the parsed rows and the raw strings.
 // PeekLogs reads up to n queued logs without removing them.
 // raw is the queue prefix, including rows that do not decode.
 func (c *Client) PeekLogs(n int) (rows []SpendLog, raw []string) {
@@ -350,7 +348,7 @@ func (c *Client) PeekLogs(n int) (rows []SpendLog, raw []string) {
 	return out, vals
 }
 
-// 在数据库事务成功后，同时确认花费增量和已经写出的日志前缀。
+// AckFlushed acknowledges spend deltas and the written log prefix together after the database transaction succeeds.
 // AckFlushed subtracts hot spend and trims the log prefix in one Redis script.
 // If the queue head is no longer the batch that was peeked, it does nothing, so a retry
 // cannot subtract twice after a successful ack and cannot drop the logs first.
@@ -388,7 +386,7 @@ redis.call('LTRIM', KEYS[1], n, -1)
 return 1
 `)
 
-// 只丢掉日志队列头部 n 条。花费增量要另确认。
+// AckLogs drops only the first n log-queue items. Spend deltas must be acknowledged separately.
 func (c *Client) AckLogs(n int) error {
 	if c == nil || n < 1 {
 		return nil
@@ -396,7 +394,7 @@ func (c *Client) AckLogs(n int) error {
 	return c.rdb.LTrim(context.Background(), "xhub:spendlog", int64(n), -1).Err()
 }
 
-// 取出并删除最多 n 条日志。
+// DrainLogs reads and deletes up to n logs.
 func (c *Client) DrainLogs(n int) []SpendLog {
 	if c == nil || n < 1 {
 		return nil

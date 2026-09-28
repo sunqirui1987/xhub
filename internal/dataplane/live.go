@@ -1,4 +1,4 @@
-// 请求路径上的 Redis 状态，以及把花费队列刷进 PostgreSQL。
+// Package dataplane reads Redis state on the request path and flushes the spend queue into PostgreSQL.
 package dataplane
 
 import (
@@ -10,8 +10,8 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// State 把进程内并发和 Redis 里的冷却、延迟、用量交给路由器。
-// 没有 Redis 时只带 Busy，冷却和延迟退回空，路由器按本地策略选。
+// State gives the router the in-process concurrency plus cooldown, latency, and usage from Redis.
+// Without Redis only Busy is filled. Cooldown and latency stay empty, and the router uses its local strategy.
 func State(h Host) router.State {
 	st := router.State{Busy: h.BusyMap()}
 	redis := h.Redis()
@@ -28,8 +28,8 @@ func State(h Host) router.State {
 	return st
 }
 
-// RecordFailure 按当前路由设置累计失败。allowed_fails 小于 1 时不写 Redis。
-// cooldown_time 为 0 或缺失时按 1 分钟冷却，和 LiteLLM 的缺省一致。
+// RecordFailure counts a failure using the current router settings. An allowed_fails below 1 does not write Redis.
+// A cooldown_time of 0 or a missing value cools down for one minute, matching the LiteLLM default.
 func RecordFailure(h Host, id string) {
 	redis := h.Redis()
 	if redis == nil || id == "" {
@@ -47,7 +47,7 @@ func RecordFailure(h Host, id string) {
 	_ = redis.RecordFailure(id, allowed, cd)
 }
 
-// 把 JSON 数字收成 float64。int 也可以。其它类型返回 0。
+// asFloat converts a JSON number to float64. An int is accepted. Any other type returns 0.
 func asFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
@@ -59,7 +59,7 @@ func asFloat(v any) float64 {
 	}
 }
 
-// RecordLatency 记下一次成功调用的毫秒数。没有 Redis 时直接返回。
+// RecordLatency stores the milliseconds of one successful call. Without Redis it returns immediately.
 func RecordLatency(h Host, id string, ms float64) {
 	if h.Redis() == nil {
 		return
@@ -67,7 +67,7 @@ func RecordLatency(h Host, id string, ms float64) {
 	_ = h.Redis().AddLatency(id, ms)
 }
 
-// RecordUsage 把本次 token 加进该部署的分钟桶。没有 Redis 时直接返回。
+// RecordUsage adds this call's tokens to the deployment's minute bucket. Without Redis it returns immediately.
 func RecordUsage(h Host, id string, tokens int) {
 	if h.Redis() == nil {
 		return
@@ -75,7 +75,7 @@ func RecordUsage(h Host, id string, tokens int) {
 	_ = h.Redis().AddUsage(id, tokens)
 }
 
-// FlushLoop 每 60 秒把 Redis 里的花费和日志写进 PostgreSQL。调用方应在进程启动后单独跑它。
+// FlushLoop writes Redis spend and logs into PostgreSQL every 60 seconds. The caller should run it on its own after the process starts.
 func FlushLoop(h Host) {
 	t := time.NewTicker(60 * time.Second)
 	defer t.Stop()
@@ -84,14 +84,14 @@ func FlushLoop(h Host) {
 	}
 }
 
-// SpendAck 是提交成功后的 Redis 确认。测试可以替换它，让第一次确认失败。
+// SpendAck acknowledges Redis after a successful commit. A test can replace it so the first acknowledgement fails.
 var SpendAck = func(c *live.Client, deltas map[string]float64, n int, head string) error {
 	return c.AckFlushed(deltas, n, head)
 }
 
-// Flush 把 Redis 队列里的花费日志一次写入 PostgreSQL。
-// 事务提交之后才确认 Redis。确认失败时两边都留着，下次还能重试。
-// 热花费和日志前缀一起确认，避免只扣掉其中一边。
+// Flush writes the spend logs currently queued in Redis into PostgreSQL once.
+// The Redis acknowledgement runs only after the transaction commits. If acknowledgement fails, both sides keep the data so the next flush can retry.
+// Hot spend and the log prefix are acknowledged together so one side is not dropped without the other.
 func Flush(h Host) {
 	redis := h.Redis()
 	db := h.SpendStore()
@@ -135,7 +135,7 @@ func Flush(h Host) {
 	_ = SpendAck(redis, hotDeltas(logs), n, head)
 }
 
-// 从一批日志汇总每个密钥、团队、用户、组织要增加的花费。零花费或无效行跳过。
+// hotDeltas totals the spend each key, team, user, and organization should gain from a batch. A zero or invalid row is skipped.
 func hotDeltas(logs []live.SpendLog) map[string]float64 {
 	out := map[string]float64{}
 	for _, row := range logs {

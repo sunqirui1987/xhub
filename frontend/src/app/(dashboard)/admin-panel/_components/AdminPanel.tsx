@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { t } from "@/i18n";
+import SecretBackendPanel from "./SecretBackendPanel";
 
 type AllowedIPFormValues = { ip: string };
 
@@ -258,6 +259,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ proxySettings }) => {
                   {t("UI Access Control")}
                 </Button>
               </div>
+              <div><Button onClick={() => {
+                    if (!accessToken) { toast.fromError(t("No access token available")); return; }
+                    void fetch("/update/ui_settings", { method: "PATCH", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ enabled_ui_pages_internal_users: ["api-keys"] }) }).then(async (response) => { if (!response.ok) throw new Error(await response.text()); toast.success(t("UI settings saved")); }).catch((error: unknown) => toast.fromError(error instanceof Error ? error.message : String(error)));
+                  }}>{t("Save UI Settings")}</Button></div>
             </div>
           </Card>
 
@@ -376,6 +381,16 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ proxySettings }) => {
       key: "logging-settings",
       label: t("pages.adminPanel.loggingSettings"),
       children: <LoggingSettings />,
+    },
+    {
+      key: "hashicorp-vault",
+      label: t("Hashicorp Vault"),
+      children: <SecretBackendPanel kind="hashicorp_vault" />,
+    },
+    {
+      key: "cyberark",
+      label: t("CyberArk Conjur"),
+      children: <SecretBackendPanel kind="cyberark" />,
     },
     {
       key: "plugins",

@@ -1,15 +1,14 @@
-// 路由设置和通用设置的读写。数据库里出现的键覆盖 YAML，没出现的键保留。
+// Package prefs reads and writes router settings and general settings. A key present in the database overrides YAML. A key that is absent stays.
 package prefs
 
 import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
-	"github.com/sunqirui1987/xhub/internal/settings"
 )
 
-// YAML 和代码默认值合成的路由设置基线。allowed_fails 在这里固定写成 3。
-// 合并后的值大于等于 1 时，失败会计入 Redis 并开始冷却；cooldown_time 为 0 时按 1 分钟。只有显式写成小于 1 才不记这次失败。
+// Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here.
+// A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
 func Base(s Host) map[string]any {
 	rs := map[string]any{
 		"routing_strategy":         s.Config().RouterSettings.RoutingStrategy,
@@ -37,16 +36,16 @@ func Base(s Host) map[string]any {
 	return rs
 }
 
-// 数据库路由设置覆盖基线。数据库没有的键保留 YAML。
+// MergedRouter overlays database router settings on the baseline. Keys absent from the database keep the YAML value.
 func MergedRouter(s Host) map[string]any {
 	db, err := s.DB().ListConfig("router_settings")
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
-	return settings.Overlay(Base(s), db)
+	return Overlay(Base(s), db)
 }
 
-// 数据库通用设置覆盖 YAML。master_key、database_url、redis_url 不会从库里露出来。
+// MergedGeneral overlays database general settings on YAML. master_key, database_url, and redis_url are not exposed from the database.
 func MergedGeneral(s Host) map[string]any {
 	base := map[string]any{}
 	for k, v := range s.Config().GeneralRaw {
@@ -59,10 +58,10 @@ func MergedGeneral(s Host) map[string]any {
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
-	return settings.Overlay(base, db)
+	return Overlay(base, db)
 }
 
-// 把局部更新写入命名空间。只保存补丁里出现的键，并在路由设置变更后刷新进程内策略。
+// saveNamespacePatch writes a partial update into one namespace. Only keys present in the patch are stored, and a router-settings change refreshes the in-process strategy.
 func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 	var current map[string]any
 	switch namespace {
@@ -77,7 +76,7 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 		}
 		current = db
 	}
-	merged := settings.MergePatch(current, patch)
+	merged := MergePatch(current, patch)
 	for k := range patch {
 		if err := s.DB().PutConfig(namespace, k, merged[k]); err != nil {
 			return err
@@ -89,7 +88,7 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 	return nil
 }
 
-// 把合并结果里的策略、重试和超时写进类型化配置。没出现的字段不改。
+// ApplyTyped copies strategy, retries, and timeout from the merged document into the typed config. Fields that are absent are left unchanged.
 func ApplyTyped(s Host, m map[string]any) {
 	if v := str(m["routing_strategy"]); v != "" {
 		s.Config().RouterSettings.RoutingStrategy = v
@@ -107,7 +106,7 @@ func ApplyTyped(s Host, m map[string]any) {
 	}
 }
 
-// 接收路由、通用或 LiteLLM 设置的局部更新。需要管理身份。
+// Update accepts a partial update of router, general, or LiteLLM settings. It requires a management identity.
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -136,7 +135,7 @@ type generalField struct {
 	tab             string
 }
 
-// 控制台通用设置页要展示的字段定义，含类型和默认值。
+// generalFieldCatalog returns the field definitions the general-settings page shows, including type and default.
 func generalFieldCatalog() []generalField {
 	return []generalField{
 		{"enable_anthropic_prompt_caching", "Boolean", "Automatically add Anthropic prompt-cache breakpoints", false, nil, "prompt_caching"},
@@ -149,7 +148,7 @@ func generalFieldCatalog() []generalField {
 	}
 }
 
-// 带 stored_in_db 的通用设置列表。只在库里有的键为 true，只在 YAML 里的为 false，两边都没有为 null。
+// GeneralList returns the general-settings list with stored_in_db. A key only in the database is true, a key only in YAML is false, and a key in neither is null.
 func GeneralList(s Host) []map[string]any {
 	yamlBase := map[string]any{}
 	for k, v := range s.Config().GeneralRaw {
@@ -188,7 +187,7 @@ func GeneralList(s Host) []map[string]any {
 	return out
 }
 
-// 更新一个通用设置字段。缺少 field_name 时返回 400。
+// FieldUpdate updates one general-settings field. A missing field_name returns 400.
 func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -210,7 +209,7 @@ func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"status": "success", "field_name": name})
 }
 
-// 删除一个通用设置字段。删除后 YAML 基线重新生效。
+// FieldDelete deletes one general-settings field. After deletion the YAML baseline applies again.
 func FieldDelete(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return

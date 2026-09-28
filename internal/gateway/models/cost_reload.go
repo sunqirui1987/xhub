@@ -1,4 +1,4 @@
-// 价格表的立即重载和定时重载。控制台只认 status、models_count 和 scheduled 这几个字段。
+// Package models reloads the price map immediately or on a timer. The dashboard reads status, models_count, and scheduled.
 package models
 
 import (
@@ -22,7 +22,7 @@ type costReloadPlan struct {
 	NextRun       *string
 }
 
-// 立即重新加载价格表。成功时返回 status 和模型条数。
+// ReloadCostMap reloads the price map now. On success it returns status and the model count.
 func ReloadCostMap(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -45,7 +45,7 @@ func ReloadCostMap(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 按小时设置定时重载。小时必须是 1 到 168 的整数。
+// ScheduleCostMapReload arms a reload every given number of hours. The hour count must be an integer from 1 to 168.
 func ScheduleCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -71,7 +71,7 @@ func ScheduleCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 取消定时重载。上次运行时间保留。
+// CancelCostMapReload turns the timer off. The last-run time is kept.
 func CancelCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -87,7 +87,7 @@ func CancelCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"status": "success"})
 }
 
-// 返回定时重载是否开启、间隔、上次和下次时间。
+// CostMapReloadStatus reports whether the timer is on, its interval, and the last and next run times.
 func CostMapReloadStatus(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -95,7 +95,7 @@ func CostMapReloadStatus(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, loadCostReload(s).public())
 }
 
-// 读出已保存的定时计划。没有记录时视为未开启。
+// loadCostReload reads the saved timer. A missing record is treated as off.
 func loadCostReload(s Host) costReloadPlan {
 	if s.DB() == nil {
 		return costReloadPlan{}
@@ -125,7 +125,7 @@ func loadCostReload(s Host) costReloadPlan {
 	return plan
 }
 
-// 保存定时计划。控制台下次读取状态时用这份记录。
+// saveCostReload stores the timer. The next status read uses this record.
 func saveCostReload(s Host, plan costReloadPlan) error {
 	if s.DB() == nil {
 		return nil
@@ -133,7 +133,7 @@ func saveCostReload(s Host, plan costReloadPlan) error {
 	return s.DB().PutConfig(costReloadNS, costReloadKey, plan.public())
 }
 
-// 转成控制台读取的 JSON。未设置的时间是 null。
+// public is the JSON the dashboard reads for a cost reload plan. An unset time is null.
 func (p costReloadPlan) public() map[string]any {
 	var hours, last, next any
 	if p.IntervalHours != nil {

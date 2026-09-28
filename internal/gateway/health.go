@@ -1,4 +1,4 @@
-// 存活、就绪和给控制台的启动配置。不改模型，也不记花费。
+// Package gateway serves liveness, readiness, and the startup config the dashboard reads. These handlers do not change models or record spend.
 package gateway
 
 import (
@@ -7,13 +7,13 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 存活探针。不访问数据库，成功时 status 为 ok。
+// healthLive answers the liveness probe. It does not touch the database and returns status ok.
 func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
 }
 
-// 就绪探针。数据库 Ping 失败时 503。
+// healthReady answers the readiness probe. A failed database ping returns 503.
 func (s *Server) healthReady(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if err := s.Store.DB.Ping(); err != nil {
@@ -23,7 +23,7 @@ func (s *Server) healthReady(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ready"})
 }
 
-// 就绪详情。包含 litellm_version，供控制台判断网关版本。
+// healthDetails returns readiness details, including litellm_version, so the dashboard can tell which gateway build is running.
 func (s *Server) healthDetails(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{
@@ -35,7 +35,7 @@ func (s *Server) healthDetails(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 控制台启动配置，例如代理基址。不含秘密。
+// uiConfig returns the startup config the dashboard needs, such as the proxy base URL. It does not include secrets.
 func (s *Server) uiConfig(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{

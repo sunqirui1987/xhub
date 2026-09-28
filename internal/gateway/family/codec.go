@@ -1,4 +1,4 @@
-// 目录资源共用的 JSON 读取和分页。空正文得到空表，页码从 1 开始。
+// Package family shares JSON readers and paging. An empty body becomes an empty map, and page numbers start at 1.
 package family
 
 import (
@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -18,13 +18,13 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// str 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// asInt 把 JSON 数字收成 int。float64 会截断小数。其它类型返回 0。
+// asInt converts a JSON number to int. A float64 is truncated. Any other type returns 0.
 func asInt(v any) int {
 	switch t := v.(type) {
 	case float64:
@@ -36,7 +36,7 @@ func asInt(v any) int {
 	}
 }
 
-// idsFrom 从正文读取 id 列表。复数键优先，单数字段有值时再追加。
+// idsFrom reads an id list from the body. The plural key wins, and a non-empty singular field is appended.
 func idsFrom(body map[string]any, plural, singular string) []string {
 	var out []string
 	switch v := body[plural].(type) {
@@ -55,7 +55,7 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 	return out
 }
 
-// sliceMaps 按页切片。页码从 1 开始，size 小于 1 时按 50 处理，越界得到空切片。
+// sliceMaps returns one page of maps. Page numbers start at 1. A size below 1 is treated as 50. A page past the end returns an empty slice.
 func sliceMaps(list []map[string]any, page, size int) []map[string]any {
 	if size < 1 {
 		size = 50

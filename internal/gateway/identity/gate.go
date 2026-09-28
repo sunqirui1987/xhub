@@ -1,4 +1,4 @@
-// 用户、团队、组织、项目和预算的 HTTP 处理。路由由本包的 Module 挂上，本包不引用 gateway。
+// Package identity serves HTTP for users, teams, organizations, projects, and budgets. Module mounts the routes. This package does not import gateway.
 package identity
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// Gate 是这些管理接口需要的进程能力。实现是 *gateway.Server。
+// Gate is the process capability these management handlers need. *gateway.Server implements it.
 type Gate interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store

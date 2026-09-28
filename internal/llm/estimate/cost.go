@@ -1,13 +1,13 @@
-// 从价格表读取单次调用的输入和输出单价。找不到模型时不算零。
+// Package estimate reads the input and output unit price of one call. A missing model is not priced as zero.
 package estimate
 
 import "strings"
 
-// Margin 是一条加价规则。
+// Margin is one markup rule.
 //
-// LiteLLM 的 cost_margin_config 有两种写法。数字表示纯百分比，例如 0.10 是加 10%，
-// 这时只看 Percent，并把 IsPercent 设为 true。对象可以同时有 percentage 和
-// fixed_amount，百分比按成本相乘，固定金额再加一次，单位都是美元。
+// LiteLLM cost_margin_config has two forms. A number is a pure percent, so 0.10 adds 10 percent,
+// and only Percent is used with IsPercent set true. An object may have both percentage and
+// fixed_amount. The percent multiplies the cost and the fixed amount is added once. Both are in dollars.
 type Margin struct {
 	Percent     float64
 	FixedAmount float64
@@ -16,11 +16,11 @@ type Margin struct {
 	IsPercent   bool
 }
 
-// ApplyDiscount 按供应商标识从折扣表里取一个比例，从基础费用里减掉。
+// ApplyDiscount looks up a rate for the provider in the discount map and subtracts it from the base cost.
 //
-// 折扣表的键是 custom_llm_provider，值是小数：0.05 表示减 5%。
-// 没有这个供应商，或者供应商名为空，费用保持原样。
-// 返回值依次是折后费用、折扣比例、折扣金额。
+// Discount-map keys are custom_llm_provider. The value is a fraction: 0.05 means subtract 5 percent.
+// A missing provider, or an empty provider name, leaves the cost unchanged.
+// The results are the discounted cost, the discount fraction, and the discount amount.
 func ApplyDiscount(baseCost float64, provider string, discounts map[string]float64) (final, percent, amount float64) {
 	if provider != "" {
 		if rate, ok := discounts[provider]; ok {
@@ -31,10 +31,10 @@ func ApplyDiscount(baseCost float64, provider string, discounts map[string]float
 	return baseCost, 0, 0
 }
 
-// ApplyMargin 在折扣之后加价。供应商自己的规则优先于键名 global 的全局规则。
+// ApplyMargin adds a markup after the discount. A provider's own rule wins over the global rule stored under the key global.
 //
-// 返回值依次是加价后的费用、百分比、固定金额、加价合计。
-// 没有任何规则时四个值里后三个是 0，费用不变。
+// The results are the marked-up cost, the percent, the fixed amount, and the markup total.
+// With no rule the last three values are 0 and the cost is unchanged.
 func ApplyMargin(baseCost float64, provider string, margins map[string]Margin) (final, percent, fixed, total float64) {
 	cfg, ok := marginFor(provider, margins)
 	if !ok {
@@ -56,7 +56,7 @@ func ApplyMargin(baseCost float64, provider string, margins map[string]Margin) (
 	return baseCost + total, percent, fixed, total
 }
 
-// 按供应商找加价。没有单独配置时 ok 为 false，调用方保持原价。
+// marginFor finds the markup for a provider. With no specific configuration ok is false and the caller keeps the original price.
 func marginFor(provider string, margins map[string]Margin) (Margin, bool) {
 	if provider != "" {
 		if cfg, ok := margins[provider]; ok {
@@ -67,17 +67,17 @@ func marginFor(provider string, margins map[string]Margin) (Margin, bool) {
 	return cfg, ok
 }
 
-// TokenCost 是文本补全不计缓存时的费用。
-// 提示词 token 乘输入单价，补全 token 乘输出单价。单价是每 token 美元。
+// TokenCost is the cost of a text completion when cache tokens are not billed separately.
+// Prompt tokens multiply the input rate and completion tokens multiply the output rate. Rates are dollars per token.
 func TokenCost(promptTokens, completionTokens int, inputRate, outputRate float64) (float64, float64) {
 	return float64(promptTokens) * inputRate, float64(completionTokens) * outputRate
 }
 
-// MapTrafficType 把 Gemini usageMetadata.trafficType 收成计费档。
+// MapTrafficType folds a Gemini usageMetadata.trafficType into a billing tier.
 //
-// ON_DEMAND_PRIORITY 用 priority 单价。FLEX、BATCH、ON_DEMAND_FLEX 用 flex 单价。
-// ON_DEMAND 是标准价，tier 为空但 known 和 standard 都为 true。
-// 空字符串和不认识的值 known 为 false，调用方应回退到标准价。
+// ON_DEMAND_PRIORITY uses the priority rate. FLEX, BATCH, and ON_DEMAND_FLEX use the flex rate.
+// ON_DEMAND is the standard price. The tier is empty, but known and standard are both true.
+// An empty string or an unknown value sets known to false, and the caller should fall back to the standard price.
 func MapTrafficType(trafficType string) (tier string, known, standard bool) {
 	if trafficType == "" {
 		return "", false, false
@@ -94,10 +94,10 @@ func MapTrafficType(trafficType string) (tier string, known, standard bool) {
 	}
 }
 
-// NormalizeServiceTier 判断 service_tier 能不能拿去查价。
+// NormalizeServiceTier reports whether service_tier can be used to look up a price.
 //
-// "auto" 只是路由偏好，不是账单档。非字符串也不是。这两种都返回 ok=false，
-// 后面的查价不会对空字符串调用 lower，也就不会把标准价查错。
+// "auto" is only a routing preference, not a billing tier. A non-string is not one either. Both return ok false,
+// so a later lookup does not call lower on an empty string and mis-read the standard price.
 func NormalizeServiceTier(serviceTier string, isString bool) (string, bool) {
 	if !isString || strings.EqualFold(serviceTier, "auto") {
 		return "", false

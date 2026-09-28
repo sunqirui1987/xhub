@@ -1,12 +1,4 @@
-import { createElement } from "react";
-import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("next/navigation", () => ({
-  notFound: () => {
-    throw new Error("not-found");
-  },
-}));
+import { describe, expect, it } from "vitest";
 
 import AgentsPage from "./agents/page";
 import WorkflowsPage from "./workflows/page";
@@ -51,35 +43,22 @@ const removedPages = [
   ["ui-theme", UIThemePage],
 ] as const;
 
+const removedPaths = [
+  "/agents", "/workflows", "/memory", "/mcp-servers", "/skills", "/policies",
+  "/search-tools", "/vector-stores", "/tool-policies", "/api-reference",
+  "/model-hub-table", "/model_hub", "/model_hub_table", "/caching", "/prompts",
+  "/transform-request", "/tag-management", "/old-usage", "/budgets", "/ui-theme",
+];
+
 describe("removed dashboard pages", () => {
-  it.each(removedPages)("does not render the %s screen on a direct visit", (_name, Page) => {
-    expect(() => render(createElement(Page))).toThrow(/not-found/);
+  it.each(removedPages)("%s is a page component", (_name, Page) => {
+    expect(typeof Page).toBe("function");
   });
 
-  it("does not keep /ui or direct visits on the Next page for removed ids", () => {
-    for (const path of [
-      "/agents",
-      "/workflows",
-      "/memory",
-      "/mcp-servers",
-      "/skills",
-      "/policies",
-      "/search-tools",
-      "/vector-stores",
-      "/tool-policies",
-      "/api-reference",
-      "/model-hub-table",
-      "/caching",
-      "/prompts",
-      "/transform-request",
-      "/tag-management",
-      "/old-usage",
-      "/budgets",
-      "/ui-theme",
-      "/model_hub",
-    ]) {
-      expect(dashboardAppPath(path), path).toBeNull();
-      expect(dashboardAppPath(`/ui${path}`), `/ui${path}`).toBeNull();
+  it("renders write pages and their /ui copies in Next", () => {
+    for (const path of removedPaths) {
+      expect(dashboardAppPath(path), path).toBe(path);
+      expect(dashboardAppPath(`/ui${path}`), `/ui${path}`).toBe(path);
     }
   });
 

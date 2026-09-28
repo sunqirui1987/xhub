@@ -1,4 +1,4 @@
-// 本包共用的 JSON 读取。空正文得到空表，坏数字收成 0。
+// Package gateway shares JSON readers. An empty body becomes an empty map, and a bad number becomes 0.
 package gateway
 
 import (
@@ -7,13 +7,13 @@ import (
 	"net/http"
 )
 
-// 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// 浅拷贝 map。调用方随后改副本不会改到原表。
+// cloneMap shallow-copies a map. Later edits to the copy do not change the original.
 func cloneMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
@@ -22,7 +22,7 @@ func cloneMap(m map[string]any) map[string]any {
 	return out
 }
 
-// 把 JSON 数字收成 float64。int 也可以。其它类型返回 0。
+// asFloat converts a JSON number to float64. An int is accepted. Any other type returns 0.
 func asFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
@@ -34,7 +34,7 @@ func asFloat(v any) float64 {
 	}
 }
 
-// 把 JSON 数字收成 int。float64 会截断小数。其它类型返回 0。
+// asInt converts a JSON number to int. A float64 is truncated. Any other type returns 0.
 func asInt(v any) int {
 	switch t := v.(type) {
 	case float64:
@@ -48,10 +48,10 @@ func asInt(v any) int {
 
 type errStr string
 
-// 把内部错误字符串当成 error。内容就是给调用方的短原因。
+// Error returns the short reason stored in this error string.
 func (e errStr) Error() string { return string(e) }
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表，调用方自己决定缺字段怎么处理。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map, and the caller decides how to treat a missing field.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -62,7 +62,7 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// idsFrom 从正文读取 id 列表。复数键优先，单数字段有值时再追加，两者都没有则得到 nil。
+// idsFrom reads an id list from the body. The plural key wins, a non-empty singular field is appended, and neither present returns nil.
 func idsFrom(body map[string]any, plural, singular string) []string {
 	var out []string
 	switch v := body[plural].(type) {
@@ -81,7 +81,7 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 	return out
 }
 
-// sliceMaps 按页切片。页码从 1 开始，size 小于 1 时按 50 处理，越界得到空切片。
+// sliceMaps returns one page of maps. Page numbers start at 1. A size below 1 is treated as 50. A page past the end returns an empty slice.
 func sliceMaps(list []map[string]any, page, size int) []map[string]any {
 	if size < 1 {
 		size = 50

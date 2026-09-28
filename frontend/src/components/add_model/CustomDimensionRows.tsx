@@ -82,7 +82,7 @@ export default function CustomDimensionRows({ rows, disabled, onChange, onWeight
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {([t("keywords"), t("patterns")] as const).map((field) => (
+            {(["keywords", "patterns"] as const).map((field) => (
               <div key={field} className="min-w-0 space-y-1">
                 <Label htmlFor={`${row.id}-${field}`}>
                   {t("{value0}(one per line)", { value0: (field === "keywords" ? "Keywords" : t("Regex patterns")) })}</Label>

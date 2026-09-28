@@ -1,15 +1,14 @@
-// 选中部署之后，把操作和供应商交给 llm 编码或解码。本文件不挑选部署。
+// Package router orders deployments that share one public model name. After a deployment is chosen, encoding and decoding are delegated to the llm package.
 package router
 
 import "github.com/sunqirui1987/xhub/internal/llm"
 
-// EncodeRequest 把对外 JSON 收成上游请求体。
-// 具体协议在 internal/llm。这里只保留原来的函数名，避免数据面和测试各写一份。
+// EncodeRequest turns the public JSON body into the upstream request body. The protocol details live in internal/llm. This wrapper keeps the old name so callers do not each import that package.
 func EncodeRequest(op, provider string, body map[string]any, realModel string) ([]byte, error) {
 	return llm.Encode(op, provider, body, realModel)
 }
 
-// DecodeResponse 把上游响应收成对外形状，并把 model 改回调用别名。
+// DecodeResponse turns an upstream response into the public shape and puts the caller's model alias back into the model field.
 func DecodeResponse(op, provider, alias string, raw []byte) []byte {
 	return llm.Decode(op, provider, alias, raw)
 }

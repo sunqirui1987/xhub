@@ -1,15 +1,15 @@
-// 虚拟密钥模块的路由。路径跟处理函数放在一起，进程只负责装上这个模块。
+// Package keys registers virtual-key routes next to their handlers. The process only mounts this module.
 package keys
 
 import (
 	"net/http"
 
-	"github.com/sunqirui1987/xhub/internal/gateway/module"
+	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// Module 是虚拟密钥的创建、列出、更新和轮换。
-func Module(h Host) module.Module {
-	return module.Bind("keys", func(reg module.Registrar) {
+// Module creates, lists, updates, and rotates virtual keys.
+func Module(h Host) httpx.Module {
+	return httpx.Bind("keys", func(reg httpx.Registrar) {
 		reg.Handle("POST /key/generate", func(w http.ResponseWriter, r *http.Request) { Generate(h, w, r) })
 		reg.Handle("POST /key/service-account/generate", func(w http.ResponseWriter, r *http.Request) { ServiceAccount(h, w, r) })
 		reg.Handle("GET /key/list", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })

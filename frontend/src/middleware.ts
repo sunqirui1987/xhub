@@ -31,6 +31,27 @@ const APP_PAGES = new Set([
   "/chat/integrations",
   "/chat/logs",
   "/chat/usage",
+  "/model_hub",
+  "/model_hub_table",
+  "/model-hub-table",
+  "/agents",
+  "/workflows",
+  "/memory",
+  "/mcp-servers",
+  "/skills",
+  "/policies",
+  "/search-tools",
+  "/vector-stores",
+  "/tool-policies",
+  "/budgets",
+  "/caching",
+  "/prompts",
+  "/transform-request",
+  "/tag-management",
+  "/ui-theme",
+  "/old-usage",
+  "/api-reference",
+  "/mcp/oauth/callback",
 ]);
 
 function stripSlash(path: string): string {
@@ -38,6 +59,13 @@ function stripSlash(path: string): string {
     return path.slice(0, -1);
   }
   return path || "/";
+}
+
+// 页面路径上的写请求是网关 API。GET /guardrails 渲染控制台，POST /guardrails 创建护栏。
+export function appPageWritePath(method: string, pathname: string): string | null {
+  if (method === "GET" || method === "HEAD") return null;
+  const path = stripSlash(pathname) || "/";
+  return APP_PAGES.has(path) ? path : null;
 }
 
 // dashboardAppPath 是 Next 真正渲染的控制台路径。不在页面集合里的地址，包括 /ui 前缀，交给网关。
@@ -74,6 +102,11 @@ export function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = appPath;
     return NextResponse.rewrite(url);
+  }
+
+  const writePath = appPageWritePath(req.method, pathname);
+  if (writePath) {
+    return NextResponse.rewrite(new URL(writePath + search, GATEWAY));
   }
 
   if (dashboardAppPath(pathname)) {

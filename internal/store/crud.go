@@ -1,4 +1,4 @@
-// 用户、团队、组织、项目、预算和键值的读写。
+// Package store reads and writes users, teams, organizations, projects, budgets, and key-value rows.
 package store
 
 import (
@@ -11,7 +11,7 @@ import (
 	"xorm.io/xorm/schemas"
 )
 
-// 空字符串时用备用值。
+// nz returns the fallback when the string is empty.
 func nz(s, fallback string) string {
 	if s == "" {
 		return fallback
@@ -19,7 +19,7 @@ func nz(s, fallback string) string {
 	return s
 }
 
-// 把可空浮点收成指针。无效时为 nil。
+// fptr turns a nullable float into a pointer. An invalid value is nil.
 func fptr(v sql.NullFloat64) *float64 {
 	if !v.Valid {
 		return nil
@@ -28,7 +28,7 @@ func fptr(v sql.NullFloat64) *float64 {
 	return &x
 }
 
-// 把浮点指针还原成可空浮点。
+// nullF turns a float pointer back into a nullable float.
 func nullF(p *float64) sql.NullFloat64 {
 	if p == nil {
 		return sql.NullFloat64{}
@@ -36,7 +36,7 @@ func nullF(p *float64) sql.NullFloat64 {
 	return sql.NullFloat64{Float64: *p, Valid: true}
 }
 
-// 把可空整数收成指针。无效时为 nil。
+// iptr turns a nullable integer into a pointer. An invalid value is nil.
 func iptr(v sql.NullInt64) *int {
 	if !v.Valid {
 		return nil
@@ -45,7 +45,7 @@ func iptr(v sql.NullInt64) *int {
 	return &x
 }
 
-// 把整数指针还原成可空整数。
+// nullI turns an integer pointer back into a nullable integer.
 func nullI(p *int) sql.NullInt64 {
 	if p == nil {
 		return sql.NullInt64{}
@@ -53,7 +53,7 @@ func nullI(p *int) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(*p), Valid: true}
 }
 
-// 解析 RFC3339 时间。空字符串得到零时间。
+// parseRFC parses an RFC3339 time. An empty string returns the zero time.
 func parseRFC(s string) time.Time {
 	if s == "" {
 		return time.Time{}
@@ -65,18 +65,18 @@ func parseRFC(s string) time.Time {
 	return t
 }
 
-// 按主键读一行。
+// one reads one row by primary key.
 func (s *Store) one(bean interface{}, id interface{}) (bool, error) {
 	return s.Engine.ID(id).Get(bean)
 }
 
-// 清掉这些表的查询缓存和行缓存。表名带不带 schema 都清。
+// bust clears the query cache and the row cache for these tables, both with and without a schema in the name.
 func (s *Store) bust(beans ...interface{}) {
 	if s == nil || s.Engine == nil {
 		return
 	}
 	for _, bean := range beans {
-		// 语句缓存的表名带 schema，引擎自带的 ClearCache 不带。两边都清。
+		// The statement cache names tables with a schema, and the engine ClearCache does not. Both are cleared.
 		for _, withSchema := range []bool{true, false} {
 			name := s.Engine.TableName(bean, withSchema)
 			cacher := s.Engine.GetCacher(name)
@@ -89,7 +89,7 @@ func (s *Store) bust(beans ...interface{}) {
 	}
 }
 
-// 没有改到行时返回无行错误。
+// rowsAffected returns a no-rows error when no row was changed.
 func rowsAffected(n int64, err error) error {
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func rowsAffected(n int64, err error) error {
 	return nil
 }
 
-// 把用户表行转成实体。
+// userFrom turns a user table row into an entity.
 func userFrom(r userRow) Entity {
 	e := Entity{
 		ID: r.UserID, Email: r.UserEmail, Role: r.UserRole, Alias: r.UserAlias,
@@ -110,7 +110,7 @@ func userFrom(r userRow) Entity {
 	return e
 }
 
-// 把用户实体转成表行。空模型列表补成空数组。
+// userTo turns a user entity into a table row. An empty model list becomes an empty array.
 func userTo(e Entity) userRow {
 	if e.ModelsJSON == "" {
 		e.ModelsJSON = "[]"
@@ -126,14 +126,14 @@ func userTo(e Entity) userRow {
 	}
 }
 
-// 插入用户，并清掉用户缓存。
+// InsertUser inserts a user and clears the user cache.
 func (s *Store) InsertUser(e Entity) error {
 	_, err := s.Engine.Insert(userTo(e))
 	s.bust(new(userRow))
 	return err
 }
 
-// 列出全部用户。
+// ListUsers lists every user.
 func (s *Store) ListUsers() ([]Entity, error) {
 	var rows []userRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -146,7 +146,7 @@ func (s *Store) ListUsers() ([]Entity, error) {
 	return out, nil
 }
 
-// 按 id 读取用户。没有这一行时返回无行错误。
+// GetUser reads a user by id. A missing row returns a no-rows error.
 func (s *Store) GetUser(id string) (*Entity, error) {
 	var r userRow
 	ok, err := s.one(&r, id)
@@ -160,7 +160,7 @@ func (s *Store) GetUser(id string) (*Entity, error) {
 	return &e, nil
 }
 
-// 先按 id 找登录用户，找不到再按邮箱找。
+// FindUserLogin looks up a login user by id first and then by email.
 func (s *Store) FindUserLogin(username string) (*Entity, error) {
 	if e, err := s.GetUser(username); err == nil {
 		return e, nil
@@ -178,7 +178,7 @@ func (s *Store) FindUserLogin(username string) (*Entity, error) {
 	return nil, sql.ErrNoRows
 }
 
-// 更新用户资料。找不到返回无行。
+// UpdateUser updates a user profile. A missing row returns a no-rows error.
 func (s *Store) UpdateUser(e Entity) error {
 	row := userTo(e)
 	n, err := s.Engine.ID(e.ID).Cols("user_email", "user_role", "user_alias", "models_json", "max_budget", "password", "extra_json").Update(&row)
@@ -186,21 +186,21 @@ func (s *Store) UpdateUser(e Entity) error {
 	return rowsAffected(n, err)
 }
 
-// 按 id 删除用户，并清掉缓存。
+// DeleteUser deletes a user by id and clears the cache.
 func (s *Store) DeleteUser(id string) error {
 	n, err := s.Engine.ID(id).Delete(&userRow{})
 	s.bust(new(userRow))
 	return rowsAffected(n, err)
 }
 
-// 给用户加上一笔花费。用户不存在时返回无行。
+// AddUserSpend adds a spend delta to a user. A missing user returns a no-rows error.
 func (s *Store) AddUserSpend(id string, delta float64) error {
 	n, err := s.Engine.ID(id).Incr("spend", delta).Update(&userRow{})
 	s.bust(new(userRow))
 	return rowsAffected(n, err)
 }
 
-// 把团队表行转成实体。组织 id 放在 TeamID 上。
+// teamFrom turns a team table row into an entity. The organization id is stored on TeamID.
 func teamFrom(r teamRow) Entity {
 	return Entity{
 		ID: r.TeamID, Alias: r.TeamAlias, TeamID: r.OrganizationID, ModelsJSON: nz(r.ModelsJSON, "[]"),
@@ -208,7 +208,7 @@ func teamFrom(r teamRow) Entity {
 	}
 }
 
-// 把团队实体转成表行。TeamID 写入组织 id。
+// teamTo turns a team entity into a table row. TeamID is written as the organization id.
 func teamTo(e Entity) teamRow {
 	if e.ModelsJSON == "" {
 		e.ModelsJSON = "[]"
@@ -223,14 +223,14 @@ func teamTo(e Entity) teamRow {
 	}
 }
 
-// 插入团队，并清掉团队缓存。
+// InsertTeam inserts a team and clears the team cache.
 func (s *Store) InsertTeam(e Entity) error {
 	_, err := s.Engine.Insert(teamTo(e))
 	s.bust(new(teamRow))
 	return err
 }
 
-// 列出全部团队。
+// ListTeams lists every team.
 func (s *Store) ListTeams() ([]Entity, error) {
 	var rows []teamRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -243,7 +243,7 @@ func (s *Store) ListTeams() ([]Entity, error) {
 	return out, nil
 }
 
-// 按 id 读取团队。没有这一行时返回无行错误。
+// GetTeam reads a team by id. A missing row returns a no-rows error.
 func (s *Store) GetTeam(id string) (*Entity, error) {
 	var r teamRow
 	ok, err := s.one(&r, id)
@@ -257,7 +257,7 @@ func (s *Store) GetTeam(id string) (*Entity, error) {
 	return &e, nil
 }
 
-// 更新团队。找不到返回无行。
+// UpdateTeam updates a team. A missing row returns a no-rows error.
 func (s *Store) UpdateTeam(e Entity) error {
 	row := teamTo(e)
 	n, err := s.Engine.ID(e.ID).Cols("team_alias", "organization_id", "models_json", "max_budget", "extra_json").Update(&row)
@@ -265,21 +265,21 @@ func (s *Store) UpdateTeam(e Entity) error {
 	return rowsAffected(n, err)
 }
 
-// 按 id 删除团队，并清掉缓存。
+// DeleteTeam deletes a team by id and clears the cache.
 func (s *Store) DeleteTeam(id string) error {
 	n, err := s.Engine.ID(id).Delete(&teamRow{})
 	s.bust(new(teamRow))
 	return rowsAffected(n, err)
 }
 
-// 给团队加上一笔花费。团队不存在时返回无行。
+// AddTeamSpend adds a spend delta to a team. A missing team returns a no-rows error.
 func (s *Store) AddTeamSpend(id string, delta float64) error {
 	n, err := s.Engine.ID(id).Incr("spend", delta).Update(&teamRow{})
 	s.bust(new(teamRow))
 	return rowsAffected(n, err)
 }
 
-// 把组织实体收成表行。模型和花费放进 extra_json。
+// packOrg turns an organization entity into a table row. Models and spend go into extra_json.
 func packOrg(e Entity) orgRow {
 	m := e.Extra()
 	var models any = []any{}
@@ -304,7 +304,7 @@ func packOrg(e Entity) orgRow {
 	return orgRow{ID: e.ID, Name: e.Alias, Status: "active", CreatedAt: created.UTC(), UpdatedAt: time.Now().UTC(), ExtraJSON: e.ExtraJSON}
 }
 
-// 把组织表行转成实体。花费从 extra_json 读出。
+// orgFrom turns an organization table row into an entity. Spend is read from extra_json.
 func orgFrom(r orgRow) Entity {
 	e := Entity{ID: r.ID, Alias: r.Name, ExtraJSON: r.ExtraJSON, CreatedAt: r.CreatedAt.UTC()}
 	m := e.Extra()
@@ -325,14 +325,14 @@ func orgFrom(r orgRow) Entity {
 	return e
 }
 
-// 插入组织，并清掉组织缓存。
+// InsertOrg inserts an organization and clears the organization cache.
 func (s *Store) InsertOrg(e Entity) error {
 	_, err := s.Engine.Insert(packOrg(e))
 	s.bust(new(orgRow))
 	return err
 }
 
-// 按 id 读取组织。没有这一行时返回无行错误。
+// GetOrg reads an organization by id. A missing row returns a no-rows error.
 func (s *Store) GetOrg(id string) (*Entity, error) {
 	var r orgRow
 	ok, err := s.one(&r, id)
@@ -346,7 +346,7 @@ func (s *Store) GetOrg(id string) (*Entity, error) {
 	return &e, nil
 }
 
-// 列出全部组织。
+// ListOrgs lists every organization.
 func (s *Store) ListOrgs() ([]Entity, error) {
 	var rows []orgRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -359,7 +359,7 @@ func (s *Store) ListOrgs() ([]Entity, error) {
 	return out, nil
 }
 
-// 更新组织的名字和额外字段。花费以库里的当前值为准。
+// UpdateOrg updates the organization name and extra fields. Spend stays at the current value in the database.
 func (s *Store) UpdateOrg(e Entity) error {
 	orgSpendMu.Lock()
 	defer orgSpendMu.Unlock()
@@ -370,12 +370,12 @@ func (s *Store) UpdateOrg(e Entity) error {
 	if e.ExtraJSON == "" {
 		e.ExtraJSON = cur.ExtraJSON
 	}
-	// 调用方手里的花费可能是刷盘前读到的。别名更新不能把已入账的花费写回去。
+	// The spend the caller holds may have been read before a flush. An alias update must not write that stale spend back.
 	e.Spend = cur.Spend
 	return s.writeOrg(e, cur.CreatedAt)
 }
 
-// 给组织加上一笔花费。和刷盘共用一把锁，避免丢掉增量。
+// AddOrgSpend adds a spend delta to an organization. It shares the flush lock so a delta is not dropped.
 func (s *Store) AddOrgSpend(id string, delta float64) error {
 	orgSpendMu.Lock()
 	defer orgSpendMu.Unlock()
@@ -387,7 +387,7 @@ func (s *Store) AddOrgSpend(id string, delta float64) error {
 	return s.writeOrg(*e, e.CreatedAt)
 }
 
-// 把组织的名字和 extra_json 写回。调用方要已经拿着花费锁。
+// writeOrg writes the organization name and extra_json. The caller must already hold the spend lock.
 func (s *Store) writeOrg(e Entity, created time.Time) error {
 	row := packOrg(e)
 	row.CreatedAt = created
@@ -401,7 +401,7 @@ var controlOrgChildren = []string{
 	"deployments", "models", "providers", "projects",
 }
 
-// 删除组织及其子表里的行。团队不删。
+// DeleteOrg deletes an organization and rows in its child tables. Teams are not deleted.
 func (s *Store) DeleteOrg(id string) error {
 	sess := s.Engine.NewSession()
 	defer sess.Close()
@@ -434,7 +434,7 @@ func (s *Store) DeleteOrg(id string) error {
 	return nil
 }
 
-// 项目所属组织。优先用团队上的组织，其次用额外字段。
+// projectOrgID is the organization a project belongs to. The team's organization wins, then the extra field.
 func (s *Store) projectOrgID(e Entity) string {
 	if e.TeamID != "" {
 		var team teamRow
@@ -449,7 +449,7 @@ func (s *Store) projectOrgID(e Entity) string {
 	return ""
 }
 
-// 把项目实体收成表行。团队和花费放进 extra_json。
+// packProject turns a project entity into a table row. The team and spend go into extra_json.
 func packProject(e Entity, orgID string) projectRow {
 	m := e.Extra()
 	var models any = []any{}
@@ -483,7 +483,7 @@ func packProject(e Entity, orgID string) projectRow {
 	}
 }
 
-// 把项目表行转成实体，并把组织 id 放回额外字段。
+// projectFrom turns a project table row into an entity and puts the organization id back into the extra fields.
 func projectFrom(r projectRow) Entity {
 	e := Entity{ID: r.ID, Alias: r.Name, Blocked: r.Blocked != 0, ExtraJSON: r.ExtraJSON, CreatedAt: r.CreatedAt.UTC()}
 	m := e.Extra()
@@ -508,14 +508,14 @@ func projectFrom(r projectRow) Entity {
 	return e
 }
 
-// 插入项目，并清掉项目缓存。
+// InsertProject inserts a project and clears the project cache.
 func (s *Store) InsertProject(e Entity) error {
 	_, err := s.Engine.Insert(packProject(e, s.projectOrgID(e)))
 	s.bust(new(projectRow))
 	return err
 }
 
-// 按 id 读取项目。没有这一行时返回无行错误。
+// GetProject reads a project by id. A missing row returns a no-rows error.
 func (s *Store) GetProject(id string) (*Entity, error) {
 	var r projectRow
 	ok, err := s.one(&r, id)
@@ -529,7 +529,7 @@ func (s *Store) GetProject(id string) (*Entity, error) {
 	return &e, nil
 }
 
-// 列出全部项目。
+// ListProjects lists every project.
 func (s *Store) ListProjects() ([]Entity, error) {
 	var rows []projectRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -542,7 +542,7 @@ func (s *Store) ListProjects() ([]Entity, error) {
 	return out, nil
 }
 
-// 更新项目。找不到返回无行。
+// UpdateProject updates a project. A missing row returns a no-rows error.
 func (s *Store) UpdateProject(e Entity) error {
 	cur, err := s.GetProject(e.ID)
 	if err != nil {
@@ -561,14 +561,14 @@ func (s *Store) UpdateProject(e Entity) error {
 	return rowsAffected(n, err)
 }
 
-// 按 id 删除项目，并清掉缓存。
+// DeleteProject deletes a project by id and clears the cache.
 func (s *Store) DeleteProject(id string) error {
 	n, err := s.Engine.ID(id).Delete(&projectRow{})
 	s.bust(new(projectRow))
 	return rowsAffected(n, err)
 }
 
-// 把预算转成控制面表行。金额写到 limit_amount。
+// budgetTo turns a budget into a control-plane table row. The amount is written to limit_amount.
 func budgetTo(b Budget) budgetRow {
 	limit := 0.0
 	if b.MaxBudget.Valid {
@@ -603,7 +603,7 @@ func budgetTo(b Budget) budgetRow {
 	return row
 }
 
-// 把预算表行转回网关用的预算。
+// budgetFrom turns a budget table row back into the budget the gateway uses.
 func budgetFrom(r budgetRow) Budget {
 	b := Budget{
 		ID: r.ID, MaxBudget: sql.NullFloat64{Float64: r.LimitAmount, Valid: true},
@@ -619,14 +619,14 @@ func budgetFrom(r budgetRow) Budget {
 	return b
 }
 
-// 插入预算，并清掉预算缓存。
+// InsertBudget inserts a budget and clears the budget cache.
 func (s *Store) InsertBudget(b Budget) error {
 	_, err := s.Engine.Insert(budgetTo(b))
 	s.bust(new(budgetRow))
 	return err
 }
 
-// 列出全部预算，按对外字段名返回。
+// ListBudgets lists every budget using the public field names.
 func (s *Store) ListBudgets() ([]map[string]any, error) {
 	var rows []budgetRow
 	if err := s.Engine.Find(&rows); err != nil {
@@ -639,7 +639,7 @@ func (s *Store) ListBudgets() ([]map[string]any, error) {
 	return out, nil
 }
 
-// 按 id 读取预算。没有这一行时返回无行错误。
+// GetBudget reads a budget by id. A missing row returns a no-rows error.
 func (s *Store) GetBudget(id string) (*Budget, error) {
 	var r budgetRow
 	ok, err := s.one(&r, id)
@@ -653,7 +653,7 @@ func (s *Store) GetBudget(id string) (*Budget, error) {
 	return &b, nil
 }
 
-// 更新预算额度、限流和重置时间。找不到返回无行。
+// UpdateBudget updates the budget amount, rate limits, and reset time. A missing row returns a no-rows error.
 func (s *Store) UpdateBudget(b Budget) error {
 	row := budgetTo(b)
 	n, err := s.Engine.ID(b.ID).Cols(
@@ -664,14 +664,14 @@ func (s *Store) UpdateBudget(b Budget) error {
 	return rowsAffected(n, err)
 }
 
-// 按 id 删除预算，并清掉缓存。
+// DeleteBudget deletes a budget by id and clears the cache.
 func (s *Store) DeleteBudget(id string) error {
 	n, err := s.Engine.ID(id).Delete(&budgetRow{})
 	s.bust(new(budgetRow))
 	return rowsAffected(n, err)
 }
 
-// 写入一条键值。已有则更新，没有则插入。
+// PutKV writes one key-value row. An existing row is updated and a missing row is inserted.
 func (s *Store) PutKV(kind, id, body string) error {
 	row := kvRow{Kind: kind, ID: id, Body: body, CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 	n, err := s.Engine.ID(coreIDs(kind, id)).Cols("body", "created_at").Update(&row)
@@ -685,12 +685,12 @@ func (s *Store) PutKV(kind, id, body string) error {
 	return err
 }
 
-// 组合主键。顺序跟表结构里的主键列一致。
+// coreIDs builds the composite primary key. The order matches the primary-key columns in the table.
 func coreIDs(kind, id string) schemas.PK {
 	return schemas.PK{kind, id}
 }
 
-// 按种类和 id 读取一条键值。
+// GetKV reads one key-value row by kind and id.
 func (s *Store) GetKV(kind, id string) (map[string]any, error) {
 	var r kvRow
 	ok, err := s.Engine.ID(coreIDs(kind, id)).Get(&r)
@@ -710,14 +710,14 @@ func (s *Store) GetKV(kind, id string) (map[string]any, error) {
 	return m, nil
 }
 
-// 删除一条键值，并清掉缓存。找不到返回无行。
+// DeleteKV deletes one key-value row and clears the cache. A missing row returns a no-rows error.
 func (s *Store) DeleteKV(kind, id string) error {
 	n, err := s.Engine.ID(coreIDs(kind, id)).Delete(&kvRow{})
 	s.bust(new(kvRow))
 	return rowsAffected(n, err)
 }
 
-// 列出某个种类下的全部键值。
+// ListKV lists every key-value row of one kind.
 func (s *Store) ListKV(kind string) ([]map[string]any, error) {
 	var rows []kvRow
 	if err := s.Engine.Where(builder.Eq{"kind": kind}).Find(&rows); err != nil {

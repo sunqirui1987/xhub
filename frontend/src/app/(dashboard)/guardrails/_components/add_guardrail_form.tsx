@@ -227,6 +227,7 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
   const [toolPermissionConfig, setToolPermissionConfig] = useState<ToolPermissionConfig>(
     createEmptyToolPermissionConfig,
   );
+  const [typedGuardrailName, setTypedGuardrailName] = useState("");
 
   const isToolPermissionProvider = useMemo(() => {
     if (!selectedProvider) {
@@ -406,6 +407,7 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
     setSelectedContentCategories([]);
     setPendingCategorySelection("");
     setToolPermissionConfig(createEmptyToolPermissionConfig());
+    setTypedGuardrailName("");
     setSelectedEndpointType("");
     setEndSessionAfterNFails(undefined);
     setOnViolation("warn");
@@ -422,6 +424,10 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
   const handleSubmit = async () => {
     try {
       setLoading(true);
+      const rememberedName = typedGuardrailName.trim();
+      if (rememberedName && !asText(form.getValues("guardrail_name"))) {
+        form.setValue("guardrail_name", rememberedName);
+      }
       // First validate currently visible fields
       if (!(await form.trigger())) {
         toast.fromError(t("Failed to create guardrail: please fix the highlighted fields"));
@@ -681,8 +687,17 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
           label={t("Guardrail Name")}
           rules={requiredRule(t("Please enter a guardrail name"))}
         >
-          {({ ref, value, ...field }) => (
-            <Input {...field} ref={ref} value={asText(value)} placeholder={t("Enter a name for this guardrail")} />
+          {({ ref, value, onChange, ...field }) => (
+            <Input
+              {...field}
+              ref={ref}
+              value={asText(value)}
+              placeholder={t("Enter a name for this guardrail")}
+              onChange={(event) => {
+                onChange(event);
+                setTypedGuardrailName(event.target.value);
+              }}
+            />
           )}
         </GuardrailField>
 
@@ -1012,7 +1027,7 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
                 <div>
                   <label className="mb-2 block text-sm font-medium text-foreground">{t("On violation")}</label>
                   <div className="space-y-2">
-                    {([t("warn"), "end_session"] as const).map((opt) => (
+                    {(["warn", "end_session"] as const).map((opt) => (
                       <label key={opt} className="flex items-start gap-2 cursor-pointer">
                         <input
                           type="radio"

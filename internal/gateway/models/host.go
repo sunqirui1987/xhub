@@ -1,4 +1,4 @@
-// 模型管理需要的进程能力。实现是 *gateway.Server。本包不引用 gateway，避免循环导入。
+// Package models defines the process capabilities model management needs. *gateway.Server implements them. This package does not import gateway, which avoids an import cycle.
 package models
 
 import (
@@ -9,18 +9,18 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// Host 是创建、更新和列出模型时要问进程要的东西。
-// 更新、删除和屏蔽在持锁期间写数据库，锁的范围和拆包之前的 mu 一样。
+// Host is what create, update, and list ask the process for.
+// Update, delete, and block write the database while holding the model lock. The lock covers the same critical section as before this package was split.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store
-	// LockModels 与 UnlockModels 成对使用。请求路径上改模型表之前必须先锁。
+	// LockModels and UnlockModels are a pair. Lock before changing the model table on a request path.
 	LockModels()
 	UnlockModels()
-	// ModelTable 返回进程内模型切片的指针。持锁时可以改；LoadStored 在对外服务前调用，那时还没有并发请求。
+	// ModelTable returns a pointer to the in-process model slice. Change it only while holding the lock. LoadStored runs before the process serves traffic, when there are no concurrent requests.
 	ModelTable() *[]config.ModelEntry
-	// Resolve 解析会话或虚拟密钥。失败时不写响应，由调用方决定 401 的正文。
+	// Resolve parses a session or a virtual key. On failure it does not write a response. The caller chooses the 401 body.
 	Resolve(r *http.Request) (*auth.Principal, error)
-	// AllowLLM 报告这个身份能否调用推理。主密钥默认不能，除非进程打开了 allow_master_key_llm。
+	// AllowLLM reports whether this identity may call inference. The master key may not unless allow_master_key_llm is on.
 	AllowLLM(p *auth.Principal) bool
 }

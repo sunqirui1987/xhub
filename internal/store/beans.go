@@ -1,4 +1,4 @@
-// 现网表的行结构。列类型跟 PostgreSQL 里已经在用的表对齐。
+// Package store declares the live table rows. Column types match the PostgreSQL tables already in use.
 package store
 
 import "time"
@@ -16,7 +16,7 @@ type userRow struct {
 	ExtraJSON  string   `xorm:"text 'extra_json'"`
 }
 
-// 用户表名。
+// TableName returns the users table name.
 func (userRow) TableName() string { return "users" }
 
 type teamRow struct {
@@ -30,7 +30,7 @@ type teamRow struct {
 	ExtraJSON      string   `xorm:"text 'extra_json'"`
 }
 
-// 团队表名。
+// TableName returns the teams table name.
 func (teamRow) TableName() string { return "teams" }
 
 type orgRow struct {
@@ -42,7 +42,7 @@ type orgRow struct {
 	ExtraJSON string    `xorm:"text 'extra_json'"`
 }
 
-// 组织表名。
+// TableName returns the organizations table name.
 func (orgRow) TableName() string { return "organizations" }
 
 type projectRow struct {
@@ -56,7 +56,7 @@ type projectRow struct {
 	ExtraJSON      string    `xorm:"text 'extra_json'"`
 }
 
-// 项目表名。
+// TableName returns the projects table name.
 func (projectRow) TableName() string { return "projects" }
 
 type budgetRow struct {
@@ -85,7 +85,7 @@ type budgetRow struct {
 	Duration         string    `xorm:"text 'budget_duration'"`
 }
 
-// 预算表名。
+// TableName returns the budgets table name.
 func (budgetRow) TableName() string { return "budgets" }
 
 type kvRow struct {
@@ -95,7 +95,7 @@ type kvRow struct {
 	CreatedAt string `xorm:"text 'created_at'"`
 }
 
-// 键值表名。
+// TableName returns the key-value table name.
 func (kvRow) TableName() string { return "kv" }
 
 type tokenRow struct {
@@ -125,7 +125,7 @@ type tokenRow struct {
 	CreatedAt    string   `xorm:"text 'created_at'"`
 }
 
-// 密钥表名。
+// TableName returns the verification-token table name.
 func (tokenRow) TableName() string { return "verification_tokens" }
 
 type spendRow struct {
@@ -142,7 +142,7 @@ type spendRow struct {
 	Status     string   `xorm:"text 'status'"`
 }
 
-// 花费日志表名。
+// TableName returns the spend-log table name.
 func (spendRow) TableName() string { return "spend_logs" }
 
 type proxyModelRow struct {
@@ -153,7 +153,7 @@ type proxyModelRow struct {
 	UpdatedAt string `xorm:"text 'updated_at'"`
 }
 
-// 代理模型表名。
+// TableName returns the proxy-model table name.
 func (proxyModelRow) TableName() string { return "proxy_models" }
 
 type configRow struct {
@@ -162,5 +162,5 @@ type configRow struct {
 	ValueJSON string `xorm:"text 'value_json'"`
 }
 
-// 代理配置表名。
+// TableName returns the proxy-config table name.
 func (configRow) TableName() string { return "proxy_config" }

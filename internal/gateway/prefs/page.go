@@ -1,4 +1,4 @@
-// 控制台看到的路由设置页、回调视图和通用设置列表。数字来自合并后的文档。
+// Package prefs builds the router-settings page, the callback view, and the general-settings list. The numbers come from the merged document.
 package prefs
 
 import (
@@ -7,7 +7,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 返回合并后的路由设置和字段说明，供控制台渲染。
+// Page writes the merged router settings and field descriptions for the dashboard to render.
 func Page(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -24,12 +24,12 @@ func Page(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 合并后的路由设置文档，含 routing_groups。
+// PageMap returns the merged router-settings document, including routing_groups.
 func PageMap(s Host) map[string]any {
 	return MergedRouter(s)
 }
 
-// 每个策略名的说明文字。未知策略不会出现在这里。
+// routingStrategyDescriptions returns the help text for each known strategy name. An unknown strategy is omitted.
 func routingStrategyDescriptions() map[string]string {
 	return map[string]string{
 		"simple-shuffle":         "Randomly picks a deployment from the list. Simple and fast.",
@@ -41,7 +41,7 @@ func routingStrategyDescriptions() map[string]string {
 	}
 }
 
-// 把路由设置拆成控制台字段列表，带当前值和默认值。
+// Fields splits router settings into the dashboard field list, with the current value and the default.
 func Fields(s Host, rs map[string]any) []map[string]any {
 	strats := []string{"simple-shuffle", "least-busy", "latency-based-routing", "cost-based-routing", "usage-based-routing", "usage-based-routing-v2"}
 	type spec struct {
@@ -87,7 +87,7 @@ func Fields(s Host, rs map[string]any) []map[string]any {
 	return out
 }
 
-// 返回回调配置视图，其中的 router_settings 与合并结果一致。
+// Callbacks returns the callback view. Its router_settings match the merged document.
 func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -127,7 +127,7 @@ func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 按 config_type 列出设置。general_settings 带 stored_in_db。
+// List returns settings for the requested config_type. general_settings includes stored_in_db.
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return

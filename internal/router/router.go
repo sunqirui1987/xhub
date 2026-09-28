@@ -1,4 +1,4 @@
-// 在同一个模型名的多个部署之间排序。冷却中的部署只要还有别的可用就会被跳过。
+// Package router orders deployments that share one model name. A deployment that is cooling down is skipped when another one is still available.
 package router
 
 import (
@@ -10,12 +10,12 @@ import (
 	"github.com/sunqirui1987/xhub/internal/llm"
 )
 
-// 同一个对外模型名下的全部部署，尚未按策略排序。
+// All returns every deployment under one public model name, before a strategy orders them.
 func All(list []config.ModelEntry, alias string) []config.ModelEntry {
 	return matchDeployments(list, alias)
 }
 
-// 路由器看到的运行时状态。零值表示只用进程内 Busy，不读冷却和延迟。
+// State is the runtime snapshot the router sees. The zero value uses only in-process Busy and does not read cooldown or latency.
 // State is the Redis-backed view of deployments. Zero values keep the old
 // in-process behavior (busy map only).
 type State struct {
@@ -25,7 +25,7 @@ type State struct {
 	Usage    map[string]float64
 }
 
-// 按策略把可用部署排成尝试顺序。冷却中的部署只要还有其它部署就不会排在前面。
+// Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
 func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry {
 	pool := All(list, alias)
 	first := Pick(list, alias, strategy, st)
@@ -42,7 +42,7 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 	return out
 }
 
-// Order 的第一个部署。没有可用部署时返回 nil。
+// Pick returns the first deployment from Order. It returns nil when no deployment is usable.
 func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry {
 	pool := matchDeployments(list, alias)
 	if len(pool) == 0 {
@@ -133,7 +133,7 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		}
 		return &pool[best]
 	default:
-		// simple_shuffle 以及按权重选的策略：权重最大者。测试依赖这个稳定结果。
+		// simple_shuffle and the other weight strategies pick the highest weight. Callers rely on this stable result.
 		best := 0
 		bestW := -1.0
 		for i, e := range pool {
@@ -147,7 +147,7 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 	}
 }
 
-// 找出对外模型名能匹配上的部署，含通配符。还不排序。
+// matchDeployments finds deployments whose public model name matches, including wildcards. It does not sort them.
 // matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM
 // wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
 func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntry {
@@ -202,7 +202,7 @@ func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntr
 	return nil
 }
 
-// 通配符越少、字面段越长越优先。
+// patternSpecificity ranks a pattern higher when it has fewer wildcards and a longer literal.
 func patternSpecificity(pattern string) (int, int) {
 	complexity := 0
 	for _, c := range "*+?\\^$|()" {
@@ -211,7 +211,7 @@ func patternSpecificity(pattern string) (int, int) {
 	return len(pattern), complexity
 }
 
-// 把模型通配符编译成正则。非法模式得到不会匹配的表达式。
+// wildcardRegexp compiles a model wildcard into a regular expression. An illegal pattern becomes an expression that matches nothing.
 func wildcardRegexp(pattern string) *regexp.Regexp {
 	// re.match: anchored at the start, not the end. QuoteMeta then restore '*'.
 	expr := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, `(.*)`)
@@ -222,7 +222,7 @@ func wildcardRegexp(pattern string) *regexp.Regexp {
 	return re
 }
 
-// 用请求里的捕获组替换上游模型名中的星号。
+// applyWildcardModel replaces stars in the upstream model name with capture groups from the request.
 func applyWildcardModel(upstream, request string, groups []string) string {
 	if !strings.Contains(upstream, "*") {
 		return upstream
@@ -236,12 +236,12 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
-// 部署身份，格式是 api_base|模型参数。Redis 的冷却和用量都用这个 id。
+// DeploymentID is the deployment identity, shaped as api_base|model parameter. Redis cooldown and usage use this id.
 func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 }
 
-// 从部署参数取浮点数。缺失时用 fallback。
+// paramFloat reads a float from deployment parameters. A missing value returns fallback.
 func paramFloat(e config.ModelEntry, key string, fallback float64) float64 {
 	if e.LiteLLMParams == nil {
 		return fallback
@@ -260,18 +260,18 @@ func paramFloat(e config.ModelEntry, key string, fallback float64) float64 {
 	}
 }
 
-// AdapterURL 是聊天补全的上游地址。其他操作用 AdapterURLOp。
+// AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
 func AdapterURL(provider, apiBase, realModel string) string {
 	return AdapterURLOp("chat", provider, apiBase, realModel)
 }
 
-// AdapterURLOp 按操作和供应商给出完整 URL。规则在 internal/llm.Endpoint。
+// AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
 func AdapterURLOp(op, provider, apiBase, realModel string) string {
 	return llm.Endpoint(op, provider, apiBase, realModel)
 }
 
-// ValidateStrategy 只接受 catalog 里的 15 个策略名，以及网关配置里已经在用的连字符写法。
-// 不认识的名字返回错误，不再当成 simple-shuffle。
+// ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses.
+// An unknown name returns an error and is not treated as simple-shuffle.
 func ValidateStrategy(strategy string) error {
 	if _, ok := strategyKind(strategy); !ok {
 		return errUnknownStrategy
@@ -283,10 +283,10 @@ var errUnknownStrategy = strategyError("unknown routing strategy")
 
 type strategyError string
 
-// 未知路由策略的错误文本。
+// Error returns the text for an unknown routing strategy.
 func (e strategyError) Error() string { return string(e) }
 
-// 把策略别名收成内部名字。连字符会先变成下划线。认不出时 ok 为 false。
+// strategyKind folds a strategy alias into the internal name. Hyphens become underscores first. An unrecognized name returns ok false.
 func strategyKind(strategy string) (string, bool) {
 	s := strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_")
 	switch s {

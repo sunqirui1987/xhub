@@ -1,4 +1,4 @@
-// 请求发出前执行护栏。命中拦截时数据面不再访问上游。
+// Package guard runs guardrails before a request is sent. A blocking match stops the data plane from calling the upstream.
 package guard
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// 管理接口上的护栏试跑。不改存储。
+// Apply is the management trial for a guardrail. It does not change storage.
 func Apply(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -33,7 +33,7 @@ func Apply(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 聊天发出前跑护栏。拦截时返回 true 和原因，数据面不再访问上游。
+// PreCall runs guardrails before chat is sent. A block returns true and a reason, and the data plane does not call the upstream.
 func PreCall(s Host, body map[string]any) (bool, string) {
 	text := guardrailText(body)
 	list := listGuardrails(s)
@@ -64,7 +64,7 @@ func PreCall(s Host, body map[string]any) (bool, string) {
 	return false, ""
 }
 
-// 按名字执行一条护栏。找不到时视为通过。
+// evalNamed runs one guardrail by name. A missing name is treated as a pass.
 func evalNamed(s Host, name, text string) (action, out string) {
 	if name != "" {
 		for _, g := range listGuardrails(s) {
@@ -88,7 +88,7 @@ func evalNamed(s Host, name, text string) (action, out string) {
 	return "allow", text
 }
 
-// 当前配置的护栏。没有配置时为空切片。
+// listGuardrails returns the guardrails in the current config. An unconfigured proxy returns an empty slice.
 func listGuardrails(s Host) []map[string]any {
 	var out []map[string]any
 	for _, kind := range []string{"guardrails", "guardrail"} {
@@ -101,7 +101,7 @@ func listGuardrails(s Host) []map[string]any {
 	return out
 }
 
-// 用护栏规则检查一段文本，返回动作和替换后的文本。
+// matchGuardrail checks text against one guardrail and returns the action and the replaced text.
 func matchGuardrail(g map[string]any, text string) (action, out string) {
 	params, _ := g["litellm_params"].(map[string]any)
 	if params == nil {
@@ -130,7 +130,7 @@ func matchGuardrail(g map[string]any, text string) (action, out string) {
 	return "allow", out
 }
 
-// 从配置值里取出额外敏感词。不是列表时为空。
+// extraWords reads extra sensitive words from a config value. A non-list is empty.
 func extraWords(v any) []string {
 	var out []string
 	switch t := v.(type) {
@@ -150,7 +150,7 @@ func extraWords(v any) []string {
 	return out
 }
 
-// 从聊天正文抽出要检查的文本。
+// guardrailText extracts the text a chat body should be checked against.
 func guardrailText(body map[string]any) string {
 	if t := str(body["text"]); t != "" {
 		return t

@@ -21,3 +21,6 @@ configs/config.yaml
 test-results/
 playwright-report/
 .e2e/
+e2e/__pycache__
+frontend/.e2e-report
+e2e-report.txt

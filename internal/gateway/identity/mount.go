@@ -1,17 +1,18 @@
-// 本模块自己的路由。进程只按名字装上，不在路由总表里写这些路径。
+// Package identity owns this module's routes. The process mounts the module by name and does not list these paths in a central table.
 package identity
 
 import (
 	"net/http"
 
-	"github.com/sunqirui1987/xhub/internal/gateway/module"
+	"github.com/sunqirui1987/xhub/internal/httpx"
 )
 
-// Module 是用户、团队、组织、项目和预算。Gate 由进程实现，本包不引用 gateway。
-func Module(h Gate) module.Module {
-	return module.Bind("identity", func(reg module.Registrar) {
+// Module is users, teams, organizations, projects, and budgets. The process implements Gate. This package does not import gateway.
+func Module(h Gate) httpx.Module {
+	return httpx.Bind("identity", func(reg httpx.Registrar) {
 		reg.Handle("POST /user/new", func(w http.ResponseWriter, r *http.Request) { UserNew(h, w, r) })
 		reg.Handle("GET /user/list", func(w http.ResponseWriter, r *http.Request) { UserList(h, w, r) })
+		reg.Handle("GET /user/filter/ui", func(w http.ResponseWriter, r *http.Request) { UserFilterUI(h, w, r) })
 		reg.Handle("GET /user/available_users", func(w http.ResponseWriter, r *http.Request) { AvailableUsers(h, w, r) })
 		reg.Handle("GET /user/available_roles", func(w http.ResponseWriter, r *http.Request) { UserAvailableRoles(h, w, r) })
 		reg.Handle("POST /user/bulk_update", func(w http.ResponseWriter, r *http.Request) { UserBulkUpdate(h, w, r) })
@@ -68,6 +69,7 @@ func Module(h Gate) module.Module {
 		reg.Handle("GET /v1/model/info", func(w http.ResponseWriter, r *http.Request) { ModelInfo(h, w, r) })
 		reg.Handle("GET /model/info", func(w http.ResponseWriter, r *http.Request) { ModelInfo(h, w, r) })
 		reg.Handle("GET /get/ui_settings", func(w http.ResponseWriter, r *http.Request) { UiSettings(h, w, r) })
+		reg.Handle("PATCH /update/ui_settings", func(w http.ResponseWriter, r *http.Request) { UpdateUISettings(h, w, r) })
 		reg.Handle("GET /get/user_banner", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
 		reg.Handle("GET /get_image", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
 		reg.Handle("GET /get_logo_url", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })

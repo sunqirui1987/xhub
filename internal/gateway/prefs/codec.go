@@ -1,4 +1,4 @@
-// 设置接口共用的 JSON 读取。空正文得到空表，坏数字收成 0。
+// Package prefs shares JSON readers for settings handlers. An empty body becomes an empty map, and a bad number becomes 0.
 package prefs
 
 import (
@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// readMap 读取 JSON 对象。空正文或解析失败时返回空表。
+// readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
@@ -18,13 +18,13 @@ func readMap(r *http.Request) map[string]any {
 	return body
 }
 
-// str 把值当成字符串。不是字符串时返回空串，不 panic。
+// str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-// asInt 把 JSON 数字收成 int。float64 会截断小数。其它类型返回 0。
+// asInt converts a JSON number to int. A float64 is truncated. Any other type returns 0.
 func asInt(v any) int {
 	switch t := v.(type) {
 	case float64:

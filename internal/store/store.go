@@ -1,4 +1,4 @@
-// 密钥和花费日志的持久化。只接受 PostgreSQL，拒绝 sqlite 和空的 database_url。
+// Package store persists keys and spend logs. It accepts PostgreSQL only and rejects sqlite and an empty database_url.
 package store
 
 import (
@@ -14,14 +14,14 @@ import (
 	"xorm.io/xorm"
 )
 
-// PostgreSQL 存储。读写都走带缓存的 xorm 引擎。DB 只留给连通性检查和测试夹具。
+// Store is the PostgreSQL storage. Reads and writes go through the cached xorm engine. DB is only for connectivity checks and test fixtures.
 type Store struct {
 	Engine *xorm.Engine
 	DB     *sql.DB
 	stmts  *int64
 }
 
-// 虚拟密钥。Models 为空表示不限制模型。Blocked 无效时表示未设置屏蔽。
+// Key is a virtual key. An empty Models list means no model restriction. An invalid Blocked value means the block flag was not set.
 type Key struct {
 	TokenHash      string
 	KeyAlias       string
@@ -49,7 +49,7 @@ type Key struct {
 	CreatedAt      time.Time
 }
 
-// 打开存储。sqlite、file: 和空 URL 直接拒绝，只接受 postgres:// 或 postgresql://。
+// Open opens storage. sqlite, file:, and an empty URL are rejected. Only postgres:// and postgresql:// are accepted.
 func Open(databaseURL string) (*Store, error) {
 	u := strings.ToLower(strings.TrimSpace(databaseURL))
 	switch {
@@ -66,20 +66,20 @@ func Open(databaseURL string) (*Store, error) {
 	}
 }
 
-// 虚拟密钥明文的哈希。数据库里只存哈希。
+// HashKey hashes a virtual-key plaintext. The database stores only the hash.
 func HashKey(plain string) string {
 	sum := sha256.Sum256([]byte(plain))
 	return hex.EncodeToString(sum[:])
 }
 
-// 生成新的 sk- 明文密钥。调用方负责只展示一次。
+// NewPlainKey generates a new sk- plaintext key. The caller must show it only once.
 func NewPlainKey() string {
 	var b [24]byte
 	_, _ = rand.Read(b[:])
 	return "sk-" + hex.EncodeToString(b[:])
 }
 
-// 密钥允许的模型名。空列表表示不限制。
+// Models returns the model names this key allows. An empty list means no restriction.
 func (k Key) Models() []string {
 	var m []string
 	_ = json.Unmarshal([]byte(k.ModelsJSON), &m)
@@ -89,7 +89,7 @@ func (k Key) Models() []string {
 	return m
 }
 
-// 密钥是否允许这个模型。空列表允许全部。
+// AllowsModel reports whether this key allows the model. An empty list allows every model.
 func (k Key) AllowsModel(alias string) bool {
 	ms := k.Models()
 	if len(ms) == 0 {
@@ -103,7 +103,7 @@ func (k Key) AllowsModel(alias string) bool {
 	return false
 }
 
-// 可空浮点的数据库参数。
+// nullFloat is the database argument for a nullable float. An invalid value is nil.
 func nullFloat(v sql.NullFloat64) any {
 	if !v.Valid {
 		return nil
@@ -111,7 +111,7 @@ func nullFloat(v sql.NullFloat64) any {
 	return v.Float64
 }
 
-// 可空整数的数据库参数。
+// nullInt is the database argument for a nullable integer. An invalid value is nil.
 func nullInt(v sql.NullInt64) any {
 	if !v.Valid {
 		return nil
@@ -119,7 +119,7 @@ func nullInt(v sql.NullInt64) any {
 	return v.Int64
 }
 
-// 布尔存成 0 或 1。
+// boolInt stores a bool as 0 or 1.
 func boolInt(v bool) int {
 	if v {
 		return 1
@@ -127,7 +127,7 @@ func boolInt(v bool) int {
 	return 0
 }
 
-// 用明文密钥生成可展示的短名称。
+// KeyNameFromPlain builds the short display name from a plaintext key.
 func KeyNameFromPlain(plain string) string {
 	if len(plain) < 8 {
 		return plain
@@ -135,7 +135,7 @@ func KeyNameFromPlain(plain string) string {
 	return plain[:6] + "..." + plain[len(plain)-4:]
 }
 
-// 计算预算重置时间。显式时间优先，否则按 duration 推算。两者都空则无效。
+// ResetAtFrom computes the budget reset time. An explicit time wins, otherwise it is derived from duration. Both empty stays invalid.
 func ResetAtFrom(explicit, duration string) sql.NullTime {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
@@ -150,7 +150,7 @@ func ResetAtFrom(explicit, duration string) sql.NullTime {
 	return t
 }
 
-// 解析 30s、30m、30h、30d、1mo。无法解析时返回错误。
+// ParseDuration parses 30s, 30m, 30h, 30d, and 1mo. An unparseable value returns an error.
 func ParseDuration(d string) (sql.NullTime, error) {
 	d = strings.TrimSpace(d)
 	if d == "" {

@@ -1,4 +1,4 @@
-// 进程配置。只接受 PostgreSQL，并保留 YAML 里类型结构没有声明的原始字段。
+// Package config loads process configuration. It accepts PostgreSQL only and keeps YAML keys the typed structs do not declare.
 package config
 
 import (
@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 进程启动后的配置。RouterRaw 和 GeneralRaw 保留类型结构没有列出的 YAML 键，数据库覆盖时按键比较。
+// Config is the loaded process configuration. RouterRaw and GeneralRaw keep YAML keys the typed structs do not name, so a database overlay can compare by key.
 type Config struct {
 	ModelList       []ModelEntry    `yaml:"model_list"`
 	RouterSettings  RouterSettings  `yaml:"router_settings"`
@@ -20,21 +20,21 @@ type Config struct {
 	GeneralRaw map[string]any `yaml:"-"`
 }
 
-// 一个部署。ModelName 是对外模型名，LiteLLMParams 是上游参数。
+// ModelEntry is one deployment. ModelName is the public model name and LiteLLMParams are the upstream parameters.
 type ModelEntry struct {
 	ModelName     string         `yaml:"model_name"`
 	LiteLLMParams map[string]any `yaml:"litellm_params"`
 	ModelInfo     map[string]any `yaml:"model_info"`
 }
 
-// 路由策略、重试次数和超时。YAML 里的其它路由键在 Config.RouterRaw，不在这里。
+// RouterSettings holds the routing strategy, retry count, and timeout. Other router keys from YAML stay in Config.RouterRaw.
 type RouterSettings struct {
 	RoutingStrategy string  `yaml:"routing_strategy"`
 	NumRetries      int     `yaml:"num_retries"`
 	Timeout         float64 `yaml:"timeout"`
 }
 
-// 主密钥、数据库、Redis 和少量开关。其它通用设置键在 Config.GeneralRaw。
+// GeneralSettings holds the master key, database, Redis, and a few switches. Other general-settings keys stay in Config.GeneralRaw.
 type GeneralSettings struct {
 	MasterKey                 string `yaml:"master_key"`
 	DatabaseURL               string `yaml:"database_url"`
@@ -44,7 +44,7 @@ type GeneralSettings struct {
 	DisableEnvCredentialLogin bool   `yaml:"disable_env_credential_login"`
 }
 
-// 读取 YAML。database_url 为空、sqlite 或 file: 时返回错误，不会悄悄改用本地文件库。
+// Load reads YAML. An empty database_url, or one that starts with sqlite or file:, returns an error instead of silently using a local file database.
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -99,7 +99,7 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// 展开配置字符串里的环境变量。变量不存在时保留原文，不改成空串。
+// resolve expands environment placeholders in a config string. A missing variable keeps the original text instead of becoming empty.
 func resolve(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "os.environ/") {
@@ -108,7 +108,7 @@ func resolve(s string) string {
 	return s
 }
 
-// 从 LiteLLMParams 取字符串。缺失或类型不对时用 fallback。
+// ParamString reads a string from LiteLLMParams. A missing or wrong-typed value returns fallback.
 func (e ModelEntry) ParamString(key, fallback string) string {
 	if e.LiteLLMParams == nil {
 		return fallback
@@ -124,7 +124,7 @@ func (e ModelEntry) ParamString(key, fallback string) string {
 	return s
 }
 
-// 把 provider/model 拆开。没有斜杠时供应商为空，模型名是整段。
+// SplitProviderModel splits provider/model. With no slash the provider is empty and the model name is the whole string.
 func SplitProviderModel(raw string) (provider, model string) {
 	raw = strings.TrimSpace(raw)
 	if i := strings.Index(raw, "/"); i > 0 {

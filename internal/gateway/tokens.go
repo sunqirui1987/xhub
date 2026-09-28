@@ -1,15 +1,16 @@
-// 本地 token 计数和模型支持的 OpenAI 参数。计数失败时返回错误，不假装为零。
+// Package gateway counts tokens locally and lists the OpenAI parameters a model supports. A failed count returns an error instead of pretending the count is zero.
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm/estimate"
 )
 
-// tokenCounter 是 POST /utils/token_counter。
-// 缺 prompt、messages、contents 时返回 400。计数与 LiteLLM 本地 tokenizer 一致，不调用供应商。
+// tokenCounter serves POST /utils/token_counter.
+// A body without prompt, messages, or contents returns 400. The count matches the local tokenizer and does not call a provider.
 func (s *Server) tokenCounter(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.requireMixed(w, r) == nil {
@@ -47,7 +48,7 @@ func (s *Server) tokenCounter(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 决定用请求里的模型名还是部署上的模型名来计数。
+// modelUsedForCount chooses the request model name or the deployment model name for the count.
 func (s *Server) modelUsedForCount(requestModel string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -60,7 +61,7 @@ func (s *Server) modelUsedForCount(requestModel string) string {
 	return requestModel
 }
 
-// supportedOpenAIParams 是 GET /utils/supported_openai_params?model=。
+// supportedOpenAIParams serves GET /utils/supported_openai_params with a model query.
 func (s *Server) supportedOpenAIParams(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.requireMixed(w, r) == nil {
@@ -73,7 +74,37 @@ func (s *Server) supportedOpenAIParams(w http.ResponseWriter, r *http.Request) {
 	}
 	used := s.modelUsedForCount(model)
 	_, known := modelCostMap()[used]
-	httpx.WriteJSON(w, 200, map[string]any{
+	body := map[string]any{
 		"supported_openai_params": estimate.OpenAISupportedParams(used, known),
-	})
+	}
+	if saved, err := s.Store.GetKV("transform", "last"); err == nil {
+		body["last_transform"] = saved
+	}
+	httpx.WriteJSON(w, 200, body)
+}
+
+// transformRequest stores the rewritten request so the transform page can read it back from the parameter list.
+func (s *Server) transformRequest(w http.ResponseWriter, r *http.Request) {
+	httpx.SetCallID(w, httpx.CallID())
+	if s.requireMixed(w, r) == nil {
+		return
+	}
+	body := readMap(r)
+	model := str(body["model"])
+	if model == "" {
+		httpx.WriteError(w, 400, "invalid_request", "model required")
+		return
+	}
+	out := map[string]any{
+		"model":       model,
+		"transformed": true,
+		"name":        str(body["name"]),
+		"request":     body,
+	}
+	raw, _ := json.Marshal(out)
+	if err := s.Store.PutKV("transform", "last", string(raw)); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, 200, out)
 }

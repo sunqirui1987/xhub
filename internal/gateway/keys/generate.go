@@ -1,4 +1,4 @@
-// 虚拟密钥的创建、列表、更新和删除。明文只在创建和轮换的响应里出现一次。
+// Package keys creates, lists, updates, and deletes virtual keys. The plaintext appears only in the create or rotate response.
 package keys
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-// 创建虚拟密钥并只在这次响应里返回明文。
+// Generate creates a virtual key and returns the plaintext only in this response.
 func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -39,7 +39,7 @@ func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(k, plain, true))
 }
 
-// 列出虚拟密钥。不返回明文。
+// List lists virtual keys and does not return plaintext.
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -63,7 +63,7 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 读取一把虚拟密钥。
+// Info reads one virtual key.
 func Info(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -93,7 +93,7 @@ func Info(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"info": Response(*k, "", false)})
 }
 
-// 删除虚拟密钥。之后该明文不能再调用推理。
+// Delete removes virtual keys. The plaintext can no longer call inference.
 func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -118,17 +118,17 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": len(keys)})
 }
 
-// 屏蔽虚拟密钥。
+// Block marks a virtual key blocked.
 func Block(s Host, w http.ResponseWriter, r *http.Request) {
 	setBlocked(s, w, r, true)
 }
 
-// 取消屏蔽。
+// Unblock clears the blocked flag.
 func Unblock(s Host, w http.ResponseWriter, r *http.Request) {
 	setBlocked(s, w, r, false)
 }
 
-// 设置屏蔽标志。密钥不存在时 404。
+// setBlocked sets the blocked flag. A missing key returns 404.
 func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -149,7 +149,7 @@ func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 	httpx.WriteJSON(w, 200, map[string]any{"blocked": blocked})
 }
 
-// 更新虚拟密钥的限额、模型和元数据。明文不变。
+// Update changes a virtual key's limits, models, and metadata. The plaintext stays the same.
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
@@ -162,7 +162,7 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "key required")
 		return
 	}
-	hash := store.HashKey(plain)
+	hash := hashKeyToken(plain)
 	k, err := s.DB().GetByHash(hash)
 	if err != nil {
 		httpx.WriteError(w, 404, "not_found", "key not found")
@@ -176,7 +176,7 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*k, "", false))
 }
 
-// 虚拟密钥的对外 JSON。includePlain 为假时不含明文。
+// Response is the public JSON for a virtual key. The plaintext is omitted when includePlain is false.
 func Response(k store.Key, plain string, includePlain bool) map[string]any {
 	created := k.CreatedAt.UTC().Format(time.RFC3339)
 	if k.CreatedAt.IsZero() {
