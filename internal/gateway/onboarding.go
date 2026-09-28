@@ -13,11 +13,17 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceOnboarding sync.Once
 
 // onboardingGetToken exchanges an invite id for a session JWT that carries the email, so the claim page can show who was invited.
 func (s *Server) onboardingGetToken(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceOnboarding.Do(func() { logx.Trace("enter gateway.onboardingGetToken") })
+
 	id := strings.TrimSpace(r.URL.Query().Get("invite_link"))
 	if id == "" {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invite_link is required")

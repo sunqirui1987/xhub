@@ -1,7 +1,11 @@
 // Package store declares the live table rows. Column types match the PostgreSQL tables already in use.
 package store
 
-import "time"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
+	"time"
+)
 
 type userRow struct {
 	UserID     string   `xorm:"pk text 'user_id'"`
@@ -16,8 +20,13 @@ type userRow struct {
 	ExtraJSON  string   `xorm:"text 'extra_json'"`
 }
 
+var logTraceOnceBeans sync.Once
+
 // TableName returns the users table name.
-func (userRow) TableName() string { return "users" }
+func (userRow) TableName() string {
+	logTraceOnceBeans.Do(func() { logx.Trace("enter store.TableName") })
+	return "users"
+}
 
 type teamRow struct {
 	TeamID         string   `xorm:"pk text 'team_id'"`
@@ -129,17 +138,21 @@ type tokenRow struct {
 func (tokenRow) TableName() string { return "verification_tokens" }
 
 type spendRow struct {
-	RequestID  string   `xorm:"pk text 'request_id'"`
-	CallType   string   `xorm:"text 'call_type'"`
-	Model      string   `xorm:"text 'model'"`
-	APIKey     string   `xorm:"text 'api_key'"`
-	Prompt     int      `xorm:"'prompt_tokens'"`
-	Completion int      `xorm:"'completion_tokens'"`
-	Spend      *float64 `xorm:"'spend'"`
-	StartTime  string   `xorm:"text 'start_time'"`
-	EndTime    string   `xorm:"text 'end_time'"`
-	CacheHit   int      `xorm:"'cache_hit'"`
-	Status     string   `xorm:"text 'status'"`
+	RequestID        string   `xorm:"pk text 'request_id'"`
+	CallType         string   `xorm:"text 'call_type'"`
+	Model            string   `xorm:"text 'model'"`
+	APIKey           string   `xorm:"text 'api_key'"`
+	Prompt           int      `xorm:"'prompt_tokens'"`
+	Completion       int      `xorm:"'completion_tokens'"`
+	Spend            *float64 `xorm:"'spend'"`
+	StartTime        string   `xorm:"text 'start_time'"`
+	EndTime          string   `xorm:"text 'end_time'"`
+	CacheHit         int      `xorm:"'cache_hit'"`
+	Status           string   `xorm:"text 'status'"`
+	UserID           string   `xorm:"text 'user_id'"`
+	MessagesJSON     string   `xorm:"text 'messages_json'"`
+	ResponseJSON     string   `xorm:"text 'response_json'"`
+	ProxyRequestJSON string   `xorm:"text 'proxy_server_request_json'"`
 }
 
 // TableName returns the spend-log table name.

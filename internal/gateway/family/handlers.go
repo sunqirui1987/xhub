@@ -13,10 +13,16 @@ import (
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceHandlers sync.Once
 
 // ServeDataPlane handles inference paths in the catalog. A recognized operation enters the data plane. The rest are resource reads and writes.
 func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceHandlers.Do(func() { logx.Trace("enter family.ServeDataPlane") })
+
 	p := s.RequireLLM(w, r)
 	if p == nil {
 		return

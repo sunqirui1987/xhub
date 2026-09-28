@@ -104,6 +104,7 @@ const ModelSection = ({
             colors={["green"]}
             valueFormatter={(value: number) => `$${formatNumberWithCommas(value, 2, true)}`}
             yAxisWidth={72}
+            showLegend={false}
           />
         </CardContent>
       </Card>
@@ -410,7 +411,11 @@ export const ActivityMetrics: React.FC<ActivityMetricsProps> = ({ modelMetrics, 
                 </h3>
                 <div className="flex space-x-4 text-sm text-muted-foreground">
                   <span>${formatNumberWithCommas(modelMetrics[modelName].total_spend, 2)}</span>
-                  <span>{modelMetrics[modelName].total_requests.toLocaleString()} requests</span>
+                  <span>
+                    {t("{value0} requests", {
+                      value0: modelMetrics[modelName].total_requests.toLocaleString(),
+                    })}
+                  </span>
                 </div>
               </div>
             }

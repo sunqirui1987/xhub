@@ -5,10 +5,16 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceHealth sync.Once
 
 // healthLive answers the liveness probe. It does not touch the database and returns status ok.
 func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceHealth.Do(func() { logx.Trace("enter gateway.healthLive") })
+	logx.Debug("process %s %s step=health check=liveliness", r.Method, r.URL.Path)
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
 }
@@ -17,9 +23,11 @@ func (s *Server) healthLive(w http.ResponseWriter, r *http.Request) {
 func (s *Server) healthReady(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if err := s.Store.DB.Ping(); err != nil {
+		logx.Error("process %s %s step=health check=readiness ok=false", r.Method, r.URL.Path)
 		httpx.WriteError(w, 503, "not_ready", err.Error())
 		return
 	}
+	logx.Debug("process %s %s step=health check=readiness ok=true", r.Method, r.URL.Path)
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ready"})
 }
 

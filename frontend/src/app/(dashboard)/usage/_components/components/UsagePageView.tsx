@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight, Download, Info, Sparkles, X } from "lucide-r
 import type { DateRangePickerValue } from "@/components/shared/date_picker_types";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { BarChart } from "@/components/shared/charts";
+import { BarChart, CustomLegend } from "@/components/shared/charts";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import PaginationStatusAlerts from "@/components/shared/PaginationStatusAlerts";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import { hasCapability } from "@/utils/capabilities";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { all_admin_roles, internalUserRoles } from "@/utils/roles";
 import { t } from "@/i18n";
+import { formatClosedRangeLabel } from "@/components/shared/advanced_date_picker";
 import { ActivityMetrics, processActivityData } from "@/components/activity_metrics";
 import CloudZeroExportModal from "@/components/cloudzero_export_modal";
 import UserDropdown from "@/components/common_components/UserDropdown";
@@ -62,8 +63,8 @@ import ModelViewToggle, { ModelViewType } from "./ModelViewToggle";
 import SpendByProvider from "./EntityUsage/SpendByProvider";
 import { TOP_MODEL_LIMITS } from "./EntityUsage/TopModelView";
 import TopKeyView from "@/components/UsagePage/components/EntityUsage/TopKeyView";
-import UsageAIChatPanel from "./UsageAIChatPanel";
 import { UsageOption, UsageViewSelect } from "./UsageViewSelect/UsageViewSelect";
+import UsageAIChatPanel from "./UsageAIChatPanel";
 
 interface UsagePageProps {
   teams: Team[];
@@ -514,7 +515,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                   <div className="flex items-center gap-2">
                     <Button variant="outline" onClick={() => setIsAiChatOpen(true)}>
                       <Sparkles />
-                      {t("pages.usage.askAi")}
+                      {t("Ask AI")}
                     </Button>
                     <Button variant="outline" onClick={() => setIsGlobalExportModalOpen(true)}>
                       <Download />
@@ -530,20 +531,9 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                       <div className="flex items-center gap-4 mt-2 mb-2">
                         <p className="text-lg text-muted-foreground">
                           {t("Project Spend")}{" "}
-                          {dateValue.from && dateValue.to && (
-                            <>
-                              {t("{value0} - {value1}", { value0: (dateValue.from.toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year:
-                                  dateValue.from.getFullYear() !== dateValue.to.getFullYear() ? "numeric" : undefined,
-                              })), value1: (dateValue.to.toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })) })}
-                            </>
-                          )}
+                          {dateValue.from && dateValue.to
+                            ? formatClosedRangeLabel(dateValue.from, dateValue.to)
+                            : null}
                         </p>
                       </div>
 
@@ -720,13 +710,21 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                                 return (
                                   <div className="bg-card p-4 shadow-lg rounded-lg border">
                                     <p className="font-bold">{data.date}</p>
-                                    <p className="text-info">Spend: ${formatNumberWithCommas(data.metrics.spend, 2)}</p>
-                                    <p className="text-muted-foreground">Requests: {data.metrics.api_requests}</p>
-                                    <p className="text-muted-foreground">
-                                      Successful: {data.metrics.successful_requests}
+                                    <p className="text-info">
+                                      {t("Spend")}: ${formatNumberWithCommas(data.metrics.spend, 2)}
                                     </p>
-                                    <p className="text-muted-foreground">Failed: {data.metrics.failed_requests}</p>
-                                    <p className="text-muted-foreground">Tokens: {data.metrics.total_tokens}</p>
+                                    <p className="text-muted-foreground">
+                                      {t("Requests")}: {data.metrics.api_requests}
+                                    </p>
+                                    <p className="text-muted-foreground">
+                                      {t("Successful")}: {data.metrics.successful_requests}
+                                    </p>
+                                    <p className="text-muted-foreground">
+                                      {t("Failed")}: {data.metrics.failed_requests}
+                                    </p>
+                                    <p className="text-muted-foreground">
+                                      {t("Tokens")}: {data.metrics.total_tokens}
+                                    </p>
                                   </div>
                                 );
                               }}
@@ -756,6 +754,10 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                             </CardTitle>
                           </CardHeader>
                           <CardContent>
+                            <CustomLegend
+                              categories={["successful_requests", "failed_requests"]}
+                              colors={["green", "red"]}
+                            />
                             <BarChart
                               data={gatewayRequestsByRoute}
                               index="route"
@@ -763,6 +765,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                               colors={["green", "red"]}
                               stack={true}
                               yAxisWidth={100}
+                              showLegend={false}
                               valueFormatter={(value: number) => value.toLocaleString()}
                             />
                           </CardContent>
@@ -830,18 +833,20 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                                       return (
                                         <div className="bg-card p-4 shadow-lg rounded-lg border">
                                           <p className="font-bold">{data.key}</p>
-                                          <p className="text-info">Spend: ${formatNumberWithCommas(data.spend, 2)}</p>
+                                          <p className="text-info">
+                                            {t("Spend")}: ${formatNumberWithCommas(data.spend, 2)}
+                                          </p>
                                           <p className="text-muted-foreground">
                                             {t("Total Requests: {value0}", { value0: (data.requests.toLocaleString()) })}
                                           </p>
                                           <p className="text-success">
-                                            Successful: {data.successful_requests.toLocaleString()}
+                                            {t("Successful")}: {data.successful_requests.toLocaleString()}
                                           </p>
                                           <p className="text-destructive">
-                                            Failed: {data.failed_requests.toLocaleString()}
+                                            {t("Failed")}: {data.failed_requests.toLocaleString()}
                                           </p>
                                           <p className="text-muted-foreground">
-                                            Tokens: {data.tokens.toLocaleString()}
+                                            {t("Tokens")}: {data.tokens.toLocaleString()}
                                           </p>
                                         </div>
                                       );
@@ -989,6 +994,8 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
         </div>
       </div>
 
+      <UsageAIChatPanel open={isAiChatOpen} onClose={() => setIsAiChatOpen(false)} accessToken={accessToken} />
+
       {/* CloudZero Export Modal */}
       <CloudZeroExportModal
         isOpen={isCloudZeroModalOpen}
@@ -1010,8 +1017,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
         customTitle="Export Usage Data"
       />
 
-      {/* AI Chat Panel */}
-      <UsageAIChatPanel open={isAiChatOpen} onClose={() => setIsAiChatOpen(false)} accessToken={accessToken} />
     </div>
   );
 };

@@ -6,13 +6,19 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceLive sync.Once
 
 // State gives the router the in-process concurrency plus cooldown, latency, and usage from Redis.
 // Without Redis only Busy is filled. Cooldown and latency stay empty, and the router uses its local strategy.
 func State(h Host) router.State {
+	logTraceOnceLive.Do(func() { logx.Trace("enter dataplane.State") })
+
 	st := router.State{Busy: h.BusyMap()}
 	redis := h.Redis()
 	if redis == nil {
@@ -123,6 +129,7 @@ func Flush(h Host) {
 			Prompt: row.Prompt, Completion: row.Completion, Spend: logged,
 			Start: start, End: end, CacheHit: row.CacheHit, Status: row.Status,
 			TeamID: row.TeamID, UserID: row.UserID, OrgID: row.OrgID,
+			Messages: row.Messages, Response: row.Response, ProxyRequest: row.ProxyRequest,
 		})
 	}
 	if len(rows) == 0 {

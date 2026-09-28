@@ -4,7 +4,17 @@ import { cn } from "@/lib/cva.config";
 import type { DateRangePickerValue } from "./date_picker_types";
 import moment from "moment";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { t } from "@/i18n";
+import { getActiveLocale, t } from "@/i18n";
+
+// Closed trigger label. zh-CN must not use moment's "D MMM" order, which renders "21 9月".
+export function formatClosedRangeLabel(from: Date, to: Date, locale: string = getActiveLocale()): string {
+  const pattern = locale === "zh-CN" ? "M月D日 HH:mm" : "MMM D, HH:mm";
+  const previous = moment.locale();
+  moment.locale(locale === "zh-CN" ? "zh-cn" : "en");
+  const text = `${moment(from).format(pattern)} - ${moment(to).format(pattern)}`;
+  moment.locale(previous);
+  return text;
+}
 
 interface AdvancedDatePickerProps {
   value: DateRangePickerValue;
@@ -161,13 +171,8 @@ const AdvancedDatePicker: React.FC<AdvancedDatePickerProps> = ({
   }, [isOpen]);
 
   const formatDisplayRange = useCallback((from: Date | undefined, to: Date | undefined) => {
-    if (!from || !to) return "Select date range";
-
-    const formatDateTime = (date: Date) => {
-      return moment(date).format("D MMM, HH:mm");
-    };
-
-    return `${formatDateTime(from)} - ${formatDateTime(to)}`;
+    if (!from || !to) return t("Select date range");
+    return formatClosedRangeLabel(from, to);
   }, []);
 
   // CRITICAL: Apply the same date adjustment logic as the original component

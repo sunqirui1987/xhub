@@ -10,6 +10,8 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 type publicModelRow struct {
@@ -29,8 +31,12 @@ type publicModelRow struct {
 	SupportedOpenAIParams        []string `json:"supported_openai_params"`
 }
 
+var logTraceOncePublicHub sync.Once
+
 // publicModelHub returns the paged list the signed-out model hub reads. The rows come from the built-in price map.
 func (s *Server) publicModelHub(w http.ResponseWriter, r *http.Request) {
+	logTraceOncePublicHub.Do(func() { logx.Trace("enter gateway.publicModelHub") })
+
 	rows := filterPublicModels(r)
 	page, size := pageQuery(r, 50, 100)
 	total := len(rows)

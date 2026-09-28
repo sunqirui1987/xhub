@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -15,4 +16,9 @@ type Host interface {
 	DB() *store.Store
 	// ModelList returns a copy of the current model table. Benchmarks use it only to find strategy-router names. They do not invent scores when there is no sample.
 	ModelList() []config.ModelEntry
+}
+
+// traceModule records that usage routes are being mounted.
+func traceModule(name string) {
+	logx.Trace("mount %s", name)
 }

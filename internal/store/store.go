@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 	"xorm.io/xorm"
 )
 
@@ -49,8 +51,12 @@ type Key struct {
 	CreatedAt      time.Time
 }
 
+var logTraceOnceStore sync.Once
+
 // Open opens storage. sqlite, file:, and an empty URL are rejected. Only postgres:// and postgresql:// are accepted.
 func Open(databaseURL string) (*Store, error) {
+	logTraceOnceStore.Do(func() { logx.Trace("enter store.Open") })
+
 	u := strings.ToLower(strings.TrimSpace(databaseURL))
 	switch {
 	case u == "", strings.HasPrefix(u, "sqlite:"), strings.HasPrefix(u, "file:"):

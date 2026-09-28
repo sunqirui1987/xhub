@@ -3,8 +3,10 @@ package catalog
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Route is one method and path from routes.json. The path may contain {param}.
@@ -13,10 +15,14 @@ type Route struct {
 	P string `json:"p"`
 }
 
+var logTraceOnceClassify sync.Once
+
 // Load reads the embedded routes.json. A parse failure returns nil, and the caller treats that as an empty catalog.
 func Load() []Route {
+	logTraceOnceClassify.Do(func() { logx.Trace("enter catalog.Load") })
+
 	var r []Route
-	_ = json.Unmarshal(routesJSON, &r)
+	_ = json.Unmarshal(Embedded("routes", routesJSON), &r)
 	return r
 }
 
@@ -117,11 +123,11 @@ func PublicBody(path string) any {
 	p := strings.ToLower(path)
 	switch {
 	case strings.Contains(p, "/public/agents/fields"):
-		return unmarshalOr(agentFieldsJSON, []any{})
+		return unmarshalOr(Embedded("agent_fields", agentFieldsJSON), []any{})
 	case strings.Contains(p, "/public/providers/fields"):
-		return unmarshalOr(providerFieldsJSON, []any{})
+		return unmarshalOr(Embedded("provider_fields", providerFieldsJSON), []any{})
 	case strings.Contains(p, "/public/autorouter_presets"):
-		return unmarshalOr(autoRouterPresetsJSON, map[string]any{"presets": []any{}})
+		return unmarshalOr(Embedded("autorouter_presets", autoRouterPresetsJSON), map[string]any{"presets": []any{}})
 	case strings.Contains(p, "blog_posts"):
 		return map[string]any{"posts": []any{}}
 	case strings.Contains(p, "scorer_defaults"):

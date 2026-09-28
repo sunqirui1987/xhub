@@ -10,6 +10,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import ReactQueryProvider from "@/contexts/ReactQueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { I18nProvider } from "@/i18n/I18nProvider";
+import { LocaleBoundary } from "@/i18n/LocaleBoundary";
 import { LOCALE_COOKIE, parseLocale, translate } from "@/i18n/translate";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -40,8 +41,12 @@ export default async function RootLayout({
           <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
             <NuqsAdapter>
               <ReactQueryProvider>
-                <AuthProvider>{children}</AuthProvider>
-                <Toaster />
+                <AuthProvider>
+                  <LocaleBoundary>
+                    {children}
+                    <Toaster />
+                  </LocaleBoundary>
+                </AuthProvider>
               </ReactQueryProvider>
             </NuqsAdapter>
           </ThemeProvider>

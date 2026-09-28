@@ -10,10 +10,16 @@ import (
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceLimits sync.Once
 
 // dataPlane hands this inference call to dataplane.Serve. Identity, budget, and the upstream loop are not reimplemented in this wrapper.
 func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
+	logTraceOnceLimits.Do(func() { logx.Trace("enter gateway.dataPlane") })
+	logx.Debug("process %s %s step=dataplane op=%s", r.Method, r.URL.Path, op)
 	dataplane.Serve(s, w, r, op)
 }
 

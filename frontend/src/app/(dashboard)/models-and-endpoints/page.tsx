@@ -24,8 +24,15 @@ import ModelRetrySettingsPanel from "@/app/(dashboard)/models-and-endpoints/pane
 import ModelGroupAliasPanel from "@/app/(dashboard)/models-and-endpoints/panels/ModelGroupAliasPanel";
 import AccessGroupBudgetsPanel from "@/app/(dashboard)/models-and-endpoints/panels/AccessGroupBudgetsPanel";
 import PriceDataPanel from "@/app/(dashboard)/models-and-endpoints/panels/PriceDataPanel";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/cva.config";
 import { t } from "@/i18n";
 
 type ModelTabSlug =
@@ -102,15 +109,13 @@ export default function ModelsAndEndpointsPage() {
   );
   const isAdmin = all_admin_roles.includes(userRole);
 
-  const visibleSlugs = useMemo<Array<"" | ModelTabSlug>>(
+  // The model list and saved providers are the only peer tabs. Write-only tools stay
+  // behind the same role gates, but they open from More tools instead of that strip.
+  const showProviders = isAdmin && !isViewOnly;
+  const secondarySlugs = useMemo<ModelTabSlug[]>(
     () => [
-      "",
-      ...(canCreate ? (["add"] as const) : []),
       ...(isAdmin || canCreate ? (["auto-routers"] as const) : []),
-      // effectiveSessionRole reports proxy_admin_viewer as "Admin", so isAdmin alone would show a
-      // viewer these write-only panels; only the raw-role isViewOnly separates them. Health Status
-      // stays: it is the bucket's one read view, and viewers keep read parity with admins.
-      ...(isAdmin && !isViewOnly ? (["llm-credentials", "pass-through"] as const) : []),
+      ...(isAdmin && !isViewOnly ? (["pass-through"] as const) : []),
       ...(isAdmin ? (["health"] as const) : []),
       ...(isAdmin && !isViewOnly
         ? (["retry-settings", "model-group-alias", "access-group-budgets", "price-data"] as const)
@@ -185,21 +190,45 @@ export default function ModelsAndEndpointsPage() {
             modelAccessGroups={availableModelAccessGroups}
           />
         ) : (
-          <Tabs value={activeKey} onValueChange={setActiveKey}>
+          <Tabs
+            value={activeKey === "llm-credentials" || activeKey === BASE_TAB_KEY ? activeKey : ""}
+            onValueChange={setActiveKey}
+          >
             <div className="flex min-w-0 flex-nowrap items-center gap-3 border-b">
               <div className="no-scrollbar scroll-fade-e -mb-1.5 min-w-0 flex-1 overflow-x-auto pb-1.5">
                 <TabsList variant="line" className="w-max justify-start">
-                  {visibleSlugs.map((slug) => {
-                    const key = slug || BASE_TAB_KEY;
-                    return (
-                      <TabsTrigger key={key} value={key} className="flex-none">
-                        {tabLabel(slug)}
-                      </TabsTrigger>
-                    );
-                  })}
+                  <TabsTrigger value={BASE_TAB_KEY} className="flex-none">
+                    {allModelsLabel}
+                  </TabsTrigger>
+                  {showProviders && (
+                    <TabsTrigger value="llm-credentials" className="flex-none">
+                      {t("pages.models.llmCredentials")}
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
               <div className="flex shrink-0 items-center gap-2 pb-1">
+                {canCreate && (
+                  <Button size="sm" onClick={() => setActiveKey("add")}>
+                    {t("pages.models.add")}
+                  </Button>
+                )}
+                {secondarySlugs.length > 0 && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    >
+                      {t("pages.models.moreTools")}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      {secondarySlugs.map((slug) => (
+                        <DropdownMenuItem key={slug} onClick={() => setActiveKey(slug)}>
+                          {tabLabel(slug)}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 {lastRefreshed && (
                   <span className="text-xs text-muted-foreground">{t("Last Refreshed: {lastRefreshed}", { lastRefreshed })}</span>
                 )}
@@ -208,15 +237,15 @@ export default function ModelsAndEndpointsPage() {
                 </Button>
               </div>
             </div>
-            {visibleSlugs.map((slug) => {
-              const key = slug || BASE_TAB_KEY;
-              return (
-                <TabsContent key={key} value={key} className="pt-4">
-                  {renderPanel(key)}
-                </TabsContent>
-              );
-            })}
           </Tabs>
+          <div className="pt-4">
+            {activeKey !== BASE_TAB_KEY && activeKey !== "llm-credentials" && (
+              <Button variant="ghost" size="sm" className="mb-3" onClick={() => setActiveKey(BASE_TAB_KEY)}>
+                {t("pages.models.backToModels")}
+              </Button>
+            )}
+            {renderPanel(activeKey)}
+          </div>
         )}
       </div>
     </div>

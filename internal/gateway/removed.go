@@ -1,8 +1,17 @@
 package gateway
 
-import "strings"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"strings"
+	"sync"
+)
 
-func IsRemovedColumn(path string) bool { return removedColumnRoute(path) }
+var logTraceOnceRemoved sync.Once
+
+func IsRemovedColumn(path string) bool {
+	logTraceOnceRemoved.Do(func() { logx.Trace("enter gateway.IsRemovedColumn") })
+	return removedColumnRoute(path)
+}
 
 func removedColumnRoute(path string) bool {
 	p := strings.ToLower(strings.TrimSuffix(path, "/"))

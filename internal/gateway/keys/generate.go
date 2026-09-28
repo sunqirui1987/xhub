@@ -9,11 +9,17 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceGenerate sync.Once
 
 // Generate creates a virtual key and returns the plaintext only in this response.
 func Generate(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceGenerate.Do(func() { logx.Trace("enter keys.Generate") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
 		return

@@ -13,11 +13,17 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceHandlers sync.Once
 
 // EmptyOK writes an empty success JSON body. It is used for a list that has no data yet or for an accepted no-op.
 func EmptyOK(s Gate, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceHandlers.Do(func() { logx.Trace("enter identity.EmptyOK") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 }

@@ -4,6 +4,8 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 	"time"
 )
 
@@ -23,8 +25,12 @@ type Entity struct {
 	CreatedAt  time.Time
 }
 
+var logTraceOnceIdentity sync.Once
+
 // Extra parses the extra JSON. An empty or corrupt value returns an empty map, not nil, so the caller can range over it.
 func (e Entity) Extra() map[string]any {
+	logTraceOnceIdentity.Do(func() { logx.Trace("enter store.Extra") })
+
 	m := map[string]any{}
 	if e.ExtraJSON != "" {
 		_ = json.Unmarshal([]byte(e.ExtraJSON), &m)

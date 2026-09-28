@@ -8,10 +8,16 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceBenchmarks sync.Once
 
 // Benchmarks returns auto-router benchmark rows. With no sample every count is 0, and latency and hit rate are not invented.
 func Benchmarks(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceBenchmarks.Do(func() { logx.Trace("enter usage.Benchmarks") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireManage(w, r) == nil {
 		return

@@ -8,13 +8,20 @@ import (
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 // These names stay for this package. The implementation is in catalog so route matching and the price map are not piled into HTTP registration.
 type catRoute = catalog.Route
 
+var logTraceOnceCatalog sync.Once
+
 // loadCatalog reads the embedded routes.json. A parse failure returns an empty slice.
-func loadCatalog() []catRoute { return catalog.Load() }
+func loadCatalog() []catRoute {
+	logTraceOnceCatalog.Do(func() { logx.Trace("enter gateway.loadCatalog") })
+	return catalog.Load()
+}
 
 // authClassOf decides whether a path needs a management identity, an inference identity, or either.
 func authClassOf(path string) authClass { return authClass(catalog.AuthOf(path)) }
@@ -73,18 +80,28 @@ var (
 // It is not mounted on "/". An unregistered path gets a 404 from the engine NoRoute.
 func (s *Server) serveFamilyRoute(w http.ResponseWriter, r *http.Request) {
 	if !s.matchCatalog(r.Method, r.URL.Path) {
+		logx.Debug("process %s %s step=catalog match=false", r.Method, r.URL.Path)
 		httpx.WriteError(w, 404, "not_found", "Not Found")
 		return
 	}
 	httpx.SetCallID(w, httpx.CallID())
 	if isPublicPath(r.Method, r.URL.Path) {
+		logx.Debug("process %s %s step=catalog class=public", r.Method, r.URL.Path)
 		httpx.WriteJSON(w, 200, publicListBody(r.URL.Path))
 		return
 	}
+	class := "manage"
 	switch authClassOf(r.URL.Path) {
 	case authData:
-		family.ServeDataPlane(s, w, r)
+		class = "data"
 	case authMixed:
+		class = "mixed"
+	}
+	logx.Debug("process %s %s step=catalog class=%s", r.Method, r.URL.Path, class)
+	switch class {
+	case "data":
+		family.ServeDataPlane(s, w, r)
+	case "mixed":
 		family.ServeMixed(s, w, r)
 	default:
 		family.ServeMgmt(s, w, r)

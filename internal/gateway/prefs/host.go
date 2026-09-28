@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -15,4 +16,9 @@ type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store
 	Config() *config.Config
+}
+
+// traceModule records that settings routes are being mounted.
+func traceModule(name string) {
+	logx.Trace("mount %s", name)
 }

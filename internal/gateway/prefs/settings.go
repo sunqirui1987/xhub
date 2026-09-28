@@ -5,11 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceSettings sync.Once
 
 // Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here.
 // A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
 func Base(s Host) map[string]any {
+	logTraceOnceSettings.Do(func() { logx.Trace("enter prefs.Base") })
+
 	rs := map[string]any{
 		"routing_strategy":         s.Config().RouterSettings.RoutingStrategy,
 		"routing_strategy_args":    map[string]any{},

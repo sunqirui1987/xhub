@@ -1,13 +1,21 @@
 // Package llm converts chat messages between the OpenAI shape and a provider shape.
 package llm
 
-import "strings"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"strings"
+	"sync"
+)
+
+var logTraceOnceMessage sync.Once
 
 // IsWildcardModel reports whether a model name is a wildcard route.
 //
 // LiteLLM uses * in a name to mean a group of models, so openai/* can catch openai/gpt-4o.
 // An exact name wins. The router looks at these patterns only when no exact deployment exists.
 func IsWildcardModel(model string) bool {
+	logTraceOnceMessage.Do(func() { logx.Trace("enter llm.IsWildcardModel") })
+
 	return strings.Contains(model, "*")
 }
 

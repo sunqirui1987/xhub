@@ -4,11 +4,17 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceGemini sync.Once
 
 // decodeGemini turns generateContent candidates into the public chat, message, or embedding response.
 // Usage fields are renamed from usageMetadata camel case to OpenAI prompt, completion, and total.
 func decodeGemini(op, alias string, raw []byte) []byte {
+	logTraceOnceGemini.Do(func() { logx.Trace("enter llm.decodeGemini") })
+
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
 		return raw

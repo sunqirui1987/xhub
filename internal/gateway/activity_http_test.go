@@ -23,7 +23,7 @@ func TestDailyActivityHTTPReadsInsertedSpendLog(t *testing.T) {
 	}
 	id := "activity-probe-" + time.Now().UTC().Format("20060102150405.000000000")
 	start := time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC)
-	if err := st.InsertSpendLog(id, "chat", "activity-probe-model", "probe-hash", 11, 7, sql.NullFloat64{Float64: 3.5, Valid: true}, start, start.Add(time.Second), false, "success"); err != nil {
+	if err := st.InsertSpendLog(id, "chat", "activity-probe-model", "probe-hash", 11, 7, sql.NullFloat64{Float64: 3.5, Valid: true}, start, start.Add(time.Second), false, "success", "admin"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

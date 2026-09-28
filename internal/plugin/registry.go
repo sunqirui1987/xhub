@@ -3,6 +3,7 @@ package plugin
 
 import (
 	"fmt"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"sync"
 )
 
@@ -35,8 +36,12 @@ type Registry struct {
 	by    map[string]Extension
 }
 
+var logTraceOnceRegistry sync.Once
+
 // New returns an empty registry. Run allows the call when nothing is registered.
 func New() *Registry {
+	logTraceOnceRegistry.Do(func() { logx.Trace("enter plugin.New") })
+
 	return &Registry{by: map[string]Extension{}}
 }
 

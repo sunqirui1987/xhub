@@ -10,6 +10,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"github.com/sunqirui1987/xhub/internal/store"
@@ -36,6 +37,8 @@ type Host interface {
 	NoteLatency(id string, ms float64)
 	SetChatHeaders(w http.ResponseWriter, p *auth.Principal, alias, apiBase string)
 	RecordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string)
+	// RememberExchange keeps this call's headers and bodies until spend is recorded. The gateway stores them only when prompt storage is on.
+	RememberExchange(callID string, r *http.Request, reqBody, respBody []byte)
 	WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck string, hit []byte, start time.Time)
 	WriteChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string)
 	EnforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool
@@ -43,4 +46,9 @@ type Host interface {
 	Models() []config.ModelEntry
 	BusyMap() map[string]int
 	SpendStore() *store.Store
+}
+
+// traceHop records that one inference call entered the data plane. The path is enough; the body and the key stay out.
+func traceHop(path string) {
+	logx.Trace("dataplane hop path=%s", path)
 }

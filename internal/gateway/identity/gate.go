@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -17,4 +18,9 @@ type Gate interface {
 	KeyJSON(k store.Key, plain string, includePlain bool) map[string]any
 	ModelList() []config.ModelEntry
 	ModelPublic(m config.ModelEntry) map[string]any
+}
+
+// traceModule records that identity routes are being mounted.
+func traceModule(name string) {
+	logx.Trace("mount %s", name)
 }

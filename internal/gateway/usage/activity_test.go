@@ -64,6 +64,10 @@ func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
 	if _, ok := breakdown["providers"].(map[string]any)["openai"]; !ok {
 		t.Fatalf("provider: %#v", breakdown["providers"])
 	}
+	endpoint := breakdown["endpoints"].(map[string]any)["/chat/completions"].(map[string]any)
+	if endpoint["metrics"].(map[string]any)["api_requests"] != 2 {
+		t.Fatalf("endpoint requests: %#v", endpoint["metrics"])
+	}
 	key := breakdown["api_keys"].(map[string]any)["hash-a"].(map[string]any)
 	if key["metadata"].(map[string]any)["key_alias"] != "desk" {
 		t.Fatalf("alias: %#v", key["metadata"])
@@ -76,6 +80,43 @@ func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
 	other := selectActivity(logs, keys, "2026-09-01", "2026-09-30", "0", "someone-else", "")
 	if len(other) != 0 {
 		t.Fatalf("other user: got %d", len(other))
+	}
+
+	scopedToAdmin := selectActivity([]map[string]any{{
+		"request_id": "owned", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
+		"user_id": "admin", "prompt_tokens": 3, "completion_tokens": 1, "spend": 0.2,
+		"startTime": "2026-09-27T13:30:00Z", "status": "success",
+	}}, nil, "2026-09-27", "2026-09-27", "0", "admin", "")
+	if len(scopedToAdmin) != 1 {
+		t.Fatalf("user filter kept %d rows for admin", len(scopedToAdmin))
+	}
+	scopedAway := selectActivity([]map[string]any{{
+		"request_id": "owned", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
+		"user_id": "admin", "prompt_tokens": 3, "completion_tokens": 1, "spend": 0.2,
+		"startTime": "2026-09-27T13:30:00Z", "status": "success",
+	}}, nil, "2026-09-27", "2026-09-27", "0", "someone-else", "")
+	if len(scopedAway) != 0 {
+		t.Fatalf("user filter leaked %d rows", len(scopedAway))
+	}
+
+	bare := selectActivity([]map[string]any{{
+		"request_id": "bare", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
+		"prompt_tokens": 10, "completion_tokens": 4, "spend": 0.5,
+		"startTime": "2026-09-27T13:30:00Z", "status": "success",
+	}}, nil, "2026-09-27", "2026-09-27", "0", "", "")
+	bareBody := dailyActivityResponse(bare, 1, true)
+	if bareBody["metadata"].(map[string]any)["total_spend"].(float64) <= 0 {
+		t.Fatal("empty api key spend was dropped")
+	}
+	bareDay := bareBody["results"].([]any)[0].(map[string]any)["breakdown"].(map[string]any)
+	if bareDay["models"].(map[string]any)["gpt-6-astra"] == nil {
+		t.Fatal("model bucket missing")
+	}
+	if len(bareDay["api_keys"].(map[string]any)) == 0 {
+		t.Fatal("empty api key did not land in a key bucket")
+	}
+	if bareDay["endpoints"].(map[string]any)["/chat/completions"] == nil {
+		t.Fatal("endpoint bucket missing")
 	}
 
 	gateway := gatewayActivityBody(rows)

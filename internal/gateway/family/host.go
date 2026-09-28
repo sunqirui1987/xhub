@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -21,4 +22,9 @@ type Host interface {
 	DataPlane(w http.ResponseWriter, r *http.Request, op string)
 	// EnforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false.
 	EnforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool
+}
+
+// traceModule records that catalog resource routes are being mounted.
+func traceModule(name string) {
+	logx.Trace("mount %s", name)
 }

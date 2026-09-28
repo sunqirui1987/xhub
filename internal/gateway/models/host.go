@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -23,4 +24,9 @@ type Host interface {
 	Resolve(r *http.Request) (*auth.Principal, error)
 	// AllowLLM reports whether this identity may call inference. The master key may not unless allow_master_key_llm is on.
 	AllowLLM(p *auth.Principal) bool
+}
+
+// traceModule records that model routes are being mounted.
+func traceModule(name string) {
+	logx.Trace("mount %s", name)
 }

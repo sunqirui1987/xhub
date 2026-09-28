@@ -5,10 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceMount sync.Once
 
 // Module is the model list and the management writes. The process implements Host.
 func Module(h Host) httpx.Module {
+	logTraceOnceMount.Do(func() { logx.Trace("enter models.Module") })
+
+	traceModule("models")
 	return httpx.Bind("models", func(reg httpx.Registrar) {
 		reg.Handle("GET /v1/models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })

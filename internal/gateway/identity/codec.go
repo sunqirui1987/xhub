@@ -5,14 +5,20 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
+var logTraceOnceCodec sync.Once
+
 // str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
+	logTraceOnceCodec.Do(func() { logx.Trace("enter identity.str") })
+
 	s, _ := v.(string)
 	return s
 }

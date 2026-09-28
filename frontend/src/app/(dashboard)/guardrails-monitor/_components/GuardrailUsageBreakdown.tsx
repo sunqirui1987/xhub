@@ -62,22 +62,22 @@ const UnpricedUnitsCell = ({ unpriced }: { unpriced: number }) =>
   );
 
 const unpricedColumn = <TRow extends { unpriced: number }>(): ColumnDef<TRow> => ({
-  header: t("Unpriced Units"),
+  header: () => t("Unpriced Units"),
   accessorKey: "unpriced",
   meta: { numeric: true },
   cell: ({ row }) => <UnpricedUnitsCell unpriced={row.original.unpriced} />,
 });
 
 const counterColumns: ColumnDef<CounterRow>[] = [
-  { header: t("Counter"), accessorKey: "counter", cell: ({ row }) => counterLabel(row.original.counter) },
+  { header: () => t("Counter"), accessorKey: "counter", cell: ({ row }) => counterLabel(row.original.counter) },
   {
-    header: t("Units"),
+    header: () => t("Units"),
     accessorKey: "units",
     meta: { numeric: true },
     cell: ({ row }) => row.original.units.toLocaleString(),
   },
   {
-    header: t("Cost"),
+    header: () => t("Cost"),
     accessorKey: "cost",
     meta: { numeric: true },
     cell: ({ row }) => <MoneyCell value={row.original.cost} emptyText="—" showZero />,
@@ -97,13 +97,13 @@ const groupColumns = (label: string, emptyLabel: string): ColumnDef<GroupRow>[] 
       ),
   },
   {
-    header: t("Units"),
+    header: () => t("Units"),
     accessorKey: "units",
     meta: { numeric: true },
     cell: ({ row }) => row.original.units.toLocaleString(),
   },
   {
-    header: t("Cost"),
+    header: () => t("Cost"),
     accessorKey: "cost",
     meta: { numeric: true },
     cell: ({ row }) => <MoneyCell value={row.original.cost} emptyText="—" showZero />,

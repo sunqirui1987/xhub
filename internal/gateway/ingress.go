@@ -9,13 +9,19 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceIngress sync.Once
 
 // handle mounts one "METHOD /path" pattern on Gin.
 //
 // A {param} in the path becomes :pN per segment. The same position keeps the same parameter name so Gin wildcards do not conflict.
 // A method and pattern that is already mounted is skipped, so a dedicated handler registered first is not overwritten by the catalog.
 func (s *Server) handle(pattern string, h http.HandlerFunc) {
+	logTraceOnceIngress.Do(func() { logx.Trace("enter gateway.handle") })
+
 	method, path, ok := strings.Cut(pattern, " ")
 	if !ok || h == nil || removedColumnRoute(path) {
 		return
@@ -36,6 +42,7 @@ func (s *Server) handle(pattern string, h http.HandlerFunc) {
 				c.Request.SetPathValue(name, v)
 			}
 		}
+		logx.Debug("process %s %s step=route pattern=%s", c.Request.Method, c.Request.URL.Path, pattern)
 		h(c.Writer, c.Request)
 	})
 }
@@ -278,21 +285,25 @@ func passthroughAPIBase(provider string) string {
 
 // chat is the chat-completions entry and forwards to the data-plane chat operation.
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	logx.Debug("process %s %s step=gateway op=chat", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "chat")
 }
 
 // embeddings is the embeddings entry and forwards to the data-plane embeddings operation.
 func (s *Server) embeddings(w http.ResponseWriter, r *http.Request) {
+	logx.Debug("process %s %s step=gateway op=embeddings", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "embeddings")
 }
 
 // completions is the text-completions entry and forwards to the data plane.
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
+	logx.Debug("process %s %s step=gateway op=completions", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "completions")
 }
 
 // messages is the Anthropic Messages entry and forwards to the data plane.
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
+	logx.Debug("process %s %s step=gateway op=messages", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "messages")
 }
 

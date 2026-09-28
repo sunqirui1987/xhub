@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
 
 // Principal is the caller of one request. Kind is master, virtual, or session. The master key cannot call inference unless configuration allows it.
@@ -23,8 +25,12 @@ type Principal struct {
 	Hash     string
 }
 
+var logTraceOnceAuth sync.Once
+
 // stripBearer removes a Bearer prefix and surrounding space. Without that prefix it returns the trimmed text.
 func stripBearer(v string) string {
+	logTraceOnceAuth.Do(func() { logx.Trace("enter auth.stripBearer") })
+
 	v = strings.TrimSpace(v)
 	if len(v) >= 7 && strings.EqualFold(v[:7], "bearer ") {
 		return strings.TrimSpace(v[7:])

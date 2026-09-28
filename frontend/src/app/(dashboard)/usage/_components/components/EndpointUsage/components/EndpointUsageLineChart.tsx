@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { LineChart, type ChartColor } from "@/components/shared/charts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DailyData } from "@/components/UsagePage/types";
-import { t } from "@/i18n";
+import { getActiveLocale, t } from "@/i18n";
 
 interface EndpointUsageLineChartProps {
   dailyData?: { results: DailyData[] };
@@ -21,8 +21,8 @@ function transformDailyDataToChart(dailyData: DailyData[]): Array<Record<string,
   });
 
   dailyData.forEach((day) => {
-    const date = new Date(day.date);
-    const dateStr = date.toLocaleDateString("en-US", {
+    const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(day.date) ? `${day.date}T00:00:00` : day.date);
+    const dateStr = date.toLocaleDateString(getActiveLocale(), {
       month: "short",
       day: "numeric",
     });

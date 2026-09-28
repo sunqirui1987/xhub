@@ -6,11 +6,17 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 	"xorm.io/builder"
 )
 
+var logTraceOnceKeys sync.Once
+
 // tokenTo turns a key into a table row. An empty model list and a zero time are filled with defaults.
 func tokenTo(k Key) tokenRow {
+	logTraceOnceKeys.Do(func() { logx.Trace("enter store.tokenTo") })
+
 	if k.ModelsJSON == "" {
 		k.ModelsJSON = "[]"
 	}
@@ -142,7 +148,19 @@ func (s *Store) SetSpend(hash string, spend float64) error {
 }
 
 // InsertSpendLog writes one request spend log. An empty status is recorded as success.
-func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status string) error {
+func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status, userID string) error {
+	if status == "" {
+		status = "success"
+	}
+	return s.insertSpendLog(requestID, callType, model, apiKeyHash, prompt, completion, spend, start, end, cacheHit, status, userID, "", "", "")
+}
+
+// InsertSpendLogWithPrompt writes one spend log plus the request and response saved for the log drawer.
+func (s *Store) InsertSpendLogWithPrompt(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status, userID, messages, response, proxy string) error {
+	return s.insertSpendLog(requestID, callType, model, apiKeyHash, prompt, completion, spend, start, end, cacheHit, status, userID, messages, response, proxy)
+}
+
+func (s *Store) insertSpendLog(requestID, callType, model, apiKeyHash string, prompt, completion int, spend sql.NullFloat64, start, end time.Time, cacheHit bool, status, userID, messages, response, proxy string) error {
 	if status == "" {
 		status = "success"
 	}
@@ -150,7 +168,8 @@ func (s *Store) InsertSpendLog(requestID, callType, model, apiKeyHash string, pr
 		RequestID: requestID, CallType: callType, Model: model, APIKey: apiKeyHash,
 		Prompt: prompt, Completion: completion, Spend: fptr(spend),
 		StartTime: start.UTC().Format(time.RFC3339Nano), EndTime: end.UTC().Format(time.RFC3339Nano),
-		CacheHit: boolInt(cacheHit), Status: status,
+		CacheHit: boolInt(cacheHit), Status: status, UserID: userID,
+		MessagesJSON: messages, ResponseJSON: response, ProxyRequestJSON: proxy,
 	}
 	_, err := s.Engine.Insert(&row)
 	s.bust(new(spendRow))
@@ -169,7 +188,7 @@ func (s *Store) ListSpendLogs() ([]map[string]any, error) {
 			"request_id": r.RequestID, "call_type": r.CallType, "model": r.Model, "api_key": r.APIKey,
 			"prompt_tokens": r.Prompt, "completion_tokens": r.Completion, "total_tokens": r.Prompt + r.Completion,
 			"startTime": r.StartTime, "endTime": r.EndTime, "cache_hit": r.CacheHit != 0,
-			"status": nz(r.Status, "success"), "session_total_count": 1,
+			"status": nz(r.Status, "success"), "session_total_count": 1, "user_id": r.UserID,
 		}
 		if r.Spend != nil {
 			row["spend"] = *r.Spend
@@ -181,9 +200,30 @@ func (s *Store) ListSpendLogs() ([]map[string]any, error) {
 				row["request_duration_ms"] = endAt.Sub(startAt).Milliseconds()
 			}
 		}
+		if msg := jsonValue(r.MessagesJSON); msg != nil {
+			row["messages"] = msg
+		}
+		if resp := jsonValue(r.ResponseJSON); resp != nil {
+			row["response"] = resp
+		}
+		if proxy := jsonValue(r.ProxyRequestJSON); proxy != nil {
+			row["proxy_server_request"] = proxy
+		}
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// jsonValue parses a stored JSON document. An empty string stays absent so older logs do not look like empty objects.
+func jsonValue(raw string) any {
+	if raw == "" {
+		return nil
+	}
+	var v any
+	if json.Unmarshal([]byte(raw), &v) != nil {
+		return raw
+	}
+	return v
 }
 
 // UpsertProxyModel updates a proxy model by id, or inserts it when the row is missing.
@@ -218,6 +258,7 @@ func (s *Store) UpsertProxyModel(m ProxyModel) error {
 
 // ListProxyModels lists every proxy model.
 func (s *Store) ListProxyModels() ([]ProxyModel, error) {
+	traceProxyModels()
 	var rows []proxyModelRow
 	if err := s.Engine.Find(&rows); err != nil {
 		return nil, err

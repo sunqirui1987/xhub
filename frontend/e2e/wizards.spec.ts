@@ -19,8 +19,8 @@ test.describe("write wizards create then list", () => {
       await loginAdmin(page);
       await stableGoto(page, "/models-and-endpoints");
     }
-    await page.getByRole("tab", { name: t("pages.models.add") }).click();
-    const add = page.getByRole("tabpanel", { name: t("pages.models.add") });
+    await page.getByRole("button", { name: t("pages.models.add") }).click();
+    const add = page.locator("form").filter({ has: page.getByTestId("add-model-btn") });
     const provider = add.getByRole("combobox", { name: t("Provider") });
     await provider.click();
     await provider.fill("OpenAI");

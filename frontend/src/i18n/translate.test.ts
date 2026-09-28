@@ -68,6 +68,8 @@ function keysUsedInProduction(): string[] {
 
 describe("translate", () => {
   it("returns Simplified Chinese for the default locale", () => {
+    expect(translate("zh-CN", "Search users by email…")).not.toBe("搜索用户由邮箱…");
+    expect(translate("zh-CN", "Search users by email…")).toMatch(/邮箱/);
     expect(translate("zh-CN", "login.title")).toBe("登录");
     expect(translate("zh-CN", "nav.apiKeys")).toBe("虚拟密钥");
     expect(translate("zh-CN", "nav.groups.gateway")).toBe("AI 网关");

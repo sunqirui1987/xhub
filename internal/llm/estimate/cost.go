@@ -1,7 +1,11 @@
 // Package estimate reads the input and output unit price of one call. A missing model is not priced as zero.
 package estimate
 
-import "strings"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"strings"
+	"sync"
+)
 
 // Margin is one markup rule.
 //
@@ -16,12 +20,16 @@ type Margin struct {
 	IsPercent   bool
 }
 
+var logTraceOnceCost sync.Once
+
 // ApplyDiscount looks up a rate for the provider in the discount map and subtracts it from the base cost.
 //
 // Discount-map keys are custom_llm_provider. The value is a fraction: 0.05 means subtract 5 percent.
 // A missing provider, or an empty provider name, leaves the cost unchanged.
 // The results are the discounted cost, the discount fraction, and the discount amount.
 func ApplyDiscount(baseCost float64, provider string, discounts map[string]float64) (final, percent, amount float64) {
+	logTraceOnceCost.Do(func() { logx.Trace("enter estimate.ApplyDiscount") })
+
 	if provider != "" {
 		if rate, ok := discounts[provider]; ok {
 			amount = baseCost * rate

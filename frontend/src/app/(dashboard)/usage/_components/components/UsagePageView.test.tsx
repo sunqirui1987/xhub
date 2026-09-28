@@ -111,7 +111,10 @@ vi.mock("@/components/shared/advanced_date_picker", async () => {
       ),
     );
   AdvancedDatePicker.displayName = "AdvancedDatePicker";
-  return { default: AdvancedDatePicker };
+  return {
+    default: AdvancedDatePicker,
+    formatClosedRangeLabel: (from: Date, to: Date) => `${from.toISOString()} - ${to.toISOString()}`,
+  };
 });
 
 vi.mock("@/components/user_agent_activity", () => ({

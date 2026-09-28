@@ -10,12 +10,18 @@ import (
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 const defaultUIOrigin = "http://127.0.0.1:3000"
 
+var logTraceOnceUiProxy sync.Once
+
 // Origin is the dashboard address. XHUB_UI_ORIGIN wins, otherwise it is http://127.0.0.1:3000. A trailing slash is removed.
 func Origin() string {
+	logTraceOnceUiProxy.Do(func() { logx.Trace("enter gateway.Origin") })
+
 	if v := strings.TrimSpace(os.Getenv("XHUB_UI_ORIGIN")); v != "" {
 		return strings.TrimRight(v, "/")
 	}

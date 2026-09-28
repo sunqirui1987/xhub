@@ -7,10 +7,16 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceThemeSettings sync.Once
 
 // uiTheme reads and writes one theme settings object. The save and logo routes share that object with the settings read.
 func (s *Server) uiTheme(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceThemeSettings.Do(func() { logx.Trace("enter gateway.uiTheme") })
+
 	if s.requireManage(w, r) == nil {
 		return
 	}

@@ -1,7 +1,11 @@
 // Package llm decides which URL paths may stay on the gateway process. Management routes are not part of that list.
 package llm
 
-import "net/http"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"net/http"
+	"sync"
+)
 
 // These lists come from gateway/routes/allowlist.py.
 // The gateway process keeps the model data plane: chat, embeddings, audio, files, batches, fine-tuning, responses,
@@ -116,8 +120,12 @@ var mountPaths = map[string]struct{}{
 	"/metrics": {},
 }
 
+var logTraceOnceAllow sync.Once
+
 // PathPrefixes returns the prefixes in the allowlist.py order so a test can compare them with the Python source.
 func PathPrefixes() []string {
+	logTraceOnceAllow.Do(func() { logx.Trace("enter llm.PathPrefixes") })
+
 	out := make([]string, len(pathPrefixes))
 	copy(out, pathPrefixes)
 	return out

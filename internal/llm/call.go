@@ -4,8 +4,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Operation names match the data-plane op. An empty string and "chat" both mean chat completions.
@@ -25,12 +27,16 @@ const (
 	OpVideos             = "videos"
 )
 
+var logTraceOnceCall sync.Once
+
 // Headers is the minimum header set sent upstream.
 //
 // The key is placed only in Authorization and not in the body, so a log or a cache key does not expand it again.
 // Content-Type is fixed as JSON. Multipart requests such as audio should later use the matching provider,
 // and this function does not guess that shape.
 func Headers(apiKey string) http.Header {
+	logTraceOnceCall.Do(func() { logx.Trace("enter llm.Headers") })
+
 	h := make(http.Header)
 	h.Set("Authorization", "Bearer "+apiKey)
 	h.Set("Content-Type", "application/json")

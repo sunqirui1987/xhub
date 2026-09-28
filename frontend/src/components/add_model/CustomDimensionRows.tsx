@@ -9,6 +9,8 @@ import { Slider } from "@/components/ui/slider";
 import type { CustomDimensionRow } from "./custom_dimensions";
 import { t } from "@/i18n";
 
+const DIMENSION_FIELDS = ["keywords", "patterns"] as const;
+
 const SCORING_MODES = [
   { value: "binary", label: t("Binary") },
   { value: "match_count", label: t("Match count") },
@@ -82,7 +84,7 @@ export default function CustomDimensionRows({ rows, disabled, onChange, onWeight
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {(["keywords", "patterns"] as const).map((field) => (
+            {DIMENSION_FIELDS.map((field) => (
               <div key={field} className="min-w-0 space-y-1">
                 <Label htmlFor={`${row.id}-${field}`}>
                   {t("{value0}(one per line)", { value0: (field === "keywords" ? "Keywords" : t("Regex patterns")) })}</Label>

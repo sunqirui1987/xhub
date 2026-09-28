@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 // Client is the hot-path Redis client. A request only updates it. Spend logs are written to PostgreSQL by the timed flush.
@@ -19,8 +21,12 @@ type Client struct {
 	rdb *redis.Client
 }
 
+var logTraceOnceRedis sync.Once
+
 // Open parses the Redis URL and pings it. On failure it closes the client and returns the error.
 func Open(url string) (*Client, error) {
+	logTraceOnceRedis.Do(func() { logx.Trace("enter live.Open") })
+
 	opt, err := redis.ParseURL(url)
 	if err != nil {
 		return nil, err
@@ -297,21 +303,24 @@ func (c *Client) TakeSpend() map[string]float64 {
 
 // SpendLog is one spend log waiting in the queue to be written to PostgreSQL.
 type SpendLog struct {
-	RequestID  string  `json:"request_id"`
-	CallType   string  `json:"call_type"`
-	Model      string  `json:"model"`
-	APIKey     string  `json:"api_key"`
-	Prompt     int     `json:"prompt_tokens"`
-	Completion int     `json:"completion_tokens"`
-	Spend      float64 `json:"spend"`
-	SpendValid bool    `json:"spend_valid"`
-	Start      string  `json:"start"`
-	End        string  `json:"end"`
-	CacheHit   bool    `json:"cache_hit"`
-	Status     string  `json:"status"`
-	TeamID     string  `json:"team_id"`
-	UserID     string  `json:"user_id"`
-	OrgID      string  `json:"org_id"`
+	RequestID    string  `json:"request_id"`
+	CallType     string  `json:"call_type"`
+	Model        string  `json:"model"`
+	APIKey       string  `json:"api_key"`
+	Prompt       int     `json:"prompt_tokens"`
+	Completion   int     `json:"completion_tokens"`
+	Spend        float64 `json:"spend"`
+	SpendValid   bool    `json:"spend_valid"`
+	Start        string  `json:"start"`
+	End          string  `json:"end"`
+	CacheHit     bool    `json:"cache_hit"`
+	Status       string  `json:"status"`
+	TeamID       string  `json:"team_id"`
+	UserID       string  `json:"user_id"`
+	OrgID        string  `json:"org_id"`
+	Messages     string  `json:"messages,omitempty"`
+	Response     string  `json:"response,omitempty"`
+	ProxyRequest string  `json:"proxy_server_request,omitempty"`
 }
 
 // EnqueueLog pushes a log onto the Redis list. The request path does only this step.

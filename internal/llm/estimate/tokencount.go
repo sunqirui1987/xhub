@@ -4,13 +4,19 @@ package estimate
 import (
 	"strings"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/tiktoken-go/tokenizer"
+	"sync"
 )
+
+var logTraceOnceTokencount sync.Once
 
 // CountTokens matches the local LiteLLM token_counter for OpenAI chat models.
 // A prompt is counted as plain text. Each message adds tokens_per_message, then the role and content, and the total adds 3 reply-priming tokens.
 // The returned tokenizer type is the openai_tokenizer selected by LiteLLM.
 func CountTokens(model, prompt string, messages []map[string]any) (int, string, error) {
+	logTraceOnceTokencount.Do(func() { logx.Trace("enter estimate.CountTokens") })
+
 	codec, err := tokenizer.ForModel(tokenizer.Model(model))
 	if err != nil {
 		codec, err = tokenizer.Get(tokenizer.Cl100kBase)

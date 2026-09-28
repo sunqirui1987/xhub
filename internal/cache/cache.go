@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 // cacheEntries is the fixed LRU capacity. The hashicorp LRU keeps the map from growing without a limit, and the library is safe for concurrent use.
@@ -16,8 +18,12 @@ type DualCache struct {
 	c *lru.Cache[string, []byte]
 }
 
+var logTraceOnceCache sync.Once
+
 // New builds an in-process cache of 8192 entries. It panics if that capacity is illegal, which would be a programming error.
 func New() *DualCache {
+	logTraceOnceCache.Do(func() { logx.Trace("enter cache.New") })
+
 	c, err := lru.New[string, []byte](cacheEntries)
 	if err != nil {
 		// New fails only when the capacity is below 1. The constant is not that case, so a failure means the library was called incorrectly.

@@ -68,6 +68,7 @@ func (h *logHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, s
 }
 func (h *logHost) RecordSpend(http.ResponseWriter, *auth.Principal, string, string, map[string]any, time.Time, bool, string) {
 }
+func (h *logHost) RememberExchange(string, *http.Request, []byte, []byte) {}
 func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, []byte, time.Time) {
 }
 func (h *logHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {
@@ -140,7 +141,9 @@ func TestServeLogsBuildSkipAndTerminalAuth(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	line := buf.String()
+	t.Log(line)
 	for _, want := range []string{
+		"trace dataplane hop path=/v1/chat/completions",
 		"error upstream encode path=/v1/chat/completions provider=base_llm model=some-model err=provider_not_implemented",
 		"error dataplane path=/v1/chat/completions status=401 code=authentication_error provider=base_llm",
 	} {
@@ -166,7 +169,12 @@ func TestServeLogsMissingCredential(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	line := buf.String()
+	t.Log(line)
 	for _, want := range []string{
+		"trace dataplane hop path=/v1/chat/completions",
+		"trace process path=/v1/chat/completions step=start op=chat",
+		"debug process path=/v1/chat/completions step=auth ok=true kind=session",
+		"debug process path=/v1/chat/completions step=route model=gpt-4o-mini deployments=1 stream=false",
 		"debug skip deployment path=/v1/chat/completions provider=openai model=gpt-4o-mini reason=missing api key or api base",
 		"error dataplane path=/v1/chat/completions status=401 code=authentication_error provider=openai",
 	} {
@@ -194,7 +202,8 @@ func TestServeLogsUnimplementedProvider(t *testing.T) {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	line := buf.String()
-	if !strings.Contains(line, "error dataplane path=/v1/chat/completions status=400 code=provider_not_implemented") {
+	t.Log(line)
+	if !strings.Contains(line, "trace dataplane hop path=/v1/chat/completions") || !strings.Contains(line, "error dataplane path=/v1/chat/completions status=400 code=provider_not_implemented") {
 		t.Fatalf("log missing provider_not_implemented: %s", line)
 	}
 	assertNoSecrets(t, line)
@@ -227,7 +236,9 @@ func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 		}
 		line := buf.String()
+		t.Log(line)
 		for _, want := range []string{
+			"trace dataplane hop path=/v1/chat/completions",
 			"error upstream stream path=/v1/chat/completions provider=openai model=gpt-4o-mini",
 			"err=empty upstream stream",
 			"error dataplane path=/v1/chat/completions status=502 code=upstream_error detail=empty upstream stream",
@@ -258,7 +269,9 @@ func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 		}
 		line := buf.String()
+		t.Log(line)
 		for _, want := range []string{
+			"trace dataplane hop path=/v1/chat/completions",
 			"error upstream status path=/v1/chat/completions provider=openai model=gpt-4o-mini",
 			"status=500",
 			"error dataplane path=/v1/chat/completions status=502 code=upstream_error detail=upstream 500",
@@ -272,4 +285,80 @@ func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
 		}
 		assertNoSecrets(t, line)
 	})
+}
+
+func TestServeLogsCacheHitAndStreamMetrics(t *testing.T) {
+	raw := []byte(`{"messages":[{"content":"hi","role":"user"}],"model":"gpt-4o-mini"}`)
+	h := newLogHost(chatConfig(config.ModelEntry{
+		ModelName: "gpt-4o-mini",
+		LiteLLMParams: map[string]any{
+			"model":    "openai/gpt-4o-mini",
+			"api_key":  "test-key",
+			"api_base": "https://api.openai.com/v1",
+		},
+	}), nil)
+	h.cache.Set(cache.Key("", "chat", "gpt-4o-mini", string(raw)), []byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+
+	buf := captureLog(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	Serve(h, rec, req, "chat")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cache status %d body %s", rec.Code, rec.Body.String())
+	}
+	line := buf.String()
+	t.Log(line)
+	for _, want := range []string{
+		"step=cache hit=true model=gpt-4o-mini",
+		"step=metrics model=gpt-4o-mini cache_hit=true",
+		"ttft=",
+		"prompt_tokens=11",
+		"completion_tokens=7",
+		"total_tokens=18",
+		"tokens_per_s=0.00",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("cache log missing %q\n%s", want, line)
+		}
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":4,\"total_tokens\":9}}\n\n")
+	}))
+	defer upstream.Close()
+	streamHost := newLogHost(chatConfig(config.ModelEntry{
+		ModelName: "gpt-4o-mini",
+		LiteLLMParams: map[string]any{
+			"model":    "openai/gpt-4o-mini",
+			"api_key":  "test-key",
+			"api_base": upstream.URL + "/v1",
+		},
+	}), upstream.Client())
+	streamRaw := []byte(`{"messages":[{"content":"hi","role":"user"}],"model":"gpt-4o-mini","stream":true}`)
+	buf = captureLog(t)
+	sreq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(streamRaw))
+	srec := httptest.NewRecorder()
+	Serve(streamHost, srec, sreq, "chat")
+	if srec.Code != http.StatusOK {
+		t.Fatalf("stream status %d body %s", srec.Code, srec.Body.String())
+	}
+	sline := buf.String()
+	t.Log(sline)
+	for _, want := range []string{
+		"step=metrics model=gpt-4o-mini cache_hit=false",
+		"ttft=",
+		"prompt_tokens=5",
+		"completion_tokens=4",
+		"total_tokens=9",
+		"tokens_per_s=",
+	} {
+		if !strings.Contains(sline, want) {
+			t.Fatalf("stream log missing %q\n%s", want, sline)
+		}
+	}
+	if strings.Contains(sline, "http://") || strings.Contains(sline, "https://") {
+		t.Fatalf("log included a full upstream url: %s", sline)
+	}
 }

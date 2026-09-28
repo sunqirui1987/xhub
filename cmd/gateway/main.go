@@ -2,10 +2,11 @@ package main
 
 import (
 	"flag"
-	"log"
+	"os"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/gateway"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -16,16 +17,19 @@ func main() {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logx.Error("config: %v", err)
+		os.Exit(1)
 	}
 	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
 	if err != nil {
-		log.Fatalf("store: %v", err)
+		logx.Error("store: %v", err)
+		os.Exit(1)
 	}
 	srv := gateway.New(cfg, st)
-	log.Printf("xhub listening on %s", *addr)
+	logx.Info("xhub listening on %s", *addr)
 	// 数据面和管理面都挂在这一个 Gin 引擎上。只留数据面会让 /key/generate 变成 404。
 	if err := srv.Run(*addr); err != nil {
-		log.Fatal(err)
+		logx.Error("gateway: %v", err)
+		os.Exit(1)
 	}
 }

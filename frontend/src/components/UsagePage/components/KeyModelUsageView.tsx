@@ -18,30 +18,30 @@ const COMPACT_TABLE_ROW_HEIGHT = 32;
 
 const columns: ColumnDef<TopModelData>[] = [
   {
-    header: t("Model"),
+    header: () => t("Model"),
     accessorKey: "model",
     cell: ({ row }) => row.original.model || "-",
   },
   {
-    header: t("Spend (USD)"),
+    header: () => t("Spend (USD)"),
     accessorKey: "spend",
     meta: { numeric: true },
     cell: ({ row }) => <MoneyCell value={row.original.spend} decimals={2} />,
   },
   {
-    header: t("Successful"),
+    header: () => t("Successful"),
     accessorKey: "successful_requests",
     meta: { numeric: true },
     cell: ({ row }) => <span className="text-success">{row.original.successful_requests?.toLocaleString() || 0}</span>,
   },
   {
-    header: t("Failed"),
+    header: () => t("Failed"),
     accessorKey: "failed_requests",
     meta: { numeric: true },
     cell: ({ row }) => <span className="text-destructive">{row.original.failed_requests?.toLocaleString() || 0}</span>,
   },
   {
-    header: t("Tokens"),
+    header: () => t("Tokens"),
     accessorKey: "tokens",
     meta: { numeric: true },
     cell: ({ row }) => row.original.tokens?.toLocaleString() || 0,

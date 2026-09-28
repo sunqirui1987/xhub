@@ -7,12 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 	"xorm.io/builder"
 	"xorm.io/xorm/schemas"
 )
 
+var logTraceOnceCrud sync.Once
+
 // nz returns the fallback when the string is empty.
 func nz(s, fallback string) string {
+	logTraceOnceCrud.Do(func() { logx.Trace("enter store.nz") })
+
 	if s == "" {
 		return fallback
 	}

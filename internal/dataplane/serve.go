@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -18,6 +17,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
+	"github.com/sunqirui1987/xhub/internal/logx"
 
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
@@ -33,44 +33,55 @@ var (
 // After those checks, and before the cache and the upstream, extensions run in registration order. A refusal writes an error and returns.
 // An empty extension registry allows the call. A retry count below 1 is treated as one attempt. An empty api_base uses the provider default when one exists. A deployment that still has no key or no base is skipped.
 func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
+	traceHop(r.URL.Path)
+	logx.Trace("process path=%s step=start op=%s", r.URL.Path, op)
 	start := time.Now()
 	callID := httpx.CallID()
 	httpx.SetCallID(w, callID)
 	p := h.RequireLLMPrincipal(w, r)
 	if p == nil {
+		logx.Debug("process path=%s step=auth ok=false", r.URL.Path)
 		return
 	}
+	logx.Debug("process path=%s step=auth ok=true kind=%s", r.URL.Path, p.Kind)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
+		logx.Error("process path=%s step=body reason=invalid body", r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid body")
 		return
 	}
 	var body map[string]any
 	if err := json.Unmarshal(raw, &body); err != nil {
+		logx.Error("process path=%s step=body reason=invalid json", r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid json")
 		return
 	}
 	alias, _ := body["model"].(string)
 	if alias == "" {
+		logx.Error("process path=%s step=model reason=required", r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model required")
 		return
 	}
 	est := EstimateTokens(body)
 	if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
+		logx.Debug("process path=%s step=limits refused model=%s", r.URL.Path, alias)
 		return
 	}
 	if op == "chat" || op == "" {
 		if blocked, msg := h.GuardrailBlocks(body); blocked {
+			logx.Error("process path=%s step=guardrail blocked model=%s", r.URL.Path, alias)
 			httpx.WriteTypedError(w, r.URL.Path, 400, "guardrail_failed", msg)
 			return
 		}
 	}
 	done, reason := h.HookEngine().Begin(p.Key)
 	if reason == "budget" {
+		logx.Error("process path=%s step=budget model=%s", r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 429, "budget_exceeded", "Budget has been exceeded")
 		return
 	}
 	if reason == "parallel" {
+		logx.Error("process path=%s step=parallel model=%s", r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 429, "rate_limit", "max_parallel_requests exceeded")
 		return
 	}
@@ -78,6 +89,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		defer done()
 	}
 	if refused := applyExtensions(w, r, h, op, alias); refused {
+		logx.Debug("process path=%s step=extension refused model=%s", r.URL.Path, alias)
 		return
 	}
 
@@ -90,18 +102,26 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	stream, _ := body["stream"].(bool)
 	if !stream {
 		if hit, ok := h.ResponseCache().Get(ck); ok {
+			elapsed := time.Since(start)
+			pt, ct := bodyUsage(hit)
+			logx.Debug("process path=%s step=cache hit=true model=%s", r.URL.Path, alias)
+			logMetrics(r.URL.Path, alias, true, pt, ct, elapsed, elapsed)
+			h.RememberExchange(callID, r, raw, hit)
 			h.WriteCacheHit(w, p, callID, alias, ck, hit, start)
 			return
 		}
+		logx.Trace("process path=%s step=cache hit=false model=%s", r.URL.Path, alias)
 	}
 
 	if err := router.ValidateStrategy(cfg.RouterSettings.RoutingStrategy); err != nil {
+		logx.Error("process path=%s step=strategy model=%s", r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
 		return
 	}
 	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
+	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
-		log.Printf("error model %s %s model not found: %s", r.Method, r.URL.Path, alias)
+		logx.Error("model %s %s model not found: %s", r.Method, r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
 	}
@@ -137,6 +157,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		provider = strings.ToLower(strings.TrimSpace(provider))
 		lastProvider = provider
 		if _, ok := llm.ProtocolGroup(provider); !ok || provider == "" {
+			logx.Debug("process path=%s step=skip provider=%s model=%s reason=unimplemented", r.URL.Path, provider, realModel)
 			continue
 		}
 		apiBase := trimBase(dep.ParamString("api_base", ""))
@@ -148,13 +169,13 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		apiKey := dep.ParamString("api_key", "")
 		if apiKey == "" || apiBase == "" {
 			missingCredential = true
-			log.Printf("debug skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, provider, realModel)
+			logx.Debug("skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, provider, realModel)
 			continue
 		}
 		if usedDefaultBase {
-			log.Printf("debug api_base empty path=%s provider=%s model=%s using default host", r.URL.Path, provider, realModel)
+			logx.Debug("api_base empty path=%s provider=%s model=%s using default host", r.URL.Path, provider, realModel)
 		} else {
-			log.Printf("debug upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
+			logx.Debug("upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
 		}
 		did := dep.ParamString("api_base", "") + "|" + upstreamModel
 		built, err := llm.Build(r.Context(), llm.Request{
@@ -164,18 +185,19 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		})
 		if err != nil {
 			lastErr = err
-			log.Printf("error upstream encode path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
+			logx.Error("upstream encode path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
 			continue
 		}
 
 		for try := 0; try < attempts; try++ {
 			triedHTTP = true
+			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, provider, realModel, baseHost(apiBase))
 			h.IncBusy(did)
 			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, built.URL, bytes.NewReader(built.Body))
 			if err != nil {
 				h.DecBusy(did)
 				lastErr = err
-				log.Printf("error upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
+				logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
 				continue
 			}
 			for key, values := range built.Header {
@@ -185,7 +207,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			if err != nil {
 				h.DecBusy(did)
 				lastErr = err
-				log.Printf("error upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
+				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
 				continue
 			}
 			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
@@ -195,29 +217,37 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 				h.NoteFailure(router.DeploymentID(rawDep))
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
-				log.Printf("error upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
+				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
 				continue
 			}
 
 			h.NoteLatency(router.DeploymentID(rawDep), float64(time.Since(start).Milliseconds()))
 			h.SetChatHeaders(w, p, alias, apiBase)
 			if stream {
-				wrote, usage := pipeStream(w, resp)
+				wrote, usage, ttft, streamed := pipeStream(w, resp, start)
 				h.DecBusy(did)
 				if wrote {
 					if usage == nil {
 						usage = map[string]any{"prompt_tokens": EstimateTokens(body), "completion_tokens": 0}
 					}
+					pt, ct := usageCounts(usage)
+					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
+					h.RememberExchange(callID, r, raw, streamed)
 					h.RecordSpend(w, p, callID, alias, usage, start, false, router.DeploymentID(rawDep))
 					return
 				}
 				lastErr = errEmptyUpstream
-				log.Printf("error upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
+				logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
 				continue
 			}
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			h.DecBusy(did)
+			elapsed := time.Since(start)
+			pt, ct := bodyUsage(respBody)
+			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, provider, realModel)
+			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
+			h.RememberExchange(callID, r, raw, respBody)
 			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, router.DeploymentID(rawDep))
 			return
 		}
@@ -225,25 +255,25 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 
 	if !triedHTTP {
 		if lastProvider != "" || missingCredential {
-			log.Printf("error dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
+			logx.Error("dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
 			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "Authentication Error, No api key passed in.")
 			return
 		}
-		log.Printf("error dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
+		logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
 		return
 	}
 	if lastStatus > 0 {
-		log.Printf("error dataplane path=%s status=502 code=upstream_error detail=upstream %d", r.URL.Path, lastStatus)
+		logx.Error("dataplane path=%s status=502 code=upstream_error detail=upstream %d", r.URL.Path, lastStatus)
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream "+strconv.Itoa(lastStatus))
 		return
 	}
 	if lastErr != nil {
-		log.Printf("error dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, safeErr(lastErr))
-		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", lastErr.Error())
+		logx.Error("dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, safeErr(lastErr))
+		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", safeErr(lastErr))
 		return
 	}
-	log.Printf("error dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
+	logx.Error("dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
 }
 
@@ -324,7 +354,7 @@ func safeErr(err error) string {
 		return ""
 	}
 	s := secretInErr.ReplaceAllString(err.Error(), "***")
-	return regexp.MustCompile(`https?://\S+`).ReplaceAllStringFunc(s, func(raw string) string {
+	return regexp.MustCompile(`https?://[^\s"'<>]+`).ReplaceAllStringFunc(s, func(raw string) string {
 		host := baseHost(strings.TrimRight(raw, `",)`))
 		if host == "" {
 			return "***"
@@ -350,18 +380,70 @@ func trimBase(s string) string {
 	return s
 }
 
+// logMetrics records cache hit, time to first token, and output tokens per second for one finished call.
+// A cache hit did not generate tokens, so tokens_per_s stays 0. ttft is the time until the first byte, or the whole call when the body arrives at once.
+func logMetrics(path, model string, cacheHit bool, pt, ct int, ttft, elapsed time.Duration) {
+	window := elapsed - ttft
+	if window <= 0 {
+		window = elapsed
+	}
+	perSec := 0.0
+	if !cacheHit {
+		perSec = tokensPerSecond(ct, window)
+	}
+	logx.Info("process path=%s step=metrics model=%s cache_hit=%t ttft=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d tokens_per_s=%.2f", path, model, cacheHit, ttft, pt, ct, pt+ct, perSec)
+}
+
+// tokensPerSecond is completion tokens divided by the generation window. A zero window or zero tokens is 0, not infinity.
+func tokensPerSecond(completion int, window time.Duration) float64 {
+	if completion <= 0 || window <= 0 {
+		return 0
+	}
+	return float64(completion) / window.Seconds()
+}
+
+// usageCounts reads prompt and completion counts. input_tokens and output_tokens are accepted when the OpenAI names are absent.
+func usageCounts(usage map[string]any) (pt, ct int) {
+	if usage == nil {
+		return 0, 0
+	}
+	pt = asInt(usage["prompt_tokens"])
+	if pt == 0 {
+		pt = asInt(usage["input_tokens"])
+	}
+	ct = asInt(usage["completion_tokens"])
+	if ct == 0 {
+		ct = asInt(usage["output_tokens"])
+	}
+	return pt, ct
+}
+
+// bodyUsage reads the usage object from a JSON response. A body without usage contributes zero tokens.
+func bodyUsage(raw []byte) (pt, ct int) {
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return 0, 0
+	}
+	usage, _ := doc["usage"].(map[string]any)
+	return usageCounts(usage)
+}
+
 // pipeStream copies upstream SSE to the client and tries to extract usage from the stream. It returns wrote false when no byte has been written yet.
-func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]any) {
+// ttft is the time from start until the first byte. It stays 0 when the body is empty.
+func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bool, map[string]any, time.Duration, []byte) {
 	defer resp.Body.Close()
 	buf := make([]byte, 4096)
 	flusher, _ := w.(http.Flusher)
 	wrote := false
+	var ttft time.Duration
 	var pending []byte
+	var captured []byte
 	var usage map[string]any
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			if !wrote {
+				ttft = time.Since(start)
 				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(resp.StatusCode)
 				wrote = true
@@ -370,6 +452,13 @@ func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]an
 			if flusher != nil {
 				flusher.Flush()
 			}
+			if len(captured) < 2<<20 {
+				take := n
+				if len(captured)+take > 2<<20 {
+					take = (2 << 20) - len(captured)
+				}
+				captured = append(captured, buf[:take]...)
+			}
 			pending = append(pending, buf[:n]...)
 			usage = streamUsage(pending, usage)
 			if len(pending) > 1<<20 {
@@ -377,7 +466,7 @@ func pipeStream(w http.ResponseWriter, resp *http.Response) (bool, map[string]an
 			}
 		}
 		if err != nil {
-			return wrote, usage
+			return wrote, usage, ttft, captured
 		}
 	}
 }

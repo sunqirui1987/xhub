@@ -9,10 +9,16 @@ import (
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/gateway/identity"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceReports sync.Once
 
 // LogsV2 is the paged spend-log API.
 func LogsV2(s identity.Gate, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceReports.Do(func() { logx.Trace("enter usage.LogsV2") })
+
 	identity.SpendLogs(s, w, r)
 }
 

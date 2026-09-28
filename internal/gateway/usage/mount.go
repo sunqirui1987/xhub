@@ -6,6 +6,8 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/gateway/identity"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 // mountHost serves both usage queries and paged spend logs. Paging is implemented in identity. This alias only requires those methods.
@@ -14,8 +16,13 @@ type mountHost interface {
 	identity.Gate
 }
 
+var logTraceOnceMount sync.Once
+
 // Module is spend reports, activity summaries, and health probes.
 func Module(h mountHost) httpx.Module {
+	logTraceOnceMount.Do(func() { logx.Trace("enter usage.Module") })
+
+	traceModule("usage")
 	return httpx.Bind("usage", func(reg httpx.Registrar) {
 		reg.Handle("GET /global/spend/teams", func(w http.ResponseWriter, r *http.Request) { SpendTeams(h, w, r) })
 		reg.Handle("GET /spend/logs/v2", func(w http.ResponseWriter, r *http.Request) { LogsV2(h, w, r) })
@@ -28,6 +35,7 @@ func Module(h mountHost) httpx.Module {
 		reg.Handle("GET /user/daily/activity", func(w http.ResponseWriter, r *http.Request) { UserDailyActivity(h, w, r) })
 		reg.Handle("GET /user/daily/activity/aggregated", func(w http.ResponseWriter, r *http.Request) { UserDailyActivityAggregated(h, w, r) })
 		reg.Handle("GET /gateway/daily/activity", func(w http.ResponseWriter, r *http.Request) { GatewayDailyActivity(h, w, r) })
+		reg.Handle("POST /usage/ai/chat", func(w http.ResponseWriter, r *http.Request) { UsageAIChat(h, w, r) })
 		reg.Handle("GET /global/activity", func(w http.ResponseWriter, r *http.Request) { Activity(h, w, r) })
 		reg.Handle("GET /global/activity/model", func(w http.ResponseWriter, r *http.Request) { ActivityModel(h, w, r) })
 		reg.Handle("GET /global/activity/cache_hits", func(w http.ResponseWriter, r *http.Request) { ActivityCacheHits(h, w, r) })

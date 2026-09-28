@@ -3,6 +3,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"os"
 	"regexp"
 	"strings"
@@ -22,8 +23,12 @@ var (
 
 var bedrockPricingOnly = regexp.MustCompile(`^bedrock/[a-zA-Z0-9_-]+/.+$`)
 
+var logTraceOnceModelCost sync.Once
+
 // init loads the embedded data this package depends on. A parse failure falls back to an empty map so the process can still start.
 func init() {
+	logTraceOnceModelCost.Do(func() { logx.Trace("enter catalog.init") })
+
 	loadModelCatalog()
 	modelCostMapLoadedAt = time.Now().UTC().Format(time.RFC3339)
 }
@@ -31,7 +36,7 @@ func init() {
 // loadModelCatalog parses the embedded price map and indexes model ids by provider. sample_spec is not added to a model set.
 func loadModelCatalog() {
 	var raw map[string]any
-	if err := json.Unmarshal(modelCostMapJSON, &raw); err != nil {
+	if err := json.Unmarshal(Embedded("model_cost", modelCostMapJSON), &raw); err != nil {
 		modelCostMapValue = map[string]any{}
 		modelsByProvider = map[string][]string{}
 		return

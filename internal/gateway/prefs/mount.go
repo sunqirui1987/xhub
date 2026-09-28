@@ -5,10 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceMount sync.Once
 
 // Module reads and writes router settings and general settings.
 func Module(h Host) httpx.Module {
+	logTraceOnceMount.Do(func() { logx.Trace("enter prefs.Module") })
+
+	traceModule("prefs")
 	return httpx.Bind("prefs", func(reg httpx.Registrar) {
 		reg.Handle("GET /router/settings", func(w http.ResponseWriter, r *http.Request) { Page(h, w, r) })
 		reg.Handle("GET /router/fields", func(w http.ResponseWriter, r *http.Request) { Page(h, w, r) })

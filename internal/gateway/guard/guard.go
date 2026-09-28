@@ -7,10 +7,16 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceGuard sync.Once
 
 // Apply is the management trial for a guardrail. It does not change storage.
 func Apply(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceGuard.Do(func() { logx.Trace("enter guard.Apply") })
+
 	if s.RequireManage(w, r) == nil {
 		return
 	}
@@ -90,6 +96,10 @@ func evalNamed(s Host, name, text string) (action, out string) {
 
 // listGuardrails returns the guardrails in the current config. An unconfigured proxy returns an empty slice.
 func listGuardrails(s Host) []map[string]any {
+	if s == nil || s.DB() == nil {
+		logx.Debug("guardrails skipped reason=no store")
+		return []map[string]any{}
+	}
 	var out []map[string]any
 	for _, kind := range []string{"guardrails", "guardrail"} {
 		list, _ := s.DB().ListKV(kind)

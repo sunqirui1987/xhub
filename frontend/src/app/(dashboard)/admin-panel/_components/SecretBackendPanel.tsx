@@ -7,17 +7,17 @@ import React, { useEffect, useState } from "react";
 
 type BackendKind = "hashicorp_vault" | "cyberark";
 
-const copy: Record<BackendKind, { title: string; description: string; empty: string; error: string; loading: string }> = {
+const copy: Record<BackendKind, { titleKey: string; descriptionKey: string; empty: string; error: string; loading: string }> = {
   hashicorp_vault: {
-    title: "Hashicorp Vault",
-    description: "Configure Hashicorp Vault to securely manage provider API keys and secrets for your LiteLLM deployment.",
+    titleKey: "Hashicorp Vault",
+    descriptionKey: "Configure Hashicorp Vault to securely manage provider API keys and secrets for your LiteLLM deployment.",
     empty: "No Hashicorp Vault Configuration Found",
     error: "Could not load Hashicorp Vault configuration",
     loading: "Loading Hashicorp Vault configuration",
   },
   cyberark: {
-    title: "CyberArk Conjur",
-    description: "Configure CyberArk Conjur to securely manage provider API keys and secrets for your LiteLLM deployment.",
+    titleKey: "CyberArk Conjur",
+    descriptionKey: "Configure CyberArk Conjur to securely manage provider API keys and secrets for your LiteLLM deployment.",
     empty: "No CyberArk Configuration Found",
     error: "Could not load CyberArk configuration",
     loading: "Loading CyberArk configuration",
@@ -60,8 +60,8 @@ const SecretBackendPanel: React.FC<{ kind: BackendKind }> = ({ kind }) => {
 
   return (
     <Card className="block p-6" data-testid={`secret-backend-${kind}`}>
-      <h3 className="mb-2 text-base font-semibold text-foreground">{t(text.title)}</h3>
-      <p className="mb-4 text-sm text-muted-foreground">{t(text.description)}</p>
+      <h3 className="mb-2 text-base font-semibold text-foreground">{t(text.titleKey)}</h3>
+      <p className="mb-4 text-sm text-muted-foreground">{t(text.descriptionKey)}</p>
       {phase === "loading" && <p className="text-sm text-muted-foreground">{t(text.loading)}</p>}
       {phase === "empty" && <p className="text-sm text-foreground">{t(text.empty)}</p>}
       {phase === "error" && <p className="text-sm text-foreground">{t(text.error)}</p>}

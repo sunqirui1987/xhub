@@ -1,7 +1,11 @@
 // Package httpx also carries the gateway module registration surface. A feature mounts through Registrar and does not import the process type.
 package httpx
 
-import "net/http"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"net/http"
+	"sync"
+)
 
 // Registrar is the route surface a module may use. Handle takes a pattern of "METHOD /path", for example "GET /health".
 type Registrar interface {
@@ -14,8 +18,12 @@ type Module interface {
 	Mount(reg Registrar)
 }
 
+var logTraceOnceModule sync.Once
+
 // Bind builds a module from a name and a mount function. An empty name stays empty, and the process refuses to register it.
 func Bind(name string, mount func(Registrar)) Module {
+	logTraceOnceModule.Do(func() { logx.Trace("enter httpx.Bind") })
+
 	return bound{name: name, mount: mount}
 }
 

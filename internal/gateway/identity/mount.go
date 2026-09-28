@@ -5,10 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceMount sync.Once
 
 // Module is users, teams, organizations, projects, and budgets. The process implements Gate. This package does not import gateway.
 func Module(h Gate) httpx.Module {
+	logTraceOnceMount.Do(func() { logx.Trace("enter identity.Module") })
+
+	traceModule("identity")
 	return httpx.Bind("identity", func(reg httpx.Registrar) {
 		reg.Handle("POST /user/new", func(w http.ResponseWriter, r *http.Request) { UserNew(h, w, r) })
 		reg.Handle("GET /user/list", func(w http.ResponseWriter, r *http.Request) { UserList(h, w, r) })

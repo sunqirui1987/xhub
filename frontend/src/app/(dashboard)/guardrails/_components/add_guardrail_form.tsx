@@ -173,6 +173,7 @@ const ALWAYS_ON_ITEMS = [
 const DEFAULT_MODES = ["pre_call", "during_call", "post_call", "logging_only"];
 
 const CALL_TYPE_ITEMS = [{ label: "/v1/realtime", value: "realtime" }];
+const VIOLATION_CHOICES = ["warn", "end_session"] as const;
 
 const applyValues = (form: UseFormReturn<GuardrailFormValues>, values: Record<string, unknown>) => {
   Object.entries(values).forEach(([name, value]) => form.setValue(name, value));
@@ -1027,7 +1028,7 @@ const AddGuardrailForm: React.FC<AddGuardrailFormProps> = ({ visible, onClose, a
                 <div>
                   <label className="mb-2 block text-sm font-medium text-foreground">{t("On violation")}</label>
                   <div className="space-y-2">
-                    {(["warn", "end_session"] as const).map((opt) => (
+                    {VIOLATION_CHOICES.map((opt) => (
                       <label key={opt} className="flex items-start gap-2 cursor-pointer">
                         <input
                           type="radio"

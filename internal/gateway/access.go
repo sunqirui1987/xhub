@@ -8,10 +8,16 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceAccess sync.Once
 
 // ssoGenerate issues a one-time SSO code. It requires a management identity.
 func (s *Server) ssoGenerate(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceAccess.Do(func() { logx.Trace("enter gateway.ssoGenerate") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	code := "sso-" + httpx.CallID()[:10]
 	s.mu.Lock()

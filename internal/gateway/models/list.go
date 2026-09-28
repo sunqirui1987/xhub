@@ -10,6 +10,8 @@ import (
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 // LiteLLM litellm.constants.DEFAULT_MODEL_CREATED_AT_TIME
@@ -21,8 +23,12 @@ const (
 	noDefaultModels = "no-default-models"
 )
 
+var logTraceOnceList sync.Once
+
 // List serves GET /v1/models. Either an inference identity or a management identity is accepted. scope accepts only empty or expand; any other value returns 400. created uses the fixed LiteLLM default time, not the time the model was stored.
 func List(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceList.Do(func() { logx.Trace("enter models.List") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	p, err := s.Resolve(r)
 	if err != nil || (!s.AllowLLM(p) && !p.CanManage()) {

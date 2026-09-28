@@ -11,7 +11,9 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"google.golang.org/genai"
+	"sync"
 )
 
 // Request is every input needed to decide one upstream call.
@@ -40,6 +42,8 @@ type Upstream struct {
 	Body   []byte
 }
 
+var logTraceOnceBuild sync.Once
+
 // Build builds the upstream request for the protocol group.
 //
 // OpenAI and providers that only change the base URL and a Bearer key use github.com/openai/openai-go.
@@ -47,6 +51,8 @@ type Upstream struct {
 // Azure still uses the OpenAI SDK JSON, but the URL is the deployment path and the auth header is api-key.
 // Anthropic, Cohere, and Bedrock each have their own path and body. They are not posted to /chat/completions.
 func Build(ctx context.Context, in Request) (Upstream, error) {
+	logTraceOnceBuild.Do(func() { logx.Trace("enter llm.Build") })
+
 	if ctx == nil {
 		ctx = context.Background()
 	}

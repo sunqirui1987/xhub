@@ -83,6 +83,7 @@ export const NAV_GROUPS = [
   t("nav.groups.gateway"),
   t("nav.groups.observability"),
   t("nav.groups.access"),
+  t("nav.groups.scope"),
   t("nav.groups.settings"),
 ];
 

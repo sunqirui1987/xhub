@@ -29,7 +29,7 @@ interface SpendByProviderProps {
 
 const columns: ColumnDef<ProviderSpendData>[] = [
   {
-    header: t("Provider"),
+    header: () => t("Provider"),
     accessorKey: "provider",
     cell: ({ row }) => (
       <div className="flex items-center space-x-2">
@@ -39,25 +39,25 @@ const columns: ColumnDef<ProviderSpendData>[] = [
     ),
   },
   {
-    header: t("Spend"),
+    header: () => t("Spend"),
     accessorKey: "spend",
     meta: { numeric: true },
     cell: ({ row }) => <MoneyCell value={row.original.spend} decimals={2} />,
   },
   {
-    header: t("Successful"),
+    header: () => t("Successful"),
     accessorKey: "successful_requests",
     meta: { numeric: true, className: "text-success" },
     cell: ({ row }) => row.original.successful_requests.toLocaleString(),
   },
   {
-    header: t("Failed"),
+    header: () => t("Failed"),
     accessorKey: "failed_requests",
     meta: { numeric: true, className: "text-destructive" },
     cell: ({ row }) => row.original.failed_requests.toLocaleString(),
   },
   {
-    header: t("Tokens"),
+    header: () => t("Tokens"),
     accessorKey: "tokens",
     meta: { numeric: true },
     cell: ({ row }) => row.original.tokens.toLocaleString(),
@@ -126,7 +126,7 @@ const SpendByProvider: React.FC<SpendByProviderProps> = ({ loading, isDateChangi
               columns={columns}
               data={filteredProviderSpend}
               getRowId={(row) => row.provider}
-              noDataMessage="No provider usage data"
+              noDataMessage={t("No provider usage data")}
               size="compact"
             />
           </div>

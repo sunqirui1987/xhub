@@ -4,6 +4,7 @@ package hooks
 import (
 	"sync"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -13,8 +14,12 @@ type Engine struct {
 	inflight map[string]int
 }
 
+var logTraceOnceHooks sync.Once
+
 // New returns an empty gate. In-flight calls are counted by key hash.
 func New() *Engine {
+	logTraceOnceHooks.Do(func() { logx.Trace("enter hooks.New") })
+
 	return &Engine{inflight: map[string]int{}}
 }
 

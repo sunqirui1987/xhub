@@ -556,6 +556,68 @@ describe("Sidebar (leftnav)", () => {
     expect(container.querySelector('a[href*="projects"]')).toHaveAttribute("title", "Projects");
   });
 
+  it("puts organizations, teams, and users first, and projects with access groups in the next group", () => {
+    const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
+    const text = container.textContent ?? "";
+    const at = (label: string) => {
+      const index = text.indexOf(label);
+      expect(index, label).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const access = at("ACCESS CONTROL");
+    const scope = at("PROJECTS & ACCESS");
+    const organizations = at("Organizations");
+    const teams = at("Teams");
+    const users = at("Internal Users");
+    const projects = at("Projects");
+    const accessGroups = at("Access Groups");
+    expect(access).toBeLessThan(organizations);
+    expect(organizations).toBeLessThan(teams);
+    expect(teams).toBeLessThan(users);
+    expect(users).toBeLessThan(scope);
+    expect(scope).toBeLessThan(projects);
+    expect(projects).toBeLessThan(accessGroups);
+
+    expect(getBreadcrumb("/ui/organizations")).toEqual({ section: "ACCESS CONTROL", title: "Organizations" });
+    expect(getBreadcrumb("/ui/teams")).toEqual({ section: "ACCESS CONTROL", title: "Teams" });
+    expect(getBreadcrumb("/ui/users")).toEqual({ section: "ACCESS CONTROL", title: "Internal Users" });
+    expect(getBreadcrumb("/ui/projects")).toEqual({ section: "PROJECTS & ACCESS", title: "Projects" });
+    expect(getBreadcrumb("/ui/access-groups")).toEqual({ section: "PROJECTS & ACCESS", title: "Access Groups" });
+  });
+
+  it("hides Projects when the projects UI is off and keeps Access Groups in the later group", () => {
+    const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI={false} />);
+    const text = container.textContent ?? "";
+    const at = (label: string) => text.indexOf(label);
+    expect(at("Organizations")).toBeGreaterThanOrEqual(0);
+    expect(at("Organizations")).toBeLessThan(at("Teams"));
+    expect(at("Teams")).toBeLessThan(at("Internal Users"));
+    expect(at("Internal Users")).toBeLessThan(at("PROJECTS & ACCESS"));
+    expect(at("PROJECTS & ACCESS")).toBeLessThan(at("Access Groups"));
+    expect(container.querySelector('a[href*="projects"]')).toBeNull();
+  });
+
+  it("renders the identity order and the second group heading in Simplified Chinese", () => {
+    setActiveLocale("zh-CN");
+    const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
+    const text = container.textContent ?? "";
+    const at = (label: string) => text.indexOf(label);
+    expect(at("组织")).toBeGreaterThanOrEqual(0);
+    expect(at("组织")).toBeLessThan(at("团队"));
+    expect(at("团队")).toBeLessThan(at("内部用户"));
+    expect(at("内部用户")).toBeLessThan(at("项目与访问组"));
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href") ?? "");
+    const projects = hrefs.findIndex((href) => href.includes("/projects"));
+    const accessGroups = hrefs.findIndex((href) => href.includes("/access-groups"));
+    const users = hrefs.findIndex((href) => href.includes("/users"));
+    expect(users).toBeGreaterThanOrEqual(0);
+    expect(projects).toBeGreaterThan(users);
+    expect(accessGroups).toBeGreaterThan(projects);
+    expect(text).not.toContain("PROJECTS & ACCESS");
+    expect(text).not.toContain("ACCESS CONTROL");
+    setActiveLocale("en");
+  });
+
   it("translates group labels to Simplified Chinese", () => {
     setActiveLocale("zh-CN");
     renderWithProviders(<Sidebar {...defaultProps} />);

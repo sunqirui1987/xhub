@@ -29,34 +29,34 @@ interface TeamUserSpendCardProps {
 }
 
 const columns: ColumnDef<TeamUserSpendRow>[] = [
-  { header: t("Team"), accessorFn: teamLabel, id: "team", cell: ({ row }) => teamLabel(row.original) },
-  { header: t("User"), accessorFn: userLabel, id: "user", cell: ({ row }) => userLabel(row.original) },
+  { header: () => t("Team"), accessorFn: teamLabel, id: "team", cell: ({ row }) => teamLabel(row.original) },
+  { header: () => t("User"), accessorFn: userLabel, id: "user", cell: ({ row }) => userLabel(row.original) },
   {
-    header: t("Spend"),
+    header: () => t("Spend"),
     accessorKey: "spend",
     meta: { numeric: true },
     cell: ({ row }) => <MoneyCell value={row.original.spend} decimals={4} />,
   },
   {
-    header: t("Requests"),
+    header: () => t("Requests"),
     accessorKey: "api_requests",
     meta: { numeric: true },
     cell: ({ row }) => row.original.api_requests.toLocaleString(),
   },
   {
-    header: t("Successful"),
+    header: () => t("Successful"),
     accessorKey: "successful_requests",
     meta: { numeric: true, className: "text-success" },
     cell: ({ row }) => row.original.successful_requests.toLocaleString(),
   },
   {
-    header: t("Failed"),
+    header: () => t("Failed"),
     accessorKey: "failed_requests",
     meta: { numeric: true, className: "text-destructive" },
     cell: ({ row }) => row.original.failed_requests.toLocaleString(),
   },
   {
-    header: t("Tokens"),
+    header: () => t("Tokens"),
     accessorKey: "total_tokens",
     meta: { numeric: true },
     cell: ({ row }) => row.original.total_tokens.toLocaleString(),

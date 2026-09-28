@@ -5,17 +5,26 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/catalog"
+	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/router"
+	"sync"
 )
+
+var logTraceOnceSpend sync.Once
 
 // incBusy increments the in-process concurrency count for a deployment.
 func (s *Server) incBusy(id string) {
+	logTraceOnceSpend.Do(func() { logx.Trace("enter gateway.incBusy") })
+
 	s.mu.Lock()
 	s.Busy[id]++
 	s.mu.Unlock()
@@ -75,8 +84,12 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	teamID, userID, orgID := "", "", ""
 	if p != nil {
 		hash = p.Hash
+		userID = p.UserID
 		if p.Key != nil {
-			teamID, userID, orgID = p.Key.TeamID, p.Key.UserID, p.Key.OrganizationID
+			teamID, orgID = p.Key.TeamID, p.Key.OrganizationID
+			if p.Key.UserID != "" {
+				userID = p.Key.UserID
+			}
 		}
 	}
 	end := time.Now()
@@ -85,11 +98,13 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		tokens = asInt(usage["total_tokens"])
 	}
 	s.noteUsage(depID, tokens)
+	ex := s.takeExchange(callID)
 	row := live.SpendLog{
 		RequestID: callID, CallType: "chat", Model: alias, APIKey: hash,
 		Prompt: pt, Completion: ct, Spend: logged.Float64, SpendValid: logged.Valid,
 		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
 		CacheHit: cacheHit, Status: "success", TeamID: teamID, UserID: userID, OrgID: orgID,
+		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
 	}
 	if s.Live != nil && s.Live.EnqueueLog(row) == nil {
 		if okc {
@@ -100,11 +115,11 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		}
 		return
 	}
-	s.persistSpend(hash, teamID, userID, orgID, callID, alias, pt, ct, logged, start, end, cacheHit, total, okc && hash != "")
+	s.persistSpend(hash, teamID, userID, orgID, callID, alias, pt, ct, logged, start, end, cacheHit, total, okc && hash != "", ex)
 }
 
 // persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
-func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string, pt, ct int, logged sql.NullFloat64, start, end time.Time, cacheHit bool, total float64, charge bool) {
+func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string, pt, ct int, logged sql.NullFloat64, start, end time.Time, cacheHit bool, total float64, charge bool, ex promptExchange) {
 	if charge {
 		_ = s.Store.AddSpend(hash, total)
 		if teamID != "" {
@@ -117,7 +132,144 @@ func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string,
 			_ = s.Store.AddOrgSpend(orgID, total)
 		}
 	}
-	_ = s.Store.InsertSpendLog(callID, "chat", alias, hash, pt, ct, logged, start, end, cacheHit, "success")
+	_ = s.Store.InsertSpendLogWithPrompt(callID, "chat", alias, hash, pt, ct, logged, start, end, cacheHit, "success", userID, ex.messages, ex.response, ex.proxy)
+}
+
+// promptExchange is the request and response saved on one spend log. Empty strings mean prompt storage was off.
+type promptExchange struct {
+	messages string
+	response string
+	proxy    string
+}
+
+// promptsEnabled reports whether new spend logs should keep the request and response.
+// The YAML flag wins when it is set. A database override can turn the same key on later.
+func (s *Server) promptsEnabled() bool {
+	if s == nil || s.Cfg == nil {
+		return false
+	}
+	if s.Cfg.GeneralSettings.StorePromptsInSpendLogs {
+		return true
+	}
+	if s.Store == nil {
+		return false
+	}
+	switch v := prefs.MergedGeneral(s)["store_prompts_in_spend_logs"].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	default:
+		return false
+	}
+}
+
+// rememberExchange keeps one call's headers and bodies until recordSpend writes the row.
+func (s *Server) rememberExchange(callID string, r *http.Request, reqBody, respBody []byte) {
+	if s == nil || callID == "" || !s.promptsEnabled() {
+		return
+	}
+	messages, response, proxy := promptJSON(r, reqBody, respBody)
+	s.mu.Lock()
+	if s.exchanges == nil {
+		s.exchanges = map[string]promptExchange{}
+	}
+	s.exchanges[callID] = promptExchange{messages: messages, response: response, proxy: proxy}
+	s.mu.Unlock()
+}
+
+func (s *Server) takeExchange(callID string) promptExchange {
+	if s == nil {
+		return promptExchange{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ex := s.exchanges[callID]
+	delete(s.exchanges, callID)
+	return ex
+}
+
+// promptJSON builds the three documents the log drawer reads: messages, response, and proxy_server_request.
+// Authorization and API key headers are replaced so the stored log does not keep a credential.
+func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, proxy string) {
+	reqDoc := jsonDocument(reqBody)
+	respDoc := jsonDocument(respBody)
+	if reqDoc == nil && len(reqBody) > 0 {
+		reqDoc = map[string]any{"body": string(reqBody)}
+	}
+	if respDoc == nil && len(respBody) > 0 {
+		respDoc = map[string]any{"body": string(respBody)}
+	}
+	messagesDoc := reqDoc
+	if m, ok := reqDoc.(map[string]any); ok {
+		if msgs, exists := m["messages"]; exists {
+			messagesDoc = msgs
+		}
+	}
+	headers := map[string]string{}
+	method, path := "", ""
+	if r != nil {
+		method = r.Method
+		path = r.URL.Path
+		for k, vals := range r.Header {
+			headers[k] = strings.Join(vals, ", ")
+		}
+		redactHeaders(headers)
+	}
+	proxyDoc := map[string]any{
+		"method":  method,
+		"url":     path,
+		"headers": headers,
+		"body":    reqDoc,
+	}
+	return mustJSON(messagesDoc), mustJSON(respDoc), mustJSON(proxyDoc)
+}
+
+func jsonDocument(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	return v
+}
+
+func mustJSON(v any) string {
+	if v == nil {
+		return ""
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func redactHeaders(h map[string]string) {
+	for k, v := range h {
+		if sensitiveHeader(k) {
+			h[k] = "***"
+			continue
+		}
+		h[k] = redactSecretText(v)
+	}
+}
+
+func sensitiveHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key", "x-litellm-api-key", "x-goog-api-key":
+		return true
+	default:
+		return false
+	}
+}
+
+var promptSecret = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+`)
+
+func redactSecretText(s string) string {
+	return promptSecret.ReplaceAllString(s, "***")
 }
 
 // writeCacheHit returns a cached body and records a cache-hit spend log.

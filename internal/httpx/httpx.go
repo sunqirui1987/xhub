@@ -5,13 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var logTraceOnceHttpx sync.Once
 
 // CallID returns a new 32-character hexadecimal call identifier.
 func CallID() string {
+	logTraceOnceHttpx.Do(func() { logx.Trace("enter httpx.CallID") })
+
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])

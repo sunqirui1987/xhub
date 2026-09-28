@@ -6,10 +6,16 @@ import (
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceConfigOverrides sync.Once
 
 // configOverride reads and stores Hashicorp Vault or CyberArk settings. An empty store is a config object with no values, not a 404.
 func (s *Server) configOverride(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceConfigOverrides.Do(func() { logx.Trace("enter gateway.configOverride") })
+
 	if s.requireManage(w, r) == nil {
 		return
 	}

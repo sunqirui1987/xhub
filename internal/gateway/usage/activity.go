@@ -9,13 +9,19 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
 
 const activityPageSize = 50
 
+var logTraceOnceActivity sync.Once
+
 // UserDailyActivity is GET /user/daily/activity. It groups stored spend logs into the daily rollup the usage page reads.
 func UserDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceActivity.Do(func() { logx.Trace("enter usage.UserDailyActivity") })
+
 	if s.RequireManage(w, r) == nil {
 		return
 	}
@@ -120,6 +126,7 @@ type dayMetric struct {
 	models    map[string]*namedMetric
 	groups    map[string]*namedMetric
 	providers map[string]*namedMetric
+	endpoints map[string]*namedMetric
 	keys      map[string]*keyMetric
 	routes    map[string]*metric
 }
@@ -144,7 +151,11 @@ func selectActivity(list []map[string]any, keys []store.Key, start, end, timezon
 		if wantKey != "" && apiKey != wantKey {
 			continue
 		}
-		if wantUser != "" && owner.UserID != wantUser {
+		ownerID := str(row["user_id"])
+		if ownerID == "" {
+			ownerID = owner.UserID
+		}
+		if wantUser != "" && ownerID != wantUser {
 			continue
 		}
 		day := activityDay(str(row["startTime"]), offsetMin)
@@ -163,7 +174,7 @@ func selectActivity(list []map[string]any, keys []store.Key, start, end, timezon
 			apiKey:     apiKey,
 			keyAlias:   owner.KeyAlias,
 			teamID:     owner.TeamID,
-			userID:     owner.UserID,
+			userID:     ownerID,
 			route:      llmRoute(str(row["call_type"])),
 			prompt:     asInt(row["prompt_tokens"]),
 			completion: asInt(row["completion_tokens"]),
@@ -197,6 +208,7 @@ func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[st
 				"model_groups": namedJSON(day.groups),
 				"providers":    namedJSON(day.providers),
 				"api_keys":     keysJSON(day.keys),
+				"endpoints":    namedJSON(day.endpoints),
 				"mcp_servers":  map[string]any{},
 				"entities":     map[string]any{},
 			},
@@ -310,6 +322,7 @@ func rollupDays(rows []activityRow) map[string]*dayMetric {
 				models:    map[string]*namedMetric{},
 				groups:    map[string]*namedMetric{},
 				providers: map[string]*namedMetric{},
+				endpoints: map[string]*namedMetric{},
 				keys:      map[string]*keyMetric{},
 				routes:    map[string]*metric{},
 			}
@@ -319,9 +332,10 @@ func rollupDays(rows []activityRow) map[string]*dayMetric {
 		addNamed(day.models, row.model, row)
 		addNamed(day.groups, row.model, row)
 		addNamed(day.providers, row.provider, row)
-		if row.apiKey != "" {
-			addKey(day.keys, row.apiKey, row)
-		}
+		addNamed(day.endpoints, row.route, row)
+		// An empty hash is still a key the usage page must list. Dropping it
+		// hides every master-key call from the key tab.
+		addKey(day.keys, row.apiKey, row)
 		route := day.routes[row.route]
 		if route == nil {
 			route = &metric{}

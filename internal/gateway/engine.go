@@ -7,18 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sunqirui1987/xhub/internal/auth"
-
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // newEngine creates the Gin engine. An unregistered path returns a JSON 404 instead of Gin's plain text.
@@ -26,6 +24,7 @@ func newEngine() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
 	e.NoRoute(gin.WrapF(func(w http.ResponseWriter, r *http.Request) {
+		logx.Debug("process %s %s step=noroute", r.Method, r.URL.Path)
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "Not Found")
 	}))
 	return e
@@ -67,9 +66,10 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		lw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		logx.Trace("process %s %s step=enter", r.Method, r.URL.Path)
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("error panic %s %s %v", r.Method, r.URL.Path, rec)
+				logx.Error("panic %s %s %v", r.Method, r.URL.Path, rec)
 				if !lw.set {
 					lw.code = http.StatusInternalServerError
 					lw.set = true
@@ -77,13 +77,13 @@ func (s *Server) Handler() http.Handler {
 				}
 			}
 			// Method, path, status, and elapsed time only. Headers and bodies stay off this line.
-			log.Printf("%s %s %d %s", r.Method, r.URL.Path, lw.code, time.Since(start))
+			logx.Info("%s %s %d %s", r.Method, r.URL.Path, lw.code, time.Since(start))
 			if lw.code >= 400 {
 				note := lw.note
 				if note == "" {
 					note = "request failed"
 				}
-				log.Printf("error %s %s %d %s", r.Method, r.URL.Path, lw.code, redactLog(note))
+				logx.Error("%s %s %d %s", r.Method, r.URL.Path, lw.code, note)
 			}
 		}()
 		w = lw
@@ -92,10 +92,12 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("x-litellm-version", Version)
 		setCORS(w, r)
 		if r.Method == http.MethodOptions {
+			logx.Debug("process %s %s step=options", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if Try(s.uiProxy, w, r) {
+			logx.Debug("process %s %s step=ui-proxy", r.Method, r.URL.Path)
 			return
 		}
 		raw, _ := io.ReadAll(r.Body)
@@ -114,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 			hit, ok := s.idem[ck]
 			s.mu.Unlock()
 			if ok {
+				logx.Debug("process %s %s step=idempotency hit=true", r.Method, r.URL.Path)
 				for k, v := range hit.Hdr {
 					w.Header().Set(k, v)
 				}
@@ -129,9 +132,11 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		if stream || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			logx.Debug("process %s %s step=dispatch mode=stream", r.Method, r.URL.Path)
 			s.engine.ServeHTTP(w, r)
 			return
 		}
+		logx.Debug("process %s %s step=dispatch mode=buffered", r.Method, r.URL.Path)
 		hw := &holdWriter{ResponseWriter: w, code: 200}
 		s.engine.ServeHTTP(hw, r)
 		if w.Header().Get("Content-Type") == "" {
@@ -168,17 +173,6 @@ func (s *Server) Handler() http.Handler {
 			s.mu.Unlock()
 		}
 	})
-}
-
-var (
-	bearerValue = regexp.MustCompile(`(?i)bearer\s+\S+`)
-	secretValue = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+`)
-)
-
-// redactLog removes bearer tokens and sk- keys from a log line. The method and path stay.
-func redactLog(s string) string {
-	s = bearerValue.ReplaceAllString(s, "Bearer ***")
-	return secretValue.ReplaceAllString(s, "sk-***")
 }
 
 // errorNote reads the error type and message from a JSON error body. A non-JSON body is shortened.

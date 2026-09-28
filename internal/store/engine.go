@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 	"xorm.io/xorm"
 	"xorm.io/xorm/caches"
 	"xorm.io/xorm/log"
@@ -20,8 +22,12 @@ type stmtLog struct {
 	lvl  log.LogLevel
 }
 
+var logTraceOnceEngine sync.Once
+
 // BeforeSQL does not count. The statement has not been sent yet.
-func (l *stmtLog) BeforeSQL(log.LogContext) {}
+func (l *stmtLog) BeforeSQL(log.LogContext) {
+	logTraceOnceEngine.Do(func() { logx.Trace("enter store.BeforeSQL") })
+}
 
 // AfterSQL increments once for each statement actually sent to the database. A cache hit does not reach here.
 func (l *stmtLog) AfterSQL(log.LogContext) {

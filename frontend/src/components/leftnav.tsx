@@ -152,21 +152,26 @@ const menuGroups: MenuGroup[] = [
   {
     groupLabel: "nav.groups.access",
     items: [
+      {
+        key: "organizations",
+        page: "organizations",
+        label: "nav.organizations",
+        icon: <Building2 {...ICON} />,
+        roles: all_admin_roles,
+      },
       { key: "teams", page: "teams", label: "nav.teams", icon: <Users {...ICON} /> },
+      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} />, roles: all_admin_roles },
+    ],
+  },
+  {
+    groupLabel: "nav.groups.scope",
+    items: [
       {
         key: "projects",
         page: "projects",
         label: "nav.projects",
         beta: true,
         icon: <Folder {...ICON} />,
-        roles: all_admin_roles,
-      },
-      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} />, roles: all_admin_roles },
-      {
-        key: "organizations",
-        page: "organizations",
-        label: "nav.organizations",
-        icon: <Building2 {...ICON} />,
         roles: all_admin_roles,
       },
       {

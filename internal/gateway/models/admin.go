@@ -9,11 +9,17 @@ import (
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceAdmin sync.Once
 
 // Public is the model JSON shown to callers. Secrets inside the parameters are masked.
 func Public(m config.ModelEntry) map[string]any {
+	logTraceOnceAdmin.Do(func() { logx.Trace("enter models.Public") })
+
 	info := m.ModelInfo
 	if info == nil {
 		info = map[string]any{}

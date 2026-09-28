@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -181,9 +181,20 @@ func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 		if rec.Role == "proxy_admin_viewer" || rec.Role == "internal_user_viewer" {
 			p.ViewOnly = true
 		}
+		logx.Debug("process %s %s step=identity source=session role=%s", r.Method, r.URL.Path, rec.Role)
 		return p, nil
 	}
-	return auth.Resolve(s.Cfg, s.Store, r)
+	p, err := auth.Resolve(s.Cfg, s.Store, r)
+	if err != nil {
+		if tok == "" {
+			logx.Debug("process %s %s step=identity source=none", r.Method, r.URL.Path)
+		} else {
+			logx.Debug("process %s %s step=identity source=reject reason=%s", r.Method, r.URL.Path, err.Error())
+		}
+		return nil, err
+	}
+	logx.Debug("process %s %s step=identity source=%s", r.Method, r.URL.Path, p.Kind)
+	return p, nil
 }
 
 // verifySessionJWT checks a session JWT. A bad signature or an expired token returns ok false.
@@ -222,17 +233,21 @@ func verifySessionJWT(tok, secret string) (role, sess, userID string, ok bool) {
 func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
+		logx.Error("process %s %s step=auth gate=manage ok=false", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 		return nil
 	}
 	if !p.CanManage() {
+		logx.Error("process %s %s step=auth gate=manage ok=false kind=%s", r.Method, r.URL.Path, p.Kind)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Not allowed to access management endpoints")
 		return nil
 	}
 	if p.ViewOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		logx.Error("process %s %s step=auth gate=manage ok=false reason=view-only", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 403, "forbidden", "view-only role cannot write")
 		return nil
 	}
+	logx.Debug("process %s %s step=auth gate=manage ok=true kind=%s", r.Method, r.URL.Path, p.Kind)
 	return p
 }
 
@@ -240,17 +255,21 @@ func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Pri
 func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
+		logx.Error("process %s %s step=auth gate=mixed ok=false", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 		return nil
 	}
 	if !p.CanLLM(s.Cfg) && !p.CanManage() {
+		logx.Error("process %s %s step=auth gate=mixed ok=false kind=%s", r.Method, r.URL.Path, p.Kind)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Not allowed to access this endpoint")
 		return nil
 	}
 	if p.ViewOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		logx.Error("process %s %s step=auth gate=mixed ok=false reason=view-only", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 403, "forbidden", "view-only role cannot write")
 		return nil
 	}
+	logx.Debug("process %s %s step=auth gate=mixed ok=true kind=%s", r.Method, r.URL.Path, p.Kind)
 	return p
 }
 
@@ -258,15 +277,16 @@ func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Prin
 func (s *Server) requireLLMPrincipal(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
-		log.Printf("error auth %s %s no api key", r.Method, r.URL.Path)
+		logx.Error("auth %s %s no api key", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 		return nil
 	}
 	if !p.CanLLM(s.Cfg) {
-		log.Printf("error auth %s %s master key cannot call llm", r.Method, r.URL.Path)
+		logx.Error("auth %s %s master key cannot call llm", r.Method, r.URL.Path)
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Master key cannot call /v1/chat/completions")
 		return nil
 	}
+	logx.Debug("process %s %s step=auth kind=%s", r.Method, r.URL.Path, p.Kind)
 	return p
 }
 

@@ -5,10 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceMount sync.Once
 
 // Module creates, lists, updates, and rotates virtual keys.
 func Module(h Host) httpx.Module {
+	logTraceOnceMount.Do(func() { logx.Trace("enter keys.Module") })
+
+	traceModule("keys")
 	return httpx.Bind("keys", func(reg httpx.Registrar) {
 		reg.Handle("POST /key/generate", func(w http.ResponseWriter, r *http.Request) { Generate(h, w, r) })
 		reg.Handle("POST /key/service-account/generate", func(w http.ResponseWriter, r *http.Request) { ServiceAccount(h, w, r) })

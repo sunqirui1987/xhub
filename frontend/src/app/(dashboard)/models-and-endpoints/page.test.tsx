@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setActiveLocale } from "@/i18n/runtime";
 import ModelsAndEndpointsPage from "./page";
 
 vi.mock("./panels/AllModelsPanel", () => ({ default: () => <div data-testid="panel-all-models" /> }));
@@ -77,20 +78,33 @@ describe("ModelsAndEndpointsPage", () => {
     };
   });
 
-  it("renders the admin tab bar and the All Models panel by default", () => {
+  it("renders the model list and Providers as the only primary tabs", () => {
     renderPage();
-    expect(screen.getByRole("tab", { name: "All Models" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "LLM Credentials" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Health Status" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["All Models", "Providers"]);
+    expect(screen.queryByRole("tab", { name: "LLM Credentials" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Add Model" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Health Status" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Model" })).toBeInTheDocument();
     expect(screen.getByTestId("panel-all-models")).toBeInTheDocument();
   });
 
-  it("switches tabs in-memory, mounting only the active panel", async () => {
+  it("titles the credential section 供应商 in zh-CN", () => {
+    setActiveLocale("zh-CN");
+    renderPage();
+    expect(screen.getByRole("tab", { name: "供应商" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "LLM 凭据" })).not.toBeInTheDocument();
+    expect(screen.queryByText("LLM 凭据")).not.toBeInTheDocument();
+    expect(screen.queryByText("LLM Credentials")).not.toBeInTheDocument();
+  });
+
+  it("opens a secondary tool without making it a sibling tab", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.click(screen.getByRole("tab", { name: "Health Status" }));
+    await user.click(screen.getByRole("button", { name: "More tools" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Health Status" }));
     expect(screen.getByTestId("panel-health")).toBeInTheDocument();
     expect(screen.queryByTestId("panel-all-models")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Health Status" })).not.toBeInTheDocument();
   });
 
   it("renders the model detail overlay from the ?model drill-in and hides the tabs", () => {
@@ -115,85 +129,94 @@ describe("ModelsAndEndpointsPage", () => {
     expect(screen.getByTestId("team-info")).toHaveAttribute("data-team-admin", "false");
   });
 
-  it("hides admin-only tabs for a non-admin user", () => {
+  it("hides admin-only tools from a non-admin user", async () => {
     mockUseAuthorized.mockReturnValue(NON_ADMIN);
     renderPage();
+    expect(screen.queryByRole("tab", { name: "Providers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "LLM Credentials" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Health Status" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More tools" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Your Models" })).toBeInTheDocument();
   });
 
-  it("keeps the full admin tab order for a real admin", () => {
+  it("does not list the old ten labels as sibling tabs", () => {
     renderPage();
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
-      "All Models",
+    const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(tabs).toEqual(["All Models", "Providers"]);
+    for (const label of [
       "Add Model",
-      "Auto-Routers Beta",
+      "Auto-Routers",
       "LLM Credentials",
       "Pass-Through Endpoints",
       "Health Status",
       "Model Retry Settings",
       "Model Group Alias",
-      "Model Access Group Budgets Beta",
+      "Model Access Group Budgets",
       "Price Data Reload",
-    ]);
+    ]) {
+      expect(screen.queryByRole("tab", { name: label })).not.toBeInTheDocument();
+    }
   });
 
-  it("hides the admin write-form tabs from a view-only admin, keeping the read views", () => {
+  it("hides write tools from a view-only admin and keeps the read tools", async () => {
+    const user = userEvent.setup();
     mockUseAuthorized.mockReturnValue(VIEW_ONLY_ADMIN);
     renderPage();
     expect(screen.getByRole("tab", { name: "All Models" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Health Status" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "LLM Credentials" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Pass-Through Endpoints" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Model Retry Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Model Group Alias" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /Model Access Group Budgets/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Price Data Reload" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Providers" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Model" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More tools" }));
+    expect(await screen.findByRole("menuitem", { name: "Health Status" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Auto-Routers/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Pass-Through Endpoints" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Model Retry Settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Model Group Alias" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Model Access Group Budgets/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Price Data Reload" })).not.toBeInTheDocument();
   });
 
-  // POST /model/new 403s a proxy_admin_viewer, so the form's tab must not render for one.
-  it("hides the Add Model tab for a view-only admin session", () => {
+  // POST /model/new 403s a proxy_admin_viewer, so the add action must not render for one.
+  it("hides Add Model for a view-only admin session", () => {
     mockUseAuthorized.mockReturnValue(VIEW_ONLY_ADMIN);
     renderPage();
-    expect(screen.queryByRole("tab", { name: "Add Model" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Model" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "All Models" })).toBeInTheDocument();
   });
 
   // Read parity: the Auto-Routers list stays reachable for a view-only admin; only the
   // create affordance inside it is withheld, which AutoRoutersTabPanel decides.
-  it("keeps the Auto-Routers tab for a view-only admin session", () => {
+  it("keeps Auto-Routers reachable for a view-only admin session", async () => {
+    const user = userEvent.setup();
     mockUseAuthorized.mockReturnValue(VIEW_ONLY_ADMIN);
     renderPage();
-    expect(screen.getByRole("tab", { name: /Auto-Routers/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More tools" }));
+    expect(await screen.findByRole("menuitem", { name: /Auto-Routers/ })).toBeInTheDocument();
   });
 
-  // Auto-routers are excluded from the All Models table, so this tab is their home: the only
-  // place in the product to list, create, edit or delete one.
-  describe("Auto-Routers tab", () => {
-    it("sits third, after All Models and Add Model", () => {
+  // Auto-routers are excluded from the All Models table, so this tool is their home.
+  describe("Auto-Routers tool", () => {
+    it("is a secondary tool, not a primary tab, and keeps the Beta badge", async () => {
+      const user = userEvent.setup();
       renderPage();
-
-      const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-      expect(tabs[0]).toContain("All Models");
-      expect(tabs[1]).toBe("Add Model");
-      expect(tabs[2]).toContain("Auto-Routers");
-      // Badged Beta while the tab settles; BetaBadge renders the label text.
-      expect(tabs[2]).toContain("Beta");
+      expect(screen.queryByRole("tab", { name: /Auto-Routers/ })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "More tools" }));
+      const item = await screen.findByRole("menuitem", { name: /Auto-Routers/ });
+      expect(item).toHaveTextContent("Beta");
     });
 
     it("renders its panel when selected", async () => {
       const user = userEvent.setup();
       renderPage();
-
-      await user.click(screen.getByRole("tab", { name: /Auto-Routers/ }));
+      await user.click(screen.getByRole("button", { name: "More tools" }));
+      await user.click(await screen.findByRole("menuitem", { name: /Auto-Routers/ }));
       expect(screen.getByTestId("panel-auto-routers")).toBeInTheDocument();
     });
 
     it("is hidden from non-admins, who cannot write models", () => {
       mockUseAuthorized.mockReturnValue(NON_ADMIN);
       renderPage();
-
       expect(screen.queryByRole("tab", { name: /Auto-Routers/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "More tools" })).not.toBeInTheDocument();
     });
   });
 });

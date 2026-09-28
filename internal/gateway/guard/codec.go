@@ -3,12 +3,18 @@ package guard
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"io"
 	"net/http"
+	"sync"
 )
+
+var logTraceOnceCodec sync.Once
 
 // readMap reads a JSON object. An empty body or a parse failure returns an empty map.
 func readMap(r *http.Request) map[string]any {
+	logTraceOnceCodec.Do(func() { logx.Trace("enter guard.readMap") })
+
 	var body map[string]any
 	b, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(b, &body)

@@ -5,10 +5,16 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOncePage sync.Once
 
 // Page writes the merged router settings and field descriptions for the dashboard to render.
 func Page(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOncePage.Do(func() { logx.Trace("enter prefs.Page") })
+
 	if s.RequireManage(w, r) == nil {
 		return
 	}

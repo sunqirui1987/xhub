@@ -3,12 +3,18 @@ package gateway
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"io"
 	"net/http"
+	"sync"
 )
+
+var logTraceOnceCodec sync.Once
 
 // str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
+	logTraceOnceCodec.Do(func() { logx.Trace("enter gateway.str") })
+
 	s, _ := v.(string)
 	return s
 }

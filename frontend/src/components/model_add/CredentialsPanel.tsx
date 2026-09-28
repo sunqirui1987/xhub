@@ -114,9 +114,12 @@ export default function CredentialsPanel() {
   return (
     <div className="mx-auto flex w-full flex-auto flex-col gap-4 overflow-y-auto p-2">
       <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">
-          {t("Configured credentials for different AI providers. Add and manage your API credentials.")}
-        </p>
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t("pages.models.llmCredentials")}</h2>
+          <p className="text-sm text-muted-foreground">
+            {t("Configured credentials for different AI providers. Add and manage your API credentials.")}
+          </p>
+        </div>
         {canModifyCredentials && (
           <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="size-4" />

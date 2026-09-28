@@ -7,11 +7,17 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm/estimate"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceTokens sync.Once
 
 // tokenCounter serves POST /utils/token_counter.
 // A body without prompt, messages, or contents returns 400. The count matches the local tokenizer and does not call a provider.
 func (s *Server) tokenCounter(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceTokens.Do(func() { logx.Trace("enter gateway.tokenCounter") })
+
 	httpx.SetCallID(w, httpx.CallID())
 	if s.requireMixed(w, r) == nil {
 		return

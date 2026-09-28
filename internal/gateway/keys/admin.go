@@ -9,12 +9,18 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceAdmin sync.Once
 
 // nullBoolFrom reads a nullable bool from the body. A missing field stays invalid.
 // LiteLLM stores that as JSON null, not false.
 func nullBoolFrom(body map[string]any, key string) sql.NullBool {
+	logTraceOnceAdmin.Do(func() { logx.Trace("enter keys.nullBoolFrom") })
+
 	v, ok := body[key]
 	if !ok || v == nil {
 		return sql.NullBool{}

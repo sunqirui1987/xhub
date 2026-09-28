@@ -2,8 +2,10 @@
 package llm
 
 import (
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"os"
 	"strings"
+	"sync"
 )
 
 // credentialFields lists the fields a named credential may copy into a deployment.
@@ -50,6 +52,8 @@ var credentialFields = []string{
 	"custom_llm_provider",
 }
 
+var logTraceOnceCredential sync.Once
+
 // Hydrate fills deployment parameters that are still empty from a named credential.
 //
 // LiteLLM load_credentials_from_list writes a value only when the key is entirely absent.
@@ -62,6 +66,8 @@ var credentialFields = []string{
 //
 // Hydrate returns a new map and does not modify the deployment parameters the caller passed in.
 func Hydrate(params, credentialValues map[string]any) map[string]any {
+	logTraceOnceCredential.Do(func() { logx.Trace("enter llm.Hydrate") })
+
 	out := map[string]any{}
 	for key, value := range params {
 		out[key] = value

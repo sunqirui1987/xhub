@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"xorm.io/xorm"
 )
 
@@ -16,24 +17,31 @@ var orgSpendMu sync.Mutex
 
 // SpendLogRow is one request log in a batch flushed from Redis into PostgreSQL.
 type SpendLogRow struct {
-	RequestID  string
-	CallType   string
-	Model      string
-	APIKey     string
-	Prompt     int
-	Completion int
-	Spend      sql.NullFloat64
-	Start      time.Time
-	End        time.Time
-	CacheHit   bool
-	Status     string
-	TeamID     string
-	UserID     string
-	OrgID      string
+	RequestID    string
+	CallType     string
+	Model        string
+	APIKey       string
+	Prompt       int
+	Completion   int
+	Spend        sql.NullFloat64
+	Start        time.Time
+	End          time.Time
+	CacheHit     bool
+	Status       string
+	TeamID       string
+	UserID       string
+	OrgID        string
+	Messages     string
+	Response     string
+	ProxyRequest string
 }
+
+var logTraceOnceSpendBatch sync.Once
 
 // Statements returns how many SQL statements have actually run since the engine was opened.
 func (s *Store) Statements() int64 {
+	logTraceOnceSpendBatch.Do(func() { logx.Trace("enter store.Statements") })
+
 	if s == nil || s.stmts == nil {
 		return 0
 	}
@@ -92,7 +100,8 @@ func (s *Store) ApplySpendBatch(rows []SpendLogRow) error {
 			RequestID: row.RequestID, CallType: row.CallType, Model: row.Model, APIKey: row.APIKey,
 			Prompt: row.Prompt, Completion: row.Completion, Spend: fptr(row.Spend),
 			StartTime: row.Start.UTC().Format(time.RFC3339Nano), EndTime: row.End.UTC().Format(time.RFC3339Nano),
-			CacheHit: boolInt(row.CacheHit), Status: status,
+			CacheHit: boolInt(row.CacheHit), Status: status, UserID: row.UserID,
+			MessagesJSON: row.Messages, ResponseJSON: row.Response, ProxyRequestJSON: row.ProxyRequest,
 		})
 		if !row.Spend.Valid || row.Spend.Float64 == 0 {
 			continue

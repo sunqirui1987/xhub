@@ -282,13 +282,11 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
 
                       {/* Credentials */}
                       <div className="mb-4">
-                        <span className="text-sm text-muted-foreground">
-                          {t("Either select existing credentials OR enter new provider credentials below")}
-                        </span>
+                        <span className="text-sm text-muted-foreground">{t("pages.models.savedProviderHelp")}</span>
                       </div>
 
                       <MountedFormField
-                        label={t("Existing Credentials")}
+                        label={t("pages.models.savedProvider")}
                         name="litellm_credential_name"
                         defaultValue={null}
                         className="mb-4"
@@ -296,7 +294,8 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                         {(control) => (
                           <SearchSelect
                             inputId={control.id}
-                            placeholder={t("Select or search for existing credentials")}
+                            aria-label={t("pages.models.savedProvider")}
+                            placeholder={t("pages.models.savedProviderPlaceholder")}
                             options={credentialOptions}
                             value={(control.value as string | null | undefined) ?? ""}
                             onValueChange={(value) => control.onChange(value === "" ? null : value)}

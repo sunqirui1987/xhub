@@ -13,10 +13,17 @@ import (
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/gateway/usage"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
+var logTraceOnceRoutes sync.Once
+
 // Handle implements httpx.Registrar. pattern is "METHOD /path". A pattern already mounted is not replaced by a later module.
-func (s *Server) Handle(pattern string, h http.HandlerFunc) { s.handle(pattern, h) }
+func (s *Server) Handle(pattern string, h http.HandlerFunc) {
+	logTraceOnceRoutes.Do(func() { logx.Trace("enter gateway.Handle") })
+	s.handle(pattern, h)
+}
 
 // Use mounts a module by name. Mounting the same name again fails, and paths already mounted stay as they are.
 // If the process is already serving, the new module is mounted immediately. During New it is recorded and mounted later with the others.

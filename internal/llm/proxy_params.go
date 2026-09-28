@@ -1,6 +1,11 @@
 // Package llm removes gateway-only fields from the body before it is sent upstream, so a provider does not reject an unknown parameter.
 package llm
 
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
+)
+
 // proxyParams is the full LiteLLM all_litellm_params name list.
 // The filter that drops proxy fields from a provider body uses this list.
 var proxyParams = map[string]struct{}{
@@ -277,8 +282,12 @@ var proxyParams = map[string]struct{}{
 	"weight":                                                 {},
 }
 
+var logTraceOnceProxyParams sync.Once
+
 // StripProxyParams deletes LiteLLM proxy fields and leaves the body the provider understands.
 func StripProxyParams(body map[string]any) {
+	logTraceOnceProxyParams.Do(func() { logx.Trace("enter llm.StripProxyParams") })
+
 	for key := range body {
 		if _, ok := proxyParams[key]; ok {
 			delete(body, key)

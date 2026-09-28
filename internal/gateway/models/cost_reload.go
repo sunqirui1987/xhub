@@ -8,6 +8,8 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
 
 const (
@@ -22,8 +24,12 @@ type costReloadPlan struct {
 	NextRun       *string
 }
 
+var logTraceOnceCostReload sync.Once
+
 // ReloadCostMap reloads the price map now. On success it returns status and the model count.
 func ReloadCostMap(s Host, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceCostReload.Do(func() { logx.Trace("enter models.ReloadCostMap") })
+
 	if s.RequireManage(w, r) == nil {
 		return
 	}

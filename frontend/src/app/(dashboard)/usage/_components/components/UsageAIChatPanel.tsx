@@ -186,7 +186,7 @@ const UsageAIChatPanel: React.FC<UsageAIChatPanelProps> = ({ open, onClose, acce
         (errorMsg: string) => {
           setStatusMessage(null);
           setActiveToolCalls([]);
-          setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${errorMsg}` }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: t("Error: {message}", { message: errorMsg }) }]);
           setStreamingContent("");
         },
         (status: string) => {
@@ -207,8 +207,8 @@ const UsageAIChatPanel: React.FC<UsageAIChatPanelProps> = ({ open, onClose, acce
       if (error?.name === "AbortError" || abortController.signal.aborted) {
         return;
       }
-      const errorMsg = error?.message || "Failed to get response. Please try again.";
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${errorMsg}` }]);
+      const errorMsg = error?.message || t("Failed to get response. Please try again.");
+      setMessages((prev) => [...prev, { role: "assistant", content: t("Error: {message}", { message: errorMsg }) }]);
       setStreamingContent("");
     } finally {
       setIsLoading(false);

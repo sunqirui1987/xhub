@@ -1,8 +1,17 @@
 // Package llm maps a provider name to the protocol group used when encoding a request. A name that is not in the table returns an empty group and false, and the data plane skips that deployment.
 package llm
 
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
+)
+
+var logTraceOnceGroups sync.Once
+
 // ProtocolGroup returns the protocol group for a provider name from the LiteLLM 1.102.0 provider set. Groups follow wire format and authentication, not the old Python package layout. An unknown or empty name returns false.
 func ProtocolGroup(provider string) (string, bool) {
+	logTraceOnceGroups.Do(func() { logx.Trace("enter llm.ProtocolGroup") })
+
 	switch provider {
 	case "ai21":
 		return "openai_byte_compatible", true

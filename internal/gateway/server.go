@@ -17,6 +17,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
@@ -50,6 +51,7 @@ type Server struct {
 	yamlStoreModelInDB bool
 	modules            []httpx.Module
 	modulesReady       bool
+	exchanges          map[string]promptExchange
 }
 
 type idemRec struct {
@@ -69,8 +71,12 @@ type sessionRec struct {
 	UserID string
 }
 
+var logTraceOnceServer sync.Once
+
 // New assembles the gateway. It loads the catalog, merges router settings, and registers dedicated routes plus the remaining catalog routes.
 func New(cfg *config.Config, st *store.Store) *Server {
+	logTraceOnceServer.Do(func() { logx.Trace("enter gateway.New") })
+
 	s := &Server{
 		Cfg:                cfg,
 		Store:              st,

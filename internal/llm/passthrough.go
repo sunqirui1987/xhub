@@ -2,15 +2,21 @@
 package llm
 
 import (
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 )
+
+var logTraceOncePassthrough sync.Once
 
 // PassthroughURL is the outbound address produced by LiteLLM _join_url_paths.
 // It first joins the subpath onto the api_base path and rejects "..".
 // If an OpenAI result still has no /v1/, v1 is inserted after api.openai.com/.
 func PassthroughURL(base, endpoint, provider string) string {
+	logTraceOncePassthrough.Do(func() { logx.Trace("enter llm.PassthroughURL") })
+
 	u, err := url.Parse(base)
 	if err != nil {
 		return base

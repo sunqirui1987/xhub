@@ -6,7 +6,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"gopkg.in/yaml.v3"
+	"sync"
 )
 
 // Config is the loaded process configuration. RouterRaw and GeneralRaw keep YAML keys the typed structs do not name, so a database overlay can compare by key.
@@ -40,12 +42,17 @@ type GeneralSettings struct {
 	DatabaseURL               string `yaml:"database_url"`
 	RedisURL                  string `yaml:"redis_url"`
 	StoreModelInDB            bool   `yaml:"store_model_in_db"`
+	StorePromptsInSpendLogs   bool   `yaml:"store_prompts_in_spend_logs"`
 	AllowMasterKeyLLM         bool   `yaml:"allow_master_key_llm"`
 	DisableEnvCredentialLogin bool   `yaml:"disable_env_credential_login"`
 }
 
+var logTraceOnceConfig sync.Once
+
 // Load reads YAML. An empty database_url, or one that starts with sqlite or file:, returns an error instead of silently using a local file database.
 func Load(path string) (*Config, error) {
+	logTraceOnceConfig.Do(func() { logx.Trace("enter config.Load") })
+
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

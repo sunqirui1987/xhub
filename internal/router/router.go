@@ -8,10 +8,16 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/llm"
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
 )
+
+var logTraceOnceRouter sync.Once
 
 // All returns every deployment under one public model name, before a strategy orders them.
 func All(list []config.ModelEntry, alias string) []config.ModelEntry {
+	logTraceOnceRouter.Do(func() { logx.Trace("enter router.All") })
+
 	return matchDeployments(list, alias)
 }
 

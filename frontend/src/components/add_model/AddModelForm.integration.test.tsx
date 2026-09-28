@@ -1,4 +1,5 @@
-import { renderHook, screen, waitFor, renderWithProviders } from "../../../tests/test-utils";
+import { chooseSelectOption, renderHook, screen, waitFor, renderWithProviders } from "../../../tests/test-utils";
+import { prepareModelAddRequest } from "./handle_add_model_submit";
 import userEvent, { PointerEventsCheckLevel } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Team } from "../key_team_helpers/key_list";
@@ -430,5 +431,49 @@ describe("AddModelForm", () => {
       expect(values.cache_control).toBe(false);
       expect(values).not.toHaveProperty("cache_control_injection_points");
     });
+  });
+
+  it("lists saved providers and submits the chosen credential name", async () => {
+    const mockUseAuthorized = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+    mockUseAuthorized.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+    const user = userEvent.setup();
+    const props = createTestProps();
+    props.credentials = [
+      {
+        credential_name: "openai-prod",
+        credential_values: {},
+        credential_info: { custom_llm_provider: "openai", description: "OpenAI" },
+      },
+      {
+        credential_name: "azure-prod",
+        credential_values: {},
+        credential_info: { custom_llm_provider: "azure", description: "Azure" },
+      },
+    ];
+    const sent: string[] = [];
+    props.handleOk = vi.fn(async () => {
+      const deployments = await prepareModelAddRequest(
+        {
+          ...props.mountedValues(),
+          model_mappings: [{ public_name: "my-model", litellm_model: "openai/gpt-4" }],
+          model: ["gpt-4"],
+          custom_llm_provider: "OpenAI",
+        },
+        "token",
+        {},
+      );
+      sent.push(...(deployments ?? []).map((deployment) => String(deployment.litellmParamsObj.litellm_credential_name)));
+      return true;
+    });
+
+    renderWithProviders(<AddModelForm {...props} />);
+    const picker = await screen.findByRole("combobox", { name: "Saved provider" });
+    await user.click(picker);
+    expect(await screen.findByRole("option", { name: "openai-prod" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "azure-prod" })).toBeInTheDocument();
+    await chooseSelectOption(user, picker, "azure-prod");
+    await user.click(screen.getByTestId("add-model-btn"));
+
+    await waitFor(() => expect(sent).toEqual(["azure-prod"]));
   });
 });

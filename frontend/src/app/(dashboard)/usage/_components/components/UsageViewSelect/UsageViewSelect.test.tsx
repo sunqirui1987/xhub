@@ -108,6 +108,16 @@ describe("UsageViewSelect", () => {
     expect(offers(container, translate("en", key))).toBe(true);
   });
 
+  it("shows only the localized view name on the closed control", async () => {
+    const { setActiveLocale } = await import("@/i18n/runtime");
+    setActiveLocale("zh-CN");
+    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
+    const closed = screen.getByRole("combobox");
+    expect(closed).toHaveTextContent("全局用量");
+    expect(closed.textContent ?? "").not.toMatch(/(^|\s)global(\s|$)/);
+    setActiveLocale("en");
+  });
+
   it("uses Simplified Chinese labels when locale is zh-CN", async () => {
     const { setActiveLocale } = await import("@/i18n/runtime");
     setActiveLocale("zh-CN");

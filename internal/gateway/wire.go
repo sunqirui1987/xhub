@@ -15,13 +15,19 @@ import (
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceWire sync.Once
 
 // RequireLLMPrincipal resolves an identity that may call inference. On failure it has already written the response and returns nil.
 func (s *Server) RequireLLMPrincipal(w http.ResponseWriter, r *http.Request) *auth.Principal {
+	logTraceOnceWire.Do(func() { logx.Trace("enter gateway.RequireLLMPrincipal") })
+
 	return s.requireLLMPrincipal(w, r)
 }
 
@@ -81,6 +87,11 @@ func (s *Server) SetChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 // RecordSpend records this call's tokens on the hot path and, when Redis is configured, queues the log instead of writing PostgreSQL immediately.
 func (s *Server) RecordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string) {
 	s.recordSpend(w, p, callID, alias, usage, start, cacheHit, depID)
+}
+
+// RememberExchange holds the request and response until this call's spend row is written.
+func (s *Server) RememberExchange(callID string, r *http.Request, reqBody, respBody []byte) {
+	s.rememberExchange(callID, r, reqBody, respBody)
 }
 
 // WriteCacheHit writes a cached body back and records a cache-hit spend row with a zero delta.

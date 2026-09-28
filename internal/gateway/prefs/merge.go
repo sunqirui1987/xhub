@@ -1,8 +1,17 @@
 // Package prefs merges configuration documents. A database key overrides YAML, and a partial update does not drop keys that were not mentioned.
 package prefs
 
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"sync"
+)
+
+var logTraceOnceMerge sync.Once
+
 // Overlay copies the YAML base and then writes every database key on top. A database value wins even when it is a list or null. Keys absent from the database stay as they were.
 func Overlay(base, db map[string]any) map[string]any {
+	logTraceOnceMerge.Do(func() { logx.Trace("enter prefs.Overlay") })
+
 	out := map[string]any{}
 	for k, v := range base {
 		out[k] = v

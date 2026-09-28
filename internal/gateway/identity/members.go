@@ -5,11 +5,17 @@ import (
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
+	"sync"
 )
+
+var logTraceOnceMembers sync.Once
 
 // UserAvailableRoles returns the user roles the current identity may assign.
 func UserAvailableRoles(s Gate, w http.ResponseWriter, r *http.Request) {
+	logTraceOnceMembers.Do(func() { logx.Trace("enter identity.UserAvailableRoles") })
+
 	if s.RequireManage(w, r) == nil {
 		return
 	}
