@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useCustomers, type EndUser } from "./useCustomers";
+import { customerListFrom, useCustomers, type EndUser } from "./useCustomers";
 
 const useQueryMock = vi.fn();
 vi.mock("@/lib/http/api", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
 
 const authorized = { accessToken: "test-access-token", userRole: "Admin" };
 
-type QueryOptions = { enabled: boolean; select: (data: EndUser[] | undefined) => EndUser[] };
+type QueryOptions = { enabled: boolean; select: (data: unknown) => EndUser[] };
 
 const lastCallOptions = (): QueryOptions => {
   const calls = useQueryMock.mock.calls;
@@ -62,5 +62,11 @@ describe("useCustomers", () => {
     ];
     renderHook(() => useCustomers());
     expect(lastCallOptions().select(customers)).toEqual(customers);
+  });
+
+  it("reads customers from the list envelope the gateway returns", () => {
+    const customers: EndUser[] = [{ user_id: "customer-1", alias: "Ada", spend: 1, blocked: false }];
+    expect(customerListFrom({ object: "list", customers, end_users: customers, data: customers })).toEqual(customers);
+    expect(customerListFrom({ object: "list" })).toEqual([]);
   });
 });

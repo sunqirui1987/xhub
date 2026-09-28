@@ -27,7 +27,6 @@ import PlaygroundPage from "./playground/page";
 import ModelsPage from "./models-and-endpoints/page";
 import GuardrailsPage from "./guardrails/page";
 import UsagePage from "./usage/page";
-import CostOptimizationPage from "./cost-optimization/page";
 import LogsPage from "./logs/page";
 import GuardrailsMonitorPage from "./guardrails-monitor/page";
 import TeamsPage from "./teams/page";
@@ -48,7 +47,6 @@ const livePages = [
   ["models-and-endpoints", "/models-and-endpoints", ModelsPage],
   ["guardrails", "/guardrails", GuardrailsPage],
   ["usage", "/usage", UsagePage],
-  ["cost-optimization", "/cost-optimization", CostOptimizationPage],
   ["logs", "/logs", LogsPage],
   ["guardrails-monitor", "/guardrails-monitor", GuardrailsMonitorPage],
   ["teams", "/teams", TeamsPage],

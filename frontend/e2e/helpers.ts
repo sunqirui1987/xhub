@@ -93,7 +93,6 @@ export const DASHBOARD_PAGES = [
   "/models-and-endpoints",
   "/guardrails",
   "/usage",
-  "/cost-optimization",
   "/logs",
   "/guardrails-monitor",
   "/teams",

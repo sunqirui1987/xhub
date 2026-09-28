@@ -467,38 +467,42 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   const keyMetrics = useMemo(() => processActivityData(userSpendData, "api_keys", teams), [userSpendData, teams]);
 
   return (
-    <div style={{ width: "100%" }} className="relative">
-      {/* Global Date Picker and Tabs - Single Row */}
-      <div className="flex items-end justify-between gap-6 mb-6">
-        <div className="flex-1">
-          <div className="flex items-end justify-between gap-6 mb-4 w-full">
-            <UsageViewSelect
-              value={usageView}
-              onChange={(value) => setUsageView(value)}
-              userRole={userRole}
-              canViewTagUsage={canViewTagUsage}
-              isOrgAdmin={isOrgAdmin}
-            />
-            <AdvancedDatePicker value={dateValue} onValueChange={handleDateChange} />
-          </div>
-          <PaginationStatusAlerts
-            isFetchingMore={paginatedResult.isFetchingMore}
-            cancelled={paginatedResult.cancelled}
-            progress={paginatedResult.progress}
-            cancel={paginatedResult.cancel}
-          />
-          {/* Your Usage / Global Usage Panel */}
-          {(usageView === "global" || usageView === "my-usage") && (
-            <>
-              {isAdmin && usageView === "global" && (
-                <div className="mb-4">
-                  <p className="mb-2 text-sm text-foreground">{t("pages.usage.filterByUser")}</p>
-                  <UserDropdown value={selectedUserId} onChange={setSelectedUserId} />
-                </div>
-              )}
-              <Tabs defaultValue="cost">
-                <div className="flex justify-between items-center">
-                  <TabsList className="mt-1">
+    <div className="relative w-full space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("nav.usage")}</h1>
+          {dateValue.from && dateValue.to ? (
+            <p className="mt-2 text-sm text-muted-foreground">{formatClosedRangeLabel(dateValue.from, dateValue.to)}</p>
+          ) : null}
+        </div>
+        <AdvancedDatePicker value={dateValue} onValueChange={handleDateChange} />
+      </div>
+      <UsageViewSelect
+        value={usageView}
+        onChange={(value) => setUsageView(value)}
+        userRole={userRole}
+        canViewTagUsage={canViewTagUsage}
+        isOrgAdmin={isOrgAdmin}
+      />
+      <PaginationStatusAlerts
+        isFetchingMore={paginatedResult.isFetchingMore}
+        cancelled={paginatedResult.cancelled}
+        progress={paginatedResult.progress}
+        cancel={paginatedResult.cancel}
+      />
+      {(usageView === "global" || usageView === "my-usage") && (
+        <>
+          {isAdmin && usageView === "global" && (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3">
+              <p className="text-sm text-muted-foreground">{t("pages.usage.filterByUser")}</p>
+              <div className="min-w-64 flex-1">
+                <UserDropdown value={selectedUserId} onChange={setSelectedUserId} />
+              </div>
+            </div>
+          )}
+          <Tabs defaultValue="cost">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <TabsList>
                     <TabsTrigger value="cost" className="flex-none px-3">
                       {t("pages.usage.cost")}
                     </TabsTrigger>
@@ -525,18 +529,12 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                 </div>
                 {/* Cost Panel */}
                 <TabsContent value="cost" keepMounted>
-                  <div className="grid grid-cols-2 gap-2 w-full">
-                    {/* Total Spend Card */}
-                    <div className="col-span-2">
-                      <div className="flex items-center gap-4 mt-2 mb-2">
-                        <p className="text-lg text-muted-foreground">
-                          {t("Project Spend")}{" "}
-                          {dateValue.from && dateValue.to
-                            ? formatClosedRangeLabel(dateValue.from, dateValue.to)
-                            : null}
-                        </p>
-                      </div>
-
+                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="lg:col-span-2 rounded-lg border bg-card px-4 py-4">
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        {t("Project Spend")}
+                        {dateValue.from && dateValue.to ? ` · ${formatClosedRangeLabel(dateValue.from, dateValue.to)}` : ""}
+                      </p>
                       <ViewUserSpend
                         userSpend={totalSpend}
                         selectedTeam={null}
@@ -544,149 +542,120 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                       />
                     </div>
 
-                    <div className="col-span-2">
-                      <ShadcnCard>
-                        <CardContent>
-                          <h3 className="text-lg font-medium text-foreground">{t("pages.usage.usageMetrics")}</h3>
-                          <div className="grid grid-cols-5 gap-4 mt-4">
-                            <ShadcnCard>
-                              <CardContent>
-                                <h3 className="text-lg font-medium text-foreground">{t("Total Requests")}</h3>
-                                <p className="text-2xl font-bold mt-2">
-                                  {(gatewayActivity
-                                    ? gatewayActivity.total_successful_requests + gatewayActivity.total_failed_requests
-                                    : userSpendData.metadata?.total_api_requests
-                                  )?.toLocaleString() || 0}
-                                </p>
-                              </CardContent>
-                            </ShadcnCard>
-                            <ShadcnCard>
-                              <CardContent>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-lg font-medium text-foreground">{t("Successful Requests")}</h3>
-                                  {gatewayActivity && (
-                                    <Tooltip>
-                                      <TooltipTrigger
-                                        render={<Info className="size-4 text-muted-foreground hover:text-foreground" />}
-                                      />
-                                      <TooltipContent>
-                                        {t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")}
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  )}
-                                </div>
-                                {/*
-                                  TODO: drop the userSpendData fallback once every deployment
-                                  is writing LiteLLM_DailyGatewayRequests. It covers two cases
-                                  today: a non-admin (who may not read deployment-wide counts)
-                                  and an admin on a proxy whose table is still backfilling.
-                                */}
-                                <p className="text-2xl font-bold mt-2 text-success">
-                                  {(
-                                    gatewayActivity?.total_successful_requests ??
-                                    userSpendData.metadata?.total_successful_requests
-                                  )?.toLocaleString() || 0}
-                                </p>
-                              </CardContent>
-                            </ShadcnCard>
-                            <ShadcnCard>
-                              <CardContent>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-lg font-medium text-foreground">{t("Failed Requests")}</h3>
-                                  <Tooltip>
-                                    <TooltipTrigger
-                                      render={<Info className="size-4 text-muted-foreground hover:text-foreground" />}
-                                    />
-                                    <TooltipContent>
-                                      {gatewayActivity
-                                        ? t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")
-                                        : t("Includes requests that failed to route to a provider, tool usage failures, and other request errors where the provider cannot be determined.")}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </div>
-                                {/* Same source as Successful Requests: the two must agree, or the
-                                    tile disagrees with the endpoint breakdown chart below it. */}
-                                <p className="text-2xl font-bold mt-2 text-destructive">
-                                  {(
-                                    gatewayActivity?.total_failed_requests ??
-                                    userSpendData.metadata?.total_failed_requests
-                                  )?.toLocaleString() || 0}
-                                </p>
-                              </CardContent>
-                            </ShadcnCard>
-                            <ShadcnCard>
-                              <CardContent>
-                                <h3 className="text-lg font-medium text-foreground">{t("Average Cost per Request")}</h3>
-                                <p className="text-2xl font-bold mt-2">
-                                  $
-                                  {formatNumberWithCommas(
-                                    (totalSpend || 0) / (userSpendData.metadata?.total_api_requests || 1),
-                                    4,
-                                  )}
-                                </p>
-                              </CardContent>
-                            </ShadcnCard>
-                            <ShadcnCard
-                              className="cursor-pointer hover:bg-accent transition-colors"
+                    <div className="lg:col-span-2">
+                      <h2 className="mb-3 text-sm font-medium text-muted-foreground">{t("pages.usage.usageMetrics")}</h2>
+                      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+                        <div className="rounded-lg border bg-card px-4 py-3">
+                          <h3 className="text-sm font-medium text-muted-foreground">{t("Total Requests")}</h3>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums">
+                            {(gatewayActivity
+                              ? gatewayActivity.total_successful_requests + gatewayActivity.total_failed_requests
+                              : userSpendData.metadata?.total_api_requests
+                            )?.toLocaleString() || 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border bg-card px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-medium text-muted-foreground">{t("Successful Requests")}</h3>
+                            {gatewayActivity && (
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={<Info className="size-4 text-muted-foreground hover:text-foreground" />}
+                                />
+                                <TooltipContent>
+                                  {t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")}
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
+                          </div>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums text-success">
+                            {(
+                              gatewayActivity?.total_successful_requests ??
+                              userSpendData.metadata?.total_successful_requests
+                            )?.toLocaleString() || 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border bg-card px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-medium text-muted-foreground">{t("Failed Requests")}</h3>
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={<Info className="size-4 text-muted-foreground hover:text-foreground" />}
+                              />
+                              <TooltipContent>
+                                {gatewayActivity
+                                  ? t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")
+                                  : t("Includes requests that failed to route to a provider, tool usage failures, and other request errors where the provider cannot be determined.")}
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums text-destructive">
+                            {(
+                              gatewayActivity?.total_failed_requests ??
+                              userSpendData.metadata?.total_failed_requests
+                            )?.toLocaleString() || 0}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border bg-card px-4 py-3">
+                          <h3 className="text-sm font-medium text-muted-foreground">{t("Average Cost per Request")}</h3>
+                          <p className="mt-1 text-2xl font-semibold tabular-nums">
+                            $
+                            {formatNumberWithCommas(
+                              (totalSpend || 0) / (userSpendData.metadata?.total_api_requests || 1),
+                              4,
+                            )}
+                          </p>
+                        </div>
+                            <button
+                              type="button"
+                              className="rounded-lg border bg-card px-4 py-3 text-left transition-colors hover:bg-accent"
                               onClick={() => setShowTokenBreakdown(!showTokenBreakdown)}
                             >
-                              <CardContent>
-                                <div className="flex items-center gap-2">
-                                  <h3 className="text-lg font-medium text-foreground">{t("Total Tokens")}</h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-medium text-muted-foreground">{t("Total Tokens")}</h3>
                                   {showTokenBreakdown ? (
                                     <ChevronDown className="size-3 text-muted-foreground" />
                                   ) : (
                                     <ChevronRight className="size-3 text-muted-foreground" />
                                   )}
                                 </div>
-                                <p className="text-2xl font-bold mt-2">
+                                <p className="mt-1 text-2xl font-semibold tabular-nums">
                                   {userSpendData.metadata?.total_tokens?.toLocaleString() || 0}
                                 </p>
-                              </CardContent>
-                            </ShadcnCard>
+                            </button>
                           </div>
                           {showTokenBreakdown && (
-                            <div className="grid grid-cols-4 gap-4 mt-4">
-                              <ShadcnCard>
-                                <CardContent>
-                                  <h3 className="text-lg font-medium text-foreground">{t("Input Tokens")}</h3>
-                                  <p className="text-2xl font-bold mt-2 text-info">
-                                    {(userSpendData.metadata?.total_prompt_tokens || 0).toLocaleString()}
-                                  </p>
-                                </CardContent>
-                              </ShadcnCard>
-                              <ShadcnCard>
-                                <CardContent>
-                                  <h3 className="text-lg font-medium text-foreground">{t("Output Tokens")}</h3>
-                                  <p className="text-2xl font-bold mt-2 text-info">
-                                    {userSpendData.metadata?.total_completion_tokens?.toLocaleString() || 0}
-                                  </p>
-                                </CardContent>
-                              </ShadcnCard>
-                              <ShadcnCard>
-                                <CardContent>
-                                  <h3 className="text-lg font-medium text-foreground">{t("Cache Read Tokens")}</h3>
-                                  <p className="text-2xl font-bold mt-2 text-success">
-                                    {userSpendData.metadata?.total_cache_read_input_tokens?.toLocaleString() || 0}
-                                  </p>
-                                </CardContent>
-                              </ShadcnCard>
-                              <ShadcnCard>
-                                <CardContent>
-                                  <h3 className="text-lg font-medium text-foreground">{t("Cache Write Tokens")}</h3>
-                                  <p className="text-2xl font-bold mt-2 text-purple-600">
-                                    {userSpendData.metadata?.total_cache_creation_input_tokens?.toLocaleString() || 0}
-                                  </p>
-                                </CardContent>
-                              </ShadcnCard>
+                            <div className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                              <div className="rounded-lg border bg-card px-4 py-3">
+                                <h3 className="text-sm font-medium text-muted-foreground">{t("Input Tokens")}</h3>
+                                <p className="mt-1 text-2xl font-semibold tabular-nums text-info">
+                                  {(userSpendData.metadata?.total_prompt_tokens || 0).toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border bg-card px-4 py-3">
+                                <h3 className="text-sm font-medium text-muted-foreground">{t("Output Tokens")}</h3>
+                                <p className="mt-1 text-2xl font-semibold tabular-nums text-info">
+                                  {userSpendData.metadata?.total_completion_tokens?.toLocaleString() || 0}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border bg-card px-4 py-3">
+                                <h3 className="text-sm font-medium text-muted-foreground">{t("Cache Read Tokens")}</h3>
+                                <p className="mt-1 text-2xl font-semibold tabular-nums text-success">
+                                  {userSpendData.metadata?.total_cache_read_input_tokens?.toLocaleString() || 0}
+                                </p>
+                              </div>
+                              <div className="rounded-lg border bg-card px-4 py-3">
+                                <h3 className="text-sm font-medium text-muted-foreground">{t("Cache Write Tokens")}</h3>
+                                <p className="mt-1 text-2xl font-semibold tabular-nums text-purple-600">
+                                  {userSpendData.metadata?.total_cache_creation_input_tokens?.toLocaleString() || 0}
+                                </p>
+                              </div>
                             </div>
                           )}
-                        </CardContent>
-                      </ShadcnCard>
                     </div>
 
                     {/* Daily Spend Chart */}
-                    <div className="col-span-2">
+                    <div className="lg:col-span-2">
                       <ShadcnCard>
                         <CardHeader>
                           <CardTitle className="text-base font-semibold">{t("Daily Spend")}</CardTitle>
@@ -736,7 +705,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                     </div>
                     {/* Gateway Requests by Endpoint (SGR) */}
                     {gatewayActivity && gatewayActivity.by_route.length > 0 && (
-                      <div className="col-span-2">
+                      <div className="lg:col-span-2">
                         <ShadcnCard data-testid="gateway-requests-by-endpoint">
                           <CardHeader>
                             <CardTitle className="text-base font-semibold">
@@ -861,7 +830,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                     </div>
 
                     {/* Spend by Provider */}
-                    <div className="col-span-2">
+                    <div className="lg:col-span-2">
                       <SpendByProvider
                         loading={loading}
                         isDateChanging={isDateChanging}
@@ -935,10 +904,12 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
               userID={userID}
               userRole={userRole}
               entityList={
-                customers?.map((customer) => ({
-                  label: customer.alias || customer.user_id,
-                  value: customer.user_id,
-                })) || null
+                Array.isArray(customers)
+                  ? customers.map((customer) => ({
+                      label: customer.alias || customer.user_id,
+                      value: customer.user_id,
+                    }))
+                  : null
               }
               premiumUser={premiumUser}
               dateValue={dateValue}
@@ -991,8 +962,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
             />
           )}
           {/* User Agent Activity Panel */}
-        </div>
-      </div>
 
       <UsageAIChatPanel open={isAiChatOpen} onClose={() => setIsAiChatOpen(false)} accessToken={accessToken} />
 

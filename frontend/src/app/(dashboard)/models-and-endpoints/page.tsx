@@ -9,7 +9,6 @@ import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings"
 import { all_admin_roles, internalUserRoles } from "@/utils/roles";
 import { canCreateModels } from "@/utils/modelPermissions";
 import BetaBadge from "@/components/BetaBadge";
-import CostOptimizationFeedbackBanner from "@/components/molecules/cost_optimization_feedback_banner";
 import ModelInfoView from "@/components/model_info_view";
 import TeamInfoView from "@/components/team/TeamInfo";
 import { useModelDetailRouting } from "@/app/(dashboard)/models-and-endpoints/detailNavigation";
@@ -176,8 +175,6 @@ export default function ModelsAndEndpointsPage() {
           </div>
         </div>
 
-        <CostOptimizationFeedbackBanner />
-
         {modelId ? (
           <ModelInfoView
             modelId={modelId}
@@ -190,6 +187,7 @@ export default function ModelsAndEndpointsPage() {
             modelAccessGroups={availableModelAccessGroups}
           />
         ) : (
+          <>
           <Tabs
             value={activeKey === "llm-credentials" || activeKey === BASE_TAB_KEY ? activeKey : ""}
             onValueChange={setActiveKey}
@@ -246,6 +244,7 @@ export default function ModelsAndEndpointsPage() {
             )}
             {renderPanel(activeKey)}
           </div>
+          </>
         )}
       </div>
     </div>

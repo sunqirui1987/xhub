@@ -325,9 +325,7 @@ describe("Sidebar (leftnav)", () => {
 
   // Workflow Runs, Memory and Guardrails Monitor render a shell and then 401
   // for every non-proxy-admin role, because their page-load routes sit outside
-  // internal_user_routes / self_managed_routes. Cost Optimization does not:
-  // its primary call is /user/daily/activity, which every role may make, so
-  // the entry stays and only its proxy-wide tabs are gated inside the page.
+  // internal_user_routes / self_managed_routes.
   describe("capability-gated pages whose data is proxy-admin-only", () => {
     const authFor = (userRole: string) => ({
       userId: "some-user-id",
@@ -388,13 +386,13 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.getByText("Models + Endpoints")).toBeInTheDocument();
     });
 
-    it("hides Guardrails Monitor from an internal user while keeping Usage and Cost Optimization", () => {
+    it("hides Guardrails Monitor from an internal user while keeping Usage", () => {
       mockUseAuthorized.mockReturnValue(authFor("internal"));
       renderWithProviders(<Sidebar {...defaultProps} />);
 
       expect(screen.queryByText("Guardrails Monitor")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cost Optimization")).not.toBeInTheDocument();
       expect(screen.getByText("Usage")).toBeInTheDocument();
-      expect(screen.getByText("Cost Optimization")).toBeInTheDocument();
     });
 
     it("shows Guardrails Monitor to admins", () => {
@@ -538,21 +536,17 @@ describe("Sidebar (leftnav)", () => {
     expect(label).toHaveClass("group-data-[collapsed=true]/sidebar:hidden");
   });
 
-  it("shows Cost Optimization without a Beta badge and no feature-flag gate", () => {
+  it("does not offer Cost Optimization and hides Projects when the projects UI is off", () => {
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI={false} />);
 
-    const costOptimization = container.querySelector('a[href*="cost-optimization"]');
-    expect(costOptimization).not.toBeNull();
-    expect(costOptimization!).toHaveTextContent(/Cost Optimization/);
-    expect(costOptimization!).not.toHaveTextContent(/Beta/);
-
+    expect(container.querySelector('a[href*="cost-optimization"]')).toBeNull();
+    expect(screen.queryByText("Cost Optimization")).not.toBeInTheDocument();
     expect(container.querySelector('a[href*="projects"]')).toBeNull();
   });
 
   it("keeps a readable collapsed-rail tooltip for items whose label carries a badge", () => {
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI collapsed />);
 
-    expect(container.querySelector('a[href*="cost-optimization"]')).toHaveAttribute("title", "Cost Optimization");
     expect(container.querySelector('a[href*="projects"]')).toHaveAttribute("title", "Projects");
   });
 

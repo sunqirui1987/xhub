@@ -19,7 +19,6 @@ export const pageDescriptions: Record<string, string> = {
   "tool-policies": "配置工具使用策略与权限",
   "vector-stores": "管理用于嵌入的向量库",
   new_usage: "查看用量分析与指标",
-  "cost-optimization": "跟踪并配置省钱能力：提示压缩、缓存与自动路由",
   logs: "查看请求与响应日志",
   "guardrails-monitor": "监控护栏表现并查看日志",
   users: "管理内部用户账号与权限",

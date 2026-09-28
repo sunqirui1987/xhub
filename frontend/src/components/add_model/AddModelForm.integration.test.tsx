@@ -1,4 +1,4 @@
-import { chooseSelectOption, renderHook, screen, waitFor, renderWithProviders } from "../../../tests/test-utils";
+import { renderHook, screen, waitFor, renderWithProviders } from "../../../tests/test-utils";
 import { prepareModelAddRequest } from "./handle_add_model_submit";
 import userEvent, { PointerEventsCheckLevel } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -471,7 +471,7 @@ describe("AddModelForm", () => {
     await user.click(picker);
     expect(await screen.findByRole("option", { name: "openai-prod" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "azure-prod" })).toBeInTheDocument();
-    await chooseSelectOption(user, picker, "azure-prod");
+    await user.click(screen.getByRole("option", { name: "azure-prod" }));
     await user.click(screen.getByTestId("add-model-btn"));
 
     await waitFor(() => expect(sent).toEqual(["azure-prod"]));

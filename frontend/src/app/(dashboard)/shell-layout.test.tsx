@@ -87,13 +87,12 @@ const kept = [
   "Internal Users",
   "Organizations",
   "Settings",
-  "Cost Optimization",
   "Projects",
   "Access Groups",
   "Guardrails Monitor",
 ];
 
-const removed = ["Agents", "MCP Servers", "Skills", "Policies", "Tools", "Developer Tools", "智能体", "Budgets"];
+const removed = ["Agents", "MCP Servers", "Skills", "Policies", "Tools", "Developer Tools", "智能体", "Budgets", "Cost Optimization", "成本优化"];
 
 describe("ai-gateway admin shell", () => {
   it("renders a header, a vertical sidebar, and a padded content region", async () => {

@@ -222,48 +222,4 @@ test("admin sso save shows a result", async ({ page }) => {
   guard.assertOk();
 });
 
-test("shadow eval start shows a result", async ({ page }) => {
-  test.setTimeout(90_000);
-  const guard = watchGateway(page);
-  await loginAdmin(page);
-  await page.goto(uiPath("/cost-optimization"));
-  await page.getByRole("tab", { name: t("Auto-Router") }).click();
-  const bearer = await sessionFrom(page);
-  const router = await page.request.post("http://127.0.0.1:4000/model/new", {
-    headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
-    data: { model_name: "e2e-shadow-router", litellm_params: { model: "auto_router/complexity_router" } },
-  });
-  expect(router.ok(), await router.text()).toBeTruthy();
-  const judge = await page.request.post("http://127.0.0.1:4000/model/new", {
-    headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
-    data: {
-      model_name: "e2e-judge",
-      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: "http://127.0.0.1:4010" },
-      model_info: { mode: "chat" },
-    },
-  });
-  expect(judge.ok(), await judge.text()).toBeTruthy();
-  await page.reload();
-  await page.getByRole("tab", { name: t("Auto-Router") }).click();
-  await page.getByRole("tab", { name: t("Shadow Evals") }).click();
-  await expect(page.getByText(t("Start a shadow eval")).first()).toBeVisible({ timeout: 15_000 });
-  const form = page.locator("form, section, div").filter({ has: page.getByRole("button", { name: t("Start shadow eval") }) }).first();
-  await page.getByPlaceholder(t("Search users by email")).click();
-  await page.getByPlaceholder(t("Search users by email")).fill("admin");
-  const userOption = page.getByRole("option", { name: /admin/i });
-  if (await userOption.count()) {
-    await userOption.first().click();
-  }
-  await page.keyboard.press("Escape");
-  await page.getByPlaceholder(t("Select up to 4 auto-routers")).click();
-  await page.getByRole("option", { name: "e2e-shadow-router" }).click();
-  await page.keyboard.press("Escape");
-  await page.getByPlaceholder(t("Select a judge model")).click();
-  await page.getByRole("option", { name: "e2e-judge" }).click();
-  await page.getByRole("button", { name: t("Start shadow eval") }).click();
-  await expect(page.getByText(t("Shadow eval started")).or(page.getByText(/error|失败|invalid/i)).first()).toBeVisible({
-    timeout: 15_000,
-  });
-  void form;
-  guard.assertOk();
-});
+

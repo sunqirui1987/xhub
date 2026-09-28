@@ -1,7 +1,4 @@
-import { BarChart3, Building2, Globe, ShoppingCart, Tags, User, Users } from "lucide-react";
 import React from "react";
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { hasCapability, type Capability } from "@/utils/capabilities";
 import { all_admin_roles } from "@/utils/roles";
 import { t } from "@/i18n";
@@ -27,7 +24,6 @@ interface OptionConfig {
   value: UsageOption;
   labelKey: string;
   descriptionKey: string;
-  icon: React.ReactNode;
   capability?: Capability;
   adminOnly?: boolean;
   showForAdminKey?: string;
@@ -45,47 +41,40 @@ const OPTIONS: OptionConfig[] = [
     descriptionKey: "pages.usage.acrossAll",
     descriptionForAdminKey: "pages.usage.acrossAll",
     descriptionForNonAdminKey: "pages.usage.viewYours",
-    icon: <Globe className="size-4" />,
   },
   {
     value: "my-usage",
     labelKey: "pages.usage.yours",
     descriptionKey: "pages.usage.yourOwn",
-    icon: <User className="size-4" />,
     adminOnly: true,
   },
   {
     value: "organization",
     labelKey: "pages.usage.organization",
     descriptionKey: "pages.usage.organizationDesc",
-    icon: <Building2 className="size-4" />,
     capability: "viewOrganizationUsage",
   },
   {
     value: "team",
     labelKey: "pages.usage.team",
     descriptionKey: "pages.usage.teamDesc",
-    icon: <Users className="size-4" />,
   },
   {
     value: "customer",
     labelKey: "pages.usage.customer",
     descriptionKey: "pages.usage.customerDesc",
-    icon: <ShoppingCart className="size-4" />,
     adminOnly: true,
   },
   {
     value: "tag",
     labelKey: "pages.usage.tag",
     descriptionKey: "pages.usage.tagDesc",
-    icon: <Tags className="size-4" />,
     adminOnly: true,
   },
   {
     value: "user",
     labelKey: "pages.usage.user",
     descriptionKey: "pages.usage.userDesc",
-    icon: <User className="size-4" />,
     adminOnly: true,
   },
 ];
@@ -125,62 +114,36 @@ export const UsageViewSelect: React.FC<UsageViewSelectProps> = ({
         value: option.value,
         label,
         description: desc,
-        icon: option.icon,
-        badgeText: option.badgeText,
       };
     });
   };
   const filteredOptions = getFilteredOptions();
-  const selectedOption = filteredOptions.find((option) => option.value === value);
   return (
     <div className="w-full" data-id={dataId}>
-      <div className="flex flex-wrap items-center justify-start gap-4">
-        <div className="flex items-stretch gap-2 min-w-0">
-          <div className="shrink-0 flex items-center">
-            <BarChart3 className="size-8" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-sm font-semibold text-foreground mb-0.5 leading-tight">
-              {title ?? t("pages.usage.viewTitle")}
-            </h3>
-            <p className="text-xs text-muted-foreground leading-tight">
-              {description ?? t("pages.usage.viewDescription")}
-            </p>
-          </div>
-        </div>
-        <div className="shrink-0">
-          <Select
-            value={value}
-            onValueChange={(next: UsageOption | null) => {
-              if (next) onChange(next);
-            }}
-          >
-            <SelectTrigger className="w-54 sm:w-64 md:w-72">
-              <SelectValue>
-                {selectedOption && (
-                  <span className="flex items-center gap-2">
-                    {selectedOption.icon}
-                    <span className="text-sm">{selectedOption.label}</span>
-                  </span>
-                )}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {filteredOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  <span className="flex items-center gap-2 py-1">
-                    <span className="shrink-0 mt-0.5">{option.icon}</span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                      <span className="block text-xs text-muted-foreground mt-0.5">{option.description}</span>
-                    </span>
-                    {option.badgeText && <Badge>{option.badgeText}</Badge>}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <h2 className="text-sm font-medium text-muted-foreground">{title ?? t("pages.usage.viewTitle")}</h2>
+        <p className="text-sm text-muted-foreground">{description ?? t("pages.usage.viewDescription")}</p>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label={title ?? t("pages.usage.viewTitle")}>
+        {filteredOptions.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => onChange(option.value)}
+              className={
+                selected
+                  ? "rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background"
+                  : "rounded-full bg-muted px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
+              }
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

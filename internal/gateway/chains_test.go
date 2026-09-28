@@ -28,7 +28,6 @@ var liveChains = []struct {
 	{"models-and-endpoints", "/v2/model/info"},
 	{"guardrails", "/guardrails/list"},
 	{"usage", "/global/activity"},
-	{"cost-optimization", "/auto_router/benchmarks"},
 	{"logs", "/spend/logs/v2?page=1&page_size=10"},
 	{"guardrails-monitor", "/guardrails/usage/overview"},
 	{"teams", "/v2/team/list?page=1&page_size=10"},

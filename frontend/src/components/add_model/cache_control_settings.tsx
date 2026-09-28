@@ -31,13 +31,14 @@ export interface CacheControlInjectionPoint {
 
 export const NEW_CACHE_CONTROL_POINT: CacheControlInjectionPoint = { location: "message" };
 
-const LOCATION_ITEMS = [{ value: "message", label: t("Message") }] as const;
+const LOCATION_VALUES = ["message"] as const;
+const ROLE_VALUES = ["user", "system", "assistant"] as const;
 
-const ROLE_ITEMS = [
-  { value: "user", label: t("User") },
-  { value: "system", label: t("System") },
-  { value: "assistant", label: t("Assistant") },
-] as const;
+const roleLabel = (role: (typeof ROLE_VALUES)[number]): string => {
+  if (role === "user") return t("User");
+  if (role === "system") return t("System");
+  return t("Assistant");
+};
 
 const LabelWithHint: React.FC<{ label: string; hint: string }> = ({ label, hint }) => (
   <div className="flex items-center">
@@ -85,14 +86,18 @@ const CacheControlInjectionPoints: React.FC<CacheControlInjectionPointsProps> = 
         <div key={index} className="mb-4 flex items-end gap-4">
           <div className="w-[180px] space-y-1">
             <Label>{t("Type")}</Label>
-            <Select items={LOCATION_ITEMS} value={point.location} disabled>
+            <Select
+              items={LOCATION_VALUES.map((value) => ({ value, label: t("Message") }))}
+              value={point.location}
+              disabled
+            >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {LOCATION_ITEMS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
+                {LOCATION_VALUES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t("Message")}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -102,7 +107,7 @@ const CacheControlInjectionPoints: React.FC<CacheControlInjectionPointsProps> = 
           <div className="w-[180px] space-y-1">
             <LabelWithHint label={t("Role")} hint={CACHE_CONTROL_ROLE_HINT} />
             <Select
-              items={ROLE_ITEMS}
+              items={ROLE_VALUES.map((value) => ({ value, label: roleLabel(value) }))}
               value={point.role ?? null}
               onValueChange={(selected) =>
                 replaceAt(index, { ...point, role: (selected as CacheControlRole | null) ?? undefined })
@@ -113,9 +118,9 @@ const CacheControlInjectionPoints: React.FC<CacheControlInjectionPointsProps> = 
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={null}>{t("None")}</SelectItem>
-                {ROLE_ITEMS.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
+                {ROLE_VALUES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {roleLabel(value)}
                   </SelectItem>
                 ))}
               </SelectContent>

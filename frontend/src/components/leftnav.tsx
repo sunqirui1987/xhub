@@ -34,7 +34,7 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
-  PiggyBank,
+
   PlayCircle,
   Route,
   Settings as SettingsIcon,
@@ -131,13 +131,6 @@ const menuGroups: MenuGroup[] = [
         icon: <BarChart3 {...ICON} />,
         roles: [...all_admin_roles, ...internalUserRoles],
         label: "nav.usage",
-      },
-      {
-        key: "cost-optimization",
-        page: "cost-optimization",
-        icon: <PiggyBank {...ICON} />,
-        roles: [...all_admin_roles, ...internalUserRoles],
-        label: "nav.costOptimization",
       },
       { key: "logs", page: "logs", label: "nav.logs", icon: <Activity {...ICON} /> },
       {

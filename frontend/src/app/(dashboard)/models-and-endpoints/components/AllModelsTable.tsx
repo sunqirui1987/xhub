@@ -33,15 +33,13 @@ export const WILDCARD_MODEL_GROUP_VALUE = "wildcard";
 
 const MODEL_TABLE_BODY_HEIGHT = 600;
 
-const FILTER_LABELS: Record<string, string> = {
-  [MODEL_NAME_COLUMN_ID]: "Public Model Name",
-  [ACCESS_GROUPS_COLUMN_ID]: "Model Access Group",
-};
+const filterLabels = (): Record<string, string> => ({
+  [MODEL_NAME_COLUMN_ID]: t("Public Model Name"),
+  [ACCESS_GROUPS_COLUMN_ID]: t("Model Access Group"),
+});
 
-const VIEW_MODE_LABELS: Record<ModelViewMode, string> = {
-  current_team: "Current Team Models",
-  all: "All Available Models",
-};
+const viewModeLabel = (mode: ModelViewMode): string =>
+  mode === "current_team" ? t("Current Team Models") : t("All Available Models");
 
 export interface ModelsTableTeamOption {
   value: string;
@@ -207,7 +205,7 @@ export function AllModelsTable({
             onOpenFilters={() => setFiltersOpen(true)}
             onRefresh={onRefresh}
             isRefreshing={isRefreshing}
-            filterLabels={FILTER_LABELS}
+            filterLabels={filterLabels()}
             formatFilterValue={formatFilterValue}
           >
             <Select value={selectedTeamValue} onValueChange={(value) => onTeamChange(String(value))}>
@@ -245,11 +243,11 @@ export function AllModelsTable({
             <Select value={viewMode} onValueChange={(value) => onViewModeChange(value as ModelViewMode)}>
               <SelectTrigger size="sm" aria-label={t("View")} data-testid="models-view-select" className="gap-2">
                 <span className="text-muted-foreground">{t("View")}</span>
-                <span className="truncate">{VIEW_MODE_LABELS[viewMode]}</span>
+                <span className="truncate">{viewModeLabel(viewMode)}</span>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="current_team">{VIEW_MODE_LABELS.current_team}</SelectItem>
-                <SelectItem value="all">{VIEW_MODE_LABELS.all}</SelectItem>
+                <SelectItem value="current_team">{viewModeLabel("current_team")}</SelectItem>
+                <SelectItem value="all">{viewModeLabel("all")}</SelectItem>
               </SelectContent>
             </Select>
 

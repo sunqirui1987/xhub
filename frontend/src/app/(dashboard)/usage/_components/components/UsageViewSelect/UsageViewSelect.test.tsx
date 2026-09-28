@@ -1,18 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { chooseSelectOption } from "@/../tests/test-utils";
 import { UsageViewSelect } from "./UsageViewSelect";
 import { translate } from "@/i18n/translate";
 
-const openMenu = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole("combobox"));
-};
-
-// The listbox is portalled outside the render container in both antd and Base UI, so an
-// option is "offered" when the label appears more times on the page than inside the trigger.
-const offers = (container: HTMLElement, label: string) =>
-  screen.queryAllByText(label).length > within(container).queryAllByText(label).length;
+const offers = (label: string) => screen.queryByRole("tab", { name: label }) != null;
 
 describe("UsageViewSelect", () => {
   const mockOnChange = vi.fn();
@@ -27,17 +19,16 @@ describe("UsageViewSelect", () => {
 
     expect(screen.getByText(translate("en", "pages.usage.viewTitle"))).toBeInTheDocument();
     expect(screen.getByText(translate("en", "pages.usage.viewDescription"))).toBeInTheDocument();
-    expect(screen.getByRole("combobox")).toBeInTheDocument();
-
-    await openMenu(user);
-    expect(offers(container, translate("en", "pages.usage.yours"))).toBe(true);
+    expect(screen.getByRole("tab", { name: translate("en", "pages.usage.yours"), selected: true })).toBeInTheDocument();
+    expect(offers(translate("en", "pages.usage.yours"))).toBe(true);
+    void user;
   });
 
   it("should call onChange when value changes", async () => {
     const user = userEvent.setup();
     render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
 
-    await chooseSelectOption(user, screen.getByRole("combobox"), new RegExp(`^${translate("en", "pages.usage.team")}`));
+    await user.click(screen.getByRole("tab", { name: translate("en", "pages.usage.team") }));
 
     expect(mockOnChange).toHaveBeenCalled();
     expect(mockOnChange.mock.calls[0][0]).toBe("team");
@@ -45,40 +36,40 @@ describe("UsageViewSelect", () => {
 
   it("should show Tag Usage for non-admin users with tag usage permission", async () => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
     );
 
-    await openMenu(user);
-    expect(offers(container, translate("en", "pages.usage.tag"))).toBe(true);
+    expect(offers(translate("en", "pages.usage.tag"))).toBe(true);
+    void user;
   });
 
   it("should hide Tag Usage for non-admin users without tag usage permission", async () => {
     const user = userEvent.setup();
-    const { container } = render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" />);
+    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" />);
 
-    await openMenu(user);
-    expect(offers(container, translate("en", "pages.usage.tag"))).toBe(false);
+    expect(offers(translate("en", "pages.usage.tag"))).toBe(false);
+    void user;
   });
 
   it.each(["pages.usage.organization"] as const)("should show %s to an admin", async (key) => {
     const user = userEvent.setup();
-    const { container } = render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
+    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
 
-    await openMenu(user);
-    expect(offers(container, translate("en", key))).toBe(true);
+    expect(offers(translate("en", key))).toBe(true);
+    void user;
   });
 
   it.each(["pages.usage.organization"] as const)(
     "should hide %s from an internal user",
     async (key) => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
     );
 
-    await openMenu(user);
-    expect(offers(container, translate("en", key))).toBe(false);
+    expect(offers(translate("en", key))).toBe(false);
+    void user;
   });
 
   // An org admin's session role is "Internal User" — org-admin-ness lives in the
@@ -88,33 +79,33 @@ describe("UsageViewSelect", () => {
   // administer, but still refuses the agent usage route.
   it.each([["pages.usage.organization", true]] as const)("should offer %s to an org admin: %s", async (key, expected) => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" isOrgAdmin={true} />,
     );
 
-    await openMenu(user);
-    expect(offers(container, translate("en", key))).toBe(expected);
+    expect(offers(translate("en", key))).toBe(expected);
+    void user;
   });
 
   it.each(["pages.usage.team", "pages.usage.tag"] as const)(
     "should keep %s available to an internal user",
     async (key) => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
     );
 
-    await openMenu(user);
-    expect(offers(container, translate("en", key))).toBe(true);
+    expect(offers(translate("en", key))).toBe(true);
+    void user;
   });
 
   it("shows only the localized view name on the closed control", async () => {
     const { setActiveLocale } = await import("@/i18n/runtime");
     setActiveLocale("zh-CN");
     render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
-    const closed = screen.getByRole("combobox");
-    expect(closed).toHaveTextContent("全局用量");
-    expect(closed.textContent ?? "").not.toMatch(/(^|\s)global(\s|$)/);
+    const selected = screen.getByRole("tab", { selected: true });
+    expect(selected).toHaveTextContent("全局用量");
+    expect(selected.textContent ?? "").not.toMatch(/(^|\s)global(\s|$)/);
     setActiveLocale("en");
   });
 
@@ -122,12 +113,12 @@ describe("UsageViewSelect", () => {
     const { setActiveLocale } = await import("@/i18n/runtime");
     setActiveLocale("zh-CN");
     const user = userEvent.setup();
-    const { container } = render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
+    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Admin" />);
     expect(screen.getByText(translate("zh-CN", "pages.usage.viewTitle"))).toBeInTheDocument();
     expect(screen.queryByText(translate("en", "pages.usage.viewTitle"))).not.toBeInTheDocument();
-    await openMenu(user);
-    expect(offers(container, translate("zh-CN", "pages.usage.global"))).toBe(true);
-    expect(offers(container, translate("en", "pages.usage.global"))).toBe(false);
+    expect(offers(translate("zh-CN", "pages.usage.global"))).toBe(true);
+    expect(offers(translate("en", "pages.usage.global"))).toBe(false);
+    void user;
     setActiveLocale("en");
   });
 });

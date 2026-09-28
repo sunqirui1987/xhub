@@ -13,7 +13,6 @@ const APP_PAGES = new Set([
   "/models-and-endpoints",
   "/guardrails",
   "/usage",
-  "/cost-optimization",
   "/logs",
   "/guardrails-monitor",
   "/teams",

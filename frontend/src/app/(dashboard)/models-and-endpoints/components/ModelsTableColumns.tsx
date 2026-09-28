@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Switch } from "@/components/ui/switch";
 import { getDisplayModelName } from "@/components/view_model/model_name_display";
+import { getActiveLocale, t } from "@/i18n";
 import { copyToClipboard } from "@/utils/dataUtils";
-import { t } from "@/i18n";
 
 export const MODEL_ID_COLUMN_ID = "model_info_id";
 export const MODEL_NAME_COLUMN_ID = "model_name";
@@ -39,7 +39,11 @@ const formatShortDate = (value: string | null | undefined): string | null => {
     return null;
   }
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : formatCellDate(date, "date");
+  if (Number.isNaN(date.getTime())) return null;
+  if (getActiveLocale() === "zh-CN") {
+    return date.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
+  }
+  return formatCellDate(date, "date");
 };
 
 function ModelInformationCell({ model, displayName }: { model: ModelData; displayName: string }) {
@@ -169,8 +173,8 @@ function CredentialsCell({ credentialName }: { credentialName: string | undefine
 function CreatedByCell({ model }: { model: ModelData }) {
   const isConfigModel = !model.model_info?.db_model;
   const createdAt = formatShortDate(model.model_info.created_at);
-  const primary = isConfigModel ? "Defined in config" : model.model_info.created_by || "Unknown";
-  const secondaryForDbModel = createdAt ?? "Unknown date";
+  const primary = isConfigModel ? t("Defined in config") : model.model_info.created_by || t("Unknown");
+  const secondaryForDbModel = createdAt ?? t("Unknown date");
 
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
