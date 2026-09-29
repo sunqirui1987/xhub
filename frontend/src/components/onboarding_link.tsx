@@ -4,6 +4,7 @@ import { CopyToClipboard } from "react-copy-to-clipboard";
 import { toast } from "@/lib/toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { t } from "@/i18n";
+import { consoleUiRoot } from "@/utils/returnUrlUtils";
 
 export interface InvitationLink {
   id: string;
@@ -27,29 +28,24 @@ interface OnboardingProps {
 }
 
 export function buildOnboardingUrl({
-  baseUrl,
+  baseUrl: _apiBase,
   invitationId,
   hasUserSetupSso,
   resetPassword,
 }: {
+  /** Kept for callers. The link is the console, not this API base joined with /ui. */
   baseUrl: string;
   invitationId: string | undefined;
   hasUserSetupSso: boolean;
   resetPassword: boolean;
 }): string {
-  if (!baseUrl) {
-    return "";
-  }
-  const basePath = new URL(baseUrl).pathname;
-  const uiPath = basePath && basePath !== "/" ? `${basePath}/ui` : "ui";
-  if (hasUserSetupSso) {
-    return new URL(uiPath, baseUrl).toString();
-  }
-  if (!invitationId) {
-    return "";
-  }
+  void _apiBase;
+  const root = consoleUiRoot();
+  if (!root) return "";
+  if (hasUserSetupSso) return `${root}/ui`;
+  if (!invitationId) return "";
   const action = resetPassword ? "&action=reset_password" : "";
-  return new URL(`${uiPath}/onboarding?invitation_id=${invitationId}${action}`, baseUrl).toString();
+  return `${root}/ui/onboarding?invitation_id=${invitationId}${action}`;
 }
 
 export default function OnboardingModal({

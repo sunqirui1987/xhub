@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	_ "time/tzdata"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/gateway"

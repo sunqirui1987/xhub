@@ -11,7 +11,7 @@
 - `Use` mounts an `httpx.Module` after startup. A duplicate module name fails. The first method and path wins.
 - `RequireManage` and `RequireLLMPrincipal` are the auth doors for admin routes and inference routes.
 - `IsRemovedColumn` reports paths that stay 404, including the removed agent, MCP, and skill surfaces.
-- `SetUIProxy` installs the dashboard reverse proxy. Nil means the console is not running.
+- The console is a separate process. `Handler` does not proxy `/ui`, `/_next`, `/assets`, or `/favicon.ico`, and it does not redirect `/` or `/login` there. `GET /litellm/.well-known/litellm-ui-config` reports `proxy_base_url` as the API origin (`http://localhost:4000`, or `XHUB_PUBLIC_ORIGIN`).
 - Health routes: `GET /health/liveliness` returns `{"status":"ok"}` without a database ping. Readiness pings PostgreSQL.
 
 ## How you run it

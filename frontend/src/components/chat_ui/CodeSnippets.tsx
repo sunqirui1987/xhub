@@ -1,6 +1,7 @@
 import { MessageType } from "./types";
 import { EndpointType } from "./mode_endpoint_mapping";
 import { MCPServer } from "@/components/mcp_tools/types";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface CodeGenMetadata {
   tags?: string[];
@@ -51,14 +52,7 @@ export const generateCodeSnippet = (params: GenerateCodeParams): string => {
   } = params;
   const effectiveApiKey = apiKeySource === "session" ? accessToken : apiKey;
 
-  // Determine base URL with priority: LITELLM_UI_API_DOC_BASE_URL > PROXY_BASE_URL > window.location.origin
-  let apiBase = window.location.origin;
-  const customDocBaseUrl = proxySettings?.LITELLM_UI_API_DOC_BASE_URL;
-  if (customDocBaseUrl && customDocBaseUrl.trim()) {
-    apiBase = customDocBaseUrl;
-  } else if (proxySettings?.PROXY_BASE_URL) {
-    apiBase = proxySettings.PROXY_BASE_URL;
-  }
+  const apiBase = clientSampleBaseUrl(proxySettings, process.env.NEXT_PUBLIC_BASE_URL);
 
   // Always get the input message early on, regardless of what happens later
   const userPrompt = inputMessage || "Your prompt here"; // Fallback if inputMessage is empty

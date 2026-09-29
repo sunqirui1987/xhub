@@ -22,6 +22,7 @@ import { getSecureItem, setSecureItem } from "@/utils/secureStorage";
 import { setToken } from "@/utils/mcpTokenStore";
 import { buildCallbackUrl, clearStorage } from "./mcpOAuthUtils";
 import { t } from "@/i18n";
+import { randomId } from "@/utils/randomId";
 
 export type ToolsOAuthStatus = "idle" | "authorizing" | "exchanging" | "success" | "error";
 
@@ -109,7 +110,7 @@ export const useToolsOAuthFlow = ({
 
       const verifier = generateCodeVerifier();
       const challenge = await generateCodeChallenge(verifier);
-      const state = crypto.randomUUID();
+      const state = randomId();
       const scopeString = scopes?.filter((s) => s.trim()).join(" ");
 
       const authorizeUrl = buildMcpOAuthAuthorizeUrl({

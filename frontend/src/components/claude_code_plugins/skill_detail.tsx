@@ -4,6 +4,7 @@ import { cn } from "@/lib/cva.config";
 import { buildMarketplaceSettingsSnippet, formatInstallCommand } from "./helpers";
 import { Plugin } from "./types";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface SkillDetailProps {
   skill: Plugin;
@@ -34,7 +35,7 @@ const SkillDetail: React.FC<SkillDetailProps> = ({ skill, onBack }) => {
   const installCommand = formatInstallCommand(skill);
 
   const settingsSnippet = buildMarketplaceSettingsSnippet(
-    typeof window !== "undefined" ? window.location.origin : "<proxy-url>",
+    clientSampleBaseUrl(undefined, process.env.NEXT_PUBLIC_BASE_URL),
   );
 
   const detailRows = [
@@ -226,7 +227,7 @@ const SkillDetail: React.FC<SkillDetailProps> = ({ skill, onBack }) => {
               <span className="text-[13px] font-medium text-foreground">{t("Run in Claude Code")}</span>
               <button
                 onClick={() => {
-                  const origin = typeof window !== "undefined" ? window.location.origin : "";
+                  const origin = clientSampleBaseUrl(undefined, process.env.NEXT_PUBLIC_BASE_URL);
                   copyToClipboard(`/plugin marketplace add ${origin}/claude-code/marketplace.json`, "marketplace-cmd");
                 }}
                 className={cn(
@@ -239,7 +240,7 @@ const SkillDetail: React.FC<SkillDetailProps> = ({ skill, onBack }) => {
               </button>
             </div>
             <pre className="m-0 bg-card px-4 py-3.5 font-mono text-[13px] text-foreground">
-              {`/plugin marketplace add ${typeof window !== "undefined" ? window.location.origin : "<proxy-url>"}/claude-code/marketplace.json`}
+              {`/plugin marketplace add ${clientSampleBaseUrl(undefined, process.env.NEXT_PUBLIC_BASE_URL)}/claude-code/marketplace.json`}
             </pre>
           </div>
 

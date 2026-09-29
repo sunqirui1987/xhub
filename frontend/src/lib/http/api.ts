@@ -42,8 +42,8 @@ const middleware: Middleware = {
  * params, query params, and request bodies are inferred from schema.d.ts.
  *
  * The base URL is injected, not fixed at import: every request is built against
- * whatever registerBaseUrlGetter supplies at call time (a split-origin proxy or
- * worker URL), falling back to the current origin. The middleware injects the
+ * whatever registerBaseUrlGetter supplies at call time (the gateway origin or
+ * a worker URL). The middleware injects the
  * auth header and maps non-2xx responses to ApiError so query functions can just
  * read `.data`.
  */

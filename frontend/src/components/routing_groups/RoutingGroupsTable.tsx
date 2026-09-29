@@ -10,6 +10,7 @@ import { RoutingGroupUsagePanel } from "./RoutingGroupUsagePanel";
 import { getRoutingGroupsTableColumns } from "./RoutingGroupsTableColumns";
 import type { RoutingGroup } from "./types";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface RoutingGroupsTableProps {
   groups: RoutingGroup[];
@@ -19,11 +20,11 @@ interface RoutingGroupsTableProps {
   proxyBaseUrl?: string;
 }
 
-const resolveBaseUrl = (proxyBaseUrl?: string): string => {
-  if (proxyBaseUrl && proxyBaseUrl.trim()) return proxyBaseUrl;
-  if (typeof window !== "undefined" && window.location?.origin) return window.location.origin;
-  return "<your_proxy_base_url>";
-};
+const resolveBaseUrl = (proxyBaseUrl?: string): string =>
+  clientSampleBaseUrl(
+    proxyBaseUrl ? { PROXY_BASE_URL: proxyBaseUrl } : undefined,
+    process.env.NEXT_PUBLIC_BASE_URL,
+  );
 
 function EmptyState() {
   return (

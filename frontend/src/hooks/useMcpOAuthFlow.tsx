@@ -6,14 +6,14 @@ import {
   buildMcpOAuthAuthorizeUrl,
   cacheTemporaryMcpServer,
   exchangeMcpOAuthToken,
-  getProxyBaseUrl,
   registerMcpOAuthClient,
-  serverRootPath,
 } from "@/components/networking";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { generateCodeChallenge, generateCodeVerifier } from "@/utils/pkce";
 import { getSecureItem, setSecureItem } from "@/utils/secureStorage";
+import { buildCallbackUrl } from "./mcpOAuthUtils";
 import { t } from "@/i18n";
+import { randomId } from "@/utils/randomId";
 
 export type McpOAuthStatus = "idle" | "authorizing" | "exchanging" | "success" | "error";
 
@@ -106,20 +106,6 @@ export const useMcpOAuthFlow = ({
     }
   };
 
-  const buildCallbackUrl = () => {
-    if (typeof window !== "undefined") {
-      const path = window.location.pathname || "";
-      const uiIndex = path.indexOf("/ui");
-      const uiPrefix = uiIndex >= 0 ? path.slice(0, uiIndex + 3) : "";
-      const normalizedPrefix = uiPrefix.replace(/\/+$/, "");
-      return `${window.location.origin}${normalizedPrefix}/mcp/oauth/callback`;
-    }
-
-    const base = (getProxyBaseUrl() || "").replace(/\/+$/, "");
-    const rootPrefix = serverRootPath && serverRootPath !== "/" ? serverRootPath : "";
-    return `${base}${rootPrefix}/ui/mcp/oauth/callback`;
-  };
-
   const callbackUrl = () => buildCallbackUrl();
 
   const startOAuthFlow = useCallback(async () => {
@@ -171,7 +157,7 @@ export const useMcpOAuthFlow = ({
 
       const verifier = generateCodeVerifier();
       const challenge = await generateCodeChallenge(verifier);
-      const state = crypto.randomUUID();
+      const state = randomId();
 
       const clientId = registeredClient.clientId || credentials.client_id;
       const scopeString = Array.isArray(credentials.scopes)

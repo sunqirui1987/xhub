@@ -22,6 +22,7 @@ import {
 } from "@/components/networking";
 import PublicModelHub from "@/components/public_model_hub";
 import { copyToClipboard } from "@/utils/dataUtils";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 import { isAdminRole, isProxyAdminRole } from "@/utils/roles";
 import { filterBySearchTerm } from "@/utils/searchUtils";
 import { SortingState } from "@tanstack/react-table";
@@ -40,7 +41,7 @@ import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
 import { checkTokenValidity } from "@/utils/jwtUtils";
 import { getCookie } from "@/utils/cookieUtils";
-import { getLoginUrl } from "@/utils/returnUrlUtils";
+import { consoleHref, getLoginUrl } from "@/utils/returnUrlUtils";
 import { t } from "@/i18n";
 
 interface ModelHubTableProps {
@@ -110,7 +111,7 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
 
       // If token is invalid, redirect to login
       if (!isTokenValid) {
-        window.location.replace(getLoginUrl(getProxyBaseUrl()));
+        window.location.replace(getLoginUrl());
         return;
       }
     }
@@ -388,9 +389,9 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
             <div className="flex items-center space-x-4">
               <p>{t("Model Hub URL:")}</p>
               <div className="flex items-center bg-border px-2 py-1 rounded-sm">
-                <p className="mr-2">{`${getProxyBaseUrl()}/ui/model_hub_table`}</p>
+                <p className="mr-2">{consoleHref("/ui/model_hub_table")}</p>
                 <button
-                  onClick={() => void copyToClipboard(`${getProxyBaseUrl()}/ui/model_hub_table`)}
+                  onClick={() => void copyToClipboard(consoleHref("/ui/model_hub_table"))}
                   className="p-1 hover:bg-accent rounded-sm transition-colors"
                   title={t("Copy URL")}
                 >
@@ -692,7 +693,7 @@ const ModelHubTable: React.FC<ModelHubTableProps> = ({ accessToken, publicPage, 
 
 client = openai.OpenAI(
     api_key="your_api_key",
-    base_url="${getProxyBaseUrl()}"  # Your proxy URL
+    base_url="${clientSampleBaseUrl(undefined, process.env.NEXT_PUBLIC_BASE_URL)}"
 )
 
 response = client.chat.completions.create(

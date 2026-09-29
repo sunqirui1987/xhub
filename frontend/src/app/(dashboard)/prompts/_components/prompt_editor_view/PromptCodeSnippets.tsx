@@ -16,6 +16,7 @@ const LANGUAGE_ITEMS = [
 ] as const;
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface PromptCodeSnippetsProps {
   promptId: string;
@@ -53,14 +54,7 @@ const PromptCodeSnippets: React.FC<PromptCodeSnippetsProps> = ({
     setIsModalVisible(false);
   };
 
-  // Determine base URL with priority: LITELLM_UI_API_DOC_BASE_URL > PROXY_BASE_URL > window.location.origin
-  let apiBase = window.location.origin;
-  const customDocBaseUrl = proxySettings?.LITELLM_UI_API_DOC_BASE_URL;
-  if (customDocBaseUrl && customDocBaseUrl.trim()) {
-    apiBase = customDocBaseUrl;
-  } else if (proxySettings?.PROXY_BASE_URL) {
-    apiBase = proxySettings.PROXY_BASE_URL;
-  }
+  const apiBase = clientSampleBaseUrl(proxySettings, process.env.NEXT_PUBLIC_BASE_URL);
 
   const effectiveApiKey = accessToken || "sk-1234";
 

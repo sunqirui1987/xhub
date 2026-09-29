@@ -3,6 +3,7 @@ import React from "react";
 import CodeBlock from "@/components/CodeBlock";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface ApiRefProps {
   proxySettings: {
@@ -12,13 +13,7 @@ interface ApiRefProps {
 }
 
 const APIReferenceView: React.FC<ApiRefProps> = ({ proxySettings }) => {
-  let base_url = "<your_proxy_base_url>";
-  const customDocBaseUrl = proxySettings?.LITELLM_UI_API_DOC_BASE_URL;
-  if (customDocBaseUrl && customDocBaseUrl.trim()) {
-    base_url = customDocBaseUrl;
-  } else if (proxySettings?.PROXY_BASE_URL) {
-    base_url = proxySettings.PROXY_BASE_URL;
-  }
+  const base_url = clientSampleBaseUrl(proxySettings, process.env.NEXT_PUBLIC_BASE_URL);
 
   return (
     <div className="grid grid-cols-1 gap-2 p-8 h-[80vh] w-full mt-2">

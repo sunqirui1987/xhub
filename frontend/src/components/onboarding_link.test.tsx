@@ -1,8 +1,28 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { buildOnboardingUrl } from "./onboarding_link";
 
 describe("buildOnboardingUrl", () => {
-  it("points the invitation link at the dedicated /ui/onboarding route", () => {
+  const originalLocation = window.location;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "location", {
+      value: {
+        ...originalLocation,
+        origin: "http://localhost:3000",
+        pathname: "/playground",
+      },
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+    });
+  });
+
+  it("points the invitation link at the console /ui/onboarding route, not the API origin", () => {
     expect(
       buildOnboardingUrl({
         baseUrl: "http://localhost:4000/",
@@ -10,18 +30,26 @@ describe("buildOnboardingUrl", () => {
         hasUserSetupSso: false,
         resetPassword: false,
       }),
-    ).toBe("http://localhost:4000/ui/onboarding?invitation_id=inv-123");
+    ).toBe("http://localhost:3000/ui/onboarding?invitation_id=inv-123");
   });
 
-  it("preserves a server_root_path prefix before /ui/onboarding", () => {
+  it("preserves a console mount prefix that sits before /ui", () => {
+    Object.defineProperty(window, "location", {
+      value: {
+        ...originalLocation,
+        origin: "https://console.example.com",
+        pathname: "/litellm/ui/users",
+      },
+      writable: true,
+    });
     expect(
       buildOnboardingUrl({
-        baseUrl: "https://proxy.example.com/litellm",
+        baseUrl: "https://api.example.com",
         invitationId: "inv-123",
         hasUserSetupSso: false,
         resetPassword: false,
       }),
-    ).toBe("https://proxy.example.com/litellm/ui/onboarding?invitation_id=inv-123");
+    ).toBe("https://console.example.com/litellm/ui/onboarding?invitation_id=inv-123");
   });
 
   it("appends action=reset_password for the reset-password flow", () => {
@@ -32,10 +60,10 @@ describe("buildOnboardingUrl", () => {
         hasUserSetupSso: false,
         resetPassword: true,
       }),
-    ).toBe("http://localhost:4000/ui/onboarding?invitation_id=inv-123&action=reset_password");
+    ).toBe("http://localhost:3000/ui/onboarding?invitation_id=inv-123&action=reset_password");
   });
 
-  it("sends SSO users to the dashboard root, not the onboarding form", () => {
+  it("sends SSO users to the console dashboard, not the API origin", () => {
     expect(
       buildOnboardingUrl({
         baseUrl: "http://localhost:4000/",
@@ -43,10 +71,10 @@ describe("buildOnboardingUrl", () => {
         hasUserSetupSso: true,
         resetPassword: false,
       }),
-    ).toBe("http://localhost:4000/ui");
+    ).toBe("http://localhost:3000/ui");
   });
 
-  it("returns an empty string when no base URL is known yet", () => {
+  it("builds the console link when the API base is empty", () => {
     expect(
       buildOnboardingUrl({
         baseUrl: "",
@@ -54,7 +82,7 @@ describe("buildOnboardingUrl", () => {
         hasUserSetupSso: false,
         resetPassword: false,
       }),
-    ).toBe("");
+    ).toBe("http://localhost:3000/ui/onboarding?invitation_id=inv-123");
   });
 
   it("returns an empty string rather than an invitation_id=undefined link when the id is not ready", () => {

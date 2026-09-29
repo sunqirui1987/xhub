@@ -114,7 +114,7 @@ import {
   extractProxyErrorMessage,
   unwrapProxyErrorMessage,
 } from "@/lib/http/client";
-import { resolveApiBase } from "@/lib/http/resolveApiBase";
+import { resolveApiBase, resolveGatewayApiBase } from "@/lib/http/resolveApiBase";
 import {
   registerAuthHeaderNameGetter,
   registerAuthTokenGetter,
@@ -130,15 +130,7 @@ export { deriveErrorMessage };
 export { ApiError } from "@/lib/http/client";
 
 const isLocal = process.env.NODE_ENV === "development";
-// In dev, if NEXT_PUBLIC_USE_REWRITES=true the Next.js dev server proxies API calls
-// to the backend — use relative URLs (null) so rewrites can intercept them.
-const resolveDefaultBase = (fallback: string | null): string | null =>
-  process.env.NEXT_PUBLIC_BASE_URL
-    ? process.env.NEXT_PUBLIC_BASE_URL
-    : isLocal && process.env.NEXT_PUBLIC_USE_REWRITES !== "true"
-      ? "http://localhost:4000"
-      : fallback;
-const defaultProxyBaseUrl = resolveDefaultBase(null);
+const defaultProxyBaseUrl = resolveGatewayApiBase({ envBase: process.env.NEXT_PUBLIC_BASE_URL });
 const WORKER_URL_KEY = "litellm_worker_url";
 // If a worker URL is in localStorage, use it as the initial proxyBaseUrl.
 // This survives page navigation.
@@ -177,7 +169,11 @@ const updateProxyBaseUrl = (serverRootPath: string, receivedProxyBaseUrl: string
     return;
   }
   proxyBaseUrl = resolveApiBase({
-    explicitBase: receivedProxyBaseUrl || resolveDefaultBase(getWindowLocation()?.origin ?? null),
+    explicitBase: resolveGatewayApiBase({
+      envBase: process.env.NEXT_PUBLIC_BASE_URL,
+      reportedBase: receivedProxyBaseUrl,
+      pageOrigin: getWindowLocation()?.origin ?? null,
+    }),
     serverRootPath,
   });
 };
@@ -190,8 +186,10 @@ export const getProxyBaseUrl = (): string => {
   if (proxyBaseUrl) {
     return proxyBaseUrl;
   }
-  const browserLocation = getWindowLocation();
-  return browserLocation?.origin ?? "";
+  return resolveGatewayApiBase({
+    envBase: process.env.NEXT_PUBLIC_BASE_URL,
+    pageOrigin: getWindowLocation()?.origin ?? null,
+  });
 };
 
 /**

@@ -17,6 +17,7 @@ import {
 import CustomDimensionRows from "./CustomDimensionRows";
 import { customDimensionsError } from "./custom_dimensions";
 import { t } from "@/i18n";
+import { randomId } from "@/utils/randomId";
 
 export type KnobGroup = "tier_boundaries" | "token_thresholds" | "dimension_weights";
 
@@ -275,7 +276,7 @@ const HeuristicScoringConfig: React.FC<HeuristicScoringConfigProps> = ({ value, 
                         onAdd={() =>
                           changeWeights({
                             type: "add",
-                            row: { id: crypto.randomUUID(), name: "", weight: 0.1, scoring_mode: "match_count" },
+                            row: { id: randomId(), name: "", weight: 0.1, scoring_mode: "match_count" },
                           })
                         }
                         onRemove={(id) => changeWeights({ type: "remove", id })}

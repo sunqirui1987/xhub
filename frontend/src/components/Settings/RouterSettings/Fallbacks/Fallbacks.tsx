@@ -7,7 +7,7 @@ import React, { useEffect, useState } from "react";
 import DeleteResourceModal from "../../../common_components/DeleteResourceModal";
 import { ProviderLogo } from "../../../molecules/models/ProviderLogo";
 import { toast } from "@/lib/toast";
-import { getCallbacksCall, setCallbacksCall } from "../../../networking";
+import { getCallbacksCall, getProxyBaseUrl, setCallbacksCall } from "../../../networking";
 import { isProxyAdminRole } from "@/utils/roles";
 import AddFallbacks from "./AddFallbacks";
 import EditFallbacks from "./EditFallbacks";
@@ -80,7 +80,7 @@ async function testFallbackModelResponse(selectedModel: string, accessToken: str
   if (isLocal != true) {
     console.log = function () {};
   }
-  const proxyBaseUrl = isLocal ? "http://localhost:4000" : window.location.origin;
+  const proxyBaseUrl = getProxyBaseUrl();
   const client = new openai.OpenAI({
     apiKey: accessToken,
     baseURL: proxyBaseUrl,

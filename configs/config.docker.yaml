@@ -7,6 +7,6 @@ router_settings:
 
 general_settings:
   master_key: sk-local-master
-  database_url: postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable
-  redis_url: redis://127.0.0.1:6379/1
+  database_url: postgres://xhub:xhub_dev_password@postgres:5432/xhub?sslmode=disable
+  redis_url: redis://redis:6379/1
   store_model_in_db: true

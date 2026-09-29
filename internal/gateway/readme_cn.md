@@ -11,7 +11,7 @@
 - `Use` 在启动之后再装一个 `httpx.Module`。模块重名会失败。同一个方法和路径以先注册的为准。
 - `RequireManage` 和 `RequireLLMPrincipal` 是管理路由和推理路由的鉴权门。
 - `IsRemovedColumn` 报告保持 404 的路径，包括已经拿掉的智能体、MCP 和技能表面。
-- `SetUIProxy` 装上控制台反向代理。传 nil 表示控制台没有启动。
+- 控制台是另一个进程。`Handler` 不反代 `/ui`、`/_next`、`/assets`、`/favicon.ico`，也不把 `/` 或 `/login` 重定向到那里。`GET /litellm/.well-known/litellm-ui-config` 的 `proxy_base_url` 是 API 源（`http://localhost:4000`，或 `XHUB_PUBLIC_ORIGIN`）。
 - 健康检查：`GET /health/liveliness` 不访问数据库，返回 `{"status":"ok"}`。就绪检查会 ping PostgreSQL。
 
 ## 怎么把它跑起来

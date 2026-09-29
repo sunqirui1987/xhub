@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AssistantMessageUpdate, ChatMessage, Conversation } from "./types";
 import { t } from "@/i18n";
+import { randomId } from "@/utils/randomId";
 
 const STORAGE_KEY_PREFIX = "litellm_chat_history_v1";
 const MAX_CONVERSATIONS = 100;
@@ -107,7 +108,7 @@ export function useChatHistory(
   }, [conversations, userId, storageUnavailable]);
 
   const createConversation = useCallback((model: string): string => {
-    const id = crypto.randomUUID();
+    const id = randomId();
     const now = Date.now();
     const newConversation: Conversation = {
       id,
@@ -126,7 +127,7 @@ export function useChatHistory(
   const appendMessage = useCallback((conversationId: string, message: Omit<ChatMessage, "id" | "timestamp">) => {
     const newMessage: ChatMessage = {
       ...message,
-      id: crypto.randomUUID(),
+      id: randomId(),
       timestamp: Date.now(),
     };
 

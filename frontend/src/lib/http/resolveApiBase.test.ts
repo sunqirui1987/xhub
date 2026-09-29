@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveApiBase, resolveRequestUrl } from "./resolveApiBase";
+import { clientSampleBaseUrl, resolveApiBase, resolveGatewayApiBase, resolveRequestUrl } from "./resolveApiBase";
 
 describe("resolveRequestUrl", () => {
   it("targets the registered base when one is registered", () => {
@@ -116,5 +116,67 @@ describe("resolveApiBase", () => {
         resolveApiBase({ explicitBase: "http://localhost:4000/team/litellm", serverRootPath: "/team/litellm" }),
       ).toBe("http://localhost:4000/team/litellm");
     });
+  });
+});
+
+describe("resolveGatewayApiBase", () => {
+  it("uses the local gateway origin when the env and the reported base are empty", () => {
+    expect(
+      resolveGatewayApiBase({
+        envBase: "",
+        reportedBase: "",
+        pageOrigin: "http://localhost:3000",
+      }),
+    ).toBe("http://localhost:4000");
+  });
+
+  it("does not use the page origin when both overrides are missing", () => {
+    const base = resolveGatewayApiBase({ pageOrigin: "http://127.0.0.1:3000" });
+    expect(base).toBe("http://localhost:4000");
+    expect(base).not.toContain(":3000");
+    expect(base).not.toContain("/ui");
+  });
+
+  it("prefers a reported proxy base over the env and the page", () => {
+    expect(
+      resolveGatewayApiBase({
+        envBase: "https://env.example.com",
+        reportedBase: "https://api.example.com/",
+        pageOrigin: "http://localhost:3000",
+      }),
+    ).toBe("https://api.example.com");
+  });
+
+  it("uses the env base when the gateway reports nothing", () => {
+    expect(
+      resolveGatewayApiBase({
+        envBase: "https://env.example.com/",
+        reportedBase: "  ",
+        pageOrigin: "http://localhost:3000",
+      }),
+    ).toBe("https://env.example.com");
+  });
+});
+
+describe("clientSampleBaseUrl", () => {
+  it("uses the gateway origin when the page is the console and no sample base is set", () => {
+    const base = clientSampleBaseUrl(undefined, "");
+    expect(base).toBe("http://localhost:4000");
+    expect(base).not.toContain("/ui");
+  });
+
+  it("prefers the doc base, then the proxy base", () => {
+    expect(
+      clientSampleBaseUrl(
+        {
+          LITELLM_UI_API_DOC_BASE_URL: "https://docs.example.com/",
+          PROXY_BASE_URL: "https://proxy.example.com",
+        },
+        "http://localhost:4000",
+      ),
+    ).toBe("https://docs.example.com");
+    expect(clientSampleBaseUrl({ PROXY_BASE_URL: "https://proxy.example.com/" }, "")).toBe(
+      "https://proxy.example.com",
+    );
   });
 });

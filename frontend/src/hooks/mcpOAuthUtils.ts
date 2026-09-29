@@ -5,8 +5,6 @@
  * to avoid divergence in URL construction and storage cleanup logic.
  */
 
-import { getProxyBaseUrl, serverRootPath } from "@/components/networking";
-
 /**
  * sessionStorage key used to restore the MCP server detail view on the Tools
  * tab after a full-page OAuth redirect. The OBO authorize flow redirects to the
@@ -19,20 +17,17 @@ export const TOOLS_OAUTH_UI_STATE_KEY = "litellm-mcp-oauth-tools-state";
 /**
  * Build the OAuth callback URL for the current UI deployment.
  *
- * In the browser, derive the `/ui` prefix from the current pathname so the
- * callback works regardless of how the proxy is mounted.  Outside the browser
- * (SSR), fall back to the configured proxy base URL and server root path.
+ * The callback is a console page. Derive a `/ui` prefix from the current
+ * pathname. Outside the browser, return the console path without an API origin.
  */
 export const buildCallbackUrl = (): string => {
-  if (typeof window !== "undefined") {
-    const path = window.location.pathname || "";
-    const idx = path.indexOf("/ui");
-    const prefix = idx >= 0 ? path.slice(0, idx + 3).replace(/\/+$/, "") : "";
-    return `${window.location.origin}${prefix}/mcp/oauth/callback`;
+  if (typeof window === "undefined") {
+    return "/ui/mcp/oauth/callback";
   }
-  const base = (getProxyBaseUrl() || "").replace(/\/+$/, "");
-  const root = serverRootPath && serverRootPath !== "/" ? serverRootPath : "";
-  return `${base}${root}/ui/mcp/oauth/callback`;
+  const path = window.location.pathname || "";
+  const idx = path.indexOf("/ui");
+  const prefix = idx >= 0 ? path.slice(0, idx + 3).replace(/\/+$/, "") : "";
+  return `${window.location.origin}${prefix}/mcp/oauth/callback`;
 };
 
 /**

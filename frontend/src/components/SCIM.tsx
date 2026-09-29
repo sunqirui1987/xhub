@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 interface SCIMConfigProps {
   accessToken: string | null;
@@ -37,12 +38,7 @@ const SCIMConfig: React.FC<SCIMConfigProps> = ({ accessToken, userID, proxySetti
   useEffect(() => {
     let url = "<your_proxy_base_url>";
 
-    if (proxySettings && proxySettings.PROXY_BASE_URL && proxySettings.PROXY_BASE_URL !== undefined) {
-      url = proxySettings.PROXY_BASE_URL;
-    } else if (typeof window !== "undefined") {
-      // Use the current origin as the base URL if no proxy URL is set
-      url = window.location.origin;
-    }
+    url = clientSampleBaseUrl(proxySettings, process.env.NEXT_PUBLIC_BASE_URL);
 
     setBaseUrl(url);
   }, [proxySettings]);

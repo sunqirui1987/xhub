@@ -11,9 +11,9 @@ describe("runtime request config defaults", () => {
     expect(getRequestBaseUrl()).toBe("https://proxy.example.com");
   });
 
-  it("defaults the base URL to same-origin when NEXT_PUBLIC_BASE_URL is unset", () => {
+  it("defaults the base URL to the local gateway when NEXT_PUBLIC_BASE_URL is unset", () => {
     vi.stubEnv("NEXT_PUBLIC_BASE_URL", "");
-    expect(getRequestBaseUrl()).toBe("");
+    expect(getRequestBaseUrl()).toBe("http://localhost:4000");
   });
 
   it("defaults the auth header name to Authorization", () => {

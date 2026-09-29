@@ -55,9 +55,6 @@ func setCORS(w http.ResponseWriter, r *http.Request) {
 	h.Add("Vary", "Access-Control-Request-Headers")
 }
 
-// SetUIProxy replaces the dashboard reverse proxy. Nil means the console is not running.
-func (s *Server) SetUIProxy(h http.Handler) { s.uiProxy = h }
-
 // GinRoutes returns the methods, paths, and handlers mounted on the engine, so a caller can confirm there is no "/" catch-all.
 func (s *Server) GinRoutes() gin.RoutesInfo { return s.engine.Routes() }
 
@@ -94,10 +91,6 @@ func (s *Server) Handler() http.Handler {
 		if r.Method == http.MethodOptions {
 			logx.Debug("process %s %s step=options", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if Try(s.uiProxy, w, r) {
-			logx.Debug("process %s %s step=ui-proxy", r.Method, r.URL.Path)
 			return
 		}
 		raw, _ := io.ReadAll(r.Body)

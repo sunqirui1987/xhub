@@ -51,10 +51,10 @@ describe("ModelHubTable", () => {
   beforeEach(() => {
     Object.defineProperty(window, "location", {
       value: {
-        href: "http://localhost:4000/ui/model_hub_table",
-        origin: "http://localhost:4000",
+        href: "http://localhost:3000/model_hub_table",
+        origin: "http://localhost:3000",
         hostname: "localhost",
-        pathname: "/ui/model_hub_table",
+        pathname: "/model_hub_table",
         search: "",
         protocol: "http:",
         replace: mockLocationReplace,
@@ -117,7 +117,7 @@ describe("ModelHubTable", () => {
 
       await waitFor(() => {
         if (shouldRedirect) {
-          expect(mockLocationReplace).toHaveBeenCalledWith("http://localhost:4000/ui/login/");
+          expect(mockLocationReplace).toHaveBeenCalledWith("/ui/login/");
           expect(mockRouterReplace).not.toHaveBeenCalled();
         } else {
           expect(mockLocationReplace).not.toHaveBeenCalled();

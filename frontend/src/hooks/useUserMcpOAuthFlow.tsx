@@ -25,6 +25,7 @@ import { generateCodeChallenge, generateCodeVerifier } from "@/utils/pkce";
 import { getSecureItem, setSecureItem } from "@/utils/secureStorage";
 import { buildCallbackUrl, clearStorage } from "./mcpOAuthUtils";
 import { t } from "@/i18n";
+import { randomId } from "@/utils/randomId";
 
 export type UserMcpOAuthStatus = "idle" | "authorizing" | "exchanging" | "success" | "error";
 
@@ -108,7 +109,7 @@ export const useUserMcpOAuthFlow = ({
 
       const verifier = generateCodeVerifier();
       const challenge = await generateCodeChallenge(verifier);
-      const state = crypto.randomUUID();
+      const state = randomId();
       const redirectUri = buildCallbackUrl();
       const scopeString = scopes?.filter((s) => s.trim()).join(" ");
 

@@ -26,7 +26,7 @@ const Version = family.ProxyVersion
 
 // Server is the gateway process object. Login is in session.go, the HTTP engine is in engine.go, and the route table is in routes.go.
 // Subpackage adapters are in wire.go, spend persistence is in spend.go, and budget and rate checks are in limits.go.
-// Keys live in keys, settings in prefs, guardrails in guard, and the dashboard proxy in ui_proxy.go.
+// Keys live in keys, settings in prefs, and guardrails in guard. The console is a separate process; this server does not proxy it.
 // Users and budgets live in identity, models in models, usage in usage, catalog resources in family, and the inference loop in dataplane.
 type Server struct {
 	Cfg                *config.Config
@@ -46,7 +46,6 @@ type Server struct {
 	ssoCodes           map[string]bool
 	emailEvents        []emailEventSetting
 	idem               map[string]idemRec
-	uiProxy            http.Handler
 	mu                 sync.Mutex
 	yamlStoreModelInDB bool
 	modules            []httpx.Module
@@ -93,7 +92,6 @@ func New(cfg *config.Config, st *store.Store) *Server {
 		sessions:           map[string]sessionRec{},
 		ssoCodes:           map[string]bool{},
 		idem:               map[string]idemRec{},
-		uiProxy:            NewProxy(),
 		yamlStoreModelInDB: cfg.GeneralSettings.StoreModelInDB,
 	}
 	if cfg.GeneralSettings.RedisURL != "" {

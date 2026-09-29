@@ -32,6 +32,7 @@ import { fetchAvailableModels, ModelGroup } from "@/components/llm_calls/fetch_m
 import ComplianceUI from "../complianceUI/ComplianceUI";
 import ChatUI from "./ChatUI";
 import { t } from "@/i18n";
+import { clientSampleBaseUrl } from "@/lib/http/resolveApiBase";
 
 export interface AgentBuilderViewProps {
   accessToken: string | null;
@@ -55,11 +56,13 @@ function getConnectTabBaseUrl(
   proxySettings: AgentBuilderViewProps["proxySettings"],
   customProxyBaseUrl?: string,
 ): string {
-  const customDocBaseUrl = proxySettings?.LITELLM_UI_API_DOC_BASE_URL;
-  if (customDocBaseUrl && customDocBaseUrl.trim()) return customDocBaseUrl;
-  if (proxySettings?.PROXY_BASE_URL) return proxySettings.PROXY_BASE_URL;
-  if (customProxyBaseUrl?.trim()) return customProxyBaseUrl;
-  return "<your_proxy_base_url>";
+  return clientSampleBaseUrl(
+    {
+      LITELLM_UI_API_DOC_BASE_URL: proxySettings?.LITELLM_UI_API_DOC_BASE_URL,
+      PROXY_BASE_URL: proxySettings?.PROXY_BASE_URL || customProxyBaseUrl,
+    },
+    process.env.NEXT_PUBLIC_BASE_URL,
+  );
 }
 
 interface ConnectTabContentProps {

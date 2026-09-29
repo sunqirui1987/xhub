@@ -3,11 +3,25 @@ package gateway
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"sync"
 )
+
+// LocalGatewayOrigin is the API clients and the console use when no public base is configured.
+const LocalGatewayOrigin = "http://localhost:4000"
+
+// PublicOrigin is the OpenAI-compatible API origin. XHUB_PUBLIC_ORIGIN overrides the local default.
+// The value is an origin only: the console is not mounted under it.
+func PublicOrigin() string {
+	if v := strings.TrimSpace(os.Getenv("XHUB_PUBLIC_ORIGIN")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return LocalGatewayOrigin
+}
 
 var logTraceOnceHealth sync.Once
 
@@ -52,7 +66,7 @@ func (s *Server) uiConfig(w http.ResponseWriter, r *http.Request) {
 		"sso_configured":                true,
 		"hide_default_credentials_hint": false,
 		"is_control_plane":              false,
-		"proxy_base_url":                "",
+		"proxy_base_url":                PublicOrigin(),
 		"server_root_path":              "/",
 	})
 }

@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: xhub-postgres
+    environment:
+      POSTGRES_USER: xhub
+      POSTGRES_PASSWORD: xhub_dev_password
+      POSTGRES_DB: xhub
+    ports:
+      - "5433:5432"
+    volumes:
+      - xhub-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xhub -d xhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: xhub-redis
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gateway
+    image: xhub-gateway
+    container_name: xhub-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      XHUB_PUBLIC_ORIGIN: http://localhost:4000
+    ports:
+      - "4000:4000"
+
+  console:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: console
+    image: xhub-console
+    container_name: xhub-console
+    depends_on:
+      - gateway
+    environment:
+      XHUB_GATEWAY_ORIGIN: http://gateway:4000
+    ports:
+      - "3000:3000"
+
+volumes:
+  xhub-pg:

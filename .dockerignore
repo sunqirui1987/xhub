@@ -1,0 +1,15 @@
+.git
+cmd
+internal
+docs
+e2e
+frontend
+node_modules
+**/*.go
+**/*.db
+logs
+tmp
+output
+playwright-report
+test-results
+configs/config.yaml

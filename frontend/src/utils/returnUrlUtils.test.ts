@@ -106,8 +106,17 @@ describe("returnUrlUtils", () => {
       expect(getLoginUrl()).toBe("/ui/login/");
     });
 
-    it("should prepend the given base URL and keep the trailing slash", () => {
-      expect(getLoginUrl("http://proxy.example")).toBe("http://proxy.example/ui/login/");
+    it("keeps a login URL on the console when the argument is the gateway API origin", () => {
+      Object.defineProperty(window, "location", {
+        value: {
+          ...window.location,
+          origin: "http://localhost:3000",
+          href: "http://localhost:3000/playground",
+        },
+        writable: true,
+      });
+      expect(getLoginUrl("http://localhost:4000")).toBe("http://localhost:3000/ui/login/");
+      expect(getLoginUrl("http://localhost:4000")).not.toContain(":4000");
     });
 
     it("should keep the trailing slash before the query when composed with buildLoginUrlWithReturn", () => {

@@ -13,8 +13,51 @@
 const RETURN_URL_COOKIE_NAME = "litellm_return_url";
 const RETURN_URL_PARAM = "redirect_to";
 
+/** Origin of the console page. Empty outside the browser. */
+export function consoleOrigin(): string {
+  if (typeof window === "undefined" || !window.location?.origin || window.location.origin === "null") {
+    return "";
+  }
+  return window.location.origin;
+}
+
+/**
+ * Root of the console, including a mount prefix that sits before `/ui`
+ * (https://host/litellm when the page is https://host/litellm/ui/...).
+ * This is never the gateway API origin.
+ */
+export function consoleUiRoot(): string {
+  const origin = consoleOrigin();
+  if (!origin) return "";
+  const path = window.location.pathname || "";
+  const idx = path.indexOf("/ui");
+  const prefix = idx >= 0 ? path.slice(0, idx).replace(/\/+$/, "") : "";
+  return `${origin}${prefix}`;
+}
+
+/** A console path on the frontend origin. An API base is not accepted. */
+export function consoleHref(path: string): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const root = consoleUiRoot();
+  if (!root) return normalized;
+  return `${root}${normalized}`;
+}
+
 export function getLoginUrl(baseUrl: string = ""): string {
-  return `${baseUrl}/ui/login/`;
+  const path = "/ui/login/";
+  if (!baseUrl) return path;
+  try {
+    const given = new URL(baseUrl);
+    const page = consoleOrigin();
+    if (page && given.origin === page) {
+      return `${given.origin}${path}`;
+    }
+  } catch {
+    /* not an absolute console origin */
+  }
+  // An API origin must not be prefixed with /ui. Stay on the console.
+  const page = consoleOrigin();
+  return page ? `${page}${path}` : path;
 }
 
 /**

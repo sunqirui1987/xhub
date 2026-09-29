@@ -6,11 +6,10 @@ describe("CodeSnippets", () => {
   const originalLocation = window.location;
 
   beforeEach(() => {
-    // Mock window.location.origin
     Object.defineProperty(window, "location", {
       value: {
         ...originalLocation,
-        origin: "http://localhost:4000",
+        origin: "http://localhost:3000",
       },
       writable: true,
     });
@@ -85,17 +84,20 @@ describe("CodeSnippets", () => {
       expect(code).not.toContain(`base_url="${proxyBaseUrl}"`);
     });
 
-    it("should fallback to window.location.origin when proxySettings is not provided", () => {
+    it("uses the gateway origin when the page is the console and proxySettings is not provided", () => {
       const code = generateCodeSnippet(baseParams);
       expect(code).toContain(`base_url="http://localhost:4000"`);
+      expect(code).not.toContain(":3000");
+      expect(code).not.toContain("/ui");
     });
 
-    it("should fallback to window.location.origin when proxySettings is empty", () => {
+    it("uses the gateway origin when proxySettings is empty", () => {
       const code = generateCodeSnippet({
         ...baseParams,
         proxySettings: {},
       });
       expect(code).toContain(`base_url="http://localhost:4000"`);
+      expect(code).not.toContain(":3000");
     });
 
     it("should fallback to PROXY_BASE_URL when LITELLM_UI_API_DOC_BASE_URL is empty string", () => {
@@ -122,7 +124,7 @@ describe("CodeSnippets", () => {
       expect(code).toContain(`base_url="${proxyBaseUrl}"`);
     });
 
-    it("should fallback to window.location.origin when LITELLM_UI_API_DOC_BASE_URL is null", () => {
+    it("uses the gateway origin when LITELLM_UI_API_DOC_BASE_URL is null", () => {
       const code = generateCodeSnippet({
         ...baseParams,
         proxySettings: {
@@ -130,6 +132,7 @@ describe("CodeSnippets", () => {
         },
       });
       expect(code).toContain(`base_url="http://localhost:4000"`);
+      expect(code).not.toContain(":3000");
     });
 
     it("should use LITELLM_UI_API_DOC_BASE_URL for Azure SDK", () => {

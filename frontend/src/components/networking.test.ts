@@ -381,6 +381,19 @@ describe("UI config and public endpoints", () => {
     expect(configCall).toBeDefined();
   });
 
+  it("uses the local gateway origin when the server reports an empty proxy_base_url", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_URL", "");
+    setupMockFetch([
+      { url: "/litellm/.well-known/litellm-ui-config", data: { server_root_path: "/", proxy_base_url: "" } },
+    ]);
+
+    await Networking.getUiConfig();
+
+    expect(Networking.getProxyBaseUrl()).toBe("http://localhost:4000");
+    expect(Networking.getProxyBaseUrl()).not.toContain("/ui");
+    vi.unstubAllEnvs();
+  });
+
   it("updates serverRootPath so path-based nav links carry the root path", async () => {
     const uiConfig = {
       server_root_path: "/litellm",
