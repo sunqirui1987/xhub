@@ -14,10 +14,17 @@ interface AvailableModel {
   model_group?: string | null;
   model_name?: string | null;
   id?: string | null;
+  role?: string | null;
+  model_info?: {
+    role?: string | null;
+  } | null;
   mode?: string | null;
   supports_reasoning?: boolean | null;
   supported_reasoning_efforts?: string[] | null;
 }
+
+const isProviderShell = (item: AvailableModel): boolean =>
+  item.role === "provider" || item.model_info?.role === "provider";
 
 const toModelGroup = (item: AvailableModel): ModelGroup => {
   const groupName = (item.model_group || item.id || item.model_name) ?? "";
@@ -48,6 +55,7 @@ export const fetchAvailableModels = async (accessToken: string): Promise<ModelGr
     const fetchedModels = await modelHubCall(accessToken);
     const fetchedData: unknown = fetchedModels?.data;
     const models: ModelGroup[] = (Array.isArray(fetchedData) ? fetchedData : [])
+      .filter((item): item is AvailableModel => typeof item === "object" && item !== null && !isProviderShell(item as AvailableModel))
       .map(toModelGroup)
       .filter((model: ModelGroup) => model.model_group !== "")
       .sort((a: ModelGroup, b: ModelGroup) => a.model_group.localeCompare(b.model_group));

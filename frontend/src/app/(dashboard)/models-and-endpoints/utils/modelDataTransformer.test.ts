@@ -101,6 +101,31 @@ describe("transformModelData", () => {
     expect(result.data[0].output_cost).toBeNull();
   });
 
+  it("drops builtin provider shells and fills a missing price from the price map", () => {
+    const rawData = {
+      data: [
+        {
+          model_name: "qiniu",
+          litellm_params: { model: "openai/qiniu" },
+          model_info: { id: "builtin:qiniu:qiniu", role: "provider" },
+        },
+        {
+          model_name: "gpt-5.5",
+          litellm_params: { model: "openai/gpt-5.5" },
+          model_info: { role: "model" },
+        },
+      ],
+    };
+
+    const result = transformModelData(rawData, mockGetProviderFromModel, {
+      "gpt-5.5": { input_cost_per_token: 0.000005, output_cost_per_token: 0.00003 },
+    });
+
+    expect(result.data.map((row: { model_name: string }) => row.model_name)).toEqual(["gpt-5.5"]);
+    expect(result.data[0].input_cost).toBe("5.00");
+    expect(result.data[0].output_cost).toBe("30.00");
+  });
+
   it("should handle missing model_info", () => {
     const rawData = {
       data: [

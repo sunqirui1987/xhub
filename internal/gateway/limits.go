@@ -8,6 +8,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
+	modelaccess "github.com/sunqirui1987/xhub/internal/gateway/models"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -47,7 +48,7 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 			p.Key = k
 		}
 	}
-	if alias != "" && p.Key != nil && !p.Key.AllowsModel(alias) {
+	if alias != "" && !modelaccess.AllowsModel(s, p, alias) {
 		httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in allowed model list")
 		return false
 	}
@@ -57,42 +58,62 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	}
 	if p.Key != nil && p.Key.TeamID != "" {
 		if team, err := s.Store.GetTeam(p.Key.TeamID); err == nil {
-			if team.ExtraBool("blocked") {
+			if team.BlockedState() {
 				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "team blocked")
-				return false
-			}
-			if !team.AllowsModel(alias) {
-				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in team allowed model list")
 				return false
 			}
 			if team.MaxBudget.Valid && team.Spend+s.hotSpend(team.ID) >= team.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Team budget has been exceeded")
 				return false
 			}
+		} else {
+			httpx.WriteTypedError(w, path, 401, "invalid_request_error", "team not found")
+			return false
 		}
 	}
 	if p.Key != nil && p.Key.UserID != "" {
 		if user, err := s.Store.GetUser(p.Key.UserID); err == nil {
-			if !user.AllowsModel(alias) {
-				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in user allowed model list")
+			if user.BlockedState() {
+				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "user blocked")
 				return false
 			}
 			if user.MaxBudget.Valid && user.Spend+s.hotSpend(user.ID) >= user.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "User budget has been exceeded")
 				return false
 			}
+		} else {
+			httpx.WriteTypedError(w, path, 401, "invalid_request_error", "user not found")
+			return false
 		}
 	}
 	if p.Key != nil && p.Key.OrganizationID != "" {
 		if org, err := s.Store.GetOrg(p.Key.OrganizationID); err == nil {
-			if !org.AllowsModel(alias) {
-				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in organization allowed model list")
+			if org.BlockedState() {
+				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "organization blocked")
 				return false
 			}
 			if org.MaxBudget.Valid && org.Spend+s.hotSpend(org.ID) >= org.MaxBudget.Float64 {
 				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Organization budget has been exceeded")
 				return false
 			}
+		} else {
+			httpx.WriteTypedError(w, path, 401, "invalid_request_error", "organization not found")
+			return false
+		}
+	}
+	if p.Key != nil && p.Key.ProjectID != "" {
+		if project, err := s.Store.GetProject(p.Key.ProjectID); err == nil {
+			if project.BlockedState() {
+				httpx.WriteTypedError(w, path, 401, "invalid_request_error", "project blocked")
+				return false
+			}
+			if project.MaxBudget.Valid && project.Spend+s.hotSpend(project.ID) >= project.MaxBudget.Float64 {
+				httpx.WriteTypedError(w, path, 429, "budget_exceeded", "Project budget has been exceeded")
+				return false
+			}
+		} else {
+			httpx.WriteTypedError(w, path, 401, "invalid_request_error", "project not found")
+			return false
 		}
 	}
 	if p.Key != nil && !s.enforceRateLimits(w, path, p, est) {

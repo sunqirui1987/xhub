@@ -19,7 +19,21 @@ import DeleteResourceModal from "../common_components/DeleteResourceModal";
 import { toast } from "@/lib/toast";
 import CredentialModal from "./CredentialModal";
 import CredentialsTable from "./CredentialsTable";
+import { ProviderModelDialog } from "./ProviderModelDialog";
 import { t } from "@/i18n";
+
+const DEFAULT_PROVIDERS: CredentialItem[] = [
+  {
+    credential_name: "fennoai",
+    credential_values: { api_base: "https://api.fenno.ai" },
+    credential_info: { custom_llm_provider: "openai", builtin: "fennoai", api_base: "https://api.fenno.ai", wire_api: "responses" },
+  },
+  {
+    credential_name: "qiniu",
+    credential_values: { api_base: "https://api.qnaigc.com/bypass/openai/v1" },
+    credential_info: { custom_llm_provider: "openai", builtin: "qiniu", api_base: "https://api.qnaigc.com/bypass/openai/v1", wire_api: "responses" },
+  },
+];
 
 const restrictedFields = ["credential_name", "custom_llm_provider"];
 
@@ -39,9 +53,15 @@ export default function CredentialsPanel() {
   // Admin Viewer follows the read-parity rule: see credentials, do not modify.
   const canModifyCredentials = isProxyAdminRole(userRole ?? "");
   const { data: credentialsResponse, isLoading, refetch: refetchCredentials } = useCredentials();
-  const credentialList = credentialsResponse?.credentials || [];
+  const credentialList = [
+    ...DEFAULT_PROVIDERS.filter(
+      (item) => !(credentialsResponse?.credentials || []).some((row) => row.credential_name === item.credential_name),
+    ),
+    ...(credentialsResponse?.credentials || []),
+  ];
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [listingProvider, setListingProvider] = useState<{ provider: "fennoai" | "qiniu"; credentialName: string } | null>(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [selectedCredential, setSelectedCredential] = useState<CredentialItem | null>(null);
   const [credentialToDelete, setCredentialToDelete] = useState<CredentialItem | null>(null);
@@ -133,6 +153,12 @@ export default function CredentialsPanel() {
         canModifyCredentials={canModifyCredentials}
         onEdit={openEditModal}
         onDelete={openDeleteModal}
+        onListModels={(credential) => {
+          const builtin = credential.credential_info?.builtin || credential.credential_name;
+          if (builtin === "fennoai" || builtin === "qiniu") {
+            setListingProvider({ provider: builtin, credentialName: credential.credential_name });
+          }
+        }}
         isLoading={isLoading}
       />
 
@@ -144,6 +170,19 @@ export default function CredentialsPanel() {
           onCancel={() => setIsAddModalOpen(false)}
         />
       )}
+      {listingProvider && accessToken ? (
+        <ProviderModelDialog
+          provider={listingProvider.provider}
+          initialCredentialName={listingProvider.credentialName}
+          credentials={credentialList}
+          accessToken={accessToken}
+          onClose={() => setListingProvider(null)}
+          onAdded={() => {
+            void refetchCredentials();
+          }}
+        />
+      ) : null}
+
       {isUpdateModalOpen && (
         <CredentialModal
           mode="edit"

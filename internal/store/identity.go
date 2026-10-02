@@ -64,6 +64,14 @@ func (e Entity) ExtraBool(key string) bool {
 	return v
 }
 
+// BlockedState reports whether the entity is explicitly blocked. Projects store the flag in the fixed field; users, teams, and organizations keep it in extra JSON.
+func (e Entity) BlockedState() bool {
+	if e.Blocked {
+		return true
+	}
+	return e.ExtraBool("blocked")
+}
+
 // ExtraList reads a list from the extra JSON. A missing or wrong-typed value is an empty slice.
 func (e Entity) ExtraList(key string) []any {
 	v, _ := e.Extra()[key].([]any)

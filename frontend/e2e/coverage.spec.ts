@@ -235,7 +235,7 @@ test("ui create is visible from the live gateway and chat returns e2e-ok", async
 test("live gateway catalog sweep", async () => {
   test.setTimeout(300_000);
   const bin = path.resolve(__dirname, "../../.e2e/livesweep");
-  const catalog = path.resolve(__dirname, "../../docs/_inventory/catalog.json");
+  const catalog = path.resolve(__dirname, "../../docs/catalog.json");
   let out = "";
   try {
     out = execFileSync(bin, {

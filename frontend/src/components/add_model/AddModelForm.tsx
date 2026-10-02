@@ -76,7 +76,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
   teams,
   credentials,
 }) => {
-  const [testMode, setTestMode] = useState<string>("chat");
+  const testMode = useWatch({ control: form.control, name: "mode" }) as string | undefined;
   const [isResultModalVisible, setIsResultModalVisible] = useState<boolean>(false);
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
   // Using a unique ID to force the ConnectionErrorDisplay to remount and run a fresh test
@@ -245,20 +245,20 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                       <ConditionalPublicModelName />
 
                       {/* Select Mode */}
-                      <MountedFormField label={t("Mode")} name="mode" className="mb-1">
+                      <MountedFormField label={t("Health check endpoint (optional)")} name="mode" className="mb-1">
                         {(control) => (
                           <Select
-                            items={TEST_MODES}
-                            value={(control.value as string | undefined) ?? null}
+                            items={[{ value: "", label: t("Not Set") }, ...TEST_MODES]}
+                            value={(control.value as string | undefined) ?? ""}
                             onValueChange={(value: string | null) => {
                               control.onChange(value);
-                              setTestMode(value ?? "");
                             }}
                           >
-                            <SelectTrigger id={control.id} className="w-full" aria-label={t("Mode")}>
+                            <SelectTrigger id={control.id} className="w-full" aria-label={t("Health check endpoint (optional)")}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="">{t("Not Set")}</SelectItem>
                               {TEST_MODES.map((mode) => (
                                 <SelectItem key={mode.value} value={mode.value}>
                                   {mode.label}
@@ -268,17 +268,9 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                           </Select>
                         )}
                       </MountedFormField>
-                      <div className="grid grid-cols-12">
-                        <div className="col-span-5" />
-                        <div className="col-span-5">
-                          <p className="text-sm mb-5 mt-1">
-                            <strong>{t("Optional")}</strong> {t("- LiteLLM endpoint to use when health checking this model")}{" "}
-                            
-                              {t("Learn more")}
-                            
-                          </p>
-                        </div>
-                      </div>
+                      <p className="text-sm text-muted-foreground mb-5 mt-1">
+                        {t("Choose an endpoint for health checks only. This does not restrict actual requests. Leave unset if unknown.")}
+                      </p>
 
                       {/* Credentials */}
                       <div className="mb-4">
@@ -455,7 +447,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
               key={connectionTestId}
               formValues={mountedValues()}
               accessToken={accessToken}
-              testMode={testMode}
+              testMode={testMode ?? ""}
               modelName={connectionTestModelName(form.getValues())}
               onClose={() => {
                 setIsResultModalVisible(false);

@@ -52,6 +52,18 @@ describe("fetchAvailableModels", () => {
     ]);
   });
 
+  it("does not expose provider shells such as qiniu and fennoai as selectable models", async () => {
+    modelHubCallMock.mockResolvedValue({
+      data: [
+        { model_group: "fennoai", role: "provider" },
+        { model_group: "qiniu", model_info: { role: "provider" } },
+        { model_group: "gpt-5.6-sol", mode: "chat" },
+      ],
+    });
+
+    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "gpt-5.6-sol", mode: "chat" }]);
+  });
+
   it("preserves absent, unknown, empty, and explicit effort capability states", async () => {
     modelHubCallMock.mockResolvedValue({
       data: [

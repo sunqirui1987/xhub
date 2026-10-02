@@ -7,7 +7,9 @@
 export const pageDescriptions: Record<string, string> = {
   "api-keys": "管理用于 API 访问与鉴权的虚拟密钥",
   "llm-playground": "交互式调试台，用于测试 LLM 请求",
+  "my-models": "查看当前账号可使用的模型",
   models: "配置并管理 LLM 模型与端点",
+  "price-data": "管理模型价格与能力数据",
   agents: "创建并管理智能体",
   agentic: "管理智能体资源：智能体、工作流运行与记忆",
   workflows: "跟踪并查看持久化工作流运行历史",

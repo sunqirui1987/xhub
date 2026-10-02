@@ -15,6 +15,7 @@ type Host interface {
 	// RequireMixed accepts either a management identity or an inference identity. Key health checks use it. Pure management routes use RequireManage.
 	RequireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal
 	DB() *store.Store
+	ValidateKeyRelations(k store.Key) error
 }
 
 // traceModule records that virtual-key routes are being mounted.

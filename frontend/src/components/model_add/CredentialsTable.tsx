@@ -15,6 +15,7 @@ interface CredentialsTableProps {
   canModifyCredentials: boolean;
   onEdit: (credential: CredentialItem) => void;
   onDelete: (credential: CredentialItem) => void;
+  onListModels?: (credential: CredentialItem) => void;
   isLoading?: boolean;
 }
 
@@ -37,13 +38,14 @@ const CredentialsTable: React.FC<CredentialsTableProps> = ({
   canModifyCredentials,
   onEdit,
   onDelete,
+  onListModels,
   isLoading = false,
 }) => {
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_SORTING);
 
   const columns = useMemo(
-    () => getCredentialsTableColumns({ canModifyCredentials, onEdit, onDelete }),
-    [canModifyCredentials, onEdit, onDelete],
+    () => getCredentialsTableColumns({ canModifyCredentials, onEdit, onDelete, onListModels }),
+    [canModifyCredentials, onEdit, onDelete, onListModels],
   );
 
   return (

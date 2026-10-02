@@ -2,11 +2,27 @@
  * Utility function to transform raw model data into the format expected by UI components
  * This creates a new transformed data object without mutating the original
  */
-export const transformModelData = (rawModelData: any, getProviderFromModel: (model: string) => string) => {
+type CostRow = { input_cost_per_token?: unknown; output_cost_per_token?: unknown };
+
+function costRate(costMap: Record<string, CostRow> | null | undefined, name: string, field: keyof CostRow): number | null {
+  if (!costMap || !name) return null;
+  const slash = name.lastIndexOf("/");
+  const row = costMap[name] ?? (slash >= 0 ? costMap[name.slice(slash + 1)] : undefined);
+  const value = row?.[field];
+  return typeof value === "number" && !Number.isNaN(value) ? value : null;
+}
+
+export const transformModelData = (
+  rawModelData: any,
+  getProviderFromModel: (model: string) => string,
+  costMap?: Record<string, CostRow> | null,
+) => {
   if (!rawModelData?.data) return { data: [] };
 
-  // Deep copy the data to avoid mutating the original
-  const transformedData = JSON.parse(JSON.stringify(rawModelData.data));
+  // Deep copy the data to avoid mutating the original. Provider shells are credentials, not models.
+  const transformedData = JSON.parse(JSON.stringify(rawModelData.data)).filter(
+    (row: { model_info?: { role?: string } }) => row?.model_info?.role !== "provider",
+  );
 
   for (let i = 0; i < transformedData.length; i++) {
     let curr_model = transformedData[i];
@@ -45,6 +61,9 @@ export const transformModelData = (rawModelData: any, getProviderFromModel: (mod
       max_tokens = model_info?.max_tokens;
       max_input_tokens = model_info?.max_input_tokens;
     }
+    const modelName = curr_model?.model_name ?? "";
+    if (input_cost == null) input_cost = costRate(costMap, modelName, "input_cost_per_token");
+    if (output_cost == null) output_cost = costRate(costMap, modelName, "output_cost_per_token");
 
     if (curr_model?.litellm_params) {
       cleanedLitellmParams = Object.fromEntries(
@@ -52,7 +71,7 @@ export const transformModelData = (rawModelData: any, getProviderFromModel: (mod
       );
     }
 
-    transformedData[i].provider = provider;
+    transformedData[i].provider = model_info?.builtin || provider;
     transformedData[i].input_cost = input_cost;
     transformedData[i].output_cost = output_cost;
     transformedData[i].litellm_model_name = litellm_model_name;

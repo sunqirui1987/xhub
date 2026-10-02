@@ -35,7 +35,6 @@ import {
   credentialListCall,
   getGuardrailsList,
   modelDeleteCall,
-  modelInfoV1Call,
   modelPatchUpdateCall,
   tagListCall,
   testConnectionRequest,
@@ -164,8 +163,8 @@ export default function ModelInfoView({
       return null;
     }
     const transformed = transformModelData(rawModelDataResponse, getProviderFromModel);
-    return transformed.data[0] || null;
-  }, [rawModelDataResponse, modelCostMapData]);
+    return transformed.data.find((model: any) => model.model_info?.id === modelId) || null;
+  }, [rawModelDataResponse, modelCostMapData, modelId]);
 
   // Keep modelData variable name for backwards compatibility
   const modelData = transformedModelData;
@@ -195,7 +194,7 @@ export default function ModelInfoView({
 
   // Initialize localModelData from modelData when available
   useEffect(() => {
-    if (modelData && !localModelData) {
+    if (modelData) {
       let processedModelData = modelData;
       if (!processedModelData.litellm_model_name) {
         processedModelData = {
@@ -207,14 +206,19 @@ export default function ModelInfoView({
             null,
         };
       }
-      setLocalModelData(processedModelData);
+      setLocalModelData((current: any) =>
+        isEditing && current?.model_info?.id === modelId ? current : processedModelData,
+      );
 
       // Check if cache control is enabled
-      if (processedModelData?.litellm_params?.cache_control_injection_points) {
-        setShowCacheControl(true);
-      }
+      setShowCacheControl(Boolean(processedModelData?.litellm_params?.cache_control_injection_points));
     }
-  }, [modelData, localModelData]);
+  }, [modelData, modelId, isEditing]);
+
+  useEffect(() => {
+    setIsEditing(false);
+    setExistingCredential(null);
+  }, [modelId]);
 
   useEffect(() => {
     const getExistingCredential = async () => {
@@ -226,30 +230,6 @@ export default function ModelInfoView({
         credential_values: existingCredentialResponse["credential_values"],
         credential_info: existingCredentialResponse["credential_info"],
       });
-    };
-
-    const getModelInfo = async () => {
-      if (!accessToken) return;
-      // Only fetch if we don't have modelData yet
-      if (modelData) return;
-      let modelInfoResponse = await modelInfoV1Call(accessToken, modelId);
-      let specificModelData = modelInfoResponse.data[0];
-      if (specificModelData && !specificModelData.litellm_model_name) {
-        specificModelData = {
-          ...specificModelData,
-          litellm_model_name:
-            specificModelData?.litellm_params?.litellm_model_name ??
-            specificModelData?.litellm_params?.model ??
-            specificModelData?.model_info?.key ??
-            null,
-        };
-      }
-      setLocalModelData(specificModelData);
-
-      // Check if cache control is enabled
-      if (specificModelData?.litellm_params?.cache_control_injection_points) {
-        setShowCacheControl(true);
-      }
     };
 
     const fetchGuardrails = async () => {
@@ -284,7 +264,6 @@ export default function ModelInfoView({
     };
 
     getExistingCredential();
-    getModelInfo();
     fetchGuardrails();
     fetchTags();
     fetchCredentials();
@@ -309,7 +288,7 @@ export default function ModelInfoView({
     isFieldTouched: (field: TouchedPricingField) => boolean,
   ) => {
     try {
-      if (!accessToken) return;
+      if (!accessToken || localModelData?.model_info?.id !== modelId) return;
       setIsSaving(true);
 
       // Parse LiteLLM extra params from JSON text area
@@ -498,7 +477,7 @@ export default function ModelInfoView({
   }
 
   const handleTestConnection = async () => {
-    if (!accessToken) return;
+    if (!accessToken || localModelData?.model_info?.id !== modelId) return;
     if (isComplexityRouterModel) {
       const targets = buildComplexityRouterTestTargets(localModelData ?? modelData);
       if (targets.length === 0) {
@@ -706,8 +685,8 @@ export default function ModelInfoView({
               <Card className="block p-6">
                 <p className="text-sm">{t("Pricing")}</p>
                 <div className="mt-2">
-                  <p className="text-sm">Input: ${modelData.input_cost}/1M tokens</p>
-                  <p className="text-sm">Output: ${modelData.output_cost}/1M tokens</p>
+                  <p className="text-sm">Input: {modelData.input_cost == null ? t("Not Set") : `$${modelData.input_cost}/1M tokens`}</p>
+                  <p className="text-sm">Output: {modelData.output_cost == null ? t("Not Set") : `$${modelData.output_cost}/1M tokens`}</p>
                 </div>
               </Card>
             </div>
@@ -768,8 +747,9 @@ export default function ModelInfoView({
                   )}
                 </div>
               </div>
-              {localModelData ? (
+              {localModelData?.model_info?.id === modelId ? (
                 <ModelInfoEditForm
+                  key={modelId}
                   localModelData={localModelData}
                   modelData={modelData}
                   teamAlias={teamAlias}

@@ -34,6 +34,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/cva.config";
 import { t } from "@/i18n";
 
+
 type ModelTabSlug =
   | "add"
   | "auto-routers"
@@ -177,6 +178,7 @@ export default function ModelsAndEndpointsPage() {
 
         {modelId ? (
           <ModelInfoView
+            key={modelId}
             modelId={modelId}
             onClose={close}
             accessToken={accessToken}

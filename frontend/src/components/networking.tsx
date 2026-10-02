@@ -292,6 +292,9 @@ export interface CredentialItem {
     custom_llm_provider?: string;
     description?: string;
     required?: boolean;
+    builtin?: string;
+    api_base?: string;
+    wire_api?: string;
   };
 }
 
@@ -1821,7 +1824,7 @@ export const modelInfoV1Call = async (accessToken: string, modelId: string) => {
    */
   try {
     let url = proxyBaseUrl ? `${proxyBaseUrl}/v1/model/info` : `/v1/model/info`;
-    url += `?litellm_model_id=${modelId}`;
+    url += `?modelId=${encodeURIComponent(modelId)}`;
 
     const response = await fetch(url, {
       method: "GET",
@@ -1994,6 +1997,10 @@ export const modelAvailableCall = async (
     console.error("Failed to create key:", error);
     throw error;
   }
+};
+
+export const userAvailableModelsCall = async (accessToken: string) => {
+  return await apiClient.get(`/model/available`, { accessToken });
 };
 
 export const teamSpendLogsCall = async (accessToken: string) => {

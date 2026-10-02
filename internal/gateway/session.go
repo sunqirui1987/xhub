@@ -20,6 +20,7 @@ import (
 const (
 	invalidUICredentials = "Invalid credentials used to access UI. Check 'UI_USERNAME' and 'UI_PASSWORD', or the password set for your user"
 	invalidUserPassword  = "Invalid credentials used to access UI. Check the password set for your user"
+	sessionTTL           = 7 * 24 * time.Hour
 )
 
 // login accepts a username and password. When environment-credential login is disabled, only a stored user is accepted.
@@ -116,7 +117,7 @@ func signSessionJWT(sess, userID, role, secret string) string {
 		"user_role":    role,
 		"key":          sess,
 		"premium_user": true,
-		"exp":          time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"exp":          time.Now().Add(sessionTTL).Unix(),
 		"login_method": "username_password",
 	})
 	pl := base64.RawURLEncoding.EncodeToString(payload)
@@ -135,10 +136,11 @@ func (s *Server) ClearSessions() {
 
 // rememberSession stores a session in the process table. A restart invalidates it.
 func (s *Server) rememberSession(sess, userID, role string) {
+	expiresAt := time.Now().Add(sessionTTL)
 	s.mu.Lock()
-	s.sessions[sess] = sessionRec{Role: role, UserID: userID}
+	s.sessions[sess] = sessionRec{Role: role, UserID: userID, ExpiresAt: expiresAt}
 	s.mu.Unlock()
-	body, err := json.Marshal(map[string]string{"role": role, "user_id": userID})
+	body, err := json.Marshal(map[string]any{"role": role, "user_id": userID, "expires_at": expiresAt.UTC().Format(time.RFC3339Nano)})
 	if err != nil {
 		return
 	}
@@ -151,10 +153,16 @@ func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	rec, ok := s.sessions[tok]
 	s.mu.Unlock()
 	if ok {
+		if !rec.ExpiresAt.IsZero() && !time.Now().Before(rec.ExpiresAt) {
+			s.mu.Lock()
+			delete(s.sessions, tok)
+			s.mu.Unlock()
+			return sessionRec{}, false
+		}
 		return rec, true
 	}
-	if rle, _, uid, vok := verifySessionJWT(tok, s.Cfg.GeneralSettings.MasterKey); vok {
-		return sessionRec{Role: rle, UserID: uid}, true
+	if _, _, uid, exp, vok := verifySessionJWT(tok, s.Cfg.GeneralSettings.MasterKey); vok {
+		return sessionRec{UserID: uid, ExpiresAt: exp}, true
 	}
 	m, err := s.Store.GetKV("ui_session", tok)
 	if err != nil {
@@ -162,10 +170,15 @@ func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	}
 	role, _ := m["role"].(string)
 	uid, _ := m["user_id"].(string)
-	if role == "" {
+	expiresText, _ := m["expires_at"].(string)
+	expiresAt, err := time.Parse(time.RFC3339Nano, expiresText)
+	if role == "" || uid == "" || err != nil || !time.Now().Before(expiresAt) {
+		if err == nil && !time.Now().Before(expiresAt) {
+			_ = s.Store.DeleteKV("ui_session", tok)
+		}
 		return sessionRec{}, false
 	}
-	rec = sessionRec{Role: role, UserID: uid}
+	rec = sessionRec{Role: role, UserID: uid, ExpiresAt: expiresAt}
 	s.mu.Lock()
 	s.sessions[tok] = rec
 	s.mu.Unlock()
@@ -177,11 +190,25 @@ func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	tok := auth.APIKeyFrom(r)
 	rec, ok := s.lookupSession(tok)
 	if ok {
-		p := &auth.Principal{Kind: "session", Master: true, Role: rec.Role, UserID: rec.UserID}
-		if rec.Role == "proxy_admin_viewer" || rec.Role == "internal_user_viewer" {
+		role := ""
+		if s.Store != nil {
+			user, err := s.Store.GetUser(rec.UserID)
+			if err != nil || user.ExtraBool("blocked") {
+				return nil, auth.ErrSessionInvalid()
+			}
+			role = user.Role
+		}
+		if role == "" {
+			role = rec.Role
+		}
+		if !validSessionRole(role) {
+			return nil, auth.ErrSessionInvalid()
+		}
+		p := &auth.Principal{Kind: "session", Role: role, UserID: rec.UserID}
+		if role == "proxy_admin_viewer" || role == "internal_user_viewer" {
 			p.ViewOnly = true
 		}
-		logx.Debug("process %s %s step=identity source=session role=%s", r.Method, r.URL.Path, rec.Role)
+		logx.Debug("process %s %s step=identity source=session role=%s", r.Method, r.URL.Path, role)
 		return p, nil
 	}
 	p, err := auth.Resolve(s.Cfg, s.Store, r)
@@ -197,11 +224,20 @@ func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	return p, nil
 }
 
+func validSessionRole(role string) bool {
+	switch role {
+	case "proxy_admin", "proxy_admin_viewer", "internal_user", "internal_user_viewer":
+		return true
+	default:
+		return false
+	}
+}
+
 // verifySessionJWT checks a session JWT. A bad signature or an expired token returns ok false.
-func verifySessionJWT(tok, secret string) (role, sess, userID string, ok bool) {
+func verifySessionJWT(tok, secret string) (role, sess, userID string, expiresAt time.Time, ok bool) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
-		return "", "", "", false
+		return "", "", "", time.Time{}, false
 	}
 	if secret == "" {
 		secret = "xhub"
@@ -210,23 +246,25 @@ func verifySessionJWT(tok, secret string) (role, sess, userID string, ok bool) {
 	mac.Write([]byte(parts[0] + "." + parts[1]))
 	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(want), []byte(parts[2])) {
-		return "", "", "", false
+		return "", "", "", time.Time{}, false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", "", "", false
+		return "", "", "", time.Time{}, false
 	}
 	var claims map[string]any
 	if json.Unmarshal(raw, &claims) != nil {
-		return "", "", "", false
+		return "", "", "", time.Time{}, false
 	}
 	role, _ = claims["user_role"].(string)
 	sess, _ = claims["key"].(string)
 	userID, _ = claims["user_id"].(string)
-	if role == "" {
-		return "", "", "", false
+	exp, ok := claims["exp"].(float64)
+	if role == "" || sess == "" || userID == "" || !ok || exp <= float64(time.Now().Unix()) {
+		return "", "", "", time.Time{}, false
 	}
-	return role, sess, userID, true
+	expiresAt = time.Unix(int64(exp), 0)
+	return role, sess, userID, expiresAt, true
 }
 
 // requireManage requires a management identity. On failure it writes 401 and returns nil.

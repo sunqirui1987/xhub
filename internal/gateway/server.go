@@ -2,6 +2,7 @@
 package gateway
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -66,8 +67,63 @@ type tokHit struct {
 }
 
 type sessionRec struct {
-	Role   string
-	UserID string
+	Role      string
+	UserID    string
+	ExpiresAt time.Time
+}
+
+// ValidateKeyRelations rejects keys that point at missing or contradictory identity objects.
+func (s *Server) ValidateKeyRelations(k store.Key) error {
+	if s == nil || s.Store == nil {
+		return nil
+	}
+	var team *store.Entity
+	if k.UserID != "" {
+		if user, err := s.Store.GetUser(k.UserID); err != nil {
+			return fmt.Errorf("user not found")
+		} else if user.BlockedState() {
+			return fmt.Errorf("user blocked")
+		}
+	}
+	if k.TeamID != "" {
+		var err error
+		team, err = s.Store.GetTeam(k.TeamID)
+		if err != nil {
+			return fmt.Errorf("team not found")
+		}
+		if team.BlockedState() {
+			return fmt.Errorf("team blocked")
+		}
+	}
+	if k.OrganizationID != "" {
+		org, err := s.Store.GetOrg(k.OrganizationID)
+		if err != nil {
+			return fmt.Errorf("organization not found")
+		}
+		if org.BlockedState() {
+			return fmt.Errorf("organization blocked")
+		}
+		if team != nil && team.TeamID != k.OrganizationID {
+			return fmt.Errorf("team does not belong to organization")
+		}
+	}
+	if k.ProjectID != "" {
+		project, err := s.Store.GetProject(k.ProjectID)
+		if err != nil {
+			return fmt.Errorf("project not found")
+		}
+		if project.BlockedState() {
+			return fmt.Errorf("project blocked")
+		}
+		projectOrg, _ := project.Extra()["organization_id"].(string)
+		if k.OrganizationID != "" && projectOrg != "" && projectOrg != k.OrganizationID {
+			return fmt.Errorf("project does not belong to organization")
+		}
+		if team != nil && project.TeamID != "" && project.TeamID != team.ID {
+			return fmt.Errorf("project does not belong to team")
+		}
+	}
+	return nil
 }
 
 var logTraceOnceServer sync.Once

@@ -124,11 +124,14 @@ describe("LoginPage", () => {
     const logo = screen.getByTestId("login-logo");
     const card = screen.getByTestId("login-card");
     expect(stage.className).toMatch(/h-dvh/);
-    expect(stage.className).toMatch(/overflow-hidden/);
+    expect(stage.className).toMatch(/overflow-y-auto/);
     expect(stage).toContainElement(card);
     expect(logo.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("img", { name: "XHub" })).toBeInTheDocument();
     expect(screen.getByText("Sign in to start your session")).toBeInTheDocument();
+    expect(screen.queryByText("Default Credentials")).not.toBeInTheDocument();
+    expect(screen.queryByText(/MASTER_KEY/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AUTO_REDIRECT_UI_LOGIN_TO_SSO/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Username")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Login", exact: true });

@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { jwtDecode } from "jwt-decode";
 import { clearTokenCookies, getCookie } from "@/utils/cookieUtils";
 import { isJwtExpired } from "@/utils/jwtUtils";
@@ -13,6 +14,17 @@ function deleteCookie(name: string, path = "/") {
   if (name === "token") {
     clearTokenCookies();
   }
+}
+
+// A client-side hop from the login form does not remount this provider, so the
+// session has to be read again whenever the route changes.
+function sessionFromCookie(): string | null {
+  const raw = getCookie("token");
+  const valid = raw && !isJwtExpired(raw) ? raw : null;
+  if (raw && !valid) {
+    deleteCookie("token", "/");
+  }
+  return valid;
 }
 
 type AuthContextValue = {
@@ -47,6 +59,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [premiumUser, setPremiumUser] = useState(false);
   const [disabledPersonalKeyCreation, setDisabledPersonalKeyCreation] = useState(false);
   const [showSSOBanner, setShowSSOBanner] = useState(true);
+  const pathname = usePathname();
+
+  // Read the cookie before paint on each route. Child pages redirect in
+  // useEffect, which runs after this, so a login that only wrote the cookie
+  // is visible before /ui/?login=success sends the browser back to /ui/login.
+  useLayoutEffect(() => {
+    setToken(sessionFromCookie());
+  }, [pathname]);
 
   // Load runtime UI config (populates proxyBaseUrl etc.) before clearing
   // authLoading, so any consumer that builds proxy-rooted URLs from authLoading=false
@@ -64,15 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (cancelled) return;
 
-      const raw = getCookie("token");
-      const valid = raw && !isJwtExpired(raw) ? raw : null;
-
-      // Clear expired/invalid token so downstream code doesn't keep trying to use it.
-      if (raw && !valid) {
-        deleteCookie("token", "/");
-      }
-
-      setToken(valid);
+      setToken(sessionFromCookie());
       setAuthLoading(false);
     })();
 

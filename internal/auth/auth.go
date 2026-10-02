@@ -99,19 +99,25 @@ func (p *Principal) CanManage() bool {
 	if p.Master {
 		return true
 	}
+	if p.Kind == "session" {
+		return p.Role == "proxy_admin" || p.Role == "proxy_admin_viewer"
+	}
 	if p.Key != nil && (p.Key.KeyType == "management" || p.Key.KeyType == "default") {
 		return true
 	}
 	return false
 }
 
-// CanLLM reports whether this caller may send inference. A session may when it is not view-only. The master key may only when AllowMasterKeyLLM is set. A management key may not.
+// CanLLM reports whether this caller may send inference. An authenticated
+// session may use inference; ViewOnly limits management writes, not the
+// models granted to the session. The master key may only when
+// AllowMasterKeyLLM is set. A management key may not.
 func (p *Principal) CanLLM(cfg *config.Config) bool {
 	if p == nil {
 		return false
 	}
 	if p.Kind == "session" {
-		return !p.ViewOnly
+		return true
 	}
 	if p.Master {
 		return cfg.GeneralSettings.AllowMasterKeyLLM
@@ -131,6 +137,10 @@ type authErr string
 
 // Error returns the authentication failure text, such as invalid_api_key, key_blocked, or key_expired.
 func (e authErr) Error() string { return string(e) }
+
+// ErrSessionInvalid is returned when a signed UI session no longer maps to a live user.
+// It is kept in this package so the gateway can reject a stale session without exposing store details to auth callers.
+func ErrSessionInvalid() error { return authErr("invalid_session") }
 
 var (
 	errNo      = authErr("invalid_api_key")

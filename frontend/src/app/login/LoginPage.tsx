@@ -4,7 +4,7 @@ import { useLogin } from "@/app/(dashboard)/hooks/login/useLogin";
 import { useUIConfig } from "@/app/(dashboard)/hooks/uiConfig/useUIConfig";
 import LoadingScreen from "@/components/common_components/LoadingScreen";
 import { exchangeLoginCode, getProxyBaseUrl, switchToWorkerUrl } from "@/components/networking";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/shared/Alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import { PasswordInput } from "@/components/shared/PasswordInput";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
@@ -17,7 +17,7 @@ import { useZodForm } from "@/lib/forms/useZodForm";
 import { clearTokenCookies, getCookieFromDocument } from "@/utils/cookieUtils";
 import { isJwtExpired } from "@/utils/jwtUtils";
 import { consumeReturnUrl, getLoginUrl, getReturnUrl, isValidReturnUrl } from "@/utils/returnUrlUtils";
-import { CircleAlert, Info, TriangleAlert, X } from "lucide-react";
+import { Activity, Boxes, CircleAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { z } from "zod/v4";
@@ -27,59 +27,63 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 type LoginFormValues = { username: string; password: string };
 
-function SsoEnabledNotice() {
-  const [dismissed, setDismissed] = useState(false);
-
-  if (dismissed) {
-    return null;
-  }
-
-  return (
-    <Alert variant="info" className="mt-4">
-      <Info />
-      <AlertTitle>
-        {t("login.ssoNotice")}
-      </AlertTitle>
-      <AlertAction>
-        <Button variant="ghost" size="icon-sm" aria-label={t("login.close")} onClick={() => setDismissed(true)}>
-          <X className="size-4" />
-        </Button>
-      </AlertAction>
-    </Alert>
-  );
-}
-
 function LoginLogo() {
   return (
-    <div data-testid="login-logo" className="mb-4 flex shrink-0 flex-col items-center gap-2">
+    <div data-testid="login-logo" className="flex shrink-0 flex-col items-start gap-4">
       <svg role="img" aria-label={t("site.logoAlt")} width="56" height="56" viewBox="0 0 84 84">
         <rect width="84" height="84" rx="18" fill="#3c8dbc" />
         <text x="42" y="54" textAnchor="middle" fontSize="36" fontWeight="700" fill="#ffffff">
           X
         </text>
       </svg>
-      <div className="text-3xl font-semibold tracking-tight text-foreground">{t("site.product")}</div>
+      <div className="text-3xl font-semibold tracking-tight text-primary-foreground">{t("site.product")}</div>
     </div>
   );
 }
 
 function LoginStage({ children }: { children: ReactNode }) {
   return (
-    <div
-      data-testid="login-stage"
-      className="relative flex h-dvh max-h-dvh w-full items-center justify-center overflow-hidden bg-canvas px-4"
-    >
-      <div className="absolute top-4 right-4">
+    <div data-testid="login-stage" className="relative flex h-dvh min-h-dvh w-full overflow-y-auto bg-canvas">
+      <div className="absolute top-5 right-5 z-10">
         <LanguageSwitcher />
       </div>
-      <div className="flex w-full max-w-xl flex-col items-center">
-        <LoginLogo />
-        <div
-          data-testid="login-card"
-          className="w-full rounded-md border border-border bg-card px-8 py-6 text-card-foreground shadow-[0_12px_32px_rgba(0,0,0,0.12)] sm:px-12"
-        >
-          {children}
-        </div>
+      <div className="grid min-h-full w-full lg:grid-cols-[minmax(0,1fr)_minmax(28rem,42rem)]">
+        <section className="flex min-h-[34rem] flex-col justify-center bg-primary px-8 py-16 text-primary-foreground sm:px-14 lg:min-h-dvh lg:px-[clamp(3.5rem,8vw,9rem)]">
+          <div className="mx-auto w-full max-w-xl">
+            <LoginLogo />
+            <div className="mt-12 max-w-lg">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary-foreground/65">
+                {t("login.brandEyebrow")}
+              </p>
+              <h2 className="mt-5 text-4xl font-semibold tracking-tight sm:text-5xl">{t("login.brandTitle")}</h2>
+              <p className="mt-6 max-w-md text-lg leading-8 text-primary-foreground/75">
+                {t("login.brandDescription")}
+              </p>
+            </div>
+            <div className="mt-12 grid max-w-sm gap-5 border-t border-primary-foreground/20 pt-8 sm:grid-cols-3 lg:grid-cols-1">
+              {[
+                { icon: Boxes, label: t("login.featureModels") },
+                { icon: ShieldCheck, label: t("login.featureAccess") },
+                { icon: Activity, label: t("login.featureObservability") },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="flex items-center gap-3 text-sm font-medium text-primary-foreground/85">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-foreground/12">
+                    <Icon className="size-4" />
+                  </span>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+        <section className="flex min-h-[38rem] items-center justify-center bg-card px-6 py-16 sm:px-12 lg:min-h-dvh lg:px-16">
+          <div
+            data-testid="login-card"
+            className="w-full max-w-md rounded-2xl border border-border bg-card px-7 py-9 text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.12)] sm:px-10"
+          >
+            {children}
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -240,17 +244,15 @@ function LoginPageContent() {
           </div>
 
           <Alert variant="warning">
-                <TriangleAlert />
-                <AlertTitle>{t("login.adminDisabled")}</AlertTitle>
-                <AlertDescription>
-                  <p className="text-sm">
-                    {t("login.adminDisabledBody")}
-                  </p>
-                  <p className="mt-2 text-sm">
-                    <code className="bg-muted px-1 py-0.5 rounded-sm text-xs">DISABLE_ADMIN_UI=False</code>
-                  </p>
-                </AlertDescription>
-              </Alert>
+            <TriangleAlert />
+            <AlertTitle>{t("login.adminDisabled")}</AlertTitle>
+            <AlertDescription>
+              <p className="text-sm">{t("login.adminDisabledBody")}</p>
+              <p className="mt-2 text-sm">
+                <code className="rounded-sm bg-muted px-1 py-0.5 text-xs">DISABLE_ADMIN_UI=False</code>
+              </p>
+            </AlertDescription>
+          </Alert>
         </div>
       </LoginStage>
     );
@@ -265,123 +267,109 @@ function LoginPageContent() {
             <p className="mt-1 text-base text-muted-foreground">{t("login.subtitle")}</p>
           </div>
 
-              {!uiConfig?.hide_default_credentials_hint && (
-                <Alert variant="info">
-                  <Info />
-                  <AlertTitle>{t("login.defaultCredentials")}</AlertTitle>
-                  <AlertDescription>
-                    <p className="text-sm">
-                      {t("login.defaultCredentialsBody", { admin: "admin", masterKey: "MASTER_KEY" })}
-                    </p>
-                    <p className="mt-2 text-sm">{t("login.defaultCredentialsHint")}</p>
-                  </AlertDescription>
-                </Alert>
-              )}
+          {error && (
+            <Alert variant="error">
+              <CircleAlert />
+              <AlertTitle>{error}</AlertTitle>
+            </Alert>
+          )}
 
-              {error && (
-                <Alert variant="error">
-                  <CircleAlert />
-                  <AlertTitle>{error}</AlertTitle>
-                </Alert>
-              )}
-
-              <form onSubmit={form.handleSubmit(handleSubmit)}>
-                <FieldGroup className="gap-4">
-                  {uiConfig?.is_control_plane && workers.length > 0 && (
-                    <Field>
-                      <FieldLabel htmlFor={workerFieldId}>{t("login.worker")}</FieldLabel>
-                      <Select
-                        items={workers.map((worker) => ({ label: worker.name, value: worker.worker_id }))}
-                        value={selectedWorkerId}
-                        onValueChange={(value: string | null) => setSelectedWorkerId(value)}
-                      >
-                        <SelectTrigger id={workerFieldId} className="h-10 w-full">
-                          <SelectValue placeholder={t("login.workerPlaceholder")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {workers.map((worker) => (
-                            <SelectItem key={worker.worker_id} value={worker.worker_id}>
-                              {worker.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  )}
-
-                  <FormField control={form.control} name="username" label={t("login.username")}>
-                    {({ ref, ...field }) => (
-                      <Input
-                        {...field}
-                        ref={ref}
-                        placeholder={t("login.usernamePlaceholder")}
-                        autoComplete="username"
-                        disabled={isLoginLoading}
-                        className="h-11 rounded-sm border-input bg-background text-base"
-                      />
-                    )}
-                  </FormField>
-
-                  <FormField control={form.control} name="password" label={t("login.password")}>
-                    {({ ref, ...field }) => (
-                      <PasswordInput
-                        {...field}
-                        ref={ref}
-                        placeholder={t("login.passwordPlaceholder")}
-                        autoComplete="current-password"
-                        disabled={isLoginLoading}
-                        groupClassName="h-11"
-                      />
-                    )}
-                  </FormField>
-
-                  <Button
-                    type="submit"
-                    size="lg"
-                    disabled={isLoginLoading}
-                    className="h-11 w-full rounded-sm bg-primary text-base font-semibold text-primary-foreground hover:bg-primary/80"
+          <form onSubmit={form.handleSubmit(handleSubmit)}>
+            <FieldGroup className="gap-4">
+              {uiConfig?.is_control_plane && workers.length > 0 && (
+                <Field>
+                  <FieldLabel htmlFor={workerFieldId}>{t("login.worker")}</FieldLabel>
+                  <Select
+                    items={workers.map((worker) => ({ label: worker.name, value: worker.worker_id }))}
+                    value={selectedWorkerId}
+                    onValueChange={(value: string | null) => setSelectedWorkerId(value)}
                   >
-                    {isLoginLoading && <UiLoadingSpinner className="size-4" role="img" aria-label={t("loading")} />}
-                    {isLoginLoading ? t("login.submitting") : t("login.submit")}
-                  </Button>
+                    <SelectTrigger id={workerFieldId} className="h-10 w-full">
+                      <SelectValue placeholder={t("login.workerPlaceholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {workers.map((worker) => (
+                        <SelectItem key={worker.worker_id} value={worker.worker_id}>
+                          {worker.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
 
-                  {!uiConfig?.sso_configured ? (
-                    <Tooltip>
-                      <TooltipTrigger render={<span className="block w-full" />}>
-                        <Button type="button" variant="outline" size="lg" disabled className="w-full">
-                          {t("login.sso")}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{t("login.ssoDisabled")}</TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      disabled={isLoginLoading || (!!selectedWorkerId && workers.length === 0)}
-                      onClick={() => {
-                        const selectedWorker = workers.find((w) => w.worker_id === selectedWorkerId);
-                        if (selectedWorker) {
-                          // Store worker selection so useWorker hook restores it after redirect
-                          localStorage.setItem("litellm_selected_worker_id", selectedWorkerId!);
-                          switchToWorkerUrl(selectedWorker.url);
-                        }
-                        // SSO on the worker (or this instance if no worker), always
-                        // include return_to so the callback redirects back here
-                        const ssoBase = selectedWorker?.url ?? getProxyBaseUrl();
-                        const returnTo = encodeURIComponent(getLoginUrl(window.location.origin));
-                        router.push(`${ssoBase}/sso/key/generate?return_to=${returnTo}`);
-                      }}
-                      className="w-full"
-                    >
+              <FormField control={form.control} name="username" label={t("login.username")}>
+                {({ ref, ...field }) => (
+                  <Input
+                    {...field}
+                    ref={ref}
+                    placeholder={t("login.usernamePlaceholder")}
+                    autoComplete="username"
+                    disabled={isLoginLoading}
+                    className="h-11 rounded-sm border-input bg-background text-base"
+                  />
+                )}
+              </FormField>
+
+              <FormField control={form.control} name="password" label={t("login.password")}>
+                {({ ref, ...field }) => (
+                  <PasswordInput
+                    {...field}
+                    ref={ref}
+                    placeholder={t("login.passwordPlaceholder")}
+                    autoComplete="current-password"
+                    disabled={isLoginLoading}
+                    groupClassName="h-11"
+                  />
+                )}
+              </FormField>
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={isLoginLoading}
+                className="h-11 w-full rounded-sm bg-primary text-base font-semibold text-primary-foreground hover:bg-primary/80"
+              >
+                {isLoginLoading && <UiLoadingSpinner className="size-4" role="img" aria-label={t("loading")} />}
+                {isLoginLoading ? t("login.submitting") : t("login.submit")}
+              </Button>
+
+              {!uiConfig?.sso_configured ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span className="block w-full" />}>
+                    <Button type="button" variant="outline" size="lg" disabled className="w-full">
                       {t("login.sso")}
                     </Button>
-                  )}
-                </FieldGroup>
-              </form>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("login.ssoDisabled")}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  disabled={isLoginLoading || (!!selectedWorkerId && workers.length === 0)}
+                  onClick={() => {
+                    const selectedWorker = workers.find((w) => w.worker_id === selectedWorkerId);
+                    if (selectedWorker) {
+                      // Store worker selection so useWorker hook restores it after redirect
+                      localStorage.setItem("litellm_selected_worker_id", selectedWorkerId!);
+                      switchToWorkerUrl(selectedWorker.url);
+                    }
+                    // SSO on the worker (or this instance if no worker), always
+                    // include return_to so the callback redirects back here
+                    const ssoBase = selectedWorker?.url ?? getProxyBaseUrl();
+                    const returnTo = encodeURIComponent(getLoginUrl(window.location.origin));
+                    router.push(`${ssoBase}/sso/key/generate?return_to=${returnTo}`);
+                  }}
+                  className="w-full"
+                >
+                  {t("login.sso")}
+                </Button>
+              )}
+            </FieldGroup>
+          </form>
         </div>
-        {uiConfig?.sso_configured && <SsoEnabledNotice />}
       </TooltipProvider>
     </LoginStage>
   );

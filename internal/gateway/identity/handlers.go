@@ -454,6 +454,12 @@ func TeamUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 		e.Alias = v
 	}
 	if v, ok := body["organization_id"].(string); ok {
+		if v != "" {
+			if _, err := s.DB().GetOrg(v); err != nil {
+				httpx.WriteError(w, 400, "invalid_request", "organization not found")
+				return
+			}
+		}
 		e.TeamID = v
 	}
 	if _, ok := body["models"]; ok {
@@ -463,6 +469,18 @@ func TeamUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 		e.MaxBudget = parseNullFloat(body["max_budget"])
 	}
 	applyEntityExtra(e, body, "tpm_limit", "rpm_limit", "metadata", "blocked", "budget_duration", "members_with_roles", "guardrails")
+	if e.TeamID != "" {
+		projects, _ := s.DB().ListProjects()
+		for _, project := range projects {
+			if project.TeamID == e.ID {
+				orgID, _ := project.Extra()["organization_id"].(string)
+				if orgID != "" && orgID != e.TeamID {
+					httpx.WriteError(w, 400, "invalid_request", "team organization conflicts with project")
+					return
+				}
+			}
+		}
+	}
 	if err := s.DB().UpdateTeam(*e); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
@@ -585,6 +603,13 @@ func OrgDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 	ids := idsFrom(body, "organization_ids", "organization_id")
 	deleted := 0
 	for _, id := range ids {
+		teams, _ := s.DB().ListTeams()
+		for _, team := range teams {
+			if team.TeamID == id {
+				httpx.WriteError(w, 400, "invalid_request", "organization has teams")
+				return
+			}
+		}
 		err := s.DB().DeleteOrg(id)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -612,6 +637,28 @@ func ProjectNew(s Gate, w http.ResponseWriter, r *http.Request) {
 		ID: id, Alias: str(body["project_alias"]), TeamID: str(body["team_id"]),
 		ModelsJSON: encodeModels(body["models"]), MaxBudget: parseNullFloat(body["max_budget"]),
 		Blocked: boolOf(body["blocked"]), CreatedAt: time.Now().UTC(),
+	}
+	if organizationID := str(body["organization_id"]); organizationID != "" {
+		e.PutExtra("organization_id", organizationID)
+	}
+	if e.TeamID != "" {
+		team, err := s.DB().GetTeam(e.TeamID)
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "team not found")
+			return
+		}
+		if organizationID := str(body["organization_id"]); organizationID != "" && team.TeamID != organizationID {
+			httpx.WriteError(w, 400, "invalid_request", "team does not belong to organization")
+			return
+		}
+		if team.TeamID != "" {
+			e.PutExtra("organization_id", team.TeamID)
+		}
+	} else if organizationID := str(body["organization_id"]); organizationID != "" {
+		if _, err := s.DB().GetOrg(organizationID); err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "organization not found")
+			return
+		}
 	}
 	if err := s.DB().InsertProject(e); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
@@ -680,6 +727,33 @@ func ProjectUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["team_id"].(string); ok {
 		e.TeamID = v
 	}
+	if v, ok := body["organization_id"].(string); ok {
+		if v == "" {
+			e.PutExtra("organization_id", "")
+		} else {
+			e.PutExtra("organization_id", v)
+		}
+	}
+	if e.TeamID != "" {
+		team, err := s.DB().GetTeam(e.TeamID)
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "team not found")
+			return
+		}
+		orgID, _ := e.Extra()["organization_id"].(string)
+		if orgID != "" && team.TeamID != orgID {
+			httpx.WriteError(w, 400, "invalid_request", "team does not belong to organization")
+			return
+		}
+		if team.TeamID != "" {
+			e.PutExtra("organization_id", team.TeamID)
+		}
+	} else if orgID, _ := e.Extra()["organization_id"].(string); orgID != "" {
+		if _, err := s.DB().GetOrg(orgID); err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "organization not found")
+			return
+		}
+	}
 	if _, ok := body["models"]; ok {
 		e.ModelsJSON = encodeModels(body["models"])
 	}
@@ -722,6 +796,7 @@ func projectPublic(e store.Entity) map[string]any {
 		"project_id":           e.ID,
 		"project_alias":        e.Alias,
 		"team_id":              e.TeamID,
+		"organization_id":      e.Extra()["organization_id"],
 		"models":               e.Models(),
 		"spend":                e.Spend,
 		"blocked":              e.Blocked,
@@ -1044,6 +1119,9 @@ func ModelInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	wantID := q.Get("modelId")
+	if wantID == "" {
+		wantID = q.Get("litellm_model_id")
+	}
 	wantName := q.Get("model")
 	search := strings.ToLower(strings.TrimSpace(q.Get("search")))
 	excludeAuto := q.Get("exclude_auto_routers") == "true"
@@ -1066,6 +1144,9 @@ func ModelInfo(s Gate, w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(model, "auto_router/") {
 				continue
 			}
+		}
+		if role, _ := info["role"].(string); role == "provider" {
+			continue
 		}
 		data = append(data, pub)
 	}

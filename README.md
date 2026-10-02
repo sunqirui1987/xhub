@@ -9,7 +9,7 @@
 
 Playground 复制出来的调用示例，以及控制台自己的请求，都指向网关，不指向 `:3000`。网关不提供页面。
 
-文档：[产品需求](docs/prd/README.md) · [UI](docs/ui/README.md) · [前端页面](docs/frontend/README.md) · [后端 API](docs/backend-api/README.md)
+文档：[设计修复方案](docs/README.md)
 
 登录控制台：http://localhost:3000/login ，用户名 `admin`，密码是配置里的 `master_key`。
 
@@ -27,6 +27,8 @@ client = openai.OpenAI(
 公网部署时，网关用环境变量 `XHUB_PUBLIC_ORIGIN`（例如 `https://api.example.com`）作为对外 API 地址。控制台要连别的网关时，构建前设置 `NEXT_PUBLIC_BASE_URL`。
 
 ## 安装
+
+第一次启动只写入 `fennoai` 和 `qiniu` 两个凭证，不写入模型。`XHUB_BUILTIN_PROVIDERS` 默认开启；设为 `off` 则不安装。从供应商目录添加的模型和手填的一样，只保存模型名和凭证名。目录地址是 fennoai `https://api.fenno.ai/v1/models`、七牛 `https://api.qnaigc.com/v1/models`。调用地址在凭证上：fennoai `https://api.fenno.ai`，七牛 `https://api.qnaigc.com/bypass/openai/v1`。key 分别读 `FENNOAI_API_KEY` 和 `QINIU_API_KEY`。
 
 控制台密码是配置里的 `master_key`，不用再导出环境变量。`redis_url` 可以留空；留空时网关不连 Redis，花费日志只走 PostgreSQL。Docker 模式使用镜像里的 `configs/config.docker.yaml`。源代码模式复制 `configs/config.example.yaml` 为 `configs/config.yaml` 后再改。
 

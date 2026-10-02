@@ -33,8 +33,8 @@ import {
   Lock,
   Network,
   PanelLeftClose,
+  Tags,
   PanelLeftOpen,
-
   PlayCircle,
   Route,
   Settings as SettingsIcon,
@@ -99,7 +99,7 @@ interface MenuGroup {
 // icons changed to lucide as part of the sidebar redesign.
 const menuGroups: MenuGroup[] = [
   {
-    groupLabel: "nav.groups.gateway",
+    groupLabel: "nav.groups.mine",
     items: [
       { key: "api-keys", page: "api-keys", label: "nav.apiKeys", icon: <KeyRound {...ICON} /> },
       {
@@ -111,12 +111,32 @@ const menuGroups: MenuGroup[] = [
         roles: rolesWithWriteAccess,
       },
       {
+        key: "my-models",
+        page: "my-models",
+        route: "mine-models",
+        label: "nav.myModels",
+        icon: <Boxes {...ICON} />,
+      },
+    ],
+  },
+  {
+    groupLabel: "nav.groups.gateway",
+    items: [
+      {
         key: "models",
         page: "models",
         route: "models-and-endpoints",
         label: "nav.models",
         icon: <Network {...ICON} />,
         roles: rolesAllowedToViewWriteScopedPages,
+      },
+      {
+        key: "price-data",
+        page: "price-data",
+        route: "price-data",
+        label: "nav.priceData",
+        icon: <Tags {...ICON} />,
+        roles: all_admin_roles,
       },
       { key: "guardrails", page: "guardrails", label: "nav.guardrails", icon: <Shield {...ICON} /> },
     ],
@@ -178,7 +198,6 @@ const menuGroups: MenuGroup[] = [
   },
   {
     groupLabel: "nav.groups.settings",
-    roles: all_admin_roles,
     items: [
       {
         key: "settings",
@@ -327,6 +346,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
         // to its own page id, which is not a real route. Drop it instead.
         if (item.children && item.children.length === 0) return false;
         if (item.key === "llm-playground" && isViewOnly) return false;
+        if (item.key === "price-data" && isViewOnly) return false;
         if (item.key === "organizations" || item.key === "users") {
           const hasRoleAccess = !item.roles || item.roles.includes(userRole) || isOrgAdmin;
           if (!hasRoleAccess) return false;
@@ -334,6 +354,10 @@ const Sidebar_: React.FC<SidebarProps> = ({
           return true;
         }
         if (item.key === "projects" && !enableProjectsUI) return false;
+        // Every signed-in user can inspect the models granted to their own account.
+        // This page is backed by /models and must not depend on the configurable
+        // admin-page allowlist used for internal users.
+        if (item.key === "my-models") return true;
         if (
           !isAdmin &&
           item.key === "agents" &&
@@ -456,10 +480,7 @@ const Sidebar_: React.FC<SidebarProps> = ({
   const darkLogoSrc = reachableDarkLogo || logoUrl;
 
   return (
-    <Sidebar
-      collapsed={collapsed}
-      className="border-r-0 shadow-[2px_0_8px_rgba(0,0,0,0.15)]"
-    >
+    <Sidebar collapsed={collapsed} className="border-r-0 shadow-[2px_0_8px_rgba(0,0,0,0.15)]">
       <SidebarHeader className="h-16 justify-center border-b border-sidebar-border bg-sidebar px-4 group-data-[collapsed=true]/sidebar:h-auto">
         <div className="flex items-center justify-between gap-2 group-data-[collapsed=true]/sidebar:flex-col">
           <div className="flex min-w-0 items-center gap-2">
@@ -505,13 +526,13 @@ const Sidebar_: React.FC<SidebarProps> = ({
       </SidebarHeader>
 
       <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2 [scrollbar-color:var(--sidebar-border)_transparent]">
-          {visibleGroups.map((group, gi) => (
-            <SidebarGroup key={group.groupLabel}>
-              {gi > 0 && <SidebarSeparator className="hidden group-data-[collapsed=true]/sidebar:block" />}
-              <SidebarGroupLabel>{t(group.groupLabel)}</SidebarGroupLabel>
-              <SidebarMenu>{group.items.map((item) => renderItem(item))}</SidebarMenu>
-            </SidebarGroup>
-          ))}
+        {visibleGroups.map((group, gi) => (
+          <SidebarGroup key={group.groupLabel}>
+            {gi > 0 && <SidebarSeparator className="hidden group-data-[collapsed=true]/sidebar:block" />}
+            <SidebarGroupLabel>{t(group.groupLabel)}</SidebarGroupLabel>
+            <SidebarMenu>{group.items.map((item) => renderItem(item))}</SidebarMenu>
+          </SidebarGroup>
+        ))}
       </nav>
 
       <SidebarFooter>

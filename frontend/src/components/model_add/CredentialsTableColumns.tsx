@@ -45,9 +45,10 @@ interface CredentialRowActionsProps {
   credential: CredentialItem;
   onEdit: (credential: CredentialItem) => void;
   onDelete: (credential: CredentialItem) => void;
+  onListModels?: (credential: CredentialItem) => void;
 }
 
-function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowActionsProps) {
+function CredentialRowActions({ credential, onEdit, onDelete, onListModels }: CredentialRowActionsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -58,6 +59,11 @@ function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowAct
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
+        {credential.credential_info?.builtin && onListModels ? (
+          <DropdownMenuItem data-testid="credential-action-models" onClick={() => onListModels(credential)}>
+            {t("Fetch model list")}
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem data-testid="credential-action-edit" onClick={() => onEdit(credential)}>
           <Pencil />
           {t("Edit")}
@@ -87,12 +93,14 @@ interface CredentialsTableColumnsDeps {
   canModifyCredentials: boolean;
   onEdit: (credential: CredentialItem) => void;
   onDelete: (credential: CredentialItem) => void;
+  onListModels?: (credential: CredentialItem) => void;
 }
 
 export const getCredentialsTableColumns = ({
   canModifyCredentials,
   onEdit,
   onDelete,
+  onListModels,
 }: CredentialsTableColumnsDeps): ColumnDef<CredentialItem>[] => {
   const dataColumns: ColumnDef<CredentialItem>[] = [
     {
@@ -102,9 +110,24 @@ export const getCredentialsTableColumns = ({
       header: ({ column }) => <DataTableSortHeader column={column} title={t("Credential Name")} />,
       size: 260,
       enableSorting: true,
-      cell: ({ row }) => (
-        <IdentityCell title={row.original.credential_name} className="max-w-72" titleClassName="font-medium" />
-      ),
+      cell: ({ row }) => {
+        const builtin = row.original.credential_info?.builtin || row.original.credential_name;
+        const isBuiltin = builtin === "fennoai" || builtin === "qiniu";
+        return (
+          <div className="flex items-center gap-2">
+            <IdentityCell title={row.original.credential_name} className="max-w-48" titleClassName="font-medium" />
+            {isBuiltin && onListModels ? (
+              <button
+                type="button"
+                className="text-xs text-primary underline-offset-2 hover:underline"
+                onClick={() => onListModels(row.original)}
+              >
+                {t("Fetch model list")}
+              </button>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       id: "provider",
@@ -132,7 +155,12 @@ export const getCredentialsTableColumns = ({
       enableHiding: false,
       cell: ({ row }) => (
         <div className="flex justify-end">
-          <CredentialRowActions credential={row.original} onEdit={onEdit} onDelete={onDelete} />
+          <CredentialRowActions
+          credential={row.original}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onListModels={onListModels}
+        />
         </div>
       ),
     },

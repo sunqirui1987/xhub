@@ -58,7 +58,12 @@ var logTraceOnceCredential sync.Once
 //
 // LiteLLM load_credentials_from_list writes a value only when the key is entirely absent.
 // Deployments in this gateway often store api_key as an empty string after a redacted response is read back,
-// so an empty string also counts as unset. A non-empty value already on the deployment always wins and a credential cannot overwrite it.
+// so an empty string also counts as unset.
+//
+// api_key is the exception. The dashboard masks a stored key as ***** and the update handler
+// keeps the previous value, so a model can keep a stale key after the user points it at a credential.
+// A non-blank api_key on the credential replaces that stale key. Every other credential field
+// still fills only a blank deployment field, and a non-empty value there still wins.
 //
 // os.environ/NAME inside a string is expanded on this call, not when the credential is saved.
 // The same credential can follow the process environment. custom_llm_provider is then lowercased,
@@ -73,6 +78,9 @@ func Hydrate(params, credentialValues map[string]any) map[string]any {
 		out[key] = value
 	}
 	if len(credentialValues) > 0 {
+		if text, ok := credentialValues["api_key"].(string); ok && strings.TrimSpace(text) != "" {
+			delete(out, "api_key")
+		}
 		for _, key := range credentialFields {
 			if !blank(out[key]) {
 				continue

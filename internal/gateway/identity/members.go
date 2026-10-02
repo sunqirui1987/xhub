@@ -174,7 +174,13 @@ func TeamMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 		kept = append(kept, m)
 	}
 	e.PutExtra("members_with_roles", kept)
-	_ = s.DB().UpdateTeam(*e)
+	if err := s.DB().UpdateTeam(*e); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if uid != "" {
+		_ = removeUserMembership(s, uid, tid, "teams")
+	}
 	httpx.WriteJSON(w, 200, teamPublic(*e))
 }
 
@@ -283,13 +289,45 @@ func OrgMemberAdd(s Gate, w http.ResponseWriter, r *http.Request) {
 	}
 	list := e.ExtraList("members")
 	for _, mem := range members {
+		uid := str(mem["user_id"])
+		if uid == "" {
+			uid = str(mem["user_email"])
+		}
+		if uid == "" {
+			httpx.WriteError(w, 400, "invalid_request", "user_id required")
+			return
+		}
+		user, err := s.DB().GetUser(uid)
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "user not found")
+			return
+		}
+		mem["user_id"] = user.ID
+		if str(mem["user_email"]) == "" {
+			mem["user_email"] = user.Email
+		}
 		if str(mem["role"]) == "" {
 			mem["role"] = "internal_user"
 		}
-		list = append(list, mem)
+		updated := false
+		for i, raw := range list {
+			old, _ := raw.(map[string]any)
+			if old != nil && str(old["user_id"]) == user.ID {
+				list[i] = mem
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			list = append(list, mem)
+		}
+		_ = addUserMembership(s, user.ID, oid, "organizations")
 	}
 	e.PutExtra("members", list)
-	_ = s.DB().UpdateOrg(*e)
+	if err := s.DB().UpdateOrg(*e); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"organization_id": oid,
 		"members":         list,
@@ -326,7 +364,13 @@ func OrgMemberDelete(s Gate, w http.ResponseWriter, r *http.Request) {
 		kept = append(kept, m)
 	}
 	e.PutExtra("members", kept)
-	_ = s.DB().UpdateOrg(*e)
+	if err := s.DB().UpdateOrg(*e); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if uid != "" {
+		_ = removeUserMembership(s, uid, oid, "organizations")
+	}
 	httpx.WriteJSON(w, 200, orgPublic(*e))
 }
 
@@ -360,7 +404,10 @@ func OrgMemberUpdate(s Gate, w http.ResponseWriter, r *http.Request) {
 		list[i] = m
 	}
 	e.PutExtra("members", list)
-	_ = s.DB().UpdateOrg(*e)
+	if err := s.DB().UpdateOrg(*e); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	httpx.WriteJSON(w, 200, orgPublic(*e))
 }
 
@@ -378,19 +425,70 @@ func addTeamMember(s Gate, tid string, mem map[string]any) (map[string]any, erro
 		uid = str(mem["user_email"])
 		mem["user_id"] = uid
 	}
+	user, err := s.DB().GetUser(uid)
+	if err != nil {
+		return nil, err
+	}
+	mem["user_id"] = user.ID
+	if str(mem["user_email"]) == "" {
+		mem["user_email"] = user.Email
+	}
 	list := e.ExtraList("members_with_roles")
-	for _, raw := range list {
+	updated := false
+	for i, raw := range list {
 		m, _ := raw.(map[string]any)
 		if m != nil && str(m["user_id"]) == uid && uid != "" {
-			return teamPublic(*e), nil
+			list[i] = mem
+			updated = true
+			break
 		}
 	}
-	list = append(list, mem)
+	if !updated {
+		list = append(list, mem)
+	}
 	e.PutExtra("members_with_roles", list)
 	if err := s.DB().UpdateTeam(*e); err != nil {
 		return nil, err
 	}
+	_ = addUserMembership(s, user.ID, tid, "teams")
 	return teamPublic(*e), nil
+}
+
+func addUserMembership(s Gate, userID, entityID, field string) error {
+	u, err := s.DB().GetUser(userID)
+	if err != nil {
+		return err
+	}
+	ids := u.ExtraList(field)
+	for _, raw := range ids {
+		if str(raw) == entityID {
+			return nil
+		}
+		if m, ok := raw.(map[string]any); ok && str(m["team_id"])+str(m["organization_id"])+str(m["id"]) == entityID {
+			return nil
+		}
+	}
+	u.PutExtra(field, append(ids, entityID))
+	return s.DB().UpdateUser(*u)
+}
+
+func removeUserMembership(s Gate, userID, entityID, field string) error {
+	u, err := s.DB().GetUser(userID)
+	if err != nil {
+		return err
+	}
+	kept := []any{}
+	for _, raw := range u.ExtraList(field) {
+		matched := str(raw) == entityID
+		if m, ok := raw.(map[string]any); ok {
+			matched = str(m["team_id"]) == entityID || str(m["organization_id"]) == entityID || str(m["id"]) == entityID
+		}
+		if !matched {
+			kept = append(kept, raw)
+		}
+	}
+	u.PutExtra(field, kept)
+	return s.DB().UpdateUser(*u)
 }
 
 // parseMembers turns the member field on the request into a list of objects.

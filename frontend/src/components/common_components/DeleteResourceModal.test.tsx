@@ -78,6 +78,16 @@ describe("DeleteResourceModal", () => {
     expect(screen.getByText("Active")).toBeInTheDocument();
   });
 
+  it("should render rows that share a label", () => {
+    const resourceInformation = [
+      { label: "模型名称", value: "public-name" },
+      { label: "模型名称", value: "upstream-name" },
+    ];
+    renderWithProviders(<DeleteResourceModal {...defaultProps} resourceInformation={resourceInformation} />);
+    expect(screen.getByText("public-name")).toBeInTheDocument();
+    expect(screen.getByText("upstream-name")).toBeInTheDocument();
+  });
+
   it("should render resource information with number values", () => {
     const resourceInformation = [{ label: "Count", value: 42 }];
     renderWithProviders(<DeleteResourceModal {...defaultProps} resourceInformation={resourceInformation} />);

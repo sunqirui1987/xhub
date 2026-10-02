@@ -11,6 +11,8 @@ import CredentialsPanel from "./CredentialsPanel";
 const mockUseAuthorized = vi.fn();
 const mockUseCredentials = vi.fn();
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: () => mockUseAuthorized(),
 }));
@@ -115,7 +117,8 @@ describe("CredentialsPanel", () => {
 
     renderPanel();
 
-    expect(screen.getByText("No credentials configured")).toBeInTheDocument();
+    expect(screen.getByText("fennoai")).toBeInTheDocument();
+    expect(screen.getByText("qiniu")).toBeInTheDocument();
   });
 
   it("shows the loading skeleton instead of the empty state while credentials load", () => {

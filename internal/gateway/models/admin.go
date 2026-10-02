@@ -261,11 +261,24 @@ func GroupInfo(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
 	}
-	groups := map[string][]string{}
 	s.LockModels()
 	list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
 	s.UnlockModels()
+	httpx.WriteJSON(w, 200, map[string]any{"data": playgroundGroups(list)})
+}
+
+// playgroundGroups is the model list behind the playground endpoint picker.
+// Provider shells such as fennoai and qiniu are credentials, not models. A mode copied from the provider wire is reported as chat, matching a hand-added model that leaves mode empty.
+func playgroundGroups(list []config.ModelEntry) []map[string]any {
+	groups := map[string][]string{}
+	order := []string{}
 	for _, m := range list {
+		if providerShell(m.ModelInfo) || m.ModelName == "" {
+			continue
+		}
+		if _, ok := groups[m.ModelName]; !ok {
+			order = append(order, m.ModelName)
+		}
 		prov := "openai"
 		if p := str(m.LiteLLMParams["custom_llm_provider"]); p != "" {
 			prov = p
@@ -276,24 +289,27 @@ func GroupInfo(s Host, w http.ResponseWriter, r *http.Request) {
 		}
 		groups[m.ModelName] = append(groups[m.ModelName], prov)
 	}
-	data := []map[string]any{}
-	for name, providers := range groups {
+	data := make([]map[string]any, 0, len(order))
+	for _, name := range order {
 		mode := "chat"
 		for _, m := range list {
-			if m.ModelName == name && m.ModelInfo != nil {
+			if m.ModelName != name || providerShell(m.ModelInfo) {
+				continue
+			}
+			if m.ModelInfo != nil {
 				if v := str(m.ModelInfo["mode"]); v != "" {
 					mode = v
 				}
-				break
 			}
+			break
 		}
 		data = append(data, map[string]any{
 			"model_group": name,
-			"providers":   providers,
+			"providers":   groups[name],
 			"mode":        mode,
 		})
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"data": data})
+	return data
 }
 
 // modelIsDB reports whether the model came from the database rather than YAML.
@@ -320,11 +336,17 @@ func LoadStored(s Host) {
 	if s.DB() == nil {
 		return
 	}
+	dropProviderShells(s)
 	rows, err := s.DB().ListProxyModels()
 	if err != nil {
 		return
 	}
 	for _, row := range rows {
+		if clearCopiedMode(&row) {
+			if err := s.DB().UpsertProxyModel(row); err != nil {
+				logx.Error("builtin model %s: %v", row.ID, err)
+			}
+		}
 		if row.Info == nil {
 			row.Info = map[string]any{}
 		}
@@ -337,6 +359,7 @@ func LoadStored(s Host) {
 			ModelName: row.ModelName, LiteLLMParams: row.Params, ModelInfo: row.Info,
 		})
 	}
+	SeedBuiltins(s)
 }
 
 // findByID finds a model by id. On a request path the caller must already hold the model lock. The startup merge has no concurrent requests.

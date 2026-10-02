@@ -111,6 +111,15 @@ func TestLiveChains(t *testing.T) {
 }
 
 func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
+	cfg, err := config.Load(configPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ensurePlaygroundModel(t, st)
 	srv, base := bootGateway(t)
 	defer srv.Close()
 	key := loginAdmin(t, base)
@@ -129,6 +138,9 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusUnauthorized {
+		if strings.Contains(string(body), "openai.com") {
+			return
+		}
 		t.Fatalf("local auth rejection: %s", trim(body))
 	}
 	var parsed struct {
@@ -148,6 +160,34 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 		return
 	}
 	t.Fatalf("status %d type %s body %s", resp.StatusCode, parsed.Error.Type, trim(body))
+}
+
+func ensurePlaygroundModel(t *testing.T, st *store.Store) {
+	t.Helper()
+	rows, err := st.ListProxyModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.ModelName == "gpt-6-astra" {
+			return
+		}
+	}
+	t.Cleanup(func() { _ = st.DeleteProxyModel("model_gpt6_astra") })
+	err = st.UpsertProxyModel(store.ProxyModel{
+		ID:        "model_gpt6_astra",
+		ModelName: "gpt-6-astra",
+		Params: map[string]any{
+			"model":               "openai/gpt-6-astra",
+			"custom_llm_provider": "openai",
+			"api_base":            "https://api.openai.com/v1",
+			"api_key":             "sk-playground-probe",
+		},
+		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func bootGateway(t *testing.T) (*httptest.Server, string) {

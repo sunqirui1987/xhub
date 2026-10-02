@@ -178,8 +178,9 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			logx.Debug("upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
 		}
 		did := dep.ParamString("api_base", "") + "|" + upstreamModel
+		upstreamOp := llm.PrepareQiniuBypass(op, apiBase, body)
 		built, err := llm.Build(r.Context(), llm.Request{
-			Op: op, Provider: provider, APIBase: apiBase, APIKey: apiKey, Model: realModel, Body: body,
+			Op: upstreamOp, Provider: provider, APIBase: apiBase, APIKey: apiKey, Model: realModel, Body: body,
 			VertexProject:  dep.ParamString("vertex_project", ""),
 			VertexLocation: dep.ParamString("vertex_location", ""),
 		})
@@ -223,8 +224,18 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 
 			h.NoteLatency(router.DeploymentID(rawDep), float64(time.Since(start).Milliseconds()))
 			h.SetChatHeaders(w, p, alias, apiBase)
+			// A chat client still expects chat chunks. The bypass body is Responses SSE, so translate only that public op.
+			asChat := upstreamOp == llm.OpResponses && (op == "" || op == llm.OpChat) && resp.StatusCode < 400
 			if stream {
-				wrote, usage, ttft, streamed := pipeStream(w, resp, start)
+				var wrote bool
+				var usage map[string]any
+				var ttft time.Duration
+				var streamed []byte
+				if asChat {
+					wrote, usage, ttft, streamed = pipeResponsesAsChat(w, resp, start, alias)
+				} else {
+					wrote, usage, ttft, streamed = pipeStream(w, resp, start)
+				}
 				h.DecBusy(did)
 				if wrote {
 					if usage == nil {
@@ -243,6 +254,9 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			h.DecBusy(did)
+			if asChat {
+				respBody = llm.ResponsesToChat(respBody, alias)
+			}
 			elapsed := time.Since(start)
 			pt, ct := bodyUsage(respBody)
 			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, provider, realModel)
@@ -426,6 +440,56 @@ func bodyUsage(raw []byte) (pt, ct int) {
 	}
 	usage, _ := doc["usage"].(map[string]any)
 	return usageCounts(usage)
+}
+
+// pipeResponsesAsChat copies a Qiniu bypass Responses stream as chat completion chunks.
+// An error status is forwarded unchanged so the client still sees the provider message.
+func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.Time, model string) (bool, map[string]any, time.Duration, []byte) {
+	defer resp.Body.Close()
+	buf := make([]byte, 4096)
+	flusher, _ := w.(http.Flusher)
+	wrote := false
+	var ttft time.Duration
+	var pending []byte
+	var captured []byte
+	var usage map[string]any
+	write := func(chunk []byte) {
+		if len(chunk) == 0 {
+			return
+		}
+		if !wrote {
+			ttft = time.Since(start)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(resp.StatusCode)
+			wrote = true
+		}
+		_, _ = w.Write(chunk)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		if len(captured) < 2<<20 {
+			take := len(chunk)
+			if len(captured)+take > 2<<20 {
+				take = (2 << 20) - len(captured)
+			}
+			captured = append(captured, chunk[:take]...)
+		}
+		usage = streamUsage(chunk, usage)
+	}
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			pending = append(pending, buf[:n]...)
+			emit, rest := llm.ResponsesSSEToChat(pending, model, false)
+			pending = rest
+			write(emit)
+		}
+		if err != nil {
+			emit, _ := llm.ResponsesSSEToChat(pending, model, true)
+			write(emit)
+			return wrote, usage, ttft, captured
+		}
+	}
 }
 
 // pipeStream copies upstream SSE to the client and tries to extract usage from the stream. It returns wrote false when no byte has been written yet.

@@ -60,7 +60,6 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	includeGroups := queryBool(q.Get("include_model_access_groups"))
 	onlyGroups := queryBool(q.Get("only_model_access_groups"))
 	returnWild := queryBool(q.Get("return_wildcard_routes"))
-	teamID := strings.TrimSpace(q.Get("team_id"))
 	scope := q.Get("scope")
 
 	s.LockModels()
@@ -70,35 +69,38 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	proxyNames := proxyModelNames(list)
 	groups := modelAccessGroups(list)
 
-	var keyModels, teamModels []string
 	adminExpand := scope == "expand" && hasAdminModelView(p)
-	if !adminExpand && p != nil && p.Key != nil {
-		if teamID != "" {
-			if team, err := s.DB().GetTeam(teamID); err == nil {
-				teamModels = team.Models()
+	var base []string
+	if adminExpand {
+		base = append([]string{}, proxyNames...)
+	} else {
+		for _, name := range proxyNames {
+			if AllowsModel(s, p, name) {
+				base = append(base, name)
 			}
-		} else {
-			keyModels = p.Key.Models()
-			if p.Key.TeamID != "" {
-				if team, err := s.DB().GetTeam(p.Key.TeamID); err == nil {
-					teamModels = team.Models()
+		}
+		if includeGroups {
+			for group, members := range groups {
+				for _, member := range members {
+					if AllowsModel(s, p, member) {
+						base = append(base, group)
+						break
+					}
 				}
 			}
 		}
-		keyModels = expandGrantedModels(keyModels, teamModels, proxyNames, groups, includeGroups, true)
-		teamModels = expandGrantedModels(teamModels, teamModels, proxyNames, groups, includeGroups, false)
 	}
-
-	var base []string
-	switch {
-	case len(keyModels) > 0:
-		base = keyModels
-	case len(teamModels) > 0:
-		base = teamModels
-	default:
-		base = append([]string{}, proxyNames...)
-		if includeGroups {
-			base = append(base, groupKeys(groups)...)
+	if returnWild && !adminExpand && p != nil && p.Key != nil {
+		for _, granted := range p.Key.Models() {
+			if !strings.Contains(granted, "*") {
+				continue
+			}
+			for _, name := range proxyNames {
+				if AllowsModel(s, p, name) && wildcardMatches(granted, name) {
+					base = append(base, granted)
+					break
+				}
+			}
 		}
 	}
 	base = dedupeModels(base)
@@ -114,12 +116,20 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	return dedupeModels(expandWildcardNames(base, list, returnWild))
 }
 
+func wildcardMatches(pattern, name string) bool {
+	if pattern == "*" {
+		return true
+	}
+	prefix, ok := strings.CutSuffix(pattern, "*")
+	return ok && strings.HasPrefix(name, prefix)
+}
+
 // hasAdminModelView reports that the master key, proxy_admin, and proxy_admin_viewer may bypass the key model restriction when scope=expand. An ordinary identity may not.
 func hasAdminModelView(p *auth.Principal) bool {
 	if p == nil {
 		return false
 	}
-	if p.Master || p.Role == "proxy_admin" || p.Role == "proxy_admin_viewer" {
+	if p.Kind == "master" || p.Role == "proxy_admin" || p.Role == "proxy_admin_viewer" {
 		return true
 	}
 	return false
@@ -142,6 +152,9 @@ func proxyModelNames(list []config.ModelEntry) []string {
 	var order []string
 	seen := map[string]struct{}{}
 	for _, m := range list {
+		if nonModelEntry(m) {
+			continue
+		}
 		if _, ok := seen[m.ModelName]; !ok && m.ModelName != "" {
 			order = append(order, m.ModelName)
 			seen[m.ModelName] = struct{}{}
@@ -162,6 +175,33 @@ func proxyModelNames(list []config.ModelEntry) []string {
 		out = append(out, name)
 	}
 	return out
+}
+
+// nonModelProvider identifies provider credentials that can appear in the
+// deployment table but are not selectable models. Keep this name-based guard
+// for older configurations that predate model_info.role: provider.
+func nonModelProvider(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "qiniu", "fennoai":
+		return true
+	default:
+		return false
+	}
+}
+
+func nonModelEntry(entry config.ModelEntry) bool {
+	return strings.TrimSpace(entry.ModelName) == "" ||
+		nonModelProvider(entry.ModelName) ||
+		providerShell(entry.ModelInfo)
+}
+
+// providerShell reports a builtin provider row. It is a credential shell, not a model the console should list.
+func providerShell(info map[string]any) bool {
+	if info == nil {
+		return false
+	}
+	role, _ := info["role"].(string)
+	return role == "provider"
 }
 
 // modelBlocked reads model_info.blocked. A missing or non-boolean field counts as not blocked and does not change the config.

@@ -139,8 +139,8 @@ const AllModelsTab = ({
 
   const modelData = useMemo<{ data: ModelData[] }>(() => {
     if (!rawModelData) return { data: [] };
-    return transformModelData(rawModelData, getProviderFromModel);
-  }, [rawModelData, getProviderFromModel]);
+    return transformModelData(rawModelData, getProviderFromModel, modelCostMapData);
+  }, [rawModelData, getProviderFromModel, modelCostMapData]);
 
   const columnFilters = useMemo<ColumnFiltersState>(
     () =>

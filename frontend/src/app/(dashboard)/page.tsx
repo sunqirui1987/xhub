@@ -12,11 +12,13 @@ import {
   storeReturnUrl,
 } from "@/utils/returnUrlUtils";
 import { legacyPageRedirectHref } from "@/app/(dashboard)/legacyPageRoutes";
+import { getCookie } from "@/utils/cookieUtils";
+import { isJwtExpired } from "@/utils/jwtUtils";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
 
 function CreateKeyPageContent() {
-  const { authLoading, token } = useAuth();
+  const { authLoading, token, setToken } = useAuth();
 
   const router = useRouter();
   const searchParams = useSearchParams()!;
@@ -27,16 +29,23 @@ function CreateKeyPageContent() {
   const redirectToLogin = authLoading === false && token === null;
 
   useEffect(() => {
-    if (redirectToLogin) {
-      // Store the current URL so we can redirect back after login
-      storeReturnUrl();
-      // Stay on this origin. proxyBaseUrl is the API host (:4000 in next dev)
-      // and does not serve the dashboard — sending the browser there 401s.
-      const dest = buildLoginUrlWithReturn(getLoginUrl());
-      // Replace instead of assigning to avoid back-button loops
-      window.location.replace(dest);
+    if (!redirectToLogin) return;
+    // Login writes the cookie and then client-navigates here. The auth
+    // context can still be the logged-out snapshot from the login page;
+    // adopt that cookie instead of sending the browser back to /ui/login.
+    const raw = getCookie("token");
+    if (raw && !isJwtExpired(raw)) {
+      setToken(raw);
+      return;
     }
-  }, [redirectToLogin]);
+    // Store the current URL so we can redirect back after login
+    storeReturnUrl();
+    // Stay on this origin. proxyBaseUrl is the API host (:4000 in next dev)
+    // and does not serve the dashboard — sending the browser there 401s.
+    const dest = buildLoginUrlWithReturn(getLoginUrl());
+    // Replace instead of assigning to avoid back-button loops
+    window.location.replace(dest);
+  }, [redirectToLogin, setToken]);
 
   const legacyRedirectHref = legacyPageRedirectHref(searchParams);
   useEffect(() => {

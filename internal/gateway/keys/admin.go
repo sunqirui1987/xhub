@@ -53,6 +53,10 @@ func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
+	if err := s.ValidateKeyRelations(k); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	if err := s.DB().InsertKey(k); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
@@ -81,6 +85,10 @@ func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	applyKeyPatch(k, body)
+	if err := s.ValidateKeyRelations(*k); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	newPlain := str(body["new_key"])
 	if newPlain == "" {
 		newPlain = store.NewPlainKey()
@@ -188,6 +196,9 @@ func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		applyKeyPatch(k, body)
+		if err := s.ValidateKeyRelations(*k); err != nil {
+			continue
+		}
 		if err := s.DB().UpdateKey(*k); err != nil {
 			continue
 		}

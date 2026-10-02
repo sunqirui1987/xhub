@@ -6,16 +6,18 @@ interface KeyRow {
   token: string;
 }
 
-const { mockReplace, mockUseKeys, mockUiHref, state } = vi.hoisted(() => {
+const { mockReplace, mockSetToken, mockUseKeys, mockUiHref, state } = vi.hoisted(() => {
   const state = {
     search: "login=success",
     userRole: "Internal User",
     keys: [] as KeyRow[],
     returnUrl: null as string | null,
+    token: "tok" as string | null,
   };
   return {
     state,
     mockReplace: vi.fn(),
+    mockSetToken: vi.fn(),
     mockUiHref: vi.fn((segment: string) => `/mocked-ui/${segment}`),
     mockUseKeys: vi.fn(() => ({
       data: { keys: state.keys, total_count: state.keys.length },
@@ -31,7 +33,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     authLoading: false,
-    token: "tok",
+    token: state.token,
+    setToken: mockSetToken,
     userRole: state.userRole,
     userID: "user-1",
   }),
@@ -75,6 +78,8 @@ describe("dashboard landing", () => {
     state.userRole = "Internal User";
     state.keys = [];
     state.returnUrl = null;
+    state.token = "tok";
+    document.cookie = "token=; Max-Age=0; Path=/";
     mockReplace.mockClear();
     mockUseKeys.mockClear();
     mockUiHref.mockClear();
@@ -123,5 +128,20 @@ describe("dashboard landing", () => {
     state.returnUrl = "/ui/models-and-endpoints";
     render(<CreateKeyPage />);
     expect(mockLocationReplace).toHaveBeenCalledWith("http://localhost:3000/ui/models-and-endpoints");
+  });
+
+  it("adopts a session cookie written by login instead of bouncing to /ui/login", () => {
+    state.token = null;
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, key: "sess-1" }))
+      .replace(/=+$/g, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+    const jwt = `eyJhbGciOiJub25lIn0.${payload}.sig`;
+    document.cookie = `token=${jwt}`;
+
+    render(<CreateKeyPage />);
+
+    expect(mockSetToken).toHaveBeenCalledWith(jwt);
+    expect(mockLocationReplace).not.toHaveBeenCalled();
   });
 });

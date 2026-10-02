@@ -178,6 +178,28 @@ const createTestProps = (userRole = "proxy_admin", userId = "user-1", isTeamAdmi
 };
 
 describe("AddModelForm", () => {
+  it("leaves the health check endpoint unset and lets the user clear a selection", async () => {
+    const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
+    auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
+    const props = createTestProps();
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
+    renderWithProviders(<AddModelForm {...props} />);
+    const endpoint = await screen.findByRole("combobox", { name: "Health check endpoint (optional)" });
+    expect(endpoint).toHaveTextContent("Not Set");
+    expect(props.form.getValues("mode")).toBeUndefined();
+    await user.click(endpoint);
+    await user.click(await screen.findByRole("option", { name: "Chat - /chat/completions" }));
+    expect(props.form.getValues("mode")).toBe("chat");
+    await user.click(endpoint);
+    await user.click(await screen.findByRole("option", { name: "Not Set", exact: true }));
+    expect(props.form.getValues("mode")).toBe("");
+    const deployments = await prepareModelAddRequest({
+      mode: props.form.getValues("mode"),
+      model_mappings: [{ public_name: "test", litellm_model: "openai/test" }],
+    }, "token", null);
+    expect(deployments?.[0].modelInfoObj).not.toHaveProperty("mode");
+  });
+
   it("should render", async () => {
     const mockUseAuthorized = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
     mockUseAuthorized.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));

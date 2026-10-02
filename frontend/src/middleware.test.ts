@@ -38,6 +38,10 @@ describe("dashboardAppPath", () => {
     expect(dashboardAppPath("/ui/logs")).toBe("/logs");
     expect(dashboardAppPath("/models-and-endpoints")).toBe("/models-and-endpoints");
     expect(dashboardAppPath("/ui/models-and-endpoints")).toBe("/models-and-endpoints");
+    expect(dashboardAppPath("/mine-models")).toBe("/mine-models");
+    expect(dashboardAppPath("/ui/mine-models")).toBe("/mine-models");
+    expect(dashboardAppPath("/price-data")).toBe("/price-data");
+    expect(dashboardAppPath("/ui/price-data")).toBe("/price-data");
   });
 
   it("sends guardrail writes on the page path to the gateway and keeps the page GET", () => {

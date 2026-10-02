@@ -64,8 +64,8 @@ export default function DeleteResourceModal({
             )}
             <CardContent>
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
-                {resourceInformation?.map(({ label, value, code }) => (
-                  <React.Fragment key={label}>
+                {resourceInformation?.map(({ label, value, code }, index) => (
+                  <React.Fragment key={`${index}:${label}`}>
                     <dt className="font-semibold">{label}</dt>
                     <dd className="min-w-0 break-words">{code ? <code>{value ?? "-"}</code> : value ?? "-"}</dd>
                   </React.Fragment>

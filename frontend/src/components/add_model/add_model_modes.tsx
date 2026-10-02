@@ -1,18 +1,18 @@
 import { t } from "@/i18n";
 // Define the available test modes
 export const TEST_MODES = [
-  { value: "chat", label: t("Chat - /chat/completions") },
-  { value: "completion", label: t("Completion - /completions") },
-  { value: "embedding", label: t("Embedding - /embeddings") },
-  { value: "audio_speech", label: t("Audio Speech - /audio/speech") },
-  { value: "audio_transcription", label: t("Audio Transcription - /audio/transcriptions") },
-  { value: "image_generation", label: t("Image Generation - /images/generations") },
-  { value: "image_edit", label: t("Image Edit - /images/edits") },
-  { value: "video_generation", label: t("Video Generation - /videos") },
-  { value: "rerank", label: t("Rerank - /rerank") },
-  { value: "realtime", label: t("Realtime - /realtime") },
-  { value: "batch", label: t("Batch - /batch") },
-  { value: "ocr", label: t("OCR - /ocr") },
+  { value: "chat", get label() { return t("Chat - /chat/completions"); } },
+  { value: "completion", get label() { return t("Completion - /completions"); } },
+  { value: "embedding", get label() { return t("Embedding - /embeddings"); } },
+  { value: "audio_speech", get label() { return t("Audio Speech - /audio/speech"); } },
+  { value: "audio_transcription", get label() { return t("Audio Transcription - /audio/transcriptions"); } },
+  { value: "image_generation", get label() { return t("Image Generation - /images/generations"); } },
+  { value: "image_edit", get label() { return t("Image Edit - /images/edits"); } },
+  { value: "video_generation", get label() { return t("Video Generation - /videos"); } },
+  { value: "rerank", get label() { return t("Rerank - /rerank"); } },
+  { value: "realtime", get label() { return t("Realtime - /realtime"); } },
+  { value: "batch", get label() { return t("Batch - /batch"); } },
+  { value: "ocr", get label() { return t("OCR - /ocr"); } },
 ];
 
 // Define the available auto router routing strategies

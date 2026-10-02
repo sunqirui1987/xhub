@@ -114,6 +114,7 @@ describe("Sidebar (leftnav)", () => {
     mockUseOrganizations.mockReset();
     mockUseThemeImpl = unbrandedTheme;
     navState.pathname = "/ui/api-keys";
+    setActiveLocale("en");
   });
 
   it("should link the logo to the UI home route rather than the proxy origin", () => {
@@ -126,7 +127,7 @@ describe("Sidebar (leftnav)", () => {
     renderWithProviders(<Sidebar {...defaultProps} />);
 
     expect(screen.getByRole("link", { name: /xhub/i })).toHaveTextContent("XHub");
-    expect(screen.getByRole("link", { name: /xhub/i }).querySelector("img")).toBeNull();
+    expect(screen.queryByRole("img", { name: /xhub/i })).not.toBeInTheDocument();
   });
 
   it("prefers a configured dark logo over the light one in dark mode", () => {
@@ -175,7 +176,9 @@ describe("Sidebar (leftnav)", () => {
     const topLevelLabels = [
       "Virtual Keys",
       "Playground",
+      "My models",
       "Models + Endpoints",
+      "Price data",
       "Guardrails",
       "Usage",
       "Logs",
@@ -188,7 +191,7 @@ describe("Sidebar (leftnav)", () => {
     ];
 
     topLevelLabels.forEach((label) => {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByRole(label === "Settings" ? "button" : "link", { name: label })).toBeInTheDocument();
     });
   });
 
@@ -197,7 +200,7 @@ describe("Sidebar (leftnav)", () => {
 
     expect(screen.queryByText("Router Settings")).not.toBeInTheDocument();
     act(() => {
-      fireEvent.click(screen.getByText("Settings"));
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     });
     await waitFor(() => {
       expect(screen.getByText("Router Settings")).toBeInTheDocument();
@@ -206,7 +209,7 @@ describe("Sidebar (leftnav)", () => {
   it("reports whether a nested tab is expanded", async () => {
     renderWithProviders(<Sidebar {...defaultProps} />);
 
-    const toggle = screen.getByText("Settings").closest("button")!;
+    const toggle = screen.getByRole("button", { name: "Settings" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     act(() => {
@@ -262,6 +265,12 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.getByText("Models + Endpoints")).toBeInTheDocument();
     });
 
+    it("hides Price data from Admin Viewer because it is a management page", () => {
+      mockUseAuthorized.mockReturnValue(adminViewerAuth);
+      renderWithProviders(<Sidebar {...defaultProps} />);
+      expect(screen.queryByText("Price data")).not.toBeInTheDocument();
+    });
+
     it("does not show Agents to Admin Viewer", () => {
       mockUseAuthorized.mockReturnValue(adminViewerAuth);
       renderWithProviders(<Sidebar {...defaultProps} />);
@@ -299,6 +308,19 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.queryByText("Tools")).not.toBeInTheDocument();
       expect(screen.queryByText("Search Tools")).not.toBeInTheDocument();
       expect(screen.getByText("Guardrails")).toBeInTheDocument();
+    });
+
+    it("keeps My models visible to internal users even with an empty admin page allowlist", () => {
+      mockUseAuthorized.mockReturnValue(internalAuth);
+      renderWithProviders(<Sidebar {...defaultProps} enabledPagesInternalUsers={[]} />);
+      expect(screen.getByRole("link", { name: "My models" })).toHaveAttribute("href", "/ui/mine-models");
+      expect(screen.queryByText("Models + Endpoints")).not.toBeInTheDocument();
+      expect(screen.getByText("MY")).toBeInTheDocument();
+      for (const group of menuGroups.slice(1)) {
+        expect(
+          screen.queryByText(t(group.groupLabel), { selector: '[data-slot="sidebar-group-label"]' }),
+        ).not.toBeInTheDocument();
+      }
     });
 
     it("does not show the removed Tools column to admins", () => {
@@ -469,7 +491,9 @@ describe("Sidebar (leftnav)", () => {
       expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", href);
     expectHref("Virtual Keys", "/ui/api-keys");
     expectHref("Playground", "/ui/playground");
+    expectHref("My models", "/ui/mine-models");
     expectHref("Models + Endpoints", "/ui/models-and-endpoints");
+    expectHref("Price data", "/ui/price-data");
     expectHref("Usage", "/ui/usage");
     expectHref("Guardrails", "/ui/guardrails");
     expectHref("Logs", "/ui/logs");
@@ -502,11 +526,47 @@ describe("Sidebar (leftnav)", () => {
     for (const label of gone) {
       expect(screen.queryByText(label), label).not.toBeInTheDocument();
     }
-    const pages = menuGroups.flatMap((group) => group.items.flatMap((item) => [item.page, ...(item.children ?? []).map((child) => child.page)]));
-    for (const id of ["agents", "workflows", "memory", "mcp-servers", "skills", "policies", "tools", "search-tools", "vector-stores", "tool-policies", "prompts", "tag-management", "transform-request", "caching", "api_ref", "model-hub-table", "usage", "budgets", "ui-theme"]) {
+    const pages = menuGroups.flatMap((group) =>
+      group.items.flatMap((item) => [item.page, ...(item.children ?? []).map((child) => child.page)]),
+    );
+    for (const id of [
+      "agents",
+      "workflows",
+      "memory",
+      "mcp-servers",
+      "skills",
+      "policies",
+      "tools",
+      "search-tools",
+      "vector-stores",
+      "tool-policies",
+      "prompts",
+      "tag-management",
+      "transform-request",
+      "caching",
+      "api_ref",
+      "model-hub-table",
+      "usage",
+      "budgets",
+      "ui-theme",
+    ]) {
       expect(pages, id).not.toContain(id);
     }
-    for (const id of ["api-keys", "llm-playground", "models", "guardrails", "new_usage", "logs", "teams", "users", "organizations", "settings", "admin-panel"]) {
+    for (const id of [
+      "api-keys",
+      "llm-playground",
+      "my-models",
+      "models",
+      "price-data",
+      "guardrails",
+      "new_usage",
+      "logs",
+      "teams",
+      "users",
+      "organizations",
+      "settings",
+      "admin-panel",
+    ]) {
       expect(pages, id).toContain(id);
     }
   });
@@ -515,7 +575,7 @@ describe("Sidebar (leftnav)", () => {
     renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
     for (const group of ["Settings"]) {
       act(() => {
-        fireEvent.click(screen.getByText(group));
+        fireEvent.click(screen.getByRole("button", { name: group }));
       });
     }
     const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href") ?? "");
@@ -550,48 +610,44 @@ describe("Sidebar (leftnav)", () => {
     expect(container.querySelector('a[href*="projects"]')).toHaveAttribute("title", "Projects");
   });
 
-  it("puts organizations, teams, and users first, and projects with access groups in the next group", () => {
+  it("groups administrator pages by purpose after personal pages", () => {
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
-    const text = container.textContent ?? "";
-    const at = (label: string) => {
-      const index = text.indexOf(label);
-      expect(index, label).toBeGreaterThanOrEqual(0);
-      return index;
-    };
-    const access = at("ACCESS CONTROL");
-    const scope = at("PROJECTS & ACCESS");
-    const organizations = at("Organizations");
-    const teams = at("Teams");
-    const users = at("Internal Users");
-    const projects = at("Projects");
-    const accessGroups = at("Access Groups");
-    expect(access).toBeLessThan(organizations);
-    expect(organizations).toBeLessThan(teams);
-    expect(teams).toBeLessThan(users);
-    expect(users).toBeLessThan(scope);
-    expect(scope).toBeLessThan(projects);
-    expect(projects).toBeLessThan(accessGroups);
-
-    expect(getBreadcrumb("/ui/organizations")).toEqual({ section: "ACCESS CONTROL", title: "Organizations" });
-    expect(getBreadcrumb("/ui/teams")).toEqual({ section: "ACCESS CONTROL", title: "Teams" });
-    expect(getBreadcrumb("/ui/users")).toEqual({ section: "ACCESS CONTROL", title: "Internal Users" });
-    expect(getBreadcrumb("/ui/projects")).toEqual({ section: "PROJECTS & ACCESS", title: "Projects" });
-    expect(getBreadcrumb("/ui/access-groups")).toEqual({ section: "PROJECTS & ACCESS", title: "Access Groups" });
+    const groups = Array.from(container.querySelectorAll('[data-slot="sidebar-group"]'));
+    expect(groups.map((group) => group.querySelector('[data-slot="sidebar-group-label"]')?.textContent)).toEqual([
+      "MY",
+      "AI GATEWAY",
+      "OBSERVABILITY",
+      "ACCESS CONTROL",
+      "PROJECTS & ACCESS",
+      "SETTINGS",
+    ]);
+    expect(
+      groups.map((group) => Array.from(group.querySelectorAll("a, button")).map((item) => item.textContent)),
+    ).toEqual([
+      ["Virtual Keys", "Playground", "My models"],
+      ["Models + Endpoints", "Price data", "Guardrails"],
+      ["Usage", "Logs", "Guardrails Monitor"],
+      ["Organizations", "Teams", "Internal Users"],
+      ["ProjectsBeta", "Access Groups"],
+      ["Settings"],
+    ]);
+    expect(screen.queryByText("ADMIN")).not.toBeInTheDocument();
   });
 
-  it("hides Projects when the projects UI is off and keeps Access Groups in the later group", () => {
+  it("hides Projects when the projects UI is off and keeps Access Groups in its own group", () => {
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI={false} />);
     const text = container.textContent ?? "";
     const at = (label: string) => text.indexOf(label);
     expect(at("Organizations")).toBeGreaterThanOrEqual(0);
     expect(at("Organizations")).toBeLessThan(at("Teams"));
     expect(at("Teams")).toBeLessThan(at("Internal Users"));
-    expect(at("Internal Users")).toBeLessThan(at("PROJECTS & ACCESS"));
+    expect(at("Internal Users")).toBeLessThan(at("Access Groups"));
+    expect(at("PROJECTS & ACCESS")).toBeGreaterThanOrEqual(0);
     expect(at("PROJECTS & ACCESS")).toBeLessThan(at("Access Groups"));
     expect(container.querySelector('a[href*="projects"]')).toBeNull();
   });
 
-  it("renders the identity order and the second group heading in Simplified Chinese", () => {
+  it("renders purpose-based headings and admin identity order in Simplified Chinese", () => {
     setActiveLocale("zh-CN");
     const { container } = renderWithProviders(<Sidebar {...defaultProps} enableProjectsUI />);
     const text = container.textContent ?? "";
@@ -599,7 +655,11 @@ describe("Sidebar (leftnav)", () => {
     expect(at("组织")).toBeGreaterThanOrEqual(0);
     expect(at("组织")).toBeLessThan(at("团队"));
     expect(at("团队")).toBeLessThan(at("内部用户"));
-    expect(at("内部用户")).toBeLessThan(at("项目与访问组"));
+    expect(at("我的")).toBeGreaterThanOrEqual(0);
+    expect(
+      Array.from(container.querySelectorAll('[data-slot="sidebar-group-label"]')).map((label) => label.textContent),
+    ).toEqual(["我的", "AI 网关", "可观测性", "访问控制", "项目与访问组", "设置"]);
+    expect(at("内部用户")).toBeLessThan(at("项目"));
     const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href") ?? "");
     const projects = hrefs.findIndex((href) => href.includes("/projects"));
     const accessGroups = hrefs.findIndex((href) => href.includes("/access-groups"));
@@ -607,15 +667,21 @@ describe("Sidebar (leftnav)", () => {
     expect(users).toBeGreaterThanOrEqual(0);
     expect(projects).toBeGreaterThan(users);
     expect(accessGroups).toBeGreaterThan(projects);
-    expect(text).not.toContain("PROJECTS & ACCESS");
-    expect(text).not.toContain("ACCESS CONTROL");
+    expect(text).not.toContain("ADMIN");
+    expect(text).not.toContain("MY");
     setActiveLocale("en");
   });
 
   it("translates group labels to Simplified Chinese", () => {
     setActiveLocale("zh-CN");
     renderWithProviders(<Sidebar {...defaultProps} />);
-    expect(screen.getByText(t("nav.groups.gateway"))).toBeInTheDocument();
+    expect(screen.getByText(t("nav.groups.mine"))).toBeInTheDocument();
+    for (const group of menuGroups) {
+      expect(
+        screen.getByText(t(group.groupLabel), { selector: '[data-slot="sidebar-group-label"]' }),
+      ).toBeInTheDocument();
+    }
+    expect(screen.queryByText(t("nav.groups.admin"))).not.toBeInTheDocument();
     expect(screen.getByText(t("nav.apiKeys"))).toBeInTheDocument();
     expect(screen.queryByText("AI GATEWAY")).not.toBeInTheDocument();
     expect(screen.queryByText("Virtual Keys")).not.toBeInTheDocument();
@@ -625,7 +691,8 @@ describe("Sidebar (leftnav)", () => {
 
 describe("getBreadcrumb", () => {
   it("resolves a top-level route to its section + title", () => {
-    expect(getBreadcrumb("/ui/api-keys")).toEqual({ section: "AI GATEWAY", title: "Virtual Keys" });
+    expect(getBreadcrumb("/ui/api-keys")).toEqual({ section: "MY", title: "Virtual Keys" });
+    expect(getBreadcrumb("/ui/mine-models")).toEqual({ section: "MY", title: "My models" });
     expect(getBreadcrumb("/ui/logs")).toEqual({ section: "OBSERVABILITY", title: "Logs" });
   });
 
@@ -635,15 +702,29 @@ describe("getBreadcrumb", () => {
   });
 
   it("titles the dashboard root as Virtual Keys", () => {
-    expect(getBreadcrumb("/ui/")).toEqual({ section: "AI GATEWAY", title: "Virtual Keys" });
+    expect(getBreadcrumb("/ui/")).toEqual({ section: "MY", title: "Virtual Keys" });
   });
 
   it("does not keep a section for a removed nested route", () => {
     expect(getBreadcrumb("/ui/search-tools/")).toEqual({ section: null, title: "Search Tools" });
   });
 
-  it("resolves router-settings under the Settings section", () => {
-    expect(getBreadcrumb("/ui/router-settings")).toEqual({ section: "SETTINGS", title: "Router Settings" });
+  it.each([
+    ["price-data", "AI GATEWAY", "Price data"],
+    ["guardrails", "AI GATEWAY", "Guardrails"],
+    ["guardrails-monitor", "OBSERVABILITY", "Guardrails Monitor"],
+    ["organizations", "ACCESS CONTROL", "Organizations"],
+    ["teams", "ACCESS CONTROL", "Teams"],
+    ["users", "ACCESS CONTROL", "Internal Users"],
+    ["projects", "PROJECTS & ACCESS", "Projects"],
+    ["access-groups", "PROJECTS & ACCESS", "Access Groups"],
+    ["settings", "SETTINGS", "Settings"],
+    ["router-settings", "SETTINGS", "Router Settings"],
+    ["logging-and-alerts", "SETTINGS", "Logging & Alerts"],
+    ["cost-tracking", "SETTINGS", "Cost Tracking"],
+    ["admin-panel", "SETTINGS", "Admin Settings"],
+  ])("resolves %s under its purpose-based section", (route, section, title) => {
+    expect(getBreadcrumb(`/ui/${route}`)).toEqual({ section, title });
   });
 
   it("falls back to a prettified title with no section for unknown routes", () => {

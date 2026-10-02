@@ -189,6 +189,26 @@ describe("ModelInfoView", () => {
   const wrapper = ({ children }: { children: ReactNode }) =>
     React.createElement(QueryClientProvider, { client: queryClient }, children);
 
+  it("uses only the requested model for both overview and settings, including after navigation", async () => {
+    const other = {
+      ...defaultModelData,
+      model_name: "DeepSeek",
+      litellm_params: { ...defaultModelData.litellm_params, model: "deepseek/deepseek-v4-flash" },
+      model_info: { ...defaultModelData.model_info, id: "other" },
+    };
+    mockModelInfoV1Call.mockResolvedValue({ data: [other] });
+    mockUseModelsInfo.mockReturnValue({ data: undefined, isLoading: true });
+    const view = render(<ModelInfoView {...DEFAULT_ADMIN_PROPS} />, { wrapper });
+    expect(mockModelInfoV1Call).not.toHaveBeenCalled();
+    mockUseModelsInfo.mockReturnValue({ data: { data: [other, defaultModelData] }, isLoading: false });
+    view.rerender(<ModelInfoView {...DEFAULT_ADMIN_PROPS} />);
+    await userEvent.click(await screen.findByRole("button", { name: /edit settings/i }));
+    expect(screen.getByLabelText("Model Name")).toHaveValue("GPT-4");
+    view.rerender(<ModelInfoView {...DEFAULT_ADMIN_PROPS} modelId="other" />);
+    await userEvent.click(await screen.findByRole("button", { name: /edit settings/i }));
+    expect(screen.getByLabelText("Model Name")).toHaveValue("DeepSeek");
+  });
+
   it("should render", async () => {
     render(<ModelInfoView {...DEFAULT_ADMIN_PROPS} />, { wrapper });
     await waitFor(() => {

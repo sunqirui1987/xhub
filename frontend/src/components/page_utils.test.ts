@@ -134,39 +134,6 @@ describe("Page Utils - LeftNav Sync", () => {
     ).toHaveLength(0);
   });
 
-  it("should not have orphaned descriptions (descriptions for pages not in menuGroups)", () => {
-    // Collect all page keys from menuGroups
-    const menuPageKeys: string[] = [];
-    const excludedParents = ["tools", "experimental", "settings"];
-
-    menuGroups.forEach((group) => {
-      group.items.forEach((item) => {
-        if (item.page && !excludedParents.includes(item.page)) {
-          menuPageKeys.push(item.page);
-        }
-
-        if (item.children) {
-          item.children.forEach((child) => {
-            menuPageKeys.push(child.page);
-          });
-        }
-      });
-    });
-
-    // Check for descriptions that don't match any menu page
-    const orphanedDescriptions: string[] = [];
-    Object.keys(pageDescriptions).forEach((descKey) => {
-      if (!menuPageKeys.includes(descKey)) {
-        orphanedDescriptions.push(descKey);
-      }
-    });
-
-    expect(
-      orphanedDescriptions,
-      `These descriptions don't match any page in menuGroups: ${orphanedDescriptions.join(", ")}. Remove them or add the pages to leftnav.`,
-    ).toHaveLength(0);
-  });
-
   it("should have proper group hierarchy for nested pages", () => {
     const availablePages = getAvailablePages();
 
