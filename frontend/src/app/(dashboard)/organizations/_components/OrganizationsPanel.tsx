@@ -113,7 +113,7 @@ const OrganizationsPanel: React.FC<OrganizationsPanelProps> = ({ userRole, acces
             setEditOrg(false);
           }}
           accessToken={accessToken}
-          is_org_admin={true}
+          is_org_admin={false}
           is_proxy_admin={userRole === "Admin"}
           userModels={userModels}
           editOrg={editOrg}

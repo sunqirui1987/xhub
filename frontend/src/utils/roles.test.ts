@@ -8,6 +8,7 @@ import {
   spendScopeUserId,
   isOrgAdminForAnyOrg,
   isOrgAdminSessionRole,
+  formatUserRole,
   isProxyAdminRole,
   isUserTeamAdminForAnyTeam,
   isUserTeamAdminForSingleTeam,
@@ -61,7 +62,10 @@ describe("roles", () => {
   describe("isProxyAdminRole", () => {
     it("should return true for proxy_admin and Admin roles", () => {
       expect(isProxyAdminRole("proxy_admin")).toBe(true);
+      expect(isProxyAdminRole("admin")).toBe(true);
       expect(isProxyAdminRole("Admin")).toBe(true);
+      expect(formatUserRole("admin")).toBe("Admin");
+      expect(formatUserRole("user")).toBe("Internal User");
     });
 
     it("should return false for other admin roles", () => {
@@ -84,6 +88,11 @@ describe("roles", () => {
         { user_id: "user-1", user_email: "user1@test.com", role: "admin" },
         { user_id: "user-2", user_email: "user2@test.com", role: "user" },
       ];
+      expect(isUserTeamAdminForSingleTeam(members_with_roles, "user-1")).toBe(true);
+    });
+
+    it("should return true when the gateway role is team_admin", () => {
+      const members_with_roles = [{ user_id: "user-1", user_email: "user1@test.com", role: "team_admin" }];
       expect(isUserTeamAdminForSingleTeam(members_with_roles, "user-1")).toBe(true);
     });
 

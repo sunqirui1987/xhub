@@ -15,9 +15,11 @@ import {
   teamListCall,
   teamMemberAddCall,
   teamMemberDeleteCall,
+  organizationListCall,
   Member,
 } from "@/components/networking";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { accountRoleKind, isTeamAdminMembership } from "@/utils/iamRoles";
 import { t } from "@/i18n";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
@@ -58,7 +60,101 @@ interface UserInfoViewProps {
 interface TeamDisplayInfo {
   team_id: string;
   team_alias: string | null;
+  user_role?: string | null;
+  organization_alias?: string | null;
 }
+
+const accountRoleLabel = (role: string | null | undefined): string => {
+  const kind = accountRoleKind(role);
+  if (kind === "admin") return t("Platform administrator");
+  if (kind === "user") return t("Regular user");
+  if (!role) return t("pages.users.notSet");
+  return role;
+};
+
+const membershipRoleLabel = (role: string | null | undefined): string => {
+  if (!role) return "—";
+  return isTeamAdminMembership(role) ? t("Team admin") : t("Team member");
+};
+
+const unwrapUserInfo = (data: unknown): UserInfoV2Response | null => {
+  if (!data || typeof data !== "object") return null;
+  const record = data as { user_id?: string; user_info?: UserInfoV2Response };
+  if (record.user_info && !record.user_id) return record.user_info;
+  return data as UserInfoV2Response;
+};
+
+const asTeamRows = (raw: unknown): Array<Record<string, any>> => {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object" && Array.isArray((raw as { teams?: unknown }).teams)) {
+    return (raw as { teams: Array<Record<string, any>> }).teams;
+  }
+  return [];
+};
+
+const organizationNames = async (accessToken: string): Promise<Map<string, string>> => {
+  const names = new Map<string, string>();
+  try {
+    const raw = await organizationListCall(accessToken);
+    const rows = Array.isArray(raw) ? raw : ((raw as { organizations?: unknown[] })?.organizations ?? []);
+    for (const row of rows as Array<Record<string, string>>) {
+      if (row.organization_id) {
+        names.set(row.organization_id, row.organization_alias || row.organization_name || row.organization_id);
+      }
+    }
+  } catch {
+    // The organization name is a label. The team still shows without it.
+  }
+  return names;
+};
+
+const resolveInfoTeams = async (accessToken: string, infoTeams: unknown): Promise<TeamDisplayInfo[]> => {
+  if (!Array.isArray(infoTeams) || infoTeams.length === 0) return [];
+  return Promise.all(
+    infoTeams.map(async (item) => {
+      if (typeof item === "string") {
+        try {
+          const teamData = await teamInfoCall(accessToken, item);
+          return {
+            team_id: item,
+            team_alias: teamData?.team_info?.team_alias || teamData?.team_alias || null,
+            user_role: null,
+            organization_alias: null,
+          };
+        } catch {
+          return { team_id: item, team_alias: null, user_role: null, organization_alias: null };
+        }
+      }
+      const team = item as Record<string, any>;
+      return {
+        team_id: String(team.team_id ?? ""),
+        team_alias: team.team_alias ?? null,
+        user_role: team.user_role ?? null,
+        organization_alias: team.organization_alias ?? null,
+      };
+    }),
+  );
+};
+
+// The user-info payload often carries an empty teams list. The team list for
+// this account is the membership, including which organization owns the team.
+const loadUserTeams = async (accessToken: string, userId: string, infoTeams: unknown): Promise<TeamDisplayInfo[]> => {
+  try {
+    const rows = asTeamRows(await teamListCall(accessToken, null, userId));
+    if (rows.length > 0) {
+      const orgs = await organizationNames(accessToken);
+      return rows.map((team) => ({
+        team_id: team.team_id,
+        team_alias: team.team_alias || team.team_id,
+        user_role: team.user_role ?? null,
+        organization_alias: orgs.get(team.organization_id) ?? team.organization_alias ?? null,
+      }));
+    }
+  } catch {
+    // Fall through to whatever the user payload named.
+  }
+  return resolveInfoTeams(accessToken, infoTeams);
+};
 
 const ADD_TEAM_FIELD_ID = "add-team-team";
 const ADD_TEAM_ROLE_FIELD_ID = "add-team-role";
@@ -68,10 +164,10 @@ interface TeamOption {
   team_alias: string;
 }
 
-const MEMBER_ROLE_OPTIONS = [
-  { value: "user", hint: t("Can view team info, but not manage it") },
-  { value: "admin", hint: t("Can create team keys, add members, and manage settings") },
-] as const;
+const memberRoleOptions = () => [
+  { value: "user", label: t("Team member"), hint: t("Can view team info, but not manage it") },
+  { value: "admin", label: t("Team admin"), hint: t("Can create team keys, add members, and manage settings") },
+];
 
 export default function UserInfoView({
   userId,
@@ -116,30 +212,9 @@ export default function UserInfoView({
     const fetchData = async () => {
       try {
         if (!accessToken) return;
-        const data = await userGetInfoV2(accessToken, userId);
+        const data = unwrapUserInfo(await userGetInfoV2(accessToken, userId));
         setUserData(data);
-
-        // Fetch team details for display (team aliases)
-        if (data.teams && data.teams.length > 0) {
-          try {
-            const teamPromises = data.teams.map(async (teamId: string) => {
-              try {
-                const teamData = await teamInfoCall(accessToken, teamId);
-                return {
-                  team_id: teamId,
-                  team_alias: teamData?.team_info?.team_alias || null,
-                };
-              } catch {
-                return { team_id: teamId, team_alias: null };
-              }
-            });
-            const teams = await Promise.all(teamPromises);
-            setTeamDetails(teams);
-          } catch {
-            // Fall back to just team IDs
-            setTeamDetails(data.teams.map((id: string) => ({ team_id: id, team_alias: null })));
-          }
-        }
+        if (data) setTeamDetails(await loadUserTeams(accessToken, userId, data.teams));
 
         // Fetch available models
         const modelDataResponse = await modelAvailableCall(accessToken, userId, userRole || "");
@@ -190,26 +265,14 @@ export default function UserInfoView({
       const member: Member = {
         role: selectedRole,
         user_id: userId,
+        user_email: userData?.user_email ?? null,
       };
       await teamMemberAddCall(accessToken, selectedTeamId, member);
       toast.success(t("User added to team successfully"));
       setIsAddTeamModalOpen(false);
-      // Re-fetch user data to refresh teams
-      const data = await userGetInfoV2(accessToken, userId);
+      const data = unwrapUserInfo(await userGetInfoV2(accessToken, userId));
       setUserData(data);
-      if (data.teams && data.teams.length > 0) {
-        const teamPromises = data.teams.map(async (teamId: string) => {
-          try {
-            const teamData = await teamInfoCall(accessToken, teamId);
-            return { team_id: teamId, team_alias: teamData?.team_info?.team_alias || null };
-          } catch {
-            return { team_id: teamId, team_alias: null };
-          }
-        });
-        setTeamDetails(await Promise.all(teamPromises));
-      } else {
-        setTeamDetails([]);
-      }
+      setTeamDetails(await loadUserTeams(accessToken, userId, data?.teams));
     } catch (error: any) {
       console.error("Error adding user to team:", error);
       toast.fromError(error?.message || t("Failed to add user to team"));
@@ -236,21 +299,9 @@ export default function UserInfoView({
       setIsRemoveTeamModalOpen(false);
       setTeamToRemove(null);
       // Re-fetch user data to refresh teams
-      const data = await userGetInfoV2(accessToken, userId);
+      const data = unwrapUserInfo(await userGetInfoV2(accessToken, userId));
       setUserData(data);
-      if (data.teams && data.teams.length > 0) {
-        const teamPromises = data.teams.map(async (teamId: string) => {
-          try {
-            const teamData = await teamInfoCall(accessToken, teamId);
-            return { team_id: teamId, team_alias: teamData?.team_info?.team_alias || null };
-          } catch {
-            return { team_id: teamId, team_alias: null };
-          }
-        });
-        setTeamDetails(await Promise.all(teamPromises));
-      } else {
-        setTeamDetails([]);
-      }
+      setTeamDetails(await loadUserTeams(accessToken, userId, data?.teams));
     } catch (error: any) {
       console.error("Error removing user from team:", error);
       toast.fromError(error?.message || t("Failed to remove user from team"));
@@ -445,7 +496,7 @@ export default function UserInfoView({
           { label: t("pages.users.userId"), value: userData.user_id, code: true },
           {
             label: t("pages.users.role"),
-            value: (userData.user_role && possibleUIRoles?.[userData.user_role]?.ui_label) || userData.user_role || "-",
+            value: accountRoleLabel(userData.user_role),
           },
           {
             label: t("pages.users.spend"),
@@ -487,7 +538,12 @@ export default function UserInfoView({
 
             <Card className="block p-6">
               <div className="flex justify-between items-center mb-2">
-                <p>{t("common.teams")}</p>
+                <div>
+                  <p>{t("common.teams")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t("There is no organization administrator. Each team belongs to one organization.")}
+                  </p>
+                </div>
                 {isProxyAdmin && (
                   <Button variant="ghost" size="sm" onClick={handleOpenAddTeamModal}>
                     <Plus />
@@ -502,6 +558,8 @@ export default function UserInfoView({
                       <TableHeader>
                         <TableRow>
                           <TableHead>{t("pages.users.teamName")}</TableHead>
+                          <TableHead>{t("Organization")}</TableHead>
+                          <TableHead>{t("Role in this team")}</TableHead>
                           {isProxyAdmin && <TableHead className="text-right">{t("common.actions")}</TableHead>}
                         </TableRow>
                       </TableHeader>
@@ -513,6 +571,8 @@ export default function UserInfoView({
                                 {team.team_alias || team.team_id}
                               </BadgeLink>
                             </TableCell>
+                            <TableCell>{team.organization_alias || "—"}</TableCell>
+                            <TableCell>{membershipRoleLabel(team.user_role)}</TableCell>
                             {isProxyAdmin && (
                               <TableCell className="text-right">
                                 <Button
@@ -553,7 +613,7 @@ export default function UserInfoView({
                 {userData.models?.length && userData.models?.length > 0 ? (
                   userData.models?.map((model, index) => <p key={index}>{model}</p>)
                 ) : (
-                  <p>{t("pages.users.allProxyModels")}</p>
+                  <p>{t("Models are decided by the teams below. This account has no model list of its own.")}</p>
                 )}
               </div>
             </Card>
@@ -617,7 +677,7 @@ export default function UserInfoView({
 
                 <div>
                   <p className="font-medium">{t("pages.users.role")}</p>
-                  <p>{userData.user_role || t("pages.users.notSet")}</p>
+                  <p>{accountRoleLabel(userData.user_role)}</p>
                 </div>
 
                 <div>
@@ -640,7 +700,7 @@ export default function UserInfoView({
                         </span>
                       ))
                     ) : (
-                      <p>{t("pages.users.allProxyModels")}</p>
+                      <p>{t("Models are decided by the teams below. This account has no model list of its own.")}</p>
                     )}
                   </div>
                 </div>
@@ -738,15 +798,21 @@ export default function UserInfoView({
 
               <Field>
                 <FieldLabel htmlFor={ADD_TEAM_ROLE_FIELD_ID}>{t("pages.users.memberRole")}</FieldLabel>
-                <Select value={selectedRole} onValueChange={(value) => value !== null && setSelectedRole(value)}>
+                <Select
+                  items={memberRoleOptions()}
+                  value={selectedRole}
+                  onValueChange={(value) => value !== null && setSelectedRole(value)}
+                >
                   <SelectTrigger id={ADD_TEAM_ROLE_FIELD_ID} className="w-full">
-                    <SelectValue />
+                    <SelectValue>
+                      {(value) => memberRoleOptions().find((option) => option.value === value)?.label ?? value}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {MEMBER_ROLE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value} title={option.value}>
+                    {memberRoleOptions().map((option) => (
+                      <SelectItem key={option.value} value={option.value} title={option.label}>
                         <SimpleTooltip content={option.hint}>
-                          <span className="font-medium">{option.value}</span>
+                          <span className="font-medium">{option.label}</span>
                           <span className="ml-2 text-muted-foreground text-sm">- {option.hint}</span>
                         </SimpleTooltip>
                       </SelectItem>

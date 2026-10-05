@@ -40,7 +40,7 @@ export const canAccessManagement = (userRole?: string | null): boolean =>
   managementSessionRoles.includes(userRole ?? "");
 
 export const isProxyAdminRole = (role: string): boolean => {
-  return role === "proxy_admin" || role === "Admin";
+  return role === "proxy_admin" || role === "admin" || role === "Admin";
 };
 
 export const isUserTeamAdminForAnyTeam = (teams: Team[] | null, userID: string): boolean => {
@@ -50,11 +50,17 @@ export const isUserTeamAdminForAnyTeam = (teams: Team[] | null, userID: string):
   return teams.some((team) => isUserTeamAdminForSingleTeam(team.members_with_roles, userID));
 };
 
+// The gateway stores team_admin. Older console payloads still say admin.
+export const isTeamAdminRole = (role: string | null | undefined): boolean => {
+  const normalized = (role ?? "").toLowerCase();
+  return normalized === "admin" || normalized === "team_admin";
+};
+
 export const isUserTeamAdminForSingleTeam = (teamMemberWithRoles: Member[] | null, userID: string): boolean => {
   if (teamMemberWithRoles == null) {
     return false;
   }
-  return teamMemberWithRoles.some((member) => member.user_id === userID && member.role === "admin");
+  return teamMemberWithRoles.some((member) => member.user_id === userID && isTeamAdminRole(member.role));
 };
 
 export const isOrgAdminForAnyOrg = (
@@ -80,7 +86,10 @@ export const formatUserRole = (userRole: string): string => {
     case "demo_app_owner":
       return "App Owner";
     case "proxy_admin":
+    case "admin":
       return "Admin";
+    case "user":
+      return "Internal User";
     case "proxy_admin_viewer":
       return "Admin Viewer";
     case "org_admin":

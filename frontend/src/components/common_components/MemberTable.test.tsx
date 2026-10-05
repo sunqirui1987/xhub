@@ -61,7 +61,7 @@ describe("MemberTable display", () => {
   it("reports the full member count", () => {
     renderTable();
 
-    expect(screen.getByText("4 Members")).toBeInTheDocument();
+    expect(screen.getByText("4 members")).toBeInTheDocument();
   });
 });
 
@@ -167,7 +167,7 @@ describe("MemberTable role filter", () => {
 
     await user.click(screen.getByTestId("datatable-filters-trigger"));
     await user.click(screen.getByTestId("filter-role"));
-    await user.click(await screen.findByRole("option", { name: "admin" }));
+    await user.click(await screen.findByRole("option", { name: "Team admin" }));
     await user.click(screen.getByTestId("filter-drawer-apply"));
 
     await waitFor(() => expect(rowIds()).toEqual(["u-amy"]));

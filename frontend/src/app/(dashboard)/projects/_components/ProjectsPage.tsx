@@ -31,7 +31,7 @@ export function ProjectsPage() {
   }, [teams]);
 
   const filteredProjects = useMemo(() => {
-    const list = projects ?? [];
+    const list = Array.isArray(projects) ? projects : [];
     if (!searchText) return list;
     const lower = searchText.toLowerCase();
     return list.filter((p) => {

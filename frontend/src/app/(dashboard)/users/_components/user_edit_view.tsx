@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { z } from "zod/v4";
 import { all_admin_roles } from "@/utils/roles";
-import { iamRoles as iam } from "@/utils/iamRoles";
+import { iamRoles as iam, normalizeAccountRole } from "@/utils/iamRoles";
 import BudgetDurationDropdown from "@/components/common_components/budget_duration_dropdown";
 import { ModelMaxBudget, ModelMaxBudgetField } from "@/components/key_team_helpers/ModelMaxBudgetEditor";
 import { modelMaxBudgetUpdate } from "@/components/key_team_helpers/modelMaxBudgetPayload";
@@ -96,7 +96,7 @@ const toFormValues = (
   return {
     ...(isBulkEdit ? {} : { user_id: userData.user_id, user_email: userData.user_info?.user_email }),
     user_alias: userData.user_info?.user_alias,
-    user_role: userData.user_info?.user_role,
+    user_role: normalizeAccountRole(userData.user_info?.user_role),
     models: userData.user_info?.models || [],
     max_budget: isUnlimited ? "" : maxBudget,
     budget_duration: userData.user_info?.budget_duration,
@@ -197,8 +197,8 @@ export function UserEditView({
   // adding someone to a team, not by giving them an account-wide role. Offering
   // it here is what made the old menu list roles that no longer existed.
   const roleOptions = [
-    { value: iam.RoleAdmin, label: t("Administrator") },
-    { value: iam.RoleUser, label: t("User") },
+    { value: iam.RoleAdmin, label: t("Platform administrator") },
+    { value: iam.RoleUser, label: t("Regular user") },
   ];
 
   return (

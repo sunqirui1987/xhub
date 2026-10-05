@@ -21,7 +21,7 @@
 团队：
 
 - `POST /team/new` 创建团队。`GET /team/list` 和 `GET /v2/team/list` 列出团队。v2 是分页的。
-- `GET /team/info?team_id=team_...` 返回 `team_info` 和 `team_memberships`。控制台详情页读的是 `team_info`。
+- `GET /team/info?team_id=team_...` 返回 `team_info` 和 `team_memberships`。控制台详情页读 `team_info.members_with_roles`。团队页能改什么，见 [团队管理](../../../docs/14-team-management.md)。
 - `POST /team/update` 和 `POST /team/delete` 修改或删除团队。
 - `POST /team/member_add`、`/team/member_update`、`/team/member_delete` 修改成员。
 

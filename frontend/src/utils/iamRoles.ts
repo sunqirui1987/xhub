@@ -20,3 +20,21 @@ export type IamRole = (typeof iamRoles)[keyof typeof iamRoles];
 /** isIamRole reports whether a string is one of the two account roles. */
 export const isIamRole = (value: unknown): value is IamRole =>
   value === iamRoles.RoleAdmin || value === iamRoles.RoleUser;
+
+/** accountRoleKind recognizes the spellings the console and the gateway have used. Anything else is not an account role. */
+export const accountRoleKind = (role: string | null | undefined): IamRole | null => {
+  const normalized = (role ?? "").toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "admin" || normalized === "proxy_admin") return iamRoles.RoleAdmin;
+  if (normalized === "user" || normalized === "internal_user") return iamRoles.RoleUser;
+  return null;
+};
+
+/** normalizeAccountRole maps a role onto the two stored values. An empty or unknown role becomes a regular user. */
+export const normalizeAccountRole = (role: string | null | undefined): IamRole =>
+  accountRoleKind(role) ?? iamRoles.RoleUser;
+
+/** isTeamAdminMembership reports a team role, which is not an account role. */
+export const isTeamAdminMembership = (role: string | null | undefined): boolean => {
+  const normalized = (role ?? "").toLowerCase();
+  return normalized === "team_admin" || normalized === "admin";
+};

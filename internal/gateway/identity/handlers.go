@@ -99,7 +99,12 @@ func membershipsOf(g Gate, r *http.Request, rows []iam.User) (map[string][]map[s
 		}
 		list := make([]map[string]any, 0, len(teams))
 		for _, t := range teams {
-			list = append(list, map[string]any{"team_id": t.ID, "team_alias": t.Name, "user_role": t.Role})
+			list = append(list, map[string]any{
+				"team_id":         t.ID,
+				"team_alias":      t.Name,
+				"user_role":       t.Role,
+				"organization_id": t.OrganizationID,
+			})
 		}
 		out[rows[i].ID] = list
 	}
@@ -119,8 +124,16 @@ func UserFilterUI(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteIAMError(w, r, err)
 		return
 	}
+	emailQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_email")))
+	idQ := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("user_id")))
 	out := make([]map[string]any, 0, len(rows))
 	for i := range rows {
+		if emailQ != "" && !strings.Contains(strings.ToLower(rows[i].Email), emailQ) {
+			continue
+		}
+		if idQ != "" && !strings.Contains(strings.ToLower(rows[i].ID), idQ) {
+			continue
+		}
 		out = append(out, map[string]any{"user_id": rows[i].ID, "user_email": rows[i].Email, "user_alias": rows[i].Name})
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"users": out})
@@ -157,7 +170,12 @@ func UserInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteIAMError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, nil)})
+	roles, err := membershipsOf(g, r, []iam.User{*u})
+	if err != nil {
+		g.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, roles[u.ID])})
 }
 
 // UserUpdate changes a role, a status, a budget or an email. Only a platform
@@ -337,7 +355,12 @@ func OrgList(g Gate, w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for i := range rows {
-		out = append(out, orgPublic(&rows[i]))
+		view, err := orgView(g, r, &rows[i])
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		out = append(out, view)
 	}
 	httpx.WriteJSON(w, 200, out)
 }
@@ -363,7 +386,12 @@ func OrgInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteIAMError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, 200, orgPublic(o))
+	view, err := orgView(g, r, o)
+	if err != nil {
+		g.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, view)
 }
 
 // orgIDFrom resolves the organization a request names, as a query parameter or
@@ -381,7 +409,7 @@ func orgIDFrom(_ Gate, r *http.Request, _ *auth.Principal) string {
 // OrgUpdate changes an organization's name, status or budget.
 func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
-	p := g.RequireManage(w, r)
+	p := g.RequireUser(w, r)
 	if p == nil {
 		return
 	}
@@ -391,7 +419,13 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "organization_id required")
 		return
 	}
-	if err := g.Authorize(r, p, authz.ActionOrgWrite, authz.Object{Type: authz.ObjectOrg, ID: id}); err != nil {
+	// A budget or a status change is the platform administrator's. An
+	// organization administrator may rename the organization only.
+	action := authz.ActionOrgAdmin
+	if _, budget := body["max_budget"]; budget || stringPtr(body, "status") != nil {
+		action = authz.ActionOrgWrite
+	}
+	if err := g.Authorize(r, p, action, authz.Object{Type: authz.ObjectOrg, ID: id}); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
 	}
@@ -576,11 +610,14 @@ func loadTeamList(g Gate, w http.ResponseWriter, r *http.Request) ([]map[string]
 	if r.URL.Query().Get("status") == "deleted" {
 		return []map[string]any{}, true
 	}
-	mine := p.UserID
+	orgFilter := r.URL.Query().Get("organization_id")
+	var rows []iam.TeamWithRole
+	var err error
 	if p.PlatformAdmin() {
-		mine = r.URL.Query().Get("user_id")
+		rows, err = g.Identity().ListTeams(r.Context(), r.URL.Query().Get("user_id"), orgFilter)
+	} else {
+		rows, err = g.Identity().ListVisibleTeams(r.Context(), p.UserID, orgFilter)
 	}
-	rows, err := g.Identity().ListTeams(r.Context(), mine, r.URL.Query().Get("organization_id"))
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return nil, false
@@ -595,7 +632,9 @@ func loadTeamList(g Gate, w http.ResponseWriter, r *http.Request) ([]map[string]
 		if alias != "" && !strings.Contains(strings.ToLower(rows[i].Name), alias) {
 			continue
 		}
-		out = append(out, teamPublic(&rows[i].Team, rows[i].Role))
+		pub := teamPublic(&rows[i].Team, rows[i].Role)
+		attachRoster(g, r, p, pub)
+		out = append(out, pub)
 	}
 	return out, true
 }
@@ -634,10 +673,12 @@ func TeamInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteIAMError(w, r, err)
 		return
 	}
+	info := teamPublic(t, myTeamRole(g, r, p, id))
+	attachRoster(g, r, p, info)
 	httpx.WriteJSON(w, 200, map[string]any{
 		"team_id":          id,
-		"team_info":        teamPublic(t, myTeamRole(g, r, p, id)),
-		"team_memberships": teamRoster(g, r, p, id),
+		"team_info":        info,
+		"team_memberships": info["members_with_roles"],
 		"keys":             []any{},
 	})
 }
@@ -651,6 +692,16 @@ func myTeamRole(g Gate, r *http.Request, p *auth.Principal, teamID string) strin
 		return ""
 	}
 	return roles[teamID]
+}
+
+// attachRoster puts the roster on the team object the console reads. The
+// detail page lists team_info.members_with_roles, so an empty placeholder
+// there hides everyone who was added.
+func attachRoster(g Gate, r *http.Request, p *auth.Principal, team map[string]any) {
+	id, _ := team["team_id"].(string)
+	roster := teamRoster(g, r, p, id)
+	team["members_with_roles"] = roster
+	team["members_count"] = len(roster)
 }
 
 // teamRoster reads the team's members. A caller who may not read them, and a
@@ -834,10 +885,10 @@ func ProjectNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := iam.ProjectInput{
-		TeamID:         teamID,
-		Name:           projectName(body),
-		Models:         stringList(body["models"]),
-		MaxBudget:      floatPtr(body["max_budget"]),
+		TeamID:    teamID,
+		Name:      projectName(body),
+		Models:    stringList(body["models"]),
+		MaxBudget: floatPtr(body["max_budget"]),
 	}
 	if in.Name == "" {
 		httpx.WriteError(w, 400, "invalid_request", "project_alias required")
@@ -873,7 +924,31 @@ func ProjectList(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
+	// TeamFilter for a non-admin is only direct membership. An organization
+	// administrator also sees the projects of every team in that organization.
+	if teams != nil && !p.PlatformAdmin() {
+		visible, err := g.Identity().ListVisibleTeams(r.Context(), p.UserID, "")
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		teams = make([]string, 0, len(visible))
+		for _, t := range visible {
+			teams = append(teams, t.ID)
+		}
+	}
 	if teamID := str(readMap(r)["team_id"]); teamID != "" {
+		allowed := teams == nil
+		for _, id := range teams {
+			if id == teamID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			httpx.WriteJSON(w, 200, map[string]any{"projects": []any{}})
+			return
+		}
 		teams = []string{teamID}
 	}
 	rows, err := g.Identity().ListProjects(r.Context(), teams)
@@ -946,11 +1021,11 @@ func ProjectUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := iam.ProjectInput{
-		TeamID:         cur.TeamID,
-		Name:           projectName(body),
-		Status:         str(body["status"]),
-		Models:         cur.Models,
-		MaxBudget:      cur.MaxBudget,
+		TeamID:    cur.TeamID,
+		Name:      projectName(body),
+		Status:    str(body["status"]),
+		Models:    cur.Models,
+		MaxBudget: cur.MaxBudget,
 	}
 	if has(body, "models") {
 		in.Models = stringList(body["models"])
@@ -1107,7 +1182,8 @@ func teamPublic(t *iam.Team, role string) map[string]any {
 		"budget_duration":    budgetDuration,
 		"user_role":          emptyNil(role),
 		"members_with_roles": []any{},
-		"models":             []string{},
+		"members_count":      0,
+		"models":             nonNilStrings(t.Models),
 		"keys":               []any{},
 		"created_at":         t.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at":         t.UpdatedAt.UTC().Format(time.RFC3339),
@@ -1117,35 +1193,74 @@ func teamPublic(t *iam.Team, role string) map[string]any {
 
 // orgPublic is the public JSON for an organization.
 func orgPublic(o *iam.Organization) map[string]any {
+	budget := floatJSON(o.MaxBudget)
 	return map[string]any{
 		"organization_id":    o.ID,
 		"organization_alias": o.Name,
 		"organization_name":  o.Name,
 		"status":             o.Status,
-		"max_budget":         floatJSON(o.MaxBudget),
-		"spend":              o.Spend,
-		"created_at":         o.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":         o.UpdatedAt.UTC().Format(time.RFC3339),
-		"metadata":           map[string]any{},
+		"max_budget":         budget,
+		// The console used to read the budget from a nested table. The budget
+		// lives on the organization; this object keeps that one field so an
+		// older screen does not crash looking it up.
+		"litellm_budget_table": map[string]any{"max_budget": budget},
+		"spend":                o.Spend,
+		"models":               []string{},
+		"members":              []any{},
+		"teams":                []any{},
+		"created_at":           o.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":           o.UpdatedAt.UTC().Format(time.RFC3339),
+		"metadata":             map[string]any{},
 	}
+}
+
+// orgView adds the administrators and the teams. Both are properties of the
+// organization, not of the account that is reading it.
+func orgView(g Gate, r *http.Request, o *iam.Organization) (map[string]any, error) {
+	pub := orgPublic(o)
+	admins, err := g.Identity().ListOrgAdmins(r.Context(), o.ID)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]any, 0, len(admins))
+	for _, m := range admins {
+		members = append(members, map[string]any{
+			"user_id":    m.UserID,
+			"user_email": m.Email,
+			"user_alias": m.Name,
+			"user_role":  m.Role,
+			"user":       map[string]any{"user_alias": m.Name, "user_email": m.Email},
+		})
+	}
+	pub["members"] = members
+	teams, err := g.Identity().ListTeams(r.Context(), "", o.ID)
+	if err != nil {
+		return nil, err
+	}
+	listed := make([]any, 0, len(teams))
+	for _, t := range teams {
+		listed = append(listed, map[string]any{"team_id": t.ID, "team_alias": t.Name})
+	}
+	pub["teams"] = listed
+	return pub, nil
 }
 
 // projectPublic is the public JSON for a project.
 func projectPublic(p *iam.Project) map[string]any {
 	return map[string]any{
-		"project_id":       p.ID,
-		"project_alias":    p.Name,
-		"project_name":     p.Name,
-		"team_id":          p.TeamID,
-		"organization_id":  emptyNil(p.OrganizationID),
-		"status":           p.Status,
-		"blocked":          p.Status != iam.StatusActive,
-		"models":           nonNilStrings(p.Models),
-		"max_budget":       floatJSON(p.MaxBudget),
-		"spend":            p.Spend,
-		"created_at":       p.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":       p.UpdatedAt.UTC().Format(time.RFC3339),
-		"metadata":         map[string]any{},
+		"project_id":      p.ID,
+		"project_alias":   p.Name,
+		"project_name":    p.Name,
+		"team_id":         p.TeamID,
+		"organization_id": emptyNil(p.OrganizationID),
+		"status":          p.Status,
+		"blocked":         p.Status != iam.StatusActive,
+		"models":          nonNilStrings(p.Models),
+		"max_budget":      floatJSON(p.MaxBudget),
+		"spend":           p.Spend,
+		"created_at":      p.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":      p.UpdatedAt.UTC().Format(time.RFC3339),
+		"metadata":        map[string]any{},
 	}
 }
 

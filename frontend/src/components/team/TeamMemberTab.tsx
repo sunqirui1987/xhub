@@ -186,6 +186,10 @@ export default function TeamMemberTab({
     },
   ];
 
+  const hasMemberBudgets = teamData.team_memberships.some(
+    (membership) => membership.litellm_budget_table != null || membership.spend != null || membership.total_spend != null,
+  );
+
   return (
     <MemberTable
       key={teamData.team_id}
@@ -193,8 +197,10 @@ export default function TeamMemberTab({
       canEdit={canEditTeam}
       onEdit={(record) => {
         const membership = teamData.team_memberships.find((tm) => tm.user_id === record.user_id);
+        const normalized = (record.role || "").toLowerCase();
         const enhancedMember = {
           ...record,
+          role: normalized === "admin" || normalized === "team_admin" ? "admin" : "user",
           max_budget_in_team: membership?.litellm_budget_table?.max_budget ?? null,
           tpm_limit: membership?.litellm_budget_table?.tpm_limit ?? null,
           rpm_limit: membership?.litellm_budget_table?.rpm_limit ?? null,
@@ -206,9 +212,9 @@ export default function TeamMemberTab({
       }}
       onDelete={handleMemberDelete}
       onAddMember={() => setIsAddMemberModalVisible(true)}
-      roleColumnTitle="Team Role"
-      roleTooltip="This role applies only to this team and is independent from the user's proxy-level role."
-      extraColumns={extraColumns}
+      roleColumnTitle={t("Team Role")}
+      roleTooltip={t("This role applies only to this team and is independent from the user's proxy-level role.")}
+      extraColumns={hasMemberBudgets ? extraColumns : []}
       showDeleteForMember={() =>
         isProxyAdmin || (canEditTeam && !isUserTeamAdmin) || (isUserTeamAdmin && !disableTeamAdminDeleteTeamUser)
       }

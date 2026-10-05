@@ -18,10 +18,11 @@ const metadataRecordSchema = z.record(z.string(), z.unknown());
 
 export const orgToForm = (org: Organization): OrgSettingsFormValues => {
   const budget = budgetSliceSchema.parse(org.litellm_budget_table ?? {});
+  const maxBudget = typeof org.max_budget === "number" ? org.max_budget : budget.max_budget;
   return {
     organization_alias: org.organization_alias ?? "",
     models: org.models ?? [],
-    max_budget: budget.max_budget?.toString() ?? "",
+    max_budget: maxBudget === undefined || maxBudget === null ? "" : String(maxBudget),
     budget_duration: budget.budget_duration ?? "",
     tpm_limit: budget.tpm_limit?.toString() ?? "",
     rpm_limit: budget.rpm_limit?.toString() ?? "",

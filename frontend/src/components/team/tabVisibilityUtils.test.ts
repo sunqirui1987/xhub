@@ -20,19 +20,17 @@ describe("team_info_tabs", () => {
   });
 
   describe("getTeamInfoVisibleTabs", () => {
-    it("returns overview, my user, and virtual keys when user cannot edit team", () => {
+    it("returns overview and virtual keys when user cannot edit team", () => {
       const tabs = getTeamInfoVisibleTabs(false);
-      expect(tabs).toEqual([TEAM_INFO_TAB_KEYS.OVERVIEW, TEAM_INFO_TAB_KEYS.MY_USER, TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS]);
+      expect(tabs).toEqual([TEAM_INFO_TAB_KEYS.OVERVIEW, TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS]);
     });
 
-    it("returns all tabs when user can edit team", () => {
+    it("returns the team management tabs when user can edit team", () => {
       const tabs = getTeamInfoVisibleTabs(true);
       expect(tabs).toEqual([
         TEAM_INFO_TAB_KEYS.OVERVIEW,
-        TEAM_INFO_TAB_KEYS.MY_USER,
         TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS,
         TEAM_INFO_TAB_KEYS.MEMBERS,
-        TEAM_INFO_TAB_KEYS.MEMBER_PERMISSIONS,
         TEAM_INFO_TAB_KEYS.SETTINGS,
       ]);
     });
@@ -64,17 +62,9 @@ describe("team_info_tabs", () => {
       expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS, true)).toBe(true);
     });
 
-    it("always returns true for my user tab regardless of edit permission", () => {
-      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MY_USER, false)).toBe(true);
-      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MY_USER, true)).toBe(true);
-    });
-
-    it("returns false for member permissions tab when user cannot edit", () => {
-      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MEMBER_PERMISSIONS, false)).toBe(false);
-    });
-
-    it("returns true for member permissions tab when user can edit", () => {
-      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MEMBER_PERMISSIONS, true)).toBe(true);
+    it("hides the leftover my user and member permissions tabs", () => {
+      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MY_USER, true)).toBe(false);
+      expect(isTeamInfoTabVisible(TEAM_INFO_TAB_KEYS.MEMBER_PERMISSIONS, true)).toBe(false);
     });
 
     it("returns false for members tab when user cannot edit", () => {

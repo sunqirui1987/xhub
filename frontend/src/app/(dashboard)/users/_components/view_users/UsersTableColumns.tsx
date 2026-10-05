@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/cva.config";
+import { accountRoleKind, isTeamAdminMembership } from "@/utils/iamRoles";
 import { t } from "@/i18n";
 import { copyToClipboard } from "@/utils/dataUtils";
 
@@ -80,7 +81,6 @@ export interface UsersTableColumnsDeps {
 }
 
 export const getUsersTableColumns = ({
-  possibleUIRoles,
   includeSelection,
   onUserClick,
   onDeleteUser,
@@ -142,7 +142,39 @@ export const getUsersTableColumns = ({
       header: ({ column }) => <DataTableSortHeader column={column} title={t("pages.users.role")} variant="header-cycle" />,
       size: 160,
       enableSorting: true,
-      cell: ({ row }) => <span className="text-sm">{possibleUIRoles?.[row.original.user_role]?.ui_label || "-"}</span>,
+      cell: ({ row }) => {
+        const kind = accountRoleKind(row.original.user_role);
+        const label =
+          kind === "admin" ? t("Platform administrator") : kind === "user" ? t("Regular user") : row.original.user_role || "-";
+        return <span className="text-sm">{label}</span>;
+      },
+    },
+    {
+      id: "teams",
+      accessorFn: (user) => (user.teams ?? []).map((team) => team.team_alias || team.team_id).join(" "),
+      meta: { title: t("Team memberships") },
+      header: t("Team memberships"),
+      size: 220,
+      enableSorting: false,
+      cell: ({ row }) => {
+        const memberships = row.original.teams ?? [];
+        if (memberships.length === 0) {
+          return <span className="text-sm text-muted-foreground">{t("Not in a team")}</span>;
+        }
+        return (
+          <div className="flex flex-col gap-1">
+            {memberships.map((membership) => (
+              <span key={membership.team_id} className="text-sm">
+                {membership.team_alias || membership.team_id}
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {isTeamAdminMembership(membership.user_role) ? t("Team admin") : t("Team member")}
+                </span>
+              </span>
+            ))}
+          </div>
+        );
+      },
     },
     {
       id: "user_alias",

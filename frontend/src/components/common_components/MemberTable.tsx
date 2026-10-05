@@ -49,7 +49,15 @@ export const memberRoleOptions = (members: readonly Member[]): string[] =>
 
 const isAdminRole = (role: string): boolean => {
   const normalized = role.toLowerCase();
-  return normalized === "admin" || normalized === "org_admin";
+  return normalized === "admin" || normalized === "team_admin" || normalized === "org_admin";
+};
+
+const roleLabel = (role: string): string => {
+  const normalized = role.toLowerCase();
+  if (normalized === "admin" || normalized === "team_admin") return t("Team admin");
+  if (normalized === "user" || normalized === "member") return t("Team member");
+  if (normalized === "org_admin") return t("Org Admin");
+  return role || "-";
 };
 
 function RoleHeaderTitle({ title, tooltip }: { title: string; tooltip?: string }) {
@@ -153,7 +161,7 @@ const buildColumns = ({
     cell: ({ row }) => (
       <span className="inline-flex items-center gap-2">
         {isAdminRole(row.original.role) ? <Crown className="size-3.5" /> : <User className="size-3.5" />}
-        <span className="capitalize">{row.original.role || "-"}</span>
+        <span>{roleLabel(row.original.role)}</span>
       </span>
     ),
   },
@@ -215,7 +223,7 @@ export default function MemberTable({
   const columns = buildColumns(columnDeps);
   const roleFilterItems = [
     { value: ALL_ROLES, label: t("All Roles") },
-    ...memberRoleOptions(members).map((role) => ({ value: role, label: role })),
+    ...memberRoleOptions(members).map((role) => ({ value: role, label: roleLabel(role) })),
   ];
 
   const isNarrowed = globalFilter !== "" || columnFilters.length > 0;
@@ -223,7 +231,7 @@ export default function MemberTable({
   return (
     <div className="flex w-full flex-col gap-2">
       <span className="inline-flex text-sm text-foreground">
-        {members.length} Member{members.length !== 1 ? "s" : ""}
+        {t("{count} members", { count: members.length })}
       </span>
       <DataTable
         data={members}

@@ -125,6 +125,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		}
 		out["capabilities"] = g.Capabilities()
 		out["teams"] = g.TeamRoles()
+		out["admin_organization_ids"] = g.AdminOrgIDs()
 	}
 	httpx.WriteJSON(w, 200, out)
 }

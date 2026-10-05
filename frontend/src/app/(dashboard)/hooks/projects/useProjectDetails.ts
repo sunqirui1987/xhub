@@ -25,7 +25,9 @@ const fetchProjectDetails = async (accessToken: string, projectId: string): Prom
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const body = await response.json();
+  if (body && typeof body === "object" && body.project && !body.project_id) return body.project;
+  return body;
 };
 
 // ── Hook ─────────────────────────────────────────────────────────────────────

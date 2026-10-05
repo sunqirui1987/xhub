@@ -143,10 +143,10 @@ test("should display empty state when organization has no members", async () => 
     expect(screen.getByText("Acme Corp")).toBeInTheDocument();
   });
 
-  await user.click(screen.getByRole("tab", { name: "Members" }));
+  await user.click(screen.getByRole("tab", { name: "Organization administrators" }));
 
   await waitFor(() => {
-    expect(screen.getByText("No members found")).toBeInTheDocument();
+    expect(screen.getByText("No organization administrators")).toBeInTheDocument();
   });
 });
 

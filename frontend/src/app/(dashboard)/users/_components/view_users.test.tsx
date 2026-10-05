@@ -107,44 +107,22 @@ describe("ViewUserDashboard", () => {
   it("should render the ViewUserDashboard component", async () => {
     renderDashboard();
 
-    await waitFor(() => {
-      expect(screen.getByText("Users")).toBeInTheDocument();
-    });
+    expect(await screen.findByText("test@example.com")).toBeInTheDocument();
 
-    expect(screen.getAllByText("Default User Settings").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("tab", { name: "Default User Settings" })).not.toBeInTheDocument();
   });
 
-  it("switches between the users table and default settings tabs for proxy admins", async () => {
-    const user = userEvent.setup();
+  it("does not offer a default user settings tab", async () => {
     renderDashboard();
 
     expect(await screen.findByText("test@example.com")).toBeInTheDocument();
-
-    const usersTab = screen.getByRole("tab", { name: "Users" });
-    const settingsTab = screen.getByRole("tab", { name: "Default User Settings" });
-    expect(usersTab).toHaveAttribute("aria-selected", "true");
-
-    await user.click(settingsTab);
-
-    expect(settingsTab).toHaveAttribute("aria-selected", "true");
-    expect(usersTab).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("region", { name: "Default user settings panel" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Default setting" }), { target: { value: "unsaved change" } });
-
-    await user.click(usersTab);
-
-    expect(usersTab).toHaveAttribute("aria-selected", "true");
-    expect(settingsTab).toHaveAttribute("aria-selected", "false");
-
-    await user.click(settingsTab);
-
-    expect(screen.getByRole("textbox", { name: "Default setting" })).toHaveValue("unsaved change");
+    expect(screen.queryByRole("tab", { name: "Default User Settings" })).not.toBeInTheDocument();
   });
 
   it("renders invite and bulk invite as toolbar actions alongside the other admin controls", async () => {
     renderDashboard();
 
-    const inviteButton = await screen.findByRole("button", { name: /\+ invite user/i });
+    const inviteButton = await screen.findByRole("button", { name: /\+ create user/i });
     const bulkInviteButton = screen.getByRole("button", { name: /\+ bulk invite users/i });
     const toolbar = screen.getByTestId("toggle-user-selection").parentElement;
 
@@ -158,7 +136,7 @@ describe("ViewUserDashboard", () => {
     expect(await screen.findByText("test@example.com")).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByTestId("toggle-user-selection")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /\+ invite user/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /\+ create user/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /\+ bulk invite users/i })).not.toBeInTheDocument();
   });
 

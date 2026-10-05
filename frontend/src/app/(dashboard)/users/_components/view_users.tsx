@@ -6,7 +6,7 @@ import BulkCreateUsersButton from "@/components/bulk_create_users_button";
 import { CreateUserButton } from "@/components/CreateUserButton";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import {
   getPossibleUserRoles,
   getProxyBaseUrl,
@@ -17,6 +17,7 @@ import {
 import OnboardingModal, { InvitationLink } from "@/components/onboarding_link";
 
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
+import { accountRoleKind } from "@/utils/iamRoles";
 import { isAdminRole, isProxyAdminRole } from "@/utils/roles";
 import { t } from "@/i18n";
 import { useDebouncedValue } from "@tanstack/react-pacer/debouncer";
@@ -31,7 +32,7 @@ import {
 import DeleteResourceModal from "@/components/common_components/DeleteResourceModal";
 import { toast } from "@/lib/toast";
 import { modelAvailableCall, userDeleteCall } from "@/components/networking";
-import { DefaultUserSettingsForm } from "./default-user-settings/DefaultUserSettingsForm";
+
 import { UsersTable } from "./view_users/UsersTable";
 import UserInfoView from "./view_users/user_info_view";
 import { UserInfo } from "@/components/networking";
@@ -363,43 +364,7 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
         </div>
       </div>
 
-      {isProxyAdmin ? (
-        <Tabs defaultValue="users" className="gap-0">
-          <TabsList variant="line" className="mb-4">
-            <TabsTrigger value="users" className="flex-none data-active:text-primary after:bg-primary">
-              {t("pages.users.tabUsers")}
-            </TabsTrigger>
-            <TabsTrigger value="default-settings" className="flex-none data-active:text-primary after:bg-primary">
-              {t("pages.users.tabDefaults")}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="users" keepMounted>
-            {usersTable}
-          </TabsContent>
-
-          <TabsContent value="default-settings" keepMounted>
-            {!userID || !userRole || !accessToken ? (
-              <div
-                className="flex h-64 items-center justify-center"
-                role="status"
-                aria-label={t("Loading default user settings")}
-              >
-                <div className="w-full max-w-lg space-y-3">
-                  <Skeleton className="h-5 w-1/3" />
-                  <Skeleton className="h-5 w-full" />
-                  <Skeleton className="h-5 w-full" />
-                  <Skeleton className="h-5 w-2/3" />
-                </div>
-              </div>
-            ) : (
-              <DefaultUserSettingsForm possibleUIRoles={possibleUIRoles} />
-            )}
-          </TabsContent>
-        </Tabs>
-      ) : (
-        usersTable
-      )}
+      {usersTable}
 
       {/* Existing Modals */}
       <DeleteResourceModal
@@ -412,8 +377,12 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
           { label: t("pages.users.userId"), value: userToDelete?.user_id, code: true },
           {
             label: t("pages.users.role"),
-            value:
-              (userToDelete && possibleUIRoles?.[userToDelete.user_role]?.ui_label) || userToDelete?.user_role || "-",
+            value: (() => {
+              const kind = accountRoleKind(userToDelete?.user_role);
+              if (kind === "admin") return t("Platform administrator");
+              if (kind === "user") return t("Regular user");
+              return userToDelete?.user_role || "-";
+            })(),
           },
           { label: t("pages.users.spend"), value: userToDelete?.spend?.toFixed(2) },
         ]}

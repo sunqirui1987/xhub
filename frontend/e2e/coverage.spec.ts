@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import path from "path";
 import { expect, test, type Page } from "@playwright/test";
-import { MASTER, loginAdmin, t, uiPath, watchGateway } from "./helpers";
+import { MASTER, login, loginAdmin, t, uiPath, watchGateway } from "./helpers";
 import { recordChain, recordPage, reportDir } from "./report";
 import { discoverPages } from "./routes";
 
@@ -156,26 +156,19 @@ test("connect fixture shows the authorize UI", async ({ page }) => {
   guard.assertOk();
 });
 
-test("onboarding claims an invite link", async ({ page }) => {
+test("a created user can sign in with the initial password", async ({ page }) => {
   test.setTimeout(90_000);
   const guard = watchGateway(page);
   await loginAdmin(page);
   await page.goto(uiPath("/users"));
   await page.getByRole("button", { name: `+ ${t("pages.users.invite")}` }).click();
   await page.getByLabel(t("pages.users.userEmail")).fill("e2e-claim@example.com");
+  await page.getByLabel(t("Initial password")).fill("claimed-pass");
   await page.getByRole("dialog").getByRole("button", { name: t("pages.users.invite") }).click();
-  await expect(page.getByRole("heading", { name: t("pages.users.invitationLink") })).toBeVisible({ timeout: 15_000 });
-  const link = await page.getByRole("dialog").locator("p").filter({ hasText: "invitation_id=" }).innerText();
-  const target = new URL(link.trim());
-  await page.goto(target.pathname + target.search);
-  await expect(page.getByRole("textbox", { name: t("onboarding.email") })).toHaveValue("e2e-claim@example.com", {
-    timeout: 15_000,
-  });
-  await page.getByRole("textbox", { name: t("onboarding.password") }).fill("claimed-pass");
-  await page.getByRole("button", { name: t("onboarding.signup") }).click();
-  await expect(page).toHaveURL(/login=success/, { timeout: 20_000 });
-  await page.waitForLoadState("domcontentloaded");
-  await noDashboardError(page, "/onboarding");
+  await expect(page.getByText("e2e-claim@example.com").first()).toBeVisible({ timeout: 15_000 });
+  await login(page, "e2e-claim@example.com", "claimed-pass");
+  await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
+  guard.assertOk();
   console.log("created resource name=e2e-claim@example.com");
   recordChain("created resource name=e2e-claim@example.com");
   recordPage("/onboarding", "pass");

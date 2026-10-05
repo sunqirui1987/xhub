@@ -62,6 +62,68 @@ func memberPublic(m *iam.Member) map[string]any {
 	}
 }
 
+// OrgMemberAdd grants organization administration to an existing account.
+// The only organization role is org_admin. People reach an organization by
+// joining one of its teams; this route does not create a general membership.
+func OrgMemberAdd(g Gate, w http.ResponseWriter, r *http.Request) {
+	httpx.SetCallID(w, httpx.CallID())
+	p := g.RequireUser(w, r)
+	if p == nil {
+		return
+	}
+	body := readMap(r)
+	orgID := str(body["organization_id"])
+	email, _ := memberFromBody(body)
+	if orgID == "" || email == "" {
+		httpx.WriteError(w, 400, "invalid_request", "organization_id and the member's email are required")
+		return
+	}
+	if err := g.Authorize(r, p, authz.ActionOrgAdmin, authz.Object{Type: authz.ObjectOrg, ID: orgID}); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
+	m, err := g.Identity().AddOrgAdmin(r.Context(), actorOf(p), orgID, email)
+	if err != nil {
+		g.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{
+		"organization_id": orgID,
+		"member": map[string]any{
+			"user_id": m.UserID, "user_email": m.Email, "user_alias": m.Name, "user_role": m.Role,
+		},
+	})
+}
+
+// OrgMemberRemove revokes organization administration.
+func OrgMemberRemove(g Gate, w http.ResponseWriter, r *http.Request) {
+	httpx.SetCallID(w, httpx.CallID())
+	p := g.RequireUser(w, r)
+	if p == nil {
+		return
+	}
+	body := readMap(r)
+	orgID := str(body["organization_id"])
+	target := str(body["user_id"])
+	if target == "" {
+		member, _ := body["member"].(map[string]any)
+		target = str(member["user_id"])
+	}
+	if orgID == "" || target == "" {
+		httpx.WriteError(w, 400, "invalid_request", "organization_id and user_id required")
+		return
+	}
+	if err := g.Authorize(r, p, authz.ActionOrgAdmin, authz.Object{Type: authz.ObjectOrg, ID: orgID}); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
+	if err := g.Identity().RemoveOrgAdmin(r.Context(), actorOf(p), orgID, target); err != nil {
+		g.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"organization_id": orgID, "user_id": target, "deleted": true})
+}
+
 // TeamMemberAdd adds an existing account to a team by exact email. An unknown
 // address and a disabled account give the same answer, so the route cannot be
 // used to enumerate accounts.
@@ -142,13 +204,30 @@ func TeamMemberRemove(g Gate, w http.ResponseWriter, r *http.Request) {
 	if teamID == "" {
 		teamID = str(body["team_id"])
 	}
-	target := str(body["user_id"])
-	if teamID == "" || target == "" {
+	if teamID == "" {
 		httpx.WriteError(w, 400, "invalid_request", "team_id and user_id required")
 		return
 	}
 	if err := g.Authorize(r, p, authz.ActionMemberRemove, authz.Object{Type: authz.ObjectMember, TeamID: teamID}); err != nil {
 		g.WriteAuthz(w, r, err)
+		return
+	}
+	target, email := memberDeleteTarget(body)
+	if target == "" && email != "" {
+		rows, err := g.Identity().ListMembers(r.Context(), teamID)
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		for i := range rows {
+			if strings.EqualFold(rows[i].Email, email) {
+				target = rows[i].UserID
+				break
+			}
+		}
+	}
+	if target == "" {
+		httpx.WriteError(w, 400, "invalid_request", "team_id and user_id required")
 		return
 	}
 	if err := g.Identity().RemoveMember(r.Context(), actorOf(p), teamID, target); err != nil {
@@ -190,6 +269,31 @@ func memberFromBody(body map[string]any) (string, string) {
 		email = pick("email")
 	}
 	return email, teamRole(pick("role"))
+}
+
+// memberDeleteTarget reads who to remove. The console sends user_id, and
+// sometimes only the email. An email stuffed into user_id is treated as an
+// email, because account ids are not addresses.
+func memberDeleteTarget(body map[string]any) (string, string) {
+	member, _ := body["member"].(map[string]any)
+	pick := func(key string) string {
+		if v := str(member[key]); v != "" {
+			return v
+		}
+		return str(body[key])
+	}
+	id := pick("user_id")
+	email := pick("user_email")
+	if email == "" {
+		email = pick("email")
+	}
+	if strings.Contains(id, "@") {
+		if email == "" {
+			email = id
+		}
+		id = ""
+	}
+	return id, email
 }
 
 // teamRole maps a requested role onto the two roles a team has.

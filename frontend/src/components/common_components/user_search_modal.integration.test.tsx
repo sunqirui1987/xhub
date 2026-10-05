@@ -136,7 +136,7 @@ describe("UserSearchModal submit payload", () => {
 
     await searchByEmail(user, "pick");
     await user.click(screen.getByLabelText("Member Role"));
-    await user.click(await screen.findByRole("option", { name: /^admin/ }));
+    await user.click(await screen.findByRole("option", { name: /Team admin/ }));
     await user.click(save());
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));

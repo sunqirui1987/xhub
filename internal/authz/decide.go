@@ -21,6 +21,10 @@ const (
 	// Organizations.
 	ActionOrgRead  Action = "org.read"
 	ActionOrgWrite Action = "org.write"
+	// ActionOrgAdmin is organization administration: the roster and the name.
+	// Budget and deletion stay ActionOrgWrite, which only a platform
+	// administrator holds.
+	ActionOrgAdmin Action = "org.admin"
 
 	// Teams.
 	ActionTeamRead    Action = "team.read"
@@ -242,6 +246,22 @@ func (g *Guard) resolve(ctx context.Context, obj Object) (Object, error) {
 		return obj, nil
 	}
 	if !obj.resolvable() {
+		// A create names a team and has no row yet. Load that team so the
+		// decision can see which organization it belongs to. An organization
+		// administrator is otherwise invisible on every create.
+		if obj.TeamID != "" && g.z != nil && g.z.db != nil {
+			t, err := g.z.db.GetTeam(ctx, obj.TeamID)
+			if err != nil {
+				return Object{}, notFoundOrInternal(err)
+			}
+			obj.TeamStatus = t.Status
+			if obj.OrgID == "" {
+				obj.OrgID = t.OrganizationID
+			}
+			if err := g.fillOrg(ctx, &obj); err != nil {
+				return Object{}, err
+			}
+		}
 		return obj, nil
 	}
 	key := string(obj.Type) + ":" + obj.ID
@@ -389,12 +409,17 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 
 	// ---------- organizations ----------
 	case ActionOrgRead:
-		if admin || g.InOrg(obj.OrgID) {
+		if admin || g.InOrg(obj.OrgID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrNotFound
 	case ActionOrgWrite:
 		if admin {
+			return nil
+		}
+		return ErrForbidden
+	case ActionOrgAdmin:
+		if admin || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden
@@ -407,36 +432,36 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 		}
 		return ErrForbidden
 	case ActionTeamWrite:
-		if admin || g.TeamAdminOf(obj.TeamID) {
+		if admin || g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden
 	case ActionTeamService:
-		if admin || g.TeamAdminOf(obj.TeamID) {
+		if admin || g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden
 
 	// ---------- members ----------
 	case ActionMemberRead:
-		if admin || g.InTeam(obj.TeamID) {
+		if admin || g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrNotFound
 	case ActionMemberWrite, ActionMemberRemove:
-		if admin || g.TeamAdminOf(obj.TeamID) {
+		if admin || g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden
 
 	// ---------- projects ----------
 	case ActionProjectRead:
-		if admin || g.InTeam(obj.TeamID) {
+		if admin || g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrNotFound
 	case ActionProjectWrite:
-		if admin || g.TeamAdminOf(obj.TeamID) {
+		if admin || g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden
@@ -510,7 +535,7 @@ func (g *Guard) decideUser(action Action, obj Object, admin bool) error {
 }
 
 func (g *Guard) decideTeamRead(obj Object, admin bool) error {
-	if admin || g.InTeam(obj.TeamID) {
+	if admin || g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 		return nil
 	}
 	return ErrNotFound
@@ -525,7 +550,7 @@ func (g *Guard) decideKeyCreate(ctx context.Context, obj Object, admin bool) err
 		return ErrForbidden
 	}
 	if obj.OwnerType == iam.OwnerService {
-		if admin || g.TeamAdminOf(obj.TeamID) {
+		if admin || g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 			return nil
 		}
 		return ErrForbidden

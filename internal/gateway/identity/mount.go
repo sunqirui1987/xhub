@@ -36,13 +36,17 @@ func Module(h Gate) httpx.Module {
 		reg.Handle("POST /user/update", func(w http.ResponseWriter, r *http.Request) { UserUpdate(h, w, r) })
 		reg.Handle("POST /user/delete", func(w http.ResponseWriter, r *http.Request) { UserDelete(h, w, r) })
 
-		// Organizations. A member sees the name of the organization that owns
-		// their team; only a platform administrator changes one.
+		// Organizations. A member sees the organization that owns their team.
+		// An organization administrator runs that organization. Budget and
+		// deletion stay with the platform administrator.
 		reg.Handle("POST /organization/new", func(w http.ResponseWriter, r *http.Request) { OrgNew(h, w, r) })
 		reg.Handle("GET /organization/list", func(w http.ResponseWriter, r *http.Request) { OrgList(h, w, r) })
 		reg.Handle("GET /organization/info", func(w http.ResponseWriter, r *http.Request) { OrgInfo(h, w, r) })
 		reg.Handle("PATCH /organization/update", func(w http.ResponseWriter, r *http.Request) { OrgUpdate(h, w, r) })
 		reg.Handle("DELETE /organization/delete", func(w http.ResponseWriter, r *http.Request) { OrgDelete(h, w, r) })
+		reg.Handle("POST /organization/member_add", func(w http.ResponseWriter, r *http.Request) { OrgMemberAdd(h, w, r) })
+		reg.Handle("POST /organization/member_delete", func(w http.ResponseWriter, r *http.Request) { OrgMemberRemove(h, w, r) })
+		reg.Handle("DELETE /organization/member_delete", func(w http.ResponseWriter, r *http.Request) { OrgMemberRemove(h, w, r) })
 
 		// Teams.
 		reg.Handle("POST /team/new", func(w http.ResponseWriter, r *http.Request) { TeamNew(h, w, r) })

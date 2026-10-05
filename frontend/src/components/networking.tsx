@@ -273,6 +273,7 @@ export interface Organization {
   metadata: Record<string, any>;
   models: string[];
   spend: number;
+  max_budget?: number | null;
   model_spend: Record<string, number>;
   created_at: string;
   created_by: string;
@@ -1018,6 +1019,7 @@ export interface UserInfo {
   user_email: string;
   user_alias: string | null;
   user_role: string;
+  teams?: { team_id: string; team_alias?: string | null; user_role?: string | null }[];
   spend: number;
   max_budget: number | null;
   models: string[];
@@ -1152,12 +1154,14 @@ const teamInfoResponse = (data: any) => {
   if (!data || typeof data !== "object") return data;
   const teamInfo = data.team_info ?? data.info;
   if (!teamInfo || typeof teamInfo !== "object") return data;
+  const memberships = Array.isArray(data.team_memberships) ? data.team_memberships : [];
+  const listed = Array.isArray(teamInfo.members_with_roles) ? teamInfo.members_with_roles : [];
   return {
     ...data,
     team_id: data.team_id ?? teamInfo.team_id,
-    team_info: teamInfo,
+    team_info: { ...teamInfo, members_with_roles: listed.length > 0 ? listed : memberships },
     keys: Array.isArray(data.keys) ? data.keys : Array.isArray(teamInfo.keys) ? teamInfo.keys : [],
-    team_memberships: Array.isArray(data.team_memberships) ? data.team_memberships : [],
+    team_memberships: memberships,
   };
 };
 
@@ -2075,13 +2079,22 @@ export const allEndUsersCall = async (accessToken: string) => {
 
 export const userFilterUICall = async (accessToken: string, params: URLSearchParams) => {
   try {
-    return await apiClient.get(`/user/filter/ui`, {
+    const data = await apiClient.get(`/user/filter/ui`, {
       accessToken,
       query: {
         user_email: params.get("user_email") || undefined,
         user_id: params.get("user_id") || undefined,
         team_id: params.get("team_id") || undefined,
       },
+    });
+    // The gateway returns { users: [...] }. Older callers expected a bare array.
+    const users = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : [];
+    const email = (params.get("user_email") || "").trim().toLowerCase();
+    const userId = (params.get("user_id") || "").trim().toLowerCase();
+    return users.filter((user: { user_email?: string | null; user_id?: string | null }) => {
+      if (email && !String(user.user_email ?? "").toLowerCase().includes(email)) return false;
+      if (userId && !String(user.user_id ?? "").toLowerCase().includes(userId)) return false;
+      return true;
     });
   } catch (error) {
     console.error("Failed to create key:", error);

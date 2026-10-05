@@ -97,11 +97,14 @@ describe("UserInfoView", () => {
       };
       return Promise.resolve(teamMap[teamId] || { team_id: teamId, team_info: { team_alias: null } });
     });
-    mockTeamListCall.mockResolvedValue([
-      { team_id: "team-1", team_alias: "Alpha Team" },
-      { team_id: "team-2", team_alias: "Beta Team" },
-      { team_id: "team-3", team_alias: "Gamma Team" },
-    ]);
+    mockTeamListCall.mockImplementation((_token: string, _org: string | null, userId?: string | null) => {
+      if (userId) return Promise.resolve([]);
+      return Promise.resolve([
+        { team_id: "team-1", team_alias: "Alpha Team" },
+        { team_id: "team-2", team_alias: "Beta Team" },
+        { team_id: "team-3", team_alias: "Gamma Team" },
+      ]);
+    });
     mockTeamMemberAddCall.mockResolvedValue({});
     mockTeamMemberDeleteCall.mockResolvedValue({});
     mockUserUpdateUserCall.mockResolvedValue({});

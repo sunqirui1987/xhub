@@ -89,6 +89,13 @@ describe("useProjects", () => {
     expect(result.current.data).toEqual(mockProjects);
   });
 
+  it("unwraps the gateway envelope {projects: [...]}", async () => {
+    (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ projects: mockProjects }) });
+    const { result } = renderHook(() => useProjects(), { wrapper: makeWrapper(queryClient) });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(mockProjects);
+  });
+
   it("should call GET /project/list with the auth header", async () => {
     (global.fetch as any).mockResolvedValue({ ok: true, json: async () => mockProjects });
     renderHook(() => useProjects(), { wrapper: makeWrapper(queryClient) });

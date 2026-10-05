@@ -31,9 +31,8 @@ export const BUDGET_DURATION_OPTIONS = [
 ] as const;
 
 const defaultPatchOrganization = async (organizationId: string, body: OrgPatchBody): Promise<unknown> => {
-  const { data } = await fetchClient.PATCH("/v2/organization/{organization_id}", {
-    params: { path: { organization_id: organizationId } },
-    body,
+  const { data } = await fetchClient.PATCH("/organization/update", {
+    body: { organization_id: organizationId, ...body },
   });
   return data;
 };

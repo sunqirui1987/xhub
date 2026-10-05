@@ -184,6 +184,34 @@ func (db *DB) userQuery(ctx context.Context, id string) *xorm.Session {
 	return db.Engine.NewSession().Context(ctx).Where("id = ?", id)
 }
 
+// ListScopedUsers lists the caller and the accounts that belong to the teams
+// they oversee. An empty team list returns only the caller.
+func (db *DB) ListScopedUsers(ctx context.Context, self string, teamIDs []string, query string, limit, offset int) ([]User, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	args := []any{self}
+	where := "id = ?"
+	if len(teamIDs) > 0 {
+		ph := make([]string, len(teamIDs))
+		for i, id := range teamIDs {
+			ph[i] = "?"
+			args = append(args, id)
+		}
+		where += " OR id IN (SELECT user_id FROM team_members WHERE team_id IN (" + strings.Join(ph, ",") + "))"
+	}
+	if query != "" {
+		like := "%" + query + "%"
+		where = "(" + where + ") AND (email ILIKE ? OR name ILIKE ?)"
+		args = append(args, like, like)
+	}
+	var out []User
+	err := s.Where(where, args...).Asc("created_at", "id").Limit(limit, offset).Find(&out)
+	return out, err
+}
+
 // ListUsers is the platform administrator's directory.
 func (db *DB) ListUsers(ctx context.Context, query string, limit, offset int) ([]User, error) {
 	if limit <= 0 || limit > 500 {

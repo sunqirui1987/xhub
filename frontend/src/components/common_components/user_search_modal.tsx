@@ -56,11 +56,15 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
   title = t("Add Team Member"),
   roles = [
     {
-      label: t("admin"),
+      label: t("Team admin"),
       value: "admin",
       description: t("Admin role. Can create team keys, add members, and manage settings."),
     },
-    { label: t("user"), value: "user", description: t("User role. Can view team info, but not manage it.") },
+    {
+      label: t("Team member"),
+      value: "user",
+      description: t("User role. Can view team info, but not manage it."),
+    },
   ],
   defaultRole = "user",
   teamId,
@@ -99,7 +103,8 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
       const response = await userFilterUICall(accessToken, params);
       if (!isLatestSearch()) return;
 
-      const data: User[] = response;
+      const payload = response as User[] | { users?: User[] } | null;
+      const data: User[] = Array.isArray(payload) ? payload : Array.isArray(payload?.users) ? payload.users : [];
       const options: UserOption[] = data.map((user) => ({
         label: fieldName === "user_email" ? `${user.user_email}` : `${user.user_id}`,
         value: fieldName === "user_email" ? user.user_email : user.user_id,
@@ -203,7 +208,7 @@ const UserSearchModal: React.FC<UserSearchModalProps> = ({
                 }
               </FormField>
 
-              <div className="text-center">OR</div>
+              <div className="text-center">{t("or")}</div>
 
               <FormField control={form.control} name="user_id" label={t("User ID")}>
                 {({ id, value, onChange }) => renderUserSearch("user_id", t("Search by user ID"), { id, value, onChange })}

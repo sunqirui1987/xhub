@@ -1,3 +1,4 @@
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { useTeams } from "@/app/(dashboard)/hooks/teams/useTeams";
 import { organizationKeys, useOrganization } from "@/app/(dashboard)/hooks/organizations/useOrganizations";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,7 +23,6 @@ import {
   organizationMemberDeleteCall,
   organizationMemberUpdateCall,
 } from "../networking";
-import ObjectPermissionsView from "../object_permissions_view";
 import MemberModal from "../team/EditMembership";
 import { OrgSettingsForm } from "./org-settings/OrgSettingsForm";
 import { t } from "@/i18n";
@@ -52,7 +52,25 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
   const [isAddMemberModalVisible, setIsAddMemberModalVisible] = useState(false);
   const [isEditMemberModalVisible, setIsEditMemberModalVisible] = useState(false);
   const [selectedEditMember, setSelectedEditMember] = useState<Member | null>(null);
-  const canEditOrg = is_org_admin || is_proxy_admin;
+  const budgetTable = (orgData?.litellm_budget_table ?? {}) as {
+    max_budget?: number | null;
+    budget_duration?: string | null;
+    tpm_limit?: number | null;
+    rpm_limit?: number | null;
+    max_parallel_requests?: number | null;
+  };
+  const maxBudget =
+    typeof orgData?.max_budget === "number" || orgData?.max_budget === null
+      ? orgData.max_budget
+      : (budgetTable.max_budget ?? null);
+  const budgetLabel = maxBudget === null || maxBudget === undefined ? t("Unlimited") : `$${formatNumberWithCommas(maxBudget, 4)}`;
+  const models = orgData?.models ?? [];
+  const showRates = typeof budgetTable.tpm_limit === "number" || typeof budgetTable.rpm_limit === "number";
+  const { userId } = useAuthorized();
+  const selfAdmin = (orgData?.members ?? []).some(
+    (member) => member?.user_id === userId && (member.user_role === "org_admin" || member.role === "org_admin"),
+  );
+  const canEditOrg = is_proxy_admin || is_org_admin || selfAdmin;
   const { data: teams } = useTeams();
   const { onTabChange, hasVisited } = useVisitedTabs(editOrg ? "settings" : "overview");
 
@@ -165,7 +183,7 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
             {t("Overview")}
           </TabsTrigger>
           <TabsTrigger value="members" className="flex-none rounded-none px-4 py-2">
-            {t("Members")}
+            {t("Organization administrators")}
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex-none rounded-none px-4 py-2">
             {t("Settings")}
@@ -178,9 +196,13 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
               <CardContent>
                 <p className="text-sm text-muted-foreground">{t("Organization Details")}</p>
                 <div className="mt-2 text-sm text-foreground">
-                  <p>Created: {new Date(orgData.created_at).toLocaleDateString()}</p>
-                  <p>Updated: {new Date(orgData.updated_at).toLocaleDateString()}</p>
-                  <p>{t("Created By: {value0}", { value0: (orgData.created_by) })}</p>
+                  <p>
+                    {t("common.created")}: {orgData.created_at ? new Date(orgData.created_at).toLocaleDateString() : t("common.unknown")}
+                  </p>
+                  <p>
+                    {t("common.updated")}: {orgData.updated_at ? new Date(orgData.updated_at).toLocaleDateString() : t("common.unknown")}
+                  </p>
+                  {orgData.created_by ? <p>{t("Created By: {value0}", { value0: orgData.created_by })}</p> : null}
                 </div>
               </CardContent>
             </Card>
@@ -189,44 +211,42 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
               <CardContent>
                 <p className="text-sm text-muted-foreground">{t("Budget Status")}</p>
                 <div className="mt-2 text-sm text-foreground">
-                  <p className="text-xl font-semibold">${formatNumberWithCommas(orgData.spend, 4)}</p>
-                  <p>
-                    {t("of {value0}", { value0: (orgData.litellm_budget_table.max_budget === null
-                      ? "Unlimited"
-                      : `$${formatNumberWithCommas(orgData.litellm_budget_table.max_budget, 4)}`) })}
-                  </p>
-                  {orgData.litellm_budget_table.budget_duration && (
-                    <p className="text-muted-foreground">Reset: {orgData.litellm_budget_table.budget_duration}</p>
-                  )}
+                  <p className="text-xl font-semibold">${formatNumberWithCommas(orgData.spend || 0, 4)}</p>
+                  <p>{t("Budget cap: {value0}", { value0: budgetLabel })}</p>
+                  {budgetTable.budget_duration ? (
+                    <p className="text-muted-foreground">{t("Reset: {value0}", { value0: budgetTable.budget_duration })}</p>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{t("Rate Limits")}</p>
-                <div className="mt-2 text-sm text-foreground">
-                  <p>TPM: {orgData.litellm_budget_table.tpm_limit ?? t("Unlimited")}</p>
-                  <p>RPM: {orgData.litellm_budget_table.rpm_limit ?? t("Unlimited")}</p>
-                  {orgData.litellm_budget_table.max_parallel_requests && (
-                    <p>{t("Max Parallel Requests: {value0}", { value0: (orgData.litellm_budget_table.max_parallel_requests) })}</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            {showRates ? (
+              <Card>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">{t("Rate Limits")}</p>
+                  <div className="mt-2 text-sm text-foreground">
+                    <p>TPM: {budgetTable.tpm_limit ?? t("Unlimited")}</p>
+                    <p>RPM: {budgetTable.rpm_limit ?? t("Unlimited")}</p>
+                    {budgetTable.max_parallel_requests ? (
+                      <p>{t("Max Parallel Requests: {value0}", { value0: budgetTable.max_parallel_requests })}</p>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            <Card>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{t("Models")}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {orgData.models.length === 0 ? (
-                    <BadgeLink>{t("All proxy models")}</BadgeLink>
-                  ) : (
-                    orgData.models.map((model, index) => <BadgeLink key={index}>{model}</BadgeLink>)
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            {models.length > 0 ? (
+              <Card>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">{t("Models")}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {models.map((model, index) => (
+                      <BadgeLink key={index}>{model}</BadgeLink>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
             <Card>
               <CardContent>
@@ -241,11 +261,6 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
               </CardContent>
             </Card>
 
-            <ObjectPermissionsView
-              objectPermission={orgData.object_permission}
-              variant="card"
-              accessToken={accessToken}
-            />
           </div>
         </TabsContent>
 
@@ -266,9 +281,9 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
               }}
               onDelete={(member) => handleMemberDelete(member)}
               onAddMember={() => setIsAddMemberModalVisible(true)}
-              roleColumnTitle="Organization Role"
+              roleColumnTitle={t("Organization administrators")}
               extraColumns={orgExtraColumns}
-              emptyText={t("No members found")}
+              emptyText={t("No organization administrators")}
             />
           </div>
         </TabsContent>
@@ -306,33 +321,25 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
                   <div>
                     <p className="font-medium text-foreground">{t("Models")}</p>
                     <div className="mt-1 flex flex-wrap gap-2">
-                      {orgData.models.map((model, index) => (
-                        <BadgeLink key={index}>{model}</BadgeLink>
-                      ))}
+                      {models.length === 0 ? (
+                        <span className="text-muted-foreground">{t("Models are set on each team.")}</span>
+                      ) : (
+                        models.map((model, index) => <BadgeLink key={index}>{model}</BadgeLink>)
+                      )}
                     </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-foreground">{t("Rate Limits")}</p>
-                    <div>TPM: {orgData.litellm_budget_table.tpm_limit ?? t("Unlimited")}</div>
-                    <div>RPM: {orgData.litellm_budget_table.rpm_limit ?? t("Unlimited")}</div>
-                  </div>
+                  {showRates ? (
+                    <div>
+                      <p className="font-medium text-foreground">{t("Rate Limits")}</p>
+                      <div>TPM: {budgetTable.tpm_limit ?? t("Unlimited")}</div>
+                      <div>RPM: {budgetTable.rpm_limit ?? t("Unlimited")}</div>
+                    </div>
+                  ) : null}
                   <div>
                     <p className="font-medium text-foreground">{t("Budget")}</p>
-                    <div>
-                      Max:{" "}
-                      {orgData.litellm_budget_table.max_budget !== null
-                        ? `$${formatNumberWithCommas(orgData.litellm_budget_table.max_budget, 4)}`
-                        : t("No Limit")}
-                    </div>
-                    <div>Reset: {orgData.litellm_budget_table.budget_duration || t("Never")}</div>
+                    <div>{t("Budget cap: {value0}", { value0: budgetLabel })}</div>
+                    <div>{t("Reset: {value0}", { value0: budgetTable.budget_duration || t("Never") })}</div>
                   </div>
-
-                  <ObjectPermissionsView
-                    objectPermission={orgData.object_permission}
-                    variant="inline"
-                    className="border-t pt-4"
-                    accessToken={accessToken}
-                  />
                 </div>
               )}
             </CardContent>
@@ -345,25 +352,15 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
         onCancel={() => setIsAddMemberModalVisible(false)}
         onSubmit={handleMemberAdd}
         accessToken={accessToken}
-        title={t("Add Organization Member")}
+        title={t("Add organization administrator")}
         roles={[
           {
-            label: "org_admin",
+            label: t("Org Admin"),
             value: "org_admin",
-            description: t("Can add and remove members, and change their roles."),
-          },
-          {
-            label: "internal_user",
-            value: "internal_user",
-            description: t("Can view/create keys for themselves within organization."),
-          },
-          {
-            label: "internal_user_viewer",
-            value: "internal_user_viewer",
-            description: t("Can only view their keys within organization."),
+            description: t("An organization administrator runs this organization's teams. This is not an account role."),
           },
         ]}
-        defaultRole="internal_user"
+        defaultRole="org_admin"
       />
       <MemberModal
         visible={isEditMemberModalVisible}
@@ -375,11 +372,7 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
           title: t("Edit Member"),
           showEmail: true,
           showUserId: true,
-          roleOptions: [
-            { label: t("Org Admin"), value: "org_admin" },
-            { label: t("Internal User"), value: "internal_user" },
-            { label: t("Internal User Viewer"), value: "internal_user_viewer" },
-          ],
+          roleOptions: [{ label: t("Org Admin"), value: "org_admin" }],
         }}
       />
     </div>

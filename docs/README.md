@@ -22,6 +22,9 @@
 | [11 可观测性与报表](11-observability-and-reporting.md) | 历史归属、指标口径、时区、对账与运行手册 |
 | [12 实施迁移](12-migration-plan.md) | 阶段依赖、旧数据迁移、发布与回滚 |
 | [13 测试与验收](13-test-and-acceptance-plan.md) | 最坏情况、并发故障、发布门槛 |
+| [14 团队管理](14-team-management.md) | 当前控制台和网关实际支持的团队、成员、模型和预算 |
+| [15 用户管理](15-user-management.md) | 账号角色和团队角色怎么分开，创建用户时该选什么 |
+| [16 权限](16-permissions.md) | 平台管理员、组织管理员、团队管理员和成员各自能做什么，列表怎么收窄 |
 
 数据契约：[请求事件](schemas/request-event.md)、[用量](schemas/usage.md)、[结算](schemas/settlement.md)、[异步任务](schemas/async-task.md)。
 

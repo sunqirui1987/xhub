@@ -47,15 +47,14 @@ test("Create Team lists the new alias", async ({ page }) => {
   await expect(page.getByText("e2e-team").first()).toBeVisible({ timeout: 15_000 });
 });
 
-test("Invite User opens an invitation link", async ({ page }) => {
+test("Create User adds an account with a password", async ({ page }) => {
   await loginAdmin(page);
   await page.goto(uiPath("/users"));
   await page.getByRole("button", { name: `+ ${t("pages.users.invite")}` }).click();
   await expect(page.getByRole("heading", { name: t("pages.users.invite") })).toBeVisible();
   await page.getByLabel(t("pages.users.userEmail")).fill("e2e-user@example.com");
+  await page.getByLabel(t("Initial password")).fill("e2e-pass-1234");
   await page.getByRole("dialog").getByRole("button", { name: t("pages.users.invite") }).click();
-  await expect(page.getByRole("heading", { name: t("pages.users.invitationLink") })).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Escape");
   await expect(page.getByText("e2e-user@example.com").first()).toBeVisible({ timeout: 15_000 });
 });
 

@@ -79,17 +79,17 @@ type Actor struct {
 type ObjectType string
 
 const (
-	ObjectUser        ObjectType = "user"
-	ObjectOrg         ObjectType = "organization"
-	ObjectTeam        ObjectType = "team"
-	ObjectMember      ObjectType = "team_member"
-	ObjectProject     ObjectType = "project"
-	ObjectKey         ObjectType = "key"
-	ObjectUsage       ObjectType = "usage"
-	ObjectLog         ObjectType = "log"
-	ObjectAudit       ObjectType = "audit"
-	ObjectBudget      ObjectType = "budget"
-	ObjectModel       ObjectType = "model"
+	ObjectUser    ObjectType = "user"
+	ObjectOrg     ObjectType = "organization"
+	ObjectTeam    ObjectType = "team"
+	ObjectMember  ObjectType = "team_member"
+	ObjectProject ObjectType = "project"
+	ObjectKey     ObjectType = "key"
+	ObjectUsage   ObjectType = "usage"
+	ObjectLog     ObjectType = "log"
+	ObjectAudit   ObjectType = "audit"
+	ObjectBudget  ObjectType = "budget"
+	ObjectModel   ObjectType = "model"
 )
 
 // Object names the target of an action. Callers fill in what they know and the
@@ -352,6 +352,15 @@ func (g *Guard) Capabilities() []string {
 		set[CapProjects] = true
 		set[CapServiceKeys] = true
 		set[CapUsageTeamDetail] = true
+	}
+	if len(g.AdminOrgIDs()) > 0 {
+		// Organization administration reaches the org's teams, members and
+		// projects. It does not reach service keys or another member's usage
+		// breakdown; those stay with the team administrator.
+		set[CapTeamRead] = true
+		set[CapTeamManage] = true
+		set[CapMembers] = true
+		set[CapProjects] = true
 	}
 	if g.PlatformAdmin() {
 		for _, c := range []string{CapPlatformAdmin, CapUsers, CapOrgs, CapTeamsPlatform,

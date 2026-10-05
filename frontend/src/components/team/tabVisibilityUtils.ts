@@ -23,18 +23,14 @@ export const TEAM_INFO_TAB_LABELS: Record<string, string> = {
 
 /**
  * Returns the list of tab keys that should be visible based on permissions.
- * - Overview, My User, Virtual Keys: always visible
- * - Members, Member Permissions, Settings: only when canEditTeam is true
+ * Overview and Virtual Keys are always visible. Members and Settings are only
+ * for someone who can edit the team. My User and Member Permissions are
+ * LiteLLM leftovers and stay hidden.
  */
 export function getTeamInfoVisibleTabs(canEditTeam: boolean): readonly string[] {
-  const baseTabs = [TEAM_INFO_TAB_KEYS.OVERVIEW, TEAM_INFO_TAB_KEYS.MY_USER, TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS];
+  const baseTabs = [TEAM_INFO_TAB_KEYS.OVERVIEW, TEAM_INFO_TAB_KEYS.VIRTUAL_KEYS];
   if (canEditTeam) {
-    return [
-      ...baseTabs,
-      TEAM_INFO_TAB_KEYS.MEMBERS,
-      TEAM_INFO_TAB_KEYS.MEMBER_PERMISSIONS,
-      TEAM_INFO_TAB_KEYS.SETTINGS,
-    ];
+    return [...baseTabs, TEAM_INFO_TAB_KEYS.MEMBERS, TEAM_INFO_TAB_KEYS.SETTINGS];
   }
   return baseTabs;
 }

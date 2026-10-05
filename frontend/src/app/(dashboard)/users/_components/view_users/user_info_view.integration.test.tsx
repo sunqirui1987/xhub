@@ -95,11 +95,14 @@ describe("UserInfoView add-to-team form", () => {
       };
       return Promise.resolve(teamMap[teamId] || { team_id: teamId, team_info: { team_alias: null } });
     });
-    mockTeamListCall.mockResolvedValue([
-      { team_id: "team-1", team_alias: "Alpha Team" },
-      { team_id: "team-2", team_alias: "Beta Team" },
-      { team_id: "team-3", team_alias: "Gamma Team" },
-    ]);
+    mockTeamListCall.mockImplementation((_token: string, _org: string | null, userId?: string | null) => {
+      if (userId) return Promise.resolve([]);
+      return Promise.resolve([
+        { team_id: "team-1", team_alias: "Alpha Team" },
+        { team_id: "team-2", team_alias: "Beta Team" },
+        { team_id: "team-3", team_alias: "Gamma Team" },
+      ]);
+    });
     mockTeamMemberAddCall.mockResolvedValue({});
     mockFetchMCPServers.mockResolvedValue([MCP_SERVER]);
     mockListMCPTools.mockResolvedValue({ tools: [] });
@@ -209,7 +212,7 @@ describe("UserInfoView add-to-team form", () => {
     const user = userEvent.setup();
     await openAddTeam(user);
 
-    expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("user");
+    expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("Team member");
   });
 
   it("adds the user to the chosen team with the default role", async () => {
@@ -223,6 +226,7 @@ describe("UserInfoView add-to-team form", () => {
     expect(mockTeamMemberAddCall).toHaveBeenCalledWith("test-token", "team-3", {
       role: "user",
       user_id: "user-123",
+      user_email: "test@example.com",
     });
   });
 
@@ -232,13 +236,14 @@ describe("UserInfoView add-to-team form", () => {
 
     await chooseTeam(user, "Gamma Team");
     await user.click(roleField());
-    await user.click(await screen.findByText("admin", { selector: "span.font-medium" }));
+    await user.click(await screen.findByText("Team admin", { selector: "span.font-medium" }));
     await user.click(submitButton());
 
     await waitFor(() => expect(mockTeamMemberAddCall).toHaveBeenCalledTimes(1));
     expect(mockTeamMemberAddCall).toHaveBeenCalledWith("test-token", "team-3", {
       role: "admin",
       user_id: "user-123",
+      user_email: "test@example.com",
     });
   });
 

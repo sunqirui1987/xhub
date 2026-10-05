@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"xorm.io/builder"
 	"xorm.io/xorm"
 
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -61,8 +60,12 @@ func (db *DB) ListOrgs(ctx context.Context, userID string) ([]Organization, erro
 	s := db.session(ctx)
 	defer s.Close()
 	if userID != "" {
-		memberTeams := builder.Select("tm.team_id").From("team_members tm").Where(builder.Eq{"tm.user_id": userID})
-		s = s.Where(builder.In("id", builder.Select("t.organization_id").From("teams t").Where(builder.In("t.id", memberTeams))))
+		// A person sees an organization by belonging to one of its teams, or by
+		// administering it. The two are independent.
+		s = s.Where(
+			"id IN (SELECT t.organization_id FROM teams t INNER JOIN team_members tm ON tm.team_id = t.id WHERE tm.user_id = ?) OR id IN (SELECT organization_id FROM organization_members WHERE user_id = ? AND role = ?)",
+			userID, userID, OrgAdmin,
+		)
 	}
 	var out []Organization
 	err := s.Asc("name").Find(&out)
@@ -385,6 +388,121 @@ func (db *DB) MemberTeams(ctx context.Context, userID string) ([]Membership, err
 	return out, nil
 }
 
+// ListOrgAdmins returns the organization administrators with public account fields.
+func (db *DB) ListOrgAdmins(ctx context.Context, orgID string) ([]Member, error) {
+	s := db.session(ctx)
+	defer s.Close()
+	var out []Member
+	err := s.Table("organization_members").Alias("m").
+		Join("INNER", "users u", "u.id = m.user_id").
+		Select("u.id AS user_id, u.email AS email, u.name AS name, m.role AS role, u.status AS status").
+		Where("m.organization_id = ? AND m.role = ?", orgID, OrgAdmin).
+		Asc("u.email").Find(&out)
+	return out, err
+}
+
+// AddOrgAdmin grants organization administration to an existing active account,
+// found by exact email. An unknown and a disabled account both return
+// ErrNotFound. Granting it again is a no-op success.
+func (db *DB) AddOrgAdmin(ctx context.Context, by Actor, orgID, email string) (*Member, error) {
+	var out Member
+	err := db.tx(ctx, func(s *xorm.Session) error {
+		if err := lockOrg(ctx, s, orgID); err != nil {
+			return err
+		}
+		var u User
+		err := get(s.Where("lower(email) = ? AND status = ?", normEmail(email), StatusActive), &u)
+		if err != nil {
+			if err == ErrNotFound {
+				return ErrNotFound
+			}
+			return err
+		}
+		if _, err := s.Where("organization_id = ? AND user_id = ?", orgID, u.ID).
+			Delete(&OrganizationMembership{}); err != nil {
+			return err
+		}
+		if _, err := s.Insert(&OrganizationMembership{OrganizationID: orgID, UserID: u.ID, Role: OrgAdmin}); err != nil {
+			return err
+		}
+		out = Member{UserID: u.ID, Email: u.Email, Name: u.Name, Role: OrgAdmin, Status: u.Status}
+		return writeAudit(s, by, Audit{Action: "org.admin_add", ObjectType: "organization", ObjectID: orgID,
+			Detail: map[string]any{"user_id": u.ID}})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RemoveOrgAdmin revokes organization administration. An organization may have
+// no administrator: a platform administrator still reaches it.
+func (db *DB) RemoveOrgAdmin(ctx context.Context, by Actor, orgID, userID string) error {
+	return db.tx(ctx, func(s *xorm.Session) error {
+		if err := lockOrg(ctx, s, orgID); err != nil {
+			return err
+		}
+		if err := affected(s.Where("organization_id = ? AND user_id = ? AND role = ?", orgID, userID, OrgAdmin).
+			Delete(&OrganizationMembership{})); err != nil {
+			return err
+		}
+		return writeAudit(s, by, Audit{Action: "org.admin_remove", ObjectType: "organization", ObjectID: orgID,
+			Detail: map[string]any{"user_id": userID}})
+	})
+}
+
+// ListVisibleTeams returns the teams a person may see: the ones they belong to,
+// plus every team in an organization they administer. The role is their team
+// role, empty when they administer the organization without joining the team.
+func (db *DB) ListVisibleTeams(ctx context.Context, userID, organizationID string) ([]TeamWithRole, error) {
+	if userID == "" {
+		return db.ListTeams(ctx, "", organizationID)
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []teamRow
+	err := s.Table("teams").Alias("t").
+		Join("LEFT", "team_members m", "m.team_id = t.id AND m.user_id = ?", userID).
+		Select("t.id AS id, t.organization_id AS organization_id, t.name AS name, t.description AS description, t.status AS status, "+
+			"t.max_budget AS max_budget, t.spend AS spend, t.created_at AS created_at, t.updated_at AS updated_at, COALESCE(m.role, '') AS role").
+		Where("(m.user_id IS NOT NULL OR t.organization_id IN (SELECT organization_id FROM organization_members WHERE user_id = ? AND role = ?)) AND (? = '' OR t.organization_id = ?)",
+			userID, OrgAdmin, organizationID, organizationID).
+		Asc("t.name", "t.id").Find(&rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TeamWithRole, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TeamWithRole{
+			Team: Team{ID: r.ID, OrganizationID: r.OrganizationID, Name: r.Name, Description: r.Description,
+				Status: r.Status, MaxBudget: r.MaxBudget, Spend: r.Spend,
+				CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
+			Role: r.Role,
+		})
+	}
+	return out, nil
+}
+
+// TeamIDsByOrg lists every team that belongs to one of the organizations.
+func (db *DB) TeamIDsByOrg(ctx context.Context, orgIDs []string) ([]string, error) {
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []struct {
+		ID string `xorm:"'id'"`
+	}
+	if err := s.Table("teams").In("organization_id", orgIDs).Cols("id").Asc("id").Find(&rows); err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.ID)
+	}
+	return out, nil
+}
+
 // AdminOrgs lists the organizations this person administers.
 //
 // It is separate from the team memberships because organization administration
@@ -595,15 +713,16 @@ type projectRead struct {
 	MaxBudget      *float64 `xorm:"'max_budget'"`
 	Spend          float64  `xorm:"'spend'"`
 	CreatedAt      Time     `xorm:"'created_at'"`
+	UpdatedAt      Time     `xorm:"'updated_at'"`
 }
 
 func (r projectRead) project() Project {
 	return Project{ID: r.ID, TeamID: r.TeamID, OrganizationID: r.OrganizationID, Name: r.Name, Status: r.Status,
-		Models: nonNil(r.Models), MaxBudget: r.MaxBudget, Spend: r.Spend, CreatedAt: r.CreatedAt}
+		Models: nonNil(r.Models), MaxBudget: r.MaxBudget, Spend: r.Spend, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 }
 
 const projectSelect = `p.id AS id, p.team_id AS team_id, t.organization_id AS organization_id, p.name AS name,
-	p.status AS status, p.models AS models, p.max_budget AS max_budget, p.spend AS spend, p.created_at AS created_at`
+	p.status AS status, p.models AS models, p.max_budget AS max_budget, p.spend AS spend, p.created_at AS created_at, p.updated_at AS updated_at`
 
 func (db *DB) projectSession(ctx context.Context) *xorm.Session {
 	return db.session(ctx).Table("projects").Alias("p").

@@ -65,7 +65,12 @@ const fetchProjects = async (accessToken: string): Promise<ProjectResponse[]> =>
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const body = await response.json();
+  // The gateway answers {projects: [...]}. An older caller sometimes returned
+  // the array itself. Either shape is a list of projects.
+  if (Array.isArray(body)) return body;
+  if (body && Array.isArray(body.projects)) return body.projects;
+  return [];
 };
 
 // ── Hook ─────────────────────────────────────────────────────────────────────

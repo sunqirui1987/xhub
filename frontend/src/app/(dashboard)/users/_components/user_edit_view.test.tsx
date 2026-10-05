@@ -315,7 +315,7 @@ describe("UserEditView", () => {
     expect(callArgs.user_id).toBe("user-123");
     expect(callArgs.user_email).toBe("test@example.com");
     expect(callArgs.user_alias).toBe("Test User");
-    expect(callArgs.user_role).toBe("proxy_admin");
+    expect(callArgs.user_role).toBe("admin");
     expect(callArgs.models).toEqual(["gpt-4", "gpt-3.5-turbo"]);
     expect(callArgs.max_budget).toBe(100.5);
     expect(callArgs.budget_duration).toBe("30d");
@@ -487,7 +487,7 @@ describe("UserEditView", () => {
         user_id: "user-123",
         user_email: "test@example.com",
         user_alias: "Test User",
-        user_role: "proxy_admin",
+        user_role: "admin",
         models: ["gpt-4", "gpt-3.5-turbo"],
         max_budget: 100.5,
         budget_duration: "30d",
@@ -571,7 +571,7 @@ describe("UserEditView", () => {
         user_id: "user-null",
         user_email: "null@example.com",
         user_alias: null,
-        user_role: null,
+        user_role: "user",
         budget_duration: null,
         max_budget: null,
       });

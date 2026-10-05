@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,6 +370,21 @@ func TestMemberAdministrationNeedsTeamAdmin(t *testing.T) {
 		mustJSONBytes(t, map[string]any{"team_id": f.teamA.ID, "user_email": newcomer.Email, "role": iam.TeamMember}))
 	if status != 200 {
 		t.Fatalf("a team admin could not add a member: %d %s", status, trim(body))
+	}
+
+	status, body = f.call(f.teamAdmin, "GET", "/team/info?team_id="+f.teamA.ID, nil)
+	if status != 200 {
+		t.Fatalf("team info after add: %d %s", status, trim(body))
+	}
+	if !strings.Contains(string(body), newcomer.Email) {
+		t.Fatalf("added member missing from team info: %s", trim(body))
+	}
+
+	// Email alone is enough. The console sometimes has the address and not the id.
+	status, body = f.call(f.teamAdmin, "POST", "/team/member_delete",
+		mustJSONBytes(t, map[string]any{"team_id": f.teamA.ID, "user_email": newcomer.Email}))
+	if status != 200 {
+		t.Fatalf("a team admin could not remove a member by email: %d %s", status, trim(body))
 	}
 
 	// A team_admin may not remove the last team_admin, which would leave the
