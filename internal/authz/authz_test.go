@@ -2,18 +2,13 @@ package authz
 
 import (
 	"context"
-	"fmt"
-	"net/url"
-	"os"
 	"testing"
-	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/sunqirui1987/xhub/internal/iam"
+	"github.com/sunqirui1987/xhub/internal/testsupport"
 )
 
-// fixture is the acceptance scenario from docs/permissions-plan.md section 13:
+// fixture is the acceptance scenario from docs/design/permissions-plan.md section 13:
 // two organizations, two teams each, two projects each, and five accounts.
 //
 //	orgA: teamA1 (alice admin, carol member)     teamA2 (dave admin)
@@ -46,43 +41,11 @@ func (f *fixture) sys() iam.Actor { return iam.Actor{ID: f.admin.ID, Kind: "sess
 
 func testDB(t *testing.T) *iam.DB {
 	t.Helper()
-	dsn := os.Getenv("XHUB_TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable"
-	}
-	u, err := url.Parse(dsn)
-	if err != nil {
-		t.Skipf("test database url unusable: %v", err)
-	}
-	schema := fmt.Sprintf("authz_test_%d", time.Now().UnixNano())
-	ctx := context.Background()
-
-	root, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		t.Skipf("no test database at %s: %v", dsn, err)
-	}
-	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		root.Close(ctx)
-		t.Fatalf("create schema: %v", err)
-	}
-	root.Close(ctx)
-
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, err := iam.Open(ctx, u.String())
+	db, err := iam.Open(context.Background(), testsupport.Postgres(t, "authz"))
 	if err != nil {
 		t.Fatalf("open iam: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = db.Close()
-		c, err := pgx.Connect(context.Background(), dsn)
-		if err != nil {
-			return
-		}
-		defer c.Close(context.Background())
-		_, _ = c.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-	})
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -314,7 +277,6 @@ func TestSessionMatrix(t *testing.T) {
 			Object{Type: ObjectKey, TeamID: f.teamA1, OwnerType: iam.OwnerService}, "allow"},
 		{"team admin rotates the team's service key", session(f.alice), ActionKeyWrite, Object{Type: ObjectKey, ID: f.aliceServiceKey.ID}, "allow"},
 
-
 		// ---- usage ----
 		{"member reads own usage", session(f.plain), ActionUsageRead, Object{Type: ObjectUsage, OwnerUserID: f.plain.ID}, "allow"},
 		{"member cannot read someone else's usage", session(f.plain), ActionUsageRead,
@@ -323,14 +285,14 @@ func TestSessionMatrix(t *testing.T) {
 			Object{Type: ObjectUsage, TeamID: f.teamA1, OwnerUserID: f.plain.ID}, "allow"},
 		{"team admin cannot read a foreign team's usage", session(f.alice), ActionUsageRead,
 			Object{Type: ObjectUsage, TeamID: f.teamB1, OwnerUserID: f.plain.ID}, "notfound"},
-		{"member reads team totals", session(f.plain), ActionUsageRead, Object{Type: ObjectUsage, TeamID: f.teamA1}, "allow"},
+		{"member cannot read team totals", session(f.plain), ActionUsageRead, Object{Type: ObjectUsage, TeamID: f.teamA1}, "forbidden"},
 		{"admin reads global usage", session(f.admin), ActionUsageRead, Object{Type: ObjectUsage}, "allow"},
 
 		// ---- logs: personal content is the owner's alone ----
 		{"owner reads own personal log", session(f.alice), ActionLogRead,
 			Object{Type: ObjectLog, ID: "r1", TeamID: f.teamA1, OwnerType: iam.OwnerPersonal, OwnerUserID: f.alice.ID}, "allow"},
-		{"team admin cannot read a member's personal log", session(f.alice), ActionLogRead,
-			Object{Type: ObjectLog, ID: "r2", TeamID: f.teamA1, OwnerType: iam.OwnerPersonal, OwnerUserID: f.carol.ID}, "notfound"},
+		{"team admin reads a member's log inside the team", session(f.alice), ActionLogRead,
+			Object{Type: ObjectLog, ID: "r2", TeamID: f.teamA1, OwnerType: iam.OwnerPersonal, OwnerUserID: f.carol.ID}, "allow"},
 		{"team admin reads the team's service log", session(f.alice), ActionLogRead,
 			Object{Type: ObjectLog, ID: "r3", TeamID: f.teamA1, OwnerType: iam.OwnerService}, "allow"},
 		{"member cannot read the team's service log", session(f.plain), ActionLogRead,

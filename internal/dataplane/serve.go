@@ -28,6 +28,23 @@ var (
 	errEmptyUpstream  = errors.New("empty upstream stream")
 )
 
+// dropPaused removes deployments the dashboard has paused. A paused model must
+// not keep serving while the switch says it is stopped.
+func dropPaused(pool []config.ModelEntry) ([]config.ModelEntry, int) {
+	active := make([]config.ModelEntry, 0, len(pool))
+	paused := 0
+	for _, dep := range pool {
+		if dep.ModelInfo != nil {
+			if blocked, _ := dep.ModelInfo["blocked"].(bool); blocked {
+				paused++
+				continue
+			}
+		}
+		active = append(active, dep)
+	}
+	return active, paused
+}
+
 // Serve runs one inference. It picks deployments with the routing strategy, encodes the upstream request, and tries the next deployment after a failure.
 // Serve calls EnforceIdentityLimits for the model allow-list, budget, and rate. When that check returns false the response is already written. Budget and parallel refusals from the hook engine are written here as 429.
 // After those checks, and before the cache and the upstream, extensions run in registration order. A refusal writes an error and returns.
@@ -111,8 +128,14 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		return
 	}
 	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
+	pool, paused := dropPaused(pool)
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
+		if paused > 0 {
+			logx.Error("process path=%s step=route model=%s reason=paused", r.URL.Path, alias)
+			httpx.WriteTypedError(w, r.URL.Path, 400, "model_paused", "model is paused")
+			return
+		}
 		logx.Error("model %s %s model not found: %s", r.Method, r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
@@ -270,7 +293,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	if !triedHTTP {
 		if lastProvider != "" || missingCredential {
 			logx.Error("dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
-			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "Authentication Error, No api key passed in.")
+			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "This model has no upstream API key configured.")
 			return
 		}
 		logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)

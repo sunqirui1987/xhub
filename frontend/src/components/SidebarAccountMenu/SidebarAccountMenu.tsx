@@ -1,7 +1,5 @@
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { useHealthReadinessDetails } from "@/app/(dashboard)/hooks/healthReadiness/useHealthReadinessDetails";
-import { useDisableShowNewBadge } from "@/app/(dashboard)/hooks/useDisableShowNewBadge";
-import { emitLocalStorageChange, removeLocalStorageItem, setLocalStorageItem } from "@/utils/localStorageUtils";
 import { navAccountDisplayName } from "@/components/Navbar/navDisplayName";
 import CopyButton from "@/components/shared/CopyButton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -9,10 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cva.config";
-import { ChevronsUpDown, Crown, IdCard, LogOut, Mail, ShieldCheck } from "lucide-react";
-import React from "react";
+import { ChevronsUpDown, IdCard, KeyRound, LogOut, Mail, ShieldCheck, Users, Building2 } from "lucide-react";
+import Link from "next/link";
+import React, { useState } from "react";
+import SetPasswordModal from "@/components/SetPasswordModal";
+import useIsOrgAdmin from "@/app/(dashboard)/hooks/useIsOrgAdmin";
+import { useSessionIdentity } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
+import { isProxyAdminRole } from "@/utils/roles";
 import { t } from "@/i18n";
 
 function hueFromString(seed: string): number {
@@ -77,29 +79,20 @@ interface SidebarAccountMenuProps {
 }
 
 const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, collapsed = false }) => {
-  const { userId, userEmail, userRoleLabel: userRole, premiumUser, accessToken } = useAuthorized();
+  const { userId, userEmail, userRoleLabel: userRole, accessToken } = useAuthorized();
+  const isOrgAdmin = useIsOrgAdmin();
+  const { data: identity } = useSessionIdentity();
+  const isTeamAdmin = Boolean(identity?.teams?.some((team) => team.role === "team_admin"));
+  const isPlatformAdmin = isProxyAdminRole(userRole);
+  const roleLabels = [
+    isPlatformAdmin ? t("Platform administrator") : null,
+    isOrgAdmin ? t("Organization administrator") : null,
+    isTeamAdmin ? t("Team management") : null,
+  ].filter((label): label is string => Boolean(label));
+  if (roleLabels.length === 0) roleLabels.push(t("Regular user"));
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const { data: healthData } = useHealthReadinessDetails(accessToken);
   const version = healthData?.litellm_version;
-  const disableShowNewBadge = useDisableShowNewBadge();
-
-  const setFlag = (key: string, checked: boolean) => {
-    if (checked) {
-      setLocalStorageItem(key, "true");
-    } else {
-      removeLocalStorageItem(key);
-    }
-    emitLocalStorageChange(key);
-  };
-
-  const toggles = [
-    {
-      key: "disableShowNewBadge",
-      label: t("Hide New Feature Indicators"),
-      ariaLabel: t("Toggle hide new feature indicators"),
-      checked: disableShowNewBadge,
-      onCheckedChange: (checked: boolean) => setFlag("disableShowNewBadge", checked),
-    },
-  ];
 
   const seed = userEmail || userId || "user";
   const initials = initialsFromIdentity(userEmail, userId);
@@ -108,6 +101,7 @@ const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, colla
   const triggerLabel = `Account menu — ${userRole ?? "Unknown role"} — signed in as ${userEmail || userId || "unknown"}`;
 
   return (
+    <>
     <Popover>
       <PopoverTrigger
         className={cn(
@@ -126,7 +120,7 @@ const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, colla
           <>
             <span className="min-w-0 flex-1 leading-tight">
               <span className="block truncate text-[13px] font-medium text-sidebar-foreground">{displayName}</span>
-              {userRole && <span className="block truncate text-[11px] text-muted-foreground">{userRole}</span>}
+              <span className="block truncate text-[11px] text-muted-foreground">{roleLabels.join(" · ")}</span>
             </span>
             <ChevronsUpDown size={16} strokeWidth={1.75} className="shrink-0 text-muted-foreground" aria-hidden />
           </>
@@ -154,21 +148,25 @@ const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, colla
         </div>
 
         <div className="flex flex-col px-3 py-2">
-          <InfoRow icon={<Crown className="size-[17px]" />} label={t("Tier")}>
-            {premiumUser ? (
-              <Badge variant="outline" className="gap-1 border-warning/30 bg-warning/10 text-warning">
-                <Crown />
-                {t("Premium")}
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="gap-1" title={t("Upgrade to Premium for advanced features")}>
-                <Crown />
-                {t("Standard")}
-              </Badge>
-            )}
-          </InfoRow>
           <InfoRow icon={<ShieldCheck className="size-[17px]" />} label={t("Role")}>
-            <Badge variant="secondary">{userRole}</Badge>
+            <span className="flex flex-wrap justify-end gap-1">
+              {isPlatformAdmin ? <Badge variant="secondary">{t("Platform administrator")}</Badge> : null}
+              {isOrgAdmin ? (
+                <Badge variant="secondary" render={<Link href="/organizations" />}>
+                  <Building2 className="size-3" />
+                  {t("Organization administrator")}
+                </Badge>
+              ) : null}
+              {isTeamAdmin ? (
+                <Badge variant="secondary" render={<Link href="/teams" />}>
+                  <Users className="size-3" />
+                  {t("Team management")}
+                </Badge>
+              ) : null}
+              {!isPlatformAdmin && !isOrgAdmin && !isTeamAdmin ? (
+                <Badge variant="secondary">{t("Regular user")}</Badge>
+              ) : null}
+            </span>
           </InfoRow>
           <InfoRow icon={<Mail className="size-[17px]" />} label={t("Email")}>
             <MonoValue value={userEmail} copyLabel="Copy email" />
@@ -180,19 +178,15 @@ const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, colla
 
         <Separator />
 
-        <div className="py-1">
-          {toggles.map((toggle) => (
-            <div key={toggle.key} className="flex h-[38px] items-center justify-between gap-3 px-3">
-              <span className="text-[13px] text-foreground">{toggle.label}</span>
-              <Switch
-                size="sm"
-                checked={toggle.checked}
-                onCheckedChange={toggle.onCheckedChange}
-                aria-label={toggle.ariaLabel}
-              />
-            </div>
-          ))}
-        </div>
+        <Button
+          variant="ghost"
+          onClick={() => setPasswordOpen(true)}
+          disabled={!userId}
+          className="h-[42px] w-full justify-start gap-2.5 rounded-none px-3 text-sm font-medium text-foreground"
+        >
+          <KeyRound className="size-[19px] text-muted-foreground" />
+          {t("Change account password")}
+        </Button>
 
         <Separator />
 
@@ -206,6 +200,13 @@ const SidebarAccountMenu: React.FC<SidebarAccountMenuProps> = ({ onLogout, colla
         </Button>
       </PopoverContent>
     </Popover>
+    <SetPasswordModal
+      open={passwordOpen}
+      onOpenChange={setPasswordOpen}
+      accessToken={accessToken}
+      user={userId ? { user_id: userId, user_email: userEmail } : null}
+    />
+    </>
   );
 };
 

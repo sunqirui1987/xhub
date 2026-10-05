@@ -43,7 +43,7 @@ test("every page route renders without a dashboard error", async ({ page }) => {
   });
   await loginAdmin(page);
   for (const item of pages) {
-    if (item.route === "/login" || item.route === "/onboarding" || item.route === "/mcp/oauth/callback") {
+    if (item.route === "/login" || item.route === "/mcp/oauth/callback") {
       continue;
     }
     if (item.route === "/usage") usageActivitySettled = false;
@@ -171,7 +171,50 @@ test("a created user can sign in with the initial password", async ({ page }) =>
   guard.assertOk();
   console.log("created resource name=e2e-claim@example.com");
   recordChain("created resource name=e2e-claim@example.com");
-  recordPage("/onboarding", "pass");
+  guard.assertOk();
+});
+
+// The reset link is gone: it pointed at an onboarding page whose claim endpoint
+// discarded the password, so a link could not change anything. An administrator
+// now sets the new password directly, and the account signs in with it.
+test("an administrator resets a password and the account signs in with it", async ({ page }) => {
+  test.setTimeout(120_000);
+  const guard = watchGateway(page);
+  await loginAdmin(page);
+  await page.goto(uiPath("/users"));
+
+  // A fresh address per run, so a leftover account from an earlier attempt
+  // cannot turn the create into a conflict that leaves the dialog open.
+  const email = `e2e-reset-${Date.now()}@example.com`;
+  await page.getByRole("button", { name: `+ ${t("pages.users.invite")}` }).click();
+  await page.getByLabel(t("pages.users.userEmail")).fill(email);
+  await page.getByLabel(t("Initial password")).fill("initial-pass");
+  await page.getByRole("dialog").getByRole("button", { name: t("pages.users.invite") }).click();
+  // The dialog closing is what says the create was accepted; the address also
+  // appears inside the form while it is open.
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText(email).first()).toBeVisible({ timeout: 15_000 });
+
+  // The row's own actions menu, so the click does not open whichever row is first.
+  await page
+    .getByRole("row", { name: new RegExp(email) })
+    .locator('[data-testid^="user-actions-"]')
+    .first()
+    .click();
+  await page.getByTestId("user-action-reset-password").click();
+  // Exact, because "New password" is a substring of "Confirm the new password".
+  await page.getByLabel(t("New password"), { exact: true }).fill("replaced-pass");
+  await page.getByLabel(t("Confirm the new password")).fill("replaced-pass");
+  await page.getByRole("button", { name: t("Save the new password") }).click();
+  await expect(page.getByText(t("Password updated. Their existing sessions have been signed out."))).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The whole point of the change: the password the administrator typed is the
+  // one the account signs in with. The old reset link answered 200 and changed
+  // nothing.
+  await login(page, email, "replaced-pass");
+  await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
   guard.assertOk();
 });
 
@@ -228,7 +271,7 @@ test("ui create is visible from the live gateway and chat returns e2e-ok", async
 test("live gateway catalog sweep", async () => {
   test.setTimeout(300_000);
   const bin = path.resolve(__dirname, "../../.e2e/livesweep");
-  const catalog = path.resolve(__dirname, "../../docs/catalog.json");
+  const catalog = path.resolve(__dirname, "../../docs/testdata/catalog.json");
   let out = "";
   try {
     out = execFileSync(bin, {

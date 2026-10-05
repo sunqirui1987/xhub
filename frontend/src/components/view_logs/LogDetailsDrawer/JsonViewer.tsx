@@ -20,7 +20,7 @@ export function JsonViewer({ data }: JsonViewerProps) {
 
   return (
     <div
-      className="bg-background"
+      className="max-w-full bg-background **:break-all **:whitespace-pre-wrap"
       style={{
         maxHeight: JSON_MAX_HEIGHT,
         overflow: "auto",

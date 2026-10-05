@@ -93,9 +93,7 @@ describe("(dashboard) Layout", () => {
     expect(screen.queryByTestId("loading-screen")).not.toBeInTheDocument();
   });
 
-  it("redirects an invitation link to the onboarding route instead of rendering the dashboard shell", async () => {
-    searchParamsValue = new URLSearchParams("invitation_id=abc123");
-
+  it("renders the dashboard shell for a signed-in user", async () => {
     render(
       <AuthProvider>
         <Layout>
@@ -106,11 +104,8 @@ describe("(dashboard) Layout", () => {
 
     pendingUiConfig.resolve();
 
-    await waitFor(() =>
-      expect(replaceMock).toHaveBeenCalledWith(expect.stringContaining("/onboarding?invitation_id=abc123")),
-    );
-    expect(screen.queryByTestId("page-content")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("dashboard-header")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("page-content")).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-header")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
   });
 });

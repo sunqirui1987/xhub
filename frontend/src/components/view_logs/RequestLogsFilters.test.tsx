@@ -8,6 +8,12 @@ import { ERROR_CODE_OPTIONS } from "./constants";
 import { LOG_FILTER_IDS } from "./log_filter_logic";
 import { RequestLogsFilters } from "./RequestLogsFilters";
 
+vi.mock("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity")>();
+  return { ...actual, useIsPlatformAdmin: () => true, useIsTeamAdminForAnyTeam: () => false };
+});
+vi.mock("@/app/(dashboard)/hooks/useIsOrgAdmin", () => ({ default: () => false }));
+
 vi.mock("@/app/(dashboard)/hooks/keys/useKeyAliases", () => ({
   useInfiniteKeyAliases: vi.fn(),
 }));

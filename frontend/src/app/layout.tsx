@@ -21,7 +21,6 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: translate(locale, "site.title"),
     description: translate(locale, "site.description"),
-    icons: { icon: "/get_favicon" },
   };
 }
 

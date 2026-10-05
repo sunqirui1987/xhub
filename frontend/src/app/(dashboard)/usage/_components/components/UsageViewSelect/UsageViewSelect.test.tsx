@@ -15,7 +15,7 @@ describe("UsageViewSelect", () => {
 
   it("should render", async () => {
     const user = userEvent.setup();
-    const { container } = render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" />);
+    const { container } = render(<UsageViewSelect value="my-usage" onChange={mockOnChange} userRole="Internal User" />);
 
     expect(screen.getByText(translate("en", "pages.usage.viewTitle"))).toBeInTheDocument();
     expect(screen.getByText(translate("en", "pages.usage.viewDescription"))).toBeInTheDocument();
@@ -40,7 +40,7 @@ describe("UsageViewSelect", () => {
       <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
     );
 
-    expect(offers(translate("en", "pages.usage.tag"))).toBe(true);
+    expect(offers(translate("en", "pages.usage.tag"))).toBe(false);
     void user;
   });
 
@@ -87,16 +87,20 @@ describe("UsageViewSelect", () => {
     void user;
   });
 
-  it.each(["pages.usage.team", "pages.usage.tag"] as const)(
-    "should keep %s available to an internal user",
-    async (key) => {
-    const user = userEvent.setup();
+  it("offers team and user filters to a team administrator, and not the organization", async () => {
     render(
-      <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
+      <UsageViewSelect value="team" onChange={mockOnChange} userRole="Internal User" isTeamAdmin />,
     );
+    expect(offers(translate("en", "pages.usage.team"))).toBe(true);
+    expect(offers(translate("en", "pages.usage.user"))).toBe(true);
+    expect(offers(translate("en", "pages.usage.organization"))).toBe(false);
+  });
 
-    expect(offers(translate("en", key))).toBe(true);
-    void user;
+  it("hides team and user filters from a plain member", async () => {
+    render(<UsageViewSelect value="my-usage" onChange={mockOnChange} userRole="Internal User" />);
+    expect(offers(translate("en", "pages.usage.team"))).toBe(false);
+    expect(offers(translate("en", "pages.usage.user"))).toBe(false);
+    expect(offers(translate("en", "pages.usage.yours"))).toBe(true);
   });
 
   it("shows only the localized view name on the closed control", async () => {

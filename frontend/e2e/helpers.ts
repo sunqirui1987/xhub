@@ -60,12 +60,32 @@ export async function stableGoto(page: Page, path: string) {
   throw last ?? new Error(`navigation to ${path} ended on ${page.url()}`);
 }
 
+/**
+ * clearConsoleSession drops the console's credentials so the next sign-in is a
+ * real one.
+ *
+ * The login page redirects a visitor who already holds a session, so signing in
+ * as somebody else without this lands back on the dashboard as the previous
+ * user and the login form is never rendered.
+ *
+ * Cookies go through the browser context rather than document.cookie, which is
+ * the same removal but works on a page that has not navigated anywhere yet.
+ * sessionStorage still needs a document, so it is cleared on the login page.
+ */
+export async function clearConsoleSession(page: Page) {
+  await page.context().clearCookies();
+  if (!page.url().startsWith("http")) return;
+  await page.evaluate(() => sessionStorage.clear()).catch(() => undefined);
+}
+
 export async function gotoLogin(page: Page) {
   await stableGoto(page, "/login");
+  await page.evaluate(() => sessionStorage.clear()).catch(() => undefined);
   await expect(page.getByRole("heading", { name: t("login.title") })).toBeVisible({ timeout: 20_000 });
 }
 
 export async function login(page: Page, username: string, password: string) {
+  await clearConsoleSession(page);
   await gotoLogin(page);
   await page.getByPlaceholder(t("login.usernamePlaceholder")).fill(username);
   await page.getByPlaceholder(t("login.passwordPlaceholder")).fill(password);
@@ -80,10 +100,10 @@ export async function loginAdmin(page: Page) {
 }
 
 export const NAV_GROUPS = [
-  t("nav.groups.gateway"),
+  t("nav.groups.mine"),
   t("nav.groups.observability"),
-  t("nav.groups.access"),
-  t("nav.groups.scope"),
+  t("nav.groups.team"),
+  t("nav.groups.platform"),
   t("nav.groups.settings"),
 ];
 
@@ -99,7 +119,6 @@ export const DASHBOARD_PAGES = [
   "/projects",
   "/users",
   "/organizations",
-  "/access-groups",
   "/router-settings",
   "/logging-and-alerts",
   "/cost-tracking",

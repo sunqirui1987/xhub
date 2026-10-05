@@ -20,6 +20,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+import useIsOrgAdmin from "@/app/(dashboard)/hooks/useIsOrgAdmin";
+import { useIsPlatformAdmin, useIsTeamAdminForAnyTeam } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import type { Team } from "../key_team_helpers/key_list";
 import { ERROR_CODE_OPTIONS } from "./constants";
 import { LOG_FILTER_IDS, type LogsWindow } from "./log_filter_logic";
@@ -320,14 +322,17 @@ interface RequestLogsFiltersProps {
 export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsFiltersProps) {
   const valueOf = (id: string): string => asString(get(id));
   const setter = (id: string) => (next: string | undefined) => set(id, next);
+  const canChooseScope = useIsPlatformAdmin() || useIsOrgAdmin() || useIsTeamAdminForAnyTeam();
 
   return (
     <>
-      <TeamFilterField
-        value={valueOf(LOG_FILTER_IDS.TEAM_ID)}
-        onChange={setter(LOG_FILTER_IDS.TEAM_ID)}
-        teams={teams}
-      />
+      {canChooseScope ? (
+        <TeamFilterField
+          value={valueOf(LOG_FILTER_IDS.TEAM_ID)}
+          onChange={setter(LOG_FILTER_IDS.TEAM_ID)}
+          teams={teams}
+        />
+      ) : null}
 
       <DataTableFilterField label={t("Status")}>
         <Select
@@ -375,11 +380,13 @@ export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsF
         teamId={valueOf(LOG_FILTER_IDS.TEAM_ID)}
       />
 
-      <UserIdFilterField
-        value={valueOf(LOG_FILTER_IDS.USER_ID)}
-        onChange={setter(LOG_FILTER_IDS.USER_ID)}
-        logsWindow={logsWindow}
-      />
+      {canChooseScope ? (
+        <UserIdFilterField
+          value={valueOf(LOG_FILTER_IDS.USER_ID)}
+          onChange={setter(LOG_FILTER_IDS.USER_ID)}
+          logsWindow={logsWindow}
+        />
+      ) : null}
 
       <EndUserFilterField
         value={valueOf(LOG_FILTER_IDS.END_USER)}

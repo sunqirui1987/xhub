@@ -26,8 +26,9 @@ const GuardrailSelector: React.FC<GuardrailSelectorProps> = ({ onChange, value, 
         if (response.guardrails) {
           setGuardrails(response.guardrails);
         }
-      } catch (error) {
-        console.error("Error fetching guardrails:", error);
+      } catch {
+        // Guardrail administration is not available to every account. The chat
+        // still works without a guardrail list.
       } finally {
         setLoading(false);
       }

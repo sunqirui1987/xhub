@@ -5,6 +5,7 @@ import ChatUI from "@/app/(dashboard)/playground/components/chat_ui/ChatUI";
 import CompareUI from "@/app/(dashboard)/playground/components/compareUI/CompareUI";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { fetchProxySettings } from "@/utils/proxyUtils";
+import { isProxyAdminRole } from "@/utils/roles";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
 
@@ -19,7 +20,7 @@ export default function PlaygroundPage() {
 
   useEffect(() => {
     const initializeProxySettings = async () => {
-      if (accessToken) {
+      if (accessToken && isProxyAdminRole(userRole)) {
         const settings = await fetchProxySettings(accessToken);
         if (settings) {
           setProxySettings({
@@ -31,7 +32,7 @@ export default function PlaygroundPage() {
     };
 
     initializeProxySettings();
-  }, [accessToken]);
+  }, [accessToken, userRole]);
 
   if (isViewOnly) {
     return (

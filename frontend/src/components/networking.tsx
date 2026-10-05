@@ -380,13 +380,17 @@ export const handleError = async (errorData: string | any) => {
     // 60000 milliseconds = 60 seconds
     // Convert errorData to string if it isn't already
     const errorString = typeof errorData === "string" ? errorData : JSON.stringify(errorData);
-    if (errorString.includes("Authentication Error - Expired Key")) {
+    const sessionEnded =
+      errorString.includes("Authentication Error - Expired Key") ||
+      errorString.includes("Authentication Error, No api key passed in.") ||
+      errorString.includes("Your session has ended");
+    if (sessionEnded) {
       toast.info(t("UI Session Expired. Logging out."));
       lastErrorTime = currentTime;
       clearTokenCookies();
       const browserLocation = getWindowLocation();
-      if (browserLocation) {
-        window.location.href = browserLocation.pathname;
+      if (browserLocation && !browserLocation.pathname.startsWith("/login")) {
+        window.location.href = "/login";
       }
     }
     lastErrorTime = currentTime;
@@ -743,21 +747,24 @@ export const budgetUpdateCall = async (
   }
 };
 
-export const invitationCreateCall = async (
-  accessToken: string,
-  userID: string, // Assuming formValues is an object
-) => {
+/**
+ * Sets another account's password.
+ *
+ * This replaces the invitation / reset-link pair. That flow minted an
+ * "invitation" that was never a real record and sent the person to an
+ * onboarding page whose claim endpoint discarded the password, so the link
+ * could not change anything. A reset is now a direct write: a platform
+ * administrator may reset any account, and a team or organization administrator
+ * the people they administer.
+ */
+export const userSetPasswordCall = async (accessToken: string, userId: string, password: string) => {
   try {
-    const data = await apiClient.post(`/invitation/new`, {
+    return await apiClient.post(`/user/set_password`, {
       accessToken,
-      body: {
-        user_id: userID, // Include formValues in the request body
-      },
+      body: { user_id: userId, password },
     });
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
-    console.error("Failed to create key:", error);
+    console.error("Failed to set the user's password:", error);
     throw error;
   }
 };
@@ -1641,60 +1648,6 @@ export const agentDailyActivityCall = async (
       agent_ids: agentIds,
     },
   });
-};
-
-export const getOnboardingCredentials = async (inviteUUID: string) => {
-  /**
-   * Get all models on proxy
-   */
-  try {
-    let url = proxyBaseUrl ? `${proxyBaseUrl}/onboarding/get_token` : `/onboarding/get_token`;
-    url += `?invite_link=${inviteUUID}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage = deriveErrorMessage(errorData);
-      handleError(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to create key:", error);
-    throw error;
-  }
-};
-
-export const claimOnboardingToken = async (
-  accessToken: string,
-  inviteUUID: string,
-  userID: string,
-  password: string,
-) => {
-  try {
-    const data = await apiClient.post(`/onboarding/claim_token`, {
-      accessToken,
-      body: {
-        invitation_link: inviteUUID,
-        user_id: userID,
-        password: password,
-      },
-    });
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to delete key:", error);
-    throw error;
-  }
 };
 
 export const regenerateKeyCall = async (accessToken: string, keyToRegenerate: string, formData: any) => {
@@ -3741,17 +3694,7 @@ export const latestHealthChecksCall = async (accessToken: string) => {
 };
 
 export const getProxyUISettings = async (accessToken: string) => {
-  /**
-   * Get all the models user has access to
-   */
-  try {
-    const data = await apiClient.get(`/sso/get/ui_settings`, { accessToken });
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to get callbacks:", error);
-    throw error;
-  }
+  return await apiClient.get(`/sso/get/ui_settings`, { accessToken });
 };
 
 export const getUISettings = async (accessToken: string) => {
@@ -3769,16 +3712,12 @@ export const getUISettings = async (accessToken: string) => {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage = deriveErrorMessage(errorData);
-      console.error("Failed to get UI settings:", errorMessage);
       return null;
     }
 
     const data = await response.json();
     return data;
-  } catch (error) {
-    console.error("Failed to get UI settings:", error);
+  } catch {
     return null;
   }
 };
@@ -3926,7 +3865,10 @@ export const getGuardrailsList = async (accessToken: string) => {
 
       return await fallbackResponse.json();
     } catch (fallbackError) {
-      console.error("Failed to get guardrails list:", fallbackError);
+      const message = fallbackError instanceof Error ? fallbackError.message : "";
+      if (message.includes("Not allowed to access management endpoints")) {
+        return { guardrails: [] };
+      }
       throw fallbackError;
     }
   }

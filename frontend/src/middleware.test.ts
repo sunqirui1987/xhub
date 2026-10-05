@@ -51,8 +51,7 @@ describe("dashboardAppPath", () => {
     expect(appPageWritePath("POST", "/guardrails/list")).toBeNull();
   });
 
-  it("renders onboarding and the oauth callback in Next", () => {
-    expect(dashboardAppPath("/ui/onboarding")).toBe("/onboarding");
+  it("renders the oauth callback in Next", () => {
     expect(dashboardAppPath("/mcp/oauth/callback")).toBe("/mcp/oauth/callback");
   });
 });

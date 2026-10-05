@@ -18,7 +18,7 @@ export interface ResetKeySpendResponse {
 
 export const resetKeySpend = async (accessToken: string, keyToken: string): Promise<ResetKeySpendResponse> => {
   const baseUrl = getProxyBaseUrl();
-  const url = `${baseUrl ? `${baseUrl}/key/${keyToken}/reset_spend` : `/key/${keyToken}/reset_spend`}`;
+  const url = `${baseUrl ? `${baseUrl}/key/${encodeURIComponent(keyToken)}/reset_spend` : `/key/${encodeURIComponent(keyToken)}/reset_spend`}`;
 
   const response = await fetch(url, {
     method: "POST",

@@ -281,6 +281,7 @@ const OrganizationInfoView: React.FC<OrganizationInfoProps> = ({
               }}
               onDelete={(member) => handleMemberDelete(member)}
               onAddMember={() => setIsAddMemberModalVisible(true)}
+              addLabel={t("Add organization administrator")}
               roleColumnTitle={t("Organization administrators")}
               extraColumns={orgExtraColumns}
               emptyText={t("No organization administrators")}

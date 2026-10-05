@@ -133,9 +133,26 @@ type UserInput struct {
 	Password  string
 	Role      string
 	MaxBudget *float64
+	// TeamID and TeamRole put the new account on a team in the same
+	// transaction that creates it. Creating an account and adding it to a team
+	// were two calls, and the second could fail on its own, which left a person
+	// who existed but could reach nothing.
+	TeamID   string
+	TeamRole string
+	// AdminOrgIDs makes the new account an organization administrator. It is
+	// the same relationship /organization/member_add grants, so an account that
+	// runs an organization can be set up without a second round trip.
+	AdminOrgIDs []string
 }
 
-// CreateUser inserts a platform account.
+// CreateUser inserts a platform account together with the memberships the
+// caller asked for, in one transaction.
+//
+// The memberships are written only after the account row exists, and a failure
+// to write any of them rolls the whole thing back: an account that came out of
+// a failed create would be one nobody intended to make. The budget is stored as
+// given; nil means no ceiling rather than zero, which is the difference between
+// "unlimited" and "cannot spend anything".
 func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, error) {
 	hash, err := hashPassword(in.Password)
 	if err != nil {
@@ -144,6 +161,12 @@ func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, er
 	if in.Role == "" {
 		in.Role = RoleUser
 	}
+	if in.TeamRole != "" && in.TeamRole != TeamAdmin && in.TeamRole != TeamMember {
+		return nil, ErrInvalid
+	}
+	if in.TeamRole != "" && in.TeamID == "" {
+		return nil, ErrInvalid
+	}
 	var out *User
 	err = db.tx(ctx, func(s *xorm.Session) error {
 		u := User{ID: newID(), Email: normEmail(in.Email), Name: in.Name, PasswordHash: hash,
@@ -151,8 +174,33 @@ func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, er
 		if _, err := s.Insert(&u); err != nil {
 			return err
 		}
+		if in.TeamID != "" {
+			if err := lockTeam(ctx, s, in.TeamID); err != nil {
+				return err
+			}
+			role := in.TeamRole
+			if role == "" {
+				role = TeamMember
+			}
+			if _, err := s.Insert(&TeamMembership{TeamID: in.TeamID, UserID: u.ID, Role: role}); err != nil {
+				return err
+			}
+		}
+		for _, orgID := range in.AdminOrgIDs {
+			if orgID == "" {
+				continue
+			}
+			if err := lockOrg(ctx, s, orgID); err != nil {
+				return err
+			}
+			if _, err := s.Insert(&OrganizationMembership{OrganizationID: orgID, UserID: u.ID, Role: OrgAdmin}); err != nil {
+				return err
+			}
+		}
 		out = &u
-		return writeAudit(s, by, Audit{Action: "user.create", ObjectType: "user", ObjectID: u.ID, Detail: map[string]any{"role": u.Role}})
+		return writeAudit(s, by, Audit{Action: "user.create", ObjectType: "user", ObjectID: u.ID,
+			Detail: map[string]any{"role": u.Role, "team_id": in.TeamID, "team_role": in.TeamRole,
+				"admin_organizations": len(in.AdminOrgIDs)}})
 	})
 	return out, err
 }

@@ -144,6 +144,13 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 			m.ModelInfo[k] = v
 		}
 	}
+	// The models page pauses with {blocked: true} on this same update route.
+	if blocked, ok := body["blocked"].(bool); ok {
+		if m.ModelInfo == nil {
+			m.ModelInfo = map[string]any{}
+		}
+		m.ModelInfo["blocked"] = blocked
+	}
 	m.ModelInfo["db_model"] = true
 	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())

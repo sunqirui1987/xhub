@@ -320,6 +320,7 @@ const (
 	CapTeamRead        = "teams.read"
 	CapTeamManage      = "teams.manage"
 	CapMembers         = "members.manage"
+	CapMemberPassword  = "members.password"
 	CapProjects        = "projects.manage"
 	CapServiceKeys     = "keys.service"
 	CapUsageTeam       = "usage.team"
@@ -349,6 +350,7 @@ func (g *Guard) Capabilities() []string {
 	if len(g.ManagedTeamIDs()) > 0 {
 		set[CapTeamManage] = true
 		set[CapMembers] = true
+		set[CapMemberPassword] = true
 		set[CapProjects] = true
 		set[CapServiceKeys] = true
 		set[CapUsageTeamDetail] = true
@@ -360,6 +362,7 @@ func (g *Guard) Capabilities() []string {
 		set[CapTeamRead] = true
 		set[CapTeamManage] = true
 		set[CapMembers] = true
+		set[CapMemberPassword] = true
 		set[CapProjects] = true
 	}
 	if g.PlatformAdmin() {
@@ -372,7 +375,7 @@ func (g *Guard) Capabilities() []string {
 		// write any team, so the reported capabilities have to say the same or
 		// the console hides pages the server would serve. Omitting these left a
 		// deployment's own administrator unable to open the teams page.
-		for _, c := range []string{CapTeamRead, CapUsageTeam, CapTeamManage, CapMembers,
+		for _, c := range []string{CapTeamRead, CapUsageTeam, CapTeamManage, CapMembers, CapMemberPassword,
 			CapProjects, CapServiceKeys, CapUsageTeamDetail} {
 			set[c] = true
 		}

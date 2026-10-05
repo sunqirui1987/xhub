@@ -32,7 +32,7 @@ test.describe("login", () => {
     await loginAdmin(page);
     const dir = process.env.E2E_SHOTS;
     if (dir) await page.screenshot({ path: `${dir}/ui-keys.png` });
-    await expect(page.getByText(t("nav.groups.gateway"), { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(t("nav.groups.mine"), { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: t("pages.apiKeys.create") })).toBeVisible();
   });
 

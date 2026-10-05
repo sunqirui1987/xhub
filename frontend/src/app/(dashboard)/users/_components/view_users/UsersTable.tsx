@@ -47,7 +47,7 @@ interface UsersTableProps {
   onRowSelectionChange: OnChangeFn<RowSelectionState>;
   onUserClick: (userId: string, openInEditMode?: boolean) => void;
   onDeleteUser: (user: UserInfo) => void;
-  onResetPassword: (userId: string) => void;
+  onResetPassword: (user: UserInfo) => void;
 }
 
 function filterLabels(): Record<string, string> {

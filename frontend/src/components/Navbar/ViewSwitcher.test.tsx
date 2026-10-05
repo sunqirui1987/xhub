@@ -49,7 +49,7 @@ describe("ViewSwitcher", () => {
     state.setMode.mockClear();
   });
 
-  it("still renders the selector with a disabled Chat hint when there are no plugins and chat is off", async () => {
+  it("opens Chat for everyone, without an administrator setting", async () => {
     render(<ViewSwitcher />);
 
     const button = screen.getByRole("button");
@@ -59,13 +59,12 @@ describe("ViewSwitcher", () => {
       fireEvent.click(button);
     });
     expect(await screen.findByText("Chat")).toBeInTheDocument();
-    expect(screen.getByText(/Admins can enable in Settings/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Admins can enable in Settings/i)).not.toBeInTheDocument();
 
     act(() => {
       fireEvent.click(screen.getByText("Chat"));
     });
-    expect(assignSpy).not.toHaveBeenCalled();
-    expect(state.setMode).not.toHaveBeenCalled();
+    expect(assignSpy).toHaveBeenCalledWith("/ui/chat");
   });
 
   it("labels the button from the active plugin and lists AI Gateway + each plugin", async () => {
@@ -135,8 +134,7 @@ describe("ViewSwitcher", () => {
     expect(assignSpy).toHaveBeenCalledWith("/ui/");
   });
 
-  it("shows Chat as a disabled, non-navigating entry with an admin hint when disabled", async () => {
-    state.enableChatUI = false;
+  it("keeps Chat clickable when other plugins are listed", async () => {
     state.plugins = [{ name: "obs", display_name: "Observability", url: "http://localhost:9000" }];
     render(<ViewSwitcher />);
 
@@ -144,12 +142,9 @@ describe("ViewSwitcher", () => {
       fireEvent.click(screen.getByRole("button"));
     });
     expect(await screen.findByText("Observability")).toBeInTheDocument();
-    expect(screen.getByText("Chat")).toBeInTheDocument();
-    expect(screen.getByText(/Admins can enable in Settings/i)).toBeInTheDocument();
-
     act(() => {
       fireEvent.click(screen.getByText("Chat"));
     });
-    expect(assignSpy).not.toHaveBeenCalled();
+    expect(assignSpy).toHaveBeenCalledWith("/ui/chat");
   });
 });

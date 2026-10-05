@@ -30,8 +30,23 @@ export const BUDGET_DURATION_OPTIONS = [
   { value: "30d", label: t("monthly") },
 ] as const;
 
+/** What the legacy update route actually accepts: the schema's fields plus the id. */
+type OrgUpdateBody = OrgPatchBody & { organization_id: string };
+
+/**
+ * The generated types declare the legacy PATCH /organization/update operation
+ * with no request body, but its handler reads one — that route is how this form
+ * has always saved. Only the operation's declaration disagrees, so the body is
+ * re-typed here against the schema's own field type and the rest keeps its
+ * checking.
+ */
+const patchOrganization = fetchClient.PATCH as unknown as (
+  path: "/organization/update",
+  options: { body: OrgUpdateBody },
+) => Promise<{ data?: unknown }>;
+
 const defaultPatchOrganization = async (organizationId: string, body: OrgPatchBody): Promise<unknown> => {
-  const { data } = await fetchClient.PATCH("/organization/update", {
+  const { data } = await patchOrganization("/organization/update", {
     body: { organization_id: organizationId, ...body },
   });
   return data;

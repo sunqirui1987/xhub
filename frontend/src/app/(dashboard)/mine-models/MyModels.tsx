@@ -21,7 +21,20 @@ function priceText(value: number | null): string {
 }
 
 function categoryLabel(category: string): string {
-  return category === "other" ? t("Other") : category;
+  const labels: Record<string, string> = {
+    chat: t("Chat"),
+    embedding: t("Embeddings"),
+    embeddings: t("Embeddings"),
+    image: t("Image"),
+    image_generation: t("Image"),
+    audio: t("Audio"),
+    speech: t("Speech"),
+    transcription: t("Transcription"),
+    rerank: t("Rerank"),
+    moderation: t("Moderation"),
+    other: t("Other"),
+  };
+  return labels[category] ?? category;
 }
 
 function ModelCard({ model }: { model: MyModelCard }) {
@@ -287,10 +300,23 @@ export function MyModels({
               {t("myModels.loading")}
             </div>
           )}
-          {!isLoading && !isError && visible.length > 0 && (
-            <div className="grid items-stretch gap-4 md:grid-cols-2">
-              {visible.map((model) => (
-                <ModelCard key={model.id} model={model} />
+          {!isLoading && visible.length > 0 && (
+            <div className="space-y-10">
+              {Array.from(
+                visible.reduce((groups, model) => {
+                  const key = model.category || "other";
+                  groups.set(key, [...(groups.get(key) ?? []), model]);
+                  return groups;
+                }, new Map<string, MyModelCard[]>()),
+              ).map(([group, items]) => (
+                <section key={group} aria-label={categoryLabel(group)}>
+                  <h2 className="mb-4 text-sm font-semibold tracking-wide text-muted-foreground">{categoryLabel(group)}</h2>
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {items.map((model) => (
+                      <ModelCard key={model.id} model={model} />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           )}

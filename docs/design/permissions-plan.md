@@ -1,6 +1,6 @@
 # 用户、团队与权限重构方案（重建版）
 
-状态：已确认，实施中。本文替代旧草稿；与 `docs/02-identity-and-authorization.md` 冲突时以本文为准。
+状态：已确认，实施中。本文替代旧草稿；与 `docs/design/02-identity-and-authorization.md` 冲突时以本文为准。
 
 ## 一、目标与原则
 
@@ -181,7 +181,7 @@ func TeamFilter(ctx, actor, action) SQLScope       // 列表查询注入 WHERE
 5. 访问组与模型：授权求交集，目录与推理共用一个函数。
 6. 用量、日志、预算：写入快照、汇总表、范围查询与导出、日志查看审计。
 7. 前端改造。
-8. 清理：删除旧接口、旧角色、死代码；修复 `logx` 测试；更新 `docs/02-identity-and-authorization.md`。
+8. 清理：删除旧接口、旧角色、死代码；修复 `logx` 测试；更新 `docs/design/02-identity-and-authorization.md`。
 
 ## 十二、发布（全库重建）
 

@@ -25,7 +25,6 @@ describe("getChatRoutes under server_root_path", () => {
 
     const routes = getChatRoutes();
     expect(routes.chats).toBe("/gw/ui/chat");
-    expect(routes.integrations).toBe("/gw/ui/chat/integrations");
     expect(routes.credentials).toBe("/gw/ui/chat/credentials");
     expect(routes.apiKeys).toBe("/gw/ui/chat/api-keys");
     expect(routes.logs).toBe("/gw/ui/chat/logs");
@@ -39,6 +38,5 @@ describe("getChatRoutes under server_root_path", () => {
     setServerRootPath("/");
 
     expect(getChatRoutes().chats).toBe("/ui/chat");
-    expect(getChatRoutes().integrations).toBe("/ui/chat/integrations");
   });
 });

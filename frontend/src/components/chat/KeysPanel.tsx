@@ -131,7 +131,7 @@ const KeysPanel: React.FC<Props> = ({ accessToken, userId, premiumUser }) => {
       if (formState.duration) payload.duration = formState.duration;
       if (formState.grace_period) payload.grace_period = formState.grace_period;
 
-      const response = await regenerateKeyCall(accessToken, rotateTarget.token || rotateTarget.token_id, payload);
+      const response = await regenerateKeyCall(accessToken, rotateTarget.token_id || rotateTarget.token, payload);
       setRegeneratedKey(response.key);
       toast.success(t("Key rotated successfully"));
       queryClient.invalidateQueries({ queryKey: [KEYS_QUERY_KEY] });

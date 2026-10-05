@@ -483,6 +483,42 @@ func (db *DB) ListVisibleTeams(ctx context.Context, userID, organizationID strin
 	return out, nil
 }
 
+// OversightTeamIDs lists the teams whose contents this person may see in full:
+// teams they administer, and every team in an organization they administer.
+// Membership alone does not put a team here.
+func (db *DB) OversightTeamIDs(ctx context.Context, userID string) ([]string, error) {
+	if userID == "" {
+		return nil, nil
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []struct {
+		ID string `xorm:"'id'"`
+	}
+	err := s.SQL(`SELECT team_id AS id FROM team_members WHERE user_id = ? AND role = ?
+		UNION
+		SELECT id FROM teams WHERE organization_id IN (
+			SELECT organization_id FROM organization_members WHERE user_id = ? AND role = ?
+		)`, userID, TeamAdmin, userID, OrgAdmin).Find(&rows)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]string, 0, len(rows))
+	seen := map[string]struct{}{}
+	for _, r := range rows {
+		if r.ID == "" {
+			continue
+		}
+		if _, ok := seen[r.ID]; ok {
+			continue
+		}
+		seen[r.ID] = struct{}{}
+		out = append(out, r.ID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // TeamIDsByOrg lists every team that belongs to one of the organizations.
 func (db *DB) TeamIDsByOrg(ctx context.Context, orgIDs []string) ([]string, error) {
 	if len(orgIDs) == 0 {

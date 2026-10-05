@@ -565,12 +565,22 @@ func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, err erro
 	case authz.IsInternal(err):
 		httpx.WriteTypedError(w, r.URL.Path, 500, "internal", "identity lookup failed")
 	case authz.IsUnauthenticated(err):
-		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), "Authentication Error, No api key passed in.")
+		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), authFailureMessage(r))
 	case authz.IsNotFound(err):
-		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), "Authentication Error, No api key passed in.")
+		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), authFailureMessage(r))
 	default:
-		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), "Authentication Error, No api key passed in.")
+		httpx.WriteTypedError(w, r.URL.Path, 401, auth.Code(err), authFailureMessage(r))
 	}
+}
+
+// authFailureMessage distinguishes a request that brought no credential from
+// one whose credential is no longer accepted. The console treats the second
+// as a finished session and sends the person to sign in again.
+func authFailureMessage(r *http.Request) string {
+	if auth.APIKeyFrom(r) != "" {
+		return "Your session has ended. Sign in again."
+	}
+	return "Authentication Error, No api key passed in."
 }
 
 // writeAuthzError maps an authorization decision onto a response. It never

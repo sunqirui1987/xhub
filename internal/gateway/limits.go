@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
@@ -55,11 +57,30 @@ func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error
 				logx.Error("credential invalid name=%s reason=missing credential_values", name)
 				return dep, errCredentialInvalid
 			}
+			fillBuiltinKey(name, values)
 		}
 	}
 	out := dep
 	out.LiteLLMParams = llm.Hydrate(dep.LiteLLMParams, values)
 	return out, nil
+}
+
+// fillBuiltinKey uses the provider environment variable when the stored key is blank.
+// A first install with no key writes an empty credential and then never reads the
+// environment again. The call still picks up QINIU_API_KEY or FENNOAI_API_KEY.
+func fillBuiltinKey(name string, values map[string]any) {
+	if text, _ := values["api_key"].(string); strings.TrimSpace(text) != "" {
+		return
+	}
+	for _, spec := range modelaccess.Builtins() {
+		if spec.ID != name {
+			continue
+		}
+		if key := strings.TrimSpace(os.Getenv(spec.KeyEnv)); key != "" {
+			values["api_key"] = key
+		}
+		return
+	}
 }
 
 // enforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false.

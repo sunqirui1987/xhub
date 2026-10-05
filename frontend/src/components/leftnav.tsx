@@ -141,14 +141,16 @@ const menuGroups: MenuGroup[] = [
     ],
   },
   {
-    // The team's own corner. A member sees the teams they belong to and can
-    // read the projects and grants inside them; a team administrator manages
-    // those; a platform administrator sees all of it. One menu for the whole
-    // scope, because the pages are the same pages and only the reach differs.
+    // Teams, projects, organizations and users are the same pages for every
+    // signed-in person. The server narrows each list: a platform administrator
+    // sees all of it, an organization administrator the organization, a team
+    // administrator the team, and everyone else only what is theirs.
     groupLabel: "nav.groups.team",
     items: [
       { key: "teams", page: "teams", label: "nav.teams", icon: <Users {...ICON} /> },
       { key: "projects", page: "projects", label: "nav.projects", icon: <Folder {...ICON} />, beta: true },
+      { key: "organizations", page: "organizations", label: "nav.organizations", icon: <Building2 {...ICON} /> },
+      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} /> },
     ],
   },
   {
@@ -158,8 +160,6 @@ const menuGroups: MenuGroup[] = [
     groupLabel: "nav.groups.platform",
     requiresPlatformAdmin: true,
     items: [
-      { key: "organizations", page: "organizations", label: "nav.organizations", icon: <Building2 {...ICON} /> },
-      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} /> },
       {
         key: "models",
         page: "models",
@@ -288,21 +288,21 @@ const Sidebar_: React.FC<SidebarProps> = ({
   // exactly when the server would serve it.
   const { data: identity } = useSessionIdentity();
   const isPlatformAdmin = Boolean(identity?.capabilities?.includes(CAPABILITIES.platformAdmin));
-  const isTeamMember = Boolean(identity?.teams?.length);
+  const isTeamAdmin = Boolean(identity?.teams?.some((team) => team.role === "team_admin"));
+  const showOrganizations = isPlatformAdmin || isOrgAdmin;
+  const showTeams = isPlatformAdmin || isOrgAdmin || isTeamAdmin;
+  const showUsers = showTeams;
 
   const filterItems = (items: MenuItem[]): MenuItem[] =>
     items
       .map((item) => ({ ...item, children: item.children ? filterItems(item.children) : undefined }))
       .filter((item) => {
-        // A parent whose children were all filtered out renders as a leaf link
-        // to its own page id, which is not a real route. Drop it instead.
         if (item.children && item.children.length === 0) return false;
-        // Projects are a team-scoped feature and the deployment can turn the UI
-        // off; when it is off the route still exists but nothing links to it.
-        if (item.key === "projects" && !enableProjectsUI) return false;
-        // The team's own scope: a member reads it, a team administrator manages
-        // it, a platform administrator sees every team.
-        if (item.key === "teams") return isPlatformAdmin || isTeamMember;
+        if (item.key === "projects" && (!enableProjectsUI || !isPlatformAdmin)) return false;
+        if (item.key === "organizations") return showOrganizations;
+        if (item.key === "teams") return showTeams;
+        if (item.key === "users") return showUsers;
+        if (item.key === "guardrails-monitor") return isPlatformAdmin;
         return true;
       });
 

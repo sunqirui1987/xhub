@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -17,6 +18,11 @@ const (
 	ActionUserWrite  Action = "user.write"
 	ActionUserCreate Action = "user.create"
 	ActionUserDelete Action = "user.delete"
+	// ActionUserPassword is setting somebody else's password. It is separate
+	// from ActionUserWrite because the people who hold it are not the same: a
+	// team administrator resets a member's password without gaining the power
+	// to change a role or a budget.
+	ActionUserPassword Action = "user.password"
 
 	// Organizations.
 	ActionOrgRead  Action = "org.read"
@@ -406,6 +412,8 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 	// ---------- account ----------
 	case ActionUserRead, ActionUserWrite, ActionUserCreate, ActionUserDelete:
 		return g.decideUser(action, obj, admin)
+	case ActionUserPassword:
+		return g.decideUserPassword(ctx, obj, admin)
 
 	// ---------- organizations ----------
 	case ActionOrgRead:
@@ -534,6 +542,81 @@ func (g *Guard) decideUser(action Action, obj Object, admin bool) error {
 	}
 }
 
+// decideUserPassword governs setting somebody else's password.
+//
+// It is deliberately narrower than ActionUserWrite and it is not the same as
+// reading an account. A team administrator may hand a member a new password,
+// because that is the ordinary support case: the person forgot theirs and there
+// is no mail server to send a link through. What they may not do is use that
+// power to climb: an account that runs the platform, or that administers an
+// organization, is out of a team administrator's reach no matter which team
+// they share, because taking over such an account would hand over everything it
+// reaches. A platform administrator has no such limit.
+//
+// The check runs against live memberships on both sides. Nothing is read from
+// the request, so a caller cannot name a team to widen their own reach.
+func (g *Guard) decideUserPassword(ctx context.Context, obj Object, admin bool) error {
+	if obj.OwnerUserID == "" {
+		return ErrNotFound
+	}
+	// A person may replace their own password. That is the account menu, not
+	// user management.
+	if obj.OwnerUserID == g.actor.UserID {
+		return nil
+	}
+	if admin {
+		return nil
+	}
+	if g.z == nil || g.z.db == nil {
+		return &InternalError{Err: errors.New("authz: no store for a password decision")}
+	}
+	target, err := g.z.db.GetUser(ctx, obj.OwnerUserID)
+	if err != nil {
+		return notFoundOrInternal(err)
+	}
+	// A team administrator setting a platform administrator's password would
+	// own the deployment. Only an administrator may touch one, which was
+	// already answered above.
+	if target.Role == iam.RoleAdmin {
+		return ErrForbidden
+	}
+	teams, err := g.z.db.MemberTeams(ctx, target.ID)
+	if err != nil {
+		return &InternalError{Err: err}
+	}
+	// The target must sit inside something the actor actually runs: a team they
+	// administer, or any team of an organization they administer.
+	reached := false
+	for _, m := range teams {
+		if g.TeamAdminOf(m.TeamID) || g.OrgAdminOf(m.OrganizationID) {
+			reached = true
+			break
+		}
+	}
+	if !reached {
+		// The answer is the same whether the account is a stranger or an
+		// account the actor merely shares a team with as a peer, so this cannot
+		// be used to work out who is in which team.
+		return ErrNotFound
+	}
+	// An organization administrator is not a team administrator's to reset, in
+	// any organization. Their reach is the org's whole inventory, which is more
+	// than the team the actor runs.
+	admins, err := g.z.db.AdminOrgs(ctx, target.ID)
+	if err != nil {
+		return &InternalError{Err: err}
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	for _, orgID := range admins {
+		if g.OrgAdminOf(orgID) {
+			return nil
+		}
+	}
+	return ErrForbidden
+}
+
 func (g *Guard) decideTeamRead(obj Object, admin bool) error {
 	if admin || g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
 		return nil
@@ -601,41 +684,41 @@ func (g *Guard) decideKeyRead(obj Object, admin bool) error {
 // decideUsageRead governs summary reads. Detail scoping is applied in SQL by
 // UsageScope; this decides whether the dimension may be requested at all.
 func (g *Guard) decideUsageRead(obj Object, admin bool) error {
-	if admin {
+	if admin || g.oversees(obj.TeamID, obj.OrgID) {
 		return nil
 	}
-	if obj.TeamID == "" {
-		// Personal usage.
+	// A person reads their own rows. A team total, or another person's rows,
+	// stays with the team administrator, the organization administrator, or
+	// the platform administrator.
+	if obj.OwnerUserID != "" && obj.OwnerUserID == g.actor.UserID {
 		return nil
 	}
-	if !g.InTeam(obj.TeamID) {
+	if obj.TeamID == "" && obj.OwnerUserID == "" {
+		return nil
+	}
+	if obj.TeamID != "" && !g.InTeam(obj.TeamID) && !g.OrgAdminOf(obj.OrgID) {
 		return ErrNotFound
 	}
-	// A member sees team totals only; per-member breakdowns are a team
-	// administrator's view.
-	if obj.OwnerUserID != "" && obj.OwnerUserID != g.actor.UserID {
-		if !g.TeamAdminOf(obj.TeamID) {
-			return ErrForbidden
-		}
-	}
-	return nil
+	return ErrForbidden
 }
 
 func (g *Guard) decideLogRead(obj Object, admin bool) error {
-	if admin {
+	if admin || g.oversees(obj.TeamID, obj.OrgID) {
 		return nil
 	}
-	// Personal request logs are the owner's alone.
-	if obj.OwnerType == iam.OwnerPersonal && obj.OwnerUserID != "" {
-		if obj.OwnerUserID == g.actor.UserID {
-			return nil
-		}
-		return ErrNotFound
-	}
-	if obj.TeamID != "" && g.TeamAdminOf(obj.TeamID) && obj.OwnerType == iam.OwnerService {
+	if obj.OwnerType == iam.OwnerPersonal && obj.OwnerUserID == g.actor.UserID {
 		return nil
 	}
 	return ErrNotFound
+}
+
+// oversees reports whether the actor sees every row under this team: they
+// administer the team, or they administer the organization that owns it.
+func (g *Guard) oversees(teamID, orgID string) bool {
+	if teamID != "" && g.TeamAdminOf(teamID) {
+		return true
+	}
+	return g.OrgAdminOf(orgID)
 }
 
 func (g *Guard) decideInfer(obj Object) error {
@@ -768,22 +851,24 @@ func (g *Guard) UsageScope(ctx context.Context, teamID string) (*Scope, error) {
 		}
 		return &Scope{Cond: builder.Eq{"key_id": g.actor.KeyID}, Kind: ScopeOwnUsage, KeyIDs: []string{g.actor.KeyID}}, nil
 	}
-	if teamID != "" {
-		if !g.InTeam(teamID) {
-			return nil, ErrNotFound
-		}
-		return &Scope{Cond: builder.Eq{"team_id": teamID}, Kind: ScopeTeamUsage, TeamIDs: []string{teamID}}, nil
-	}
-	// The whole visible set: the actor's own rows plus everything in the teams
-	// they belong to. Spend is attributed by the snapshot on the event, so a
-	// member sees their team's total without seeing other members' identities.
-	teams := g.VisibleTeamIDs()
-	if len(teams) == 0 {
-		return &Scope{Cond: builder.Eq{"user_id": g.actor.UserID}, Kind: ScopeOwnUsage, UserID: g.actor.UserID}, nil
+	watch, err := g.oversightTeamIDs(ctx)
+	if err != nil {
+		return nil, err
 	}
 	own := builder.Eq{"user_id": g.actor.UserID}
-	inTeams := builder.In("team_id", teams)
-	return &Scope{Cond: own.Or(inTeams), Kind: ScopeTeamUsage, TeamIDs: teams, UserID: g.actor.UserID}, nil
+	if teamID != "" {
+		if containsID(watch, teamID) {
+			return &Scope{Cond: builder.Eq{"team_id": teamID}, Kind: ScopeTeamUsage, TeamIDs: []string{teamID}}, nil
+		}
+		if g.InTeam(teamID) {
+			return &Scope{Cond: own.And(builder.Eq{"team_id": teamID}), Kind: ScopeOwnUsage, TeamIDs: []string{teamID}, UserID: g.actor.UserID}, nil
+		}
+		return nil, ErrNotFound
+	}
+	if len(watch) == 0 {
+		return &Scope{Cond: own, Kind: ScopeOwnUsage, UserID: g.actor.UserID}, nil
+	}
+	return &Scope{Cond: own.Or(builder.In("team_id", watch)), Kind: ScopeTeamUsage, TeamIDs: watch, UserID: g.actor.UserID}, nil
 }
 
 // LogsScope returns the request-log scope for an actor: own personal logs, plus
@@ -806,20 +891,37 @@ func (g *Guard) LogsScope(ctx context.Context) (*Scope, error) {
 		return &Scope{Cond: builder.Eq{"key_id": g.actor.KeyID}, Kind: ScopeOwnLogs, KeyIDs: []string{g.actor.KeyID}}, nil
 	}
 	own := builder.Eq{"owner_type": iam.OwnerPersonal, "user_id": g.actor.UserID}
-	managed := g.ManagedTeamIDs()
-	if len(managed) == 0 {
+	watch, err := g.oversightTeamIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(watch) == 0 {
 		return &Scope{Cond: own, Kind: ScopeOwnLogs, UserID: g.actor.UserID,
 			OwnerTypes: []string{iam.OwnerPersonal}}, nil
 	}
-	service := builder.Cond(builder.Eq{"owner_type": iam.OwnerService}).And(builder.In("team_id", managed))
 	return &Scope{
-		Cond:        own.Or(service),
-		Kind:        ScopeTeamLogs,
-		TeamIDs:     managed,
-		UserID:      g.actor.UserID,
-		OwnerTypes:  []string{iam.OwnerPersonal, iam.OwnerService},
-		ServiceOnly: true,
+		Cond:       own.Or(builder.In("team_id", watch)),
+		Kind:       ScopeTeamLogs,
+		TeamIDs:    watch,
+		UserID:     g.actor.UserID,
+		OwnerTypes: []string{iam.OwnerPersonal, iam.OwnerService},
 	}, nil
+}
+
+func (g *Guard) oversightTeamIDs(ctx context.Context) ([]string, error) {
+	if g.z == nil || g.z.db == nil || g.actor.UserID == "" {
+		return nil, nil
+	}
+	return g.z.db.OversightTeamIDs(ctx, g.actor.UserID)
+}
+
+func containsID(ids []string, id string) bool {
+	for _, cur := range ids {
+		if cur == id {
+			return true
+		}
+	}
+	return false
 }
 
 // TeamFilter returns the team-ID filter for team-scoped listings such as

@@ -20,7 +20,6 @@ vi.mock("@/components/networking", () => ({
     User: { ui_label: "User" },
   }),
   modelAvailableCall: vi.fn().mockResolvedValue({ data: [] }),
-  invitationCreateCall: vi.fn().mockResolvedValue({}),
   userUpdateUserCall: vi.fn().mockResolvedValue({}),
   getProxyBaseUrl: vi.fn().mockReturnValue("http://localhost:4000"),
   getProxyUISettings: vi.fn().mockResolvedValue({
@@ -186,7 +185,7 @@ describe("ViewUserDashboard", () => {
     expect(screen.queryByText("test@example.com")).not.toBeInTheDocument();
   });
 
-  it("should open the detail view in edit mode from the row actions menu", async () => {
+  it("does not offer an edit action in the row menu", async () => {
     const user = userEvent.setup();
     renderDashboard();
 
@@ -195,9 +194,7 @@ describe("ViewUserDashboard", () => {
     });
 
     await user.click(screen.getByTestId("user-actions-user-1"));
-    await user.click(await screen.findByTestId("user-action-edit"));
-
-    expect(await screen.findByTestId("user-info-view")).toHaveTextContent("detail:user-1:true");
+    expect(screen.queryByTestId("user-action-edit")).not.toBeInTheDocument();
   });
 
   describe("bulk edit selection", () => {

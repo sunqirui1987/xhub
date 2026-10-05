@@ -94,14 +94,28 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
+function prettyText(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.stringify(JSON.parse(trimmed), null, 2);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  return JSON.stringify(value, null, 2);
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   if (value == null || value === "") {
     return <p className="m-0 text-xs text-muted-foreground">{t("Not available")}</p>;
   }
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
-    <pre className="m-0 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/50 p-3 font-mono text-xs">
-      {text}
+    <pre className="m-0 h-64 w-full min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/50 p-3 font-mono text-xs">
+      {prettyText(value)}
     </pre>
   );
 }
@@ -194,7 +208,7 @@ function LogDetailDialog({
 }) {
   return (
     <Dialog open={!!log} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("Request details")}</DialogTitle>
           <DialogDescription className="break-all font-mono text-xs">{log?.request_id}</DialogDescription>
@@ -223,7 +237,7 @@ function LogDetailDialog({
               </div>
             </div>
 
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 flex-col gap-1.5">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Request")}</div>
               {isLoading ? (
                 <Skeleton className="h-16 w-full" />
@@ -231,7 +245,7 @@ function LogDetailDialog({
                 <JsonBlock value={details?.proxy_server_request ?? details?.messages} />
               )}
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 flex-col gap-1.5">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Response")}</div>
               {isLoading ? <Skeleton className="h-16 w-full" /> : <JsonBlock value={details?.response} />}
             </div>

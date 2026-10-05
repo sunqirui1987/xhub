@@ -10,11 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   getPossibleUserRoles,
   getProxyBaseUrl,
-  invitationCreateCall,
   userListCall,
   UserListResponse,
 } from "@/components/networking";
-import OnboardingModal, { InvitationLink } from "@/components/onboarding_link";
+import SetPasswordModal from "@/components/SetPasswordModal";
 
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
 import { accountRoleKind } from "@/utils/iamRoles";
@@ -79,8 +78,8 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeletingUser, setIsDeletingUser] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserInfo | null>(null);
-  const [isInvitationLinkModalVisible, setIsInvitationLinkModalVisible] = useState(false);
-  const [invitationLinkData, setInvitationLinkData] = useState<InvitationLink | null>(null);
+  const [isSetPasswordModalVisible, setIsSetPasswordModalVisible] = useState(false);
+  const [passwordUser, setPasswordUser] = useState<UserInfo | null>(null);
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [userModels, setUserModels] = useState<string[]>([]);
 
@@ -156,23 +155,10 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
     setIsDeleteModalOpen(true);
   }, []);
 
-  const handleResetPassword = useCallback(
-    async (userId: string) => {
-      if (!accessToken) {
-        toast.fromError(t("Access token not found"));
-        return;
-      }
-      try {
-        toast.success(t("Generating password reset link..."));
-        const data = await invitationCreateCall(accessToken, userId);
-        setInvitationLinkData(data);
-        setIsInvitationLinkModalVisible(true);
-      } catch (error) {
-        toast.fromError(t("Failed to generate password reset link"));
-      }
-    },
-    [accessToken],
-  );
+  const handleResetPassword = useCallback((user: UserInfo) => {
+    setPasswordUser(user);
+    setIsSetPasswordModalVisible(true);
+  }, []);
 
   const confirmDelete = async () => {
     if (userToDelete && accessToken) {
@@ -391,12 +377,12 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
         confirmLoading={isDeletingUser}
       />
 
-      <OnboardingModal
-        isInvitationLinkModalVisible={isInvitationLinkModalVisible}
-        setIsInvitationLinkModalVisible={setIsInvitationLinkModalVisible}
-        baseUrl={baseUrl || ""}
-        invitationLinkData={invitationLinkData}
-        modalType="resetPassword"
+      <SetPasswordModal
+        open={isSetPasswordModalVisible}
+        onOpenChange={setIsSetPasswordModalVisible}
+        accessToken={accessToken}
+        user={passwordUser}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["userList"] })}
       />
 
       <BulkEditUserModal

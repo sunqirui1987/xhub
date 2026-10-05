@@ -32,6 +32,9 @@ router_settings:
   timeout: 15
 general_settings:
   master_key: ${MASTER}
+  admin_email: admin
+  admin_name: admin
+  admin_password: ${MASTER}
   database_url: "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable&search_path=e2e"
 YAML
 

@@ -6,6 +6,13 @@ test:
 run:
 	go run ./cmd/gateway -config configs/config.yaml -addr :4000
 
+# Optional verification tenant. Not part of `make run`.
+seed:
+	go run ./cmd/seed -config configs/config.yaml
+
+verify-seed:
+	go run ./cmd/seed -config configs/config.yaml -verify -gateway http://127.0.0.1:4000
+
 ui:
 	cd frontend && npm install && npm run dev
 

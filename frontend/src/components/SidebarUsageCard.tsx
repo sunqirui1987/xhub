@@ -46,10 +46,14 @@ const UsageMeter = ({ label, used, total }: MeterData) => {
 
 type RemainingUsage = NonNullable<Awaited<ReturnType<typeof getRemainingUsers>>>;
 
-const remainingUsersQuery = (accessToken: string | null) => ({
+const remainingUsersQuery = (accessToken: string | null, enabled: boolean) => ({
   queryKey: ["sidebarRemainingUsers", accessToken] as const,
   queryFn: () => getRemainingUsers(accessToken as string),
-  enabled: Boolean(accessToken),
+  // The seat count is a deployment-wide number, so /user/available_users is a
+  // platform-administrator route. The card only has something to show when a
+  // license exists, so the request waits for that: asking without one fired a
+  // 403 and logged a console error on every page load, in every session.
+  enabled: Boolean(accessToken) && enabled,
   retry: false as const,
   staleTime: 5 * 60 * 1000,
 });
@@ -70,12 +74,15 @@ const buildMeters = (data: RemainingUsage | null): MeterData[] => {
  */
 export default function SidebarUsageCard({ accessToken, collapsed, onExpandRail }: SidebarUsageCardProps) {
   const licenseInfo = useLicenseInfo(accessToken).data ?? null;
-  const { data: usageData, isLoading } = useQuery(remainingUsersQuery(accessToken));
+  // The seat count is only meaningful under a license, which is also the only
+  // state the card renders in. Requesting it earlier is what produced the 403.
+  const licensed = Boolean(licenseInfo?.has_license);
+  const { data: usageData, isLoading } = useQuery(remainingUsersQuery(accessToken, licensed));
   const data = usageData ?? null;
 
   const hasData = data !== null && (data.total_users !== null || data.total_teams !== null);
-  const noUsableData = !isLoading && !hasData;
-  const noLicensedUsage = !licenseInfo?.has_license || noUsableData;
+  const noUsableData = licensed && !isLoading && !hasData;
+  const noLicensedUsage = !licensed || noUsableData;
   if (!accessToken || noLicensedUsage) {
     return null;
   }

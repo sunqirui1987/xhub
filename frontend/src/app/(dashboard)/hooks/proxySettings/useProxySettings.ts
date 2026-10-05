@@ -1,5 +1,7 @@
 import { fetchProxySettings } from "@/utils/proxyUtils";
 import { useQuery } from "@tanstack/react-query";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { isProxyAdminRole } from "@/utils/roles";
 import { createQueryKeys } from "../common/queryKeysFactory";
 
 export const proxySettingsKeys = createQueryKeys("proxySettings");
@@ -19,10 +21,11 @@ const EMPTY_PROXY_SETTINGS: ProxySettings = {
 };
 
 export default function useProxySettings(accessToken: string | null): ProxySettings {
+  const { userRole } = useAuthorized();
   const { data } = useQuery({
     queryKey: [...proxySettingsKeys.all, accessToken],
     queryFn: () => fetchProxySettings(accessToken),
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && isProxyAdminRole(userRole),
   });
   return data ?? EMPTY_PROXY_SETTINGS;
 }

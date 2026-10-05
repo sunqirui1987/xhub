@@ -18,7 +18,10 @@ const { mockUsePluginMode, mockUseUISettings, state } = vi.hoisted(() => {
 
 vi.mock("@/contexts/PluginModeContext", () => ({ usePluginMode: mockUsePluginMode }));
 vi.mock("@/app/(dashboard)/hooks/uiSettings/useUISettings", () => ({ useUISettings: mockUseUISettings }));
-vi.mock("next/navigation", () => ({ usePathname: () => state.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => state.pathname,
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+}));
 vi.mock("@/hooks/useWorker", () => ({ useWorker: () => ({ isControlPlane: false, selectedWorker: null }) }));
 vi.mock("@/app/(dashboard)/hooks/useDisableShowPrompts", () => ({ useDisableShowPrompts: () => false }));
 vi.mock("@/components/Navbar/BlogDropdown/BlogDropdown", () => ({ BlogDropdown: () => null }));

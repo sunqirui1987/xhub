@@ -1,7 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { Copy, Info, KeyRound, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Copy, Info, KeyRound, MoreHorizontal, Trash2 } from "lucide-react";
 
 import { UserInfo } from "@/components/networking";
 import { createSelectionColumn, DataTableSortHeader } from "@/components/shared/DataTable";
@@ -33,10 +33,10 @@ interface UserRowActionsProps {
   user: UserInfo;
   onUserClick: (userId: string, openInEditMode?: boolean) => void;
   onDeleteUser: (user: UserInfo) => void;
-  onResetPassword: (userId: string) => void;
+  onResetPassword: (user: UserInfo) => void;
 }
 
-function UserRowActions({ user, onUserClick, onDeleteUser, onResetPassword }: UserRowActionsProps) {
+function UserRowActions({ user, onDeleteUser, onResetPassword }: UserRowActionsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -47,20 +47,16 @@ function UserRowActions({ user, onUserClick, onDeleteUser, onResetPassword }: Us
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem onClick={() => onUserClick(user.user_id, true)} data-testid="user-action-edit">
-          <Pencil />
-          {t("pages.users.editUser")}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onResetPassword(user.user_id)} data-testid="user-action-reset-password">
-          <KeyRound />
-          {t("pages.users.resetPassword")}
-        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => void copyToClipboard(user.user_id, t("pages.users.userIdCopied"))}
           data-testid="user-action-copy"
         >
           <Copy />
           {t("pages.users.copyUserId")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onResetPassword(user)} data-testid="user-action-reset-password">
+          <KeyRound />
+          {t("pages.users.resetPassword")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={() => onDeleteUser(user)} data-testid="user-action-delete">
@@ -77,7 +73,7 @@ export interface UsersTableColumnsDeps {
   includeSelection: boolean;
   onUserClick: (userId: string, openInEditMode?: boolean) => void;
   onDeleteUser: (user: UserInfo) => void;
-  onResetPassword: (userId: string) => void;
+  onResetPassword: (user: UserInfo) => void;
 }
 
 export const getUsersTableColumns = ({

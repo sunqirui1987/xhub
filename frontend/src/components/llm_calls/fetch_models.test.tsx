@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { modelAvailableCall, modelHubCall } from "@/components/networking";
+import { modelAvailableCall, userAvailableModelsCall } from "@/components/networking";
 import { fetchAvailableModels, fetchAvailableModelsForTeam } from "./fetch_models";
 
 vi.mock("@/components/networking", () => ({
   modelAvailableCall: vi.fn(),
-  modelHubCall: vi.fn(),
+  userAvailableModelsCall: vi.fn(),
 }));
 
 const modelAvailableCallMock = vi.mocked(modelAvailableCall);
-const modelHubCallMock = vi.mocked(modelHubCall);
+const availableMock = vi.mocked(userAvailableModelsCall);
 
 describe("fetchAvailableModelsForTeam", () => {
   beforeEach(() => {
@@ -38,48 +38,36 @@ describe("fetchAvailableModels", () => {
     vi.clearAllMocks();
   });
 
-  it("carries the reasoning capabilities the model hub reports for each group", async () => {
-    modelHubCallMock.mockResolvedValue({
+  it("reads the models a signed-in caller may use, including the endpoint type", async () => {
+    availableMock.mockResolvedValue({
       data: [
-        { model_group: "smart", mode: "chat", supports_reasoning: true, supported_reasoning_efforts: ["low", "high"] },
-        { model_group: "plain", mode: "chat", supports_reasoning: false },
+        { id: "kimi-k2", category: "chat" },
+        { id: "embed-small", category: "embedding", capabilities: ["reasoning"] },
       ],
     });
 
     expect(await fetchAvailableModels("token")).toEqual([
-      { model_group: "plain", mode: "chat" },
-      { model_group: "smart", mode: "chat", supports_reasoning: true, supported_reasoning_efforts: ["low", "high"] },
+      { model_group: "embed-small", mode: "embedding", supports_reasoning: true },
+      { model_group: "kimi-k2", mode: "chat" },
     ]);
+    expect(availableMock).toHaveBeenCalledWith("token");
   });
 
-  it("does not expose provider shells such as qiniu and fennoai as selectable models", async () => {
-    modelHubCallMock.mockResolvedValue({
+  it("does not expose provider shells as selectable models", async () => {
+    availableMock.mockResolvedValue({
       data: [
-        { model_group: "fennoai", role: "provider" },
-        { model_group: "qiniu", model_info: { role: "provider" } },
-        { model_group: "gpt-5.6-sol", mode: "chat" },
+        { id: "fennoai", role: "provider", category: "chat" },
+        { id: "qiniu", model_info: { role: "provider" } },
+        { id: "gpt-5.6-sol", category: "chat" },
       ],
     });
 
     expect(await fetchAvailableModels("token")).toEqual([{ model_group: "gpt-5.6-sol", mode: "chat" }]);
   });
 
-  it("preserves absent, unknown, empty, and explicit effort capability states", async () => {
-    modelHubCallMock.mockResolvedValue({
-      data: [
-        { model_group: "absent", supports_reasoning: true },
-        { model_group: "unknown", supports_reasoning: true, supported_reasoning_efforts: null },
-        { model_group: "empty", supports_reasoning: true, supported_reasoning_efforts: [] },
-        { model_group: "known", supports_reasoning: true, supported_reasoning_efforts: ["low"] },
-      ],
-    });
-
-    expect(await fetchAvailableModels("token")).toEqual([
-      { model_group: "absent", supports_reasoning: true },
-      { model_group: "empty", supports_reasoning: true, supported_reasoning_efforts: [] },
-      { model_group: "known", supports_reasoning: true, supported_reasoning_efforts: ["low"] },
-      { model_group: "unknown", supports_reasoning: true, supported_reasoning_efforts: null },
-    ]);
+  it("treats a model with no endpoint type as chat", async () => {
+    availableMock.mockResolvedValue({ data: [{ id: "plain" }] });
+    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "plain", mode: "chat" }]);
   });
 
   it.each([
@@ -87,8 +75,7 @@ describe("fetchAvailableModels", () => {
     ["a missing data key", {}],
     ["no body at all", undefined],
   ])("returns an empty list on %s rather than throwing", async (_label, response) => {
-    modelHubCallMock.mockResolvedValue(response);
-
+    availableMock.mockResolvedValue(response);
     expect(await fetchAvailableModels("token")).toEqual([]);
   });
 });

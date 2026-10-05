@@ -16,6 +16,7 @@ export interface UsageViewSelectProps {
   userRole: string | null;
   canViewTagUsage?: boolean;
   isOrgAdmin?: boolean;
+  isTeamAdmin?: boolean;
   title?: string;
   description?: string;
   "data-id"?: string;
@@ -84,23 +85,24 @@ export const UsageViewSelect: React.FC<UsageViewSelectProps> = ({
   userRole,
   canViewTagUsage = false,
   isOrgAdmin = false,
+  isTeamAdmin = false,
   title,
   description,
   "data-id": dataId,
 }) => {
   const isAdmin = all_admin_roles.includes(userRole ?? "");
+  const canFilterByOrganization = isAdmin || isOrgAdmin;
+  const canFilterByTeam = isAdmin || isOrgAdmin || isTeamAdmin;
   const getFilteredOptions = () => {
     return OPTIONS.filter((option) => {
-      if (option.capability) {
-        return hasCapability(userRole, option.capability, isOrgAdmin);
-      }
-      if (option.value === "tag" && canViewTagUsage) {
-        return true;
-      }
-      if (option.adminOnly && !isAdmin) {
-        return false;
-      }
-      return true;
+      if (option.value === "global") return isAdmin;
+      if (option.value === "my-usage") return !isAdmin;
+      if (option.value === "organization") return canFilterByOrganization;
+      if (option.value === "team" || option.value === "user") return canFilterByTeam;
+      if (option.value === "tag" && canViewTagUsage && isAdmin) return true;
+      if (option.adminOnly && !isAdmin) return false;
+      if (option.capability) return hasCapability(userRole, option.capability, isOrgAdmin);
+      return isAdmin;
     }).map((option) => {
       let label = t(option.labelKey);
       let desc = t(option.descriptionKey);

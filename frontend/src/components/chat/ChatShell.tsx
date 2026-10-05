@@ -2,7 +2,7 @@
 
 import React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Plus, MessageSquare, LayoutGrid, KeyRound, Lock, BarChart3, ScrollText } from "lucide-react";
+import { Plus, MessageSquare, KeyRound, Lock, BarChart3, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { uiHref } from "@/utils/uiHref";
@@ -14,7 +14,6 @@ export function getChatRoutes() {
   const base = uiHref("chat");
   return {
     chats: base,
-    integrations: `${base}/integrations`,
     credentials: `${base}/credentials`,
     apiKeys: `${base}/api-keys`,
     logs: `${base}/logs`,
@@ -83,12 +82,6 @@ const ChatShell: React.FC<ChatShellProps> = ({ children }) => {
               label={t("pages.chat.chats")}
               onClick={() => router.push(routes.chats)}
               active={isChatsRoute}
-            />
-            <NavItem
-              icon={<LayoutGrid className="h-4 w-4" />}
-              label={t("pages.chat.integrations")}
-              onClick={() => router.push(routes.integrations)}
-              active={pathname === routes.integrations}
             />
             <NavItem
               icon={<KeyRound className="h-4 w-4" />}

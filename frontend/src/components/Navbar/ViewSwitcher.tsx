@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Check, ChevronsUpDown, LayoutGrid } from "lucide-react";
 import { usePluginMode } from "@/contexts/PluginModeContext";
-import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
 import { uiHref } from "@/utils/uiHref";
 import { t } from "@/i18n";
 
@@ -24,14 +23,11 @@ interface ViewSwitcherItem {
 
 export default function ViewSwitcher() {
   const { mode, setMode, plugins } = usePluginMode();
-  const { data: uiSettings } = useUISettings();
   const pathname = usePathname();
-
-  const chatEnabled = Boolean(uiSettings?.values?.enable_chat_ui);
 
   const chatHref = uiHref(CHAT);
   const normalizedPathname = (pathname ?? "").replace(/\/+$/, "");
-  const isChatRoute = chatEnabled && (normalizedPathname === chatHref || normalizedPathname.startsWith(`${chatHref}/`));
+  const isChatRoute = normalizedPathname === chatHref || normalizedPathname.startsWith(`${chatHref}/`);
 
   const activeLabel = isChatRoute ? t("header.viewChat") : plugins.find((p) => p.name === mode)?.display_name ?? t("header.viewGateway");
 
@@ -49,29 +45,16 @@ export default function ViewSwitcher() {
     }
   };
 
-  const chatItem: ViewSwitcherItem = chatEnabled
-    ? {
-        key: CHAT,
-        label: (
-          <div className="flex items-center justify-between gap-6 py-0.5">
-            <span className="font-medium">{t("header.viewChat")}</span>
-            {isChatRoute && <Check className="size-4 text-info" />}
-          </div>
-        ),
-        onClick: () => window.location.assign(uiHref(CHAT)),
-      }
-    : {
-        key: CHAT,
-        disabled: true,
-        label: (
-          <div className="flex max-w-[220px] flex-col py-0.5">
-            <span className="font-medium">{t("header.viewChat")}</span>
-            <span className="whitespace-normal text-xs leading-snug text-muted-foreground">
-              {t("header.chatEnableHint")}
-            </span>
-          </div>
-        ),
-      };
+  const chatItem: ViewSwitcherItem = {
+    key: CHAT,
+    label: (
+      <div className="flex items-center justify-between gap-6 py-0.5">
+        <span className="font-medium">{t("header.viewChat")}</span>
+        {isChatRoute && <Check className="size-4 text-info" />}
+      </div>
+    ),
+    onClick: () => window.location.assign(uiHref(CHAT)),
+  };
 
   const items: ViewSwitcherItem[] = [
     ...modeEntries.map((e) => ({

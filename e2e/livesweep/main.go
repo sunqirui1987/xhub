@@ -23,7 +23,7 @@ type httpRoute struct {
 func main() {
 	base := strings.TrimRight(getenv("E2E_GATEWAY", "http://127.0.0.1:4000"), "/")
 	master := getenv("E2E_MASTER_KEY", "sk-e2e-master")
-	catPath := getenv("CATALOG_JSON", "docs/catalog.json")
+	catPath := getenv("CATALOG_JSON", "docs/testdata/catalog.json")
 	raw, err := os.ReadFile(catPath)
 	if err != nil {
 		fail(err)

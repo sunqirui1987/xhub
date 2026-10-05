@@ -54,8 +54,17 @@ describe("fetchProxySettings", () => {
     expect(result).toBeNull();
     expect(getProxyUISettings).toHaveBeenCalledOnce();
     expect(getProxyUISettings).toHaveBeenCalledWith(accessToken);
-    expect(consoleSpy).toHaveBeenCalledWith("Error fetching proxy settings:", mockError);
+    expect(consoleSpy).toHaveBeenCalledWith("Error fetching proxy settings:", "Network error");
 
+    consoleSpy.mockRestore();
+  });
+
+  it("returns null without logging when the account cannot read management settings", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(getProxyUISettings).mockRejectedValue(new Error("Not allowed to access management endpoints"));
+
+    expect(await fetchProxySettings("test-token")).toBeNull();
+    expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
 
@@ -71,7 +80,7 @@ describe("fetchProxySettings", () => {
     expect(result).toBeNull();
     expect(getProxyUISettings).toHaveBeenCalledOnce();
     expect(getProxyUISettings).toHaveBeenCalledWith(accessToken);
-    expect(consoleSpy).toHaveBeenCalledWith("Error fetching proxy settings:", mockError);
+    expect(consoleSpy).toHaveBeenCalledWith("Error fetching proxy settings:", "String error");
 
     consoleSpy.mockRestore();
   });

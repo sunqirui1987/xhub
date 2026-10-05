@@ -28,7 +28,7 @@ test.describe("console pages", () => {
       await expect(page, path).not.toHaveURL(/\/login/);
       await expect(page.getByText("This page couldn’t load")).toHaveCount(0);
       await expect(page.getByText(/Dashboard error:/), path).toHaveCount(0, { timeout: 3_000 });
-      await expect(page.getByText(t("nav.groups.gateway")).first()).toBeVisible();
+      await expect(page.getByText(t("nav.groups.mine")).first()).toBeVisible();
     }
     expect(errors, errors.join("\n")).toEqual([]);
     guard.assertOk();
@@ -38,6 +38,6 @@ test.describe("console pages", () => {
     await loginAdmin(page);
     await stableGoto(page, "/chat");
     await expect(page).toHaveURL(/\/chat/, { timeout: 15_000 });
-    await expect(page.locator("[data-slot=sidebar-group-label]", { hasText: t("nav.groups.gateway") })).toHaveCount(0);
+    await expect(page.locator("[data-slot=sidebar-group-label]", { hasText: t("nav.groups.mine") })).toHaveCount(0);
   });
 });

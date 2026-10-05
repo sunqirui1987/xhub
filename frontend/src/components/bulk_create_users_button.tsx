@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, FileText, FileWarning, Trash2, TriangleAlert, Upload } from "lucide-react";
-import { userCreateCall, invitationCreateCall, getProxyUISettings } from "./networking";
+import { userCreateCall } from "./networking";
 import Papa from "papaparse";
 import { CheckCircleIcon, XCircleIcon, ExclamationIcon } from "@heroicons/react/outline";
-import { CopyToClipboard } from "react-copy-to-clipboard";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 import { iamRoles as iam } from "@/utils/iamRoles";
@@ -31,18 +30,10 @@ interface UserData {
   rowNumber?: number;
   isValid?: boolean;
   key?: string;
-  invitation_link?: string;
+  user_id?: string;
 }
 
 const PREVIEW_PAGE_SIZE = 5;
-
-// Define an interface for the UI settings
-interface UISettings {
-  PROXY_BASE_URL: string | null;
-  PROXY_LOGOUT_URL: string | null;
-  DEFAULT_TEAM_DISABLED: boolean;
-  SSO_ENABLED: boolean;
-}
 
 const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
   accessToken,
@@ -57,29 +48,9 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
   const [csvStructureError, setCsvStructureError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uiSettings, setUISettings] = useState<UISettings | null>(null);
-  const [baseUrl, setBaseUrl] = useState("http://localhost:4000");
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const csvInputId = React.useId();
-
-  useEffect(() => {
-    // Get UI settings
-    const fetchUISettings = async () => {
-      try {
-        const uiSettingsResponse = await getProxyUISettings(accessToken);
-        setUISettings(uiSettingsResponse);
-      } catch (error) {
-        console.error("Error fetching UI settings:", error);
-      }
-    };
-
-    fetchUISettings();
-
-    // Set base URL
-    const base = new URL("/", window.location.href);
-    setBaseUrl(base.toString());
-  }, [accessToken]);
 
   const handleFileUpload = (file: File) => {
     // Reset all error states
@@ -195,7 +166,7 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
                 // Validate user role against the roles the gateway stores. It
                 // accepts exactly these two, so anything else would be refused
                 // on save rather than caught here.
-                const validRoles = [iam.RoleAdmin, iam.RoleUser];
+                const validRoles: string[] = [iam.RoleAdmin, iam.RoleUser];
                 if (!validRoles.includes(user.user_role)) {
                   errors.push(`Invalid role "${user.user_role}". Must be one of: ${validRoles.join(", ")}`);
                 }
@@ -367,57 +338,21 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
           anySuccessful = true;
           const user_id = response.data?.user_id || response.user_id;
 
-          // Create invitation link for the user
-          try {
-            if (!uiSettings?.SSO_ENABLED) {
-              // Regular invitation flow
-              const invitationData = await invitationCreateCall(accessToken, user_id);
-              const invitationUrl = new URL(`/ui/onboarding?invitation_id=${invitationData.id}`, baseUrl).toString();
-
-              setParsedData((current) =>
-                current.map((u, i) =>
-                  i === index
-                    ? {
-                        ...u,
-                        status: "success",
-                        key: response.key || response.user_id,
-                        invitation_link: invitationUrl,
-                      }
-                    : u,
-                ),
-              );
-            } else {
-              // SSO flow - just use the base URL
-              const invitationUrl = new URL("/ui", baseUrl).toString();
-
-              setParsedData((current) =>
-                current.map((u, i) =>
-                  i === index
-                    ? {
-                        ...u,
-                        status: "success",
-                        key: response.key || response.user_id,
-                        invitation_link: invitationUrl,
-                      }
-                    : u,
-                ),
-              );
-            }
-          } catch (inviteError) {
-            console.error("Error creating invitation:", inviteError);
-            setParsedData((current) =>
-              current.map((u, i) =>
-                i === index
-                  ? {
-                      ...u,
-                      status: "success",
-                      key: response.key || response.user_id,
-                      error: "User created but failed to generate invitation link",
-                    }
-                  : u,
-              ),
-            );
-          }
+          // There is no invitation link to hand out. An account is created with
+          // the password in the row, and the administrator who needs to change
+          // it later does so from the user's page.
+          setParsedData((current) =>
+            current.map((u, i) =>
+              i === index
+                ? {
+                    ...u,
+                    status: "success",
+                    key: response.key || response.user_id,
+                    user_id,
+                  }
+                : u,
+            ),
+          );
         } else {
           const errorMessage = response?.error || "Failed to create user";
           setParsedData((current) =>
@@ -446,8 +381,7 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
       user_email: user.user_email,
       user_role: user.user_role,
       status: user.status,
-      key: user.key || "",
-      invitation_link: user.invitation_link || "",
+      user_id: user.user_id || "",
       error: user.error || "",
     }));
 
@@ -480,21 +414,9 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
     }
     if (record.status === "success") {
       return (
-        <div>
-          <div className="flex items-center">
-            <CheckCircleIcon className="h-5 w-5 text-success mr-2" />
-            <span className="text-success">{t("Success")}</span>
-          </div>
-          {record.invitation_link && (
-            <div className="mt-1">
-              <div className="flex items-center">
-                <span className="text-xs text-muted-foreground truncate max-w-[150px]">{record.invitation_link}</span>
-                <CopyToClipboard text={record.invitation_link} onCopy={() => toast.success(t("Invitation link copied!"))}>
-                  <button className="ml-1 text-info text-xs hover:text-info/80">{t("Copy")}</button>
-                </CopyToClipboard>
-              </div>
-            </div>
-          )}
+        <div className="flex items-center">
+          <CheckCircleIcon className="h-5 w-5 text-success mr-2" />
+          <span className="text-success">{t("Success")}</span>
         </div>
       );
     }

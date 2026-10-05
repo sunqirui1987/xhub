@@ -505,14 +505,7 @@ export default function ChatConversationPage() {
             </h1>
 
             <p className="-mt-4 mb-7 text-sm text-muted-foreground text-center max-w-[520px] leading-relaxed">
-              {t("Chat with 100+ LLMs + MCP tools; authenticate once, use them here.")}{" "}
-              <Button
-                variant="link"
-                onClick={() => router.push(getChatRoutes().integrations)}
-                className="h-auto p-0 text-sm font-medium"
-              >
-                {t("Open Integrations ->")}
-              </Button>
+              {t("Chat with 100+ LLMs + MCP tools; authenticate once, use them here.")}
             </p>
 
             <div className="w-full max-w-[680px]">{inputBar(false)}</div>

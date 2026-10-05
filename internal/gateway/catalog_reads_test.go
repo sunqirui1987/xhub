@@ -89,7 +89,7 @@ func catalogGets(t *testing.T) []catalogRoute {
 	t.Helper()
 	var raw []byte
 	var err error
-	for _, rel := range []string{"docs/catalog.json", "../../docs/catalog.json"} {
+	for _, rel := range []string{"docs/testdata/catalog.json", "../../docs/testdata/catalog.json"} {
 		raw, err = os.ReadFile(rel)
 		if err == nil {
 			break

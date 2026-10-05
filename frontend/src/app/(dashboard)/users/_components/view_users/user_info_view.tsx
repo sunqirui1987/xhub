@@ -7,10 +7,6 @@ import {
   userGetInfoV2,
   UserInfoV2Response,
   userDeleteCall,
-  userUpdateUserCall,
-  modelAvailableCall,
-  invitationCreateCall,
-  getProxyBaseUrl,
   teamInfoCall,
   teamListCall,
   teamMemberAddCall,
@@ -31,18 +27,14 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { rolesWithWriteAccess } from "@/utils/roles";
 import { teamDetailHref } from "@/utils/entityLinks";
 import { BadgeLink } from "@/components/shared/BadgeLink";
-import { UserEditView } from "../user_edit_view";
-import OnboardingModal, { InvitationLink } from "@/components/onboarding_link";
 import { formatNumberWithCommas, copyToClipboard as utilCopyToClipboard } from "@/utils/dataUtils";
-import { ArrowLeft, CheckIcon, CopyIcon, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckIcon, CopyIcon, KeyRound, Plus, Trash2 } from "lucide-react";
+import SetPasswordModal from "@/components/SetPasswordModal";
 import { toast } from "@/lib/toast";
 import { getBudgetDurationLabel } from "@/components/common_components/budget_duration_dropdown";
 import DeleteResourceModal from "@/components/common_components/DeleteResourceModal";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface UserInfoViewProps {
@@ -175,21 +167,14 @@ export default function UserInfoView({
   accessToken,
   userRole,
   onDelete,
-  possibleUIRoles,
   initialTab = 0,
-  startInEditMode = false,
 }: UserInfoViewProps) {
-  const { premiumUser } = useAuthorized();
   const [userData, setUserData] = useState<UserInfoV2Response | null>(null);
   const [teamDetails, setTeamDetails] = useState<TeamDisplayInfo[]>([]);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isSetPasswordOpen, setIsSetPasswordOpen] = useState(false);
   const [isDeletingUser, setIsDeletingUser] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(startInEditMode);
-  const [userModels, setUserModels] = useState<string[]>([]);
-  const [isInvitationLinkModalVisible, setIsInvitationLinkModalVisible] = useState(false);
-  const [invitationLinkData, setInvitationLinkData] = useState<InvitationLink | null>(null);
-  const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>(initialTab === 1 ? "details" : "overview");
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const [isTeamsExpanded, setIsTeamsExpanded] = useState(false);
@@ -205,21 +190,12 @@ export default function UserInfoView({
 
 
   React.useEffect(() => {
-    setBaseUrl(getProxyBaseUrl());
-  }, []);
-
-  React.useEffect(() => {
     const fetchData = async () => {
       try {
         if (!accessToken) return;
         const data = unwrapUserInfo(await userGetInfoV2(accessToken, userId));
         setUserData(data);
         if (data) setTeamDetails(await loadUserTeams(accessToken, userId, data.teams));
-
-        // Fetch available models
-        const modelDataResponse = await modelAvailableCall(accessToken, userId, userRole || "");
-        const availableModels = modelDataResponse.data.map((model: any) => model.id);
-        setUserModels(availableModels);
       } catch (error) {
         console.error("Error fetching user data:", error);
         toast.fromError(t("Failed to fetch user data"));
@@ -319,21 +295,6 @@ export default function UserInfoView({
 
   const selectedTeamOption = availableTeamsForAdd.find((team) => team.team_id === selectedTeamId) ?? null;
 
-  const handleResetPassword = async () => {
-    if (!accessToken) {
-      toast.fromError(t("Access token not found"));
-      return;
-    }
-    try {
-      toast.success(t("Generating password reset link..."));
-      const data = await invitationCreateCall(accessToken, userId);
-      setInvitationLinkData(data);
-      setIsInvitationLinkModalVisible(true);
-    } catch (error) {
-      toast.fromError(t("Failed to generate password reset link"));
-    }
-  };
-
   const handleDelete = async () => {
     try {
       if (!accessToken) return;
@@ -355,40 +316,6 @@ export default function UserInfoView({
 
   const cancelDelete = () => {
     setIsDeleteModalOpen(false);
-  };
-
-  const handleUserUpdate = async (formValues: Record<string, any>) => {
-    try {
-      if (!accessToken || !userData) return;
-
-      const userFields = Object.fromEntries(
-        Object.entries(formValues).filter(
-          ([field]) => field !== "mcp_servers_and_groups" && field !== "mcp_tool_permissions",
-        ),
-      );
-
-      await userUpdateUserCall(accessToken, userFields, null);
-
-      // Update local state with new values
-      setUserData({
-        ...userData,
-        user_email: formValues.user_email ?? userData.user_email,
-        user_alias: formValues.user_alias ?? userData.user_alias,
-        models: formValues.models ?? userData.models,
-        max_budget: formValues.max_budget === undefined ? userData.max_budget : formValues.max_budget,
-        budget_duration:
-          formValues.budget_duration === undefined ? userData.budget_duration : formValues.budget_duration,
-        metadata: formValues.metadata ?? userData.metadata,
-        model_max_budget: formValues.model_max_budget ?? userData.model_max_budget,
-        object_permission: userData.object_permission,
-      });
-
-      toast.success(t("User updated successfully"));
-      setIsEditing(false);
-    } catch (error) {
-      console.error("Error updating user:", error);
-      toast.fromError(t("Failed to update user"));
-    }
   };
 
   if (isLoading) {
@@ -425,24 +352,6 @@ export default function UserInfoView({
     }
   };
 
-  // Build a legacy-compatible shape for UserEditView
-  const userDataForEdit = {
-    user_id: userData.user_id,
-    user_info: {
-      user_email: userData.user_email,
-      user_alias: userData.user_alias,
-      user_role: userData.user_role,
-      models: userData.models,
-      max_budget: userData.max_budget,
-      budget_duration: userData.budget_duration,
-      metadata: userData.metadata,
-      // Without these the per-model budget editor mounts empty and a save
-      // replaces the user's existing budgets with whatever was typed.
-      model_max_budget: userData.model_max_budget,
-      model_max_budget_usage: userData.model_max_budget_usage,
-    },
-  };
-
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
@@ -468,12 +377,12 @@ export default function UserInfoView({
             </Button>
           </div>
         </div>
-        {userRole && rolesWithWriteAccess.includes(userRole) && (
-          <div className="flex items-center space-x-2">
-            <Button variant="secondary" onClick={handleResetPassword} className="flex items-center">
-              <RefreshCw />
-              {t("Reset Password")}
-            </Button>
+        <div className="flex items-center space-x-2">
+          <Button variant="secondary" onClick={() => setIsSetPasswordOpen(true)}>
+            <KeyRound />
+            {t("pages.users.resetPassword")}
+          </Button>
+          {isProxyAdmin && (
             <Button
               variant="secondary"
               onClick={() => setIsDeleteModalOpen(true)}
@@ -482,8 +391,8 @@ export default function UserInfoView({
               <Trash2 />
               {t("pages.users.deleteUser")}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <DeleteResourceModal
@@ -625,27 +534,9 @@ export default function UserInfoView({
           <Card className="block p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-medium">{t("pages.users.userSettings")}</h3>
-              {!isEditing && userRole && rolesWithWriteAccess.includes(userRole) && (
-                <Button onClick={() => setIsEditing(true)}>{t("pages.users.editSettings")}</Button>
-              )}
             </div>
 
-            {isEditing && userData ? (
-              <UserEditView
-                userData={userDataForEdit}
-                onCancel={() => setIsEditing(false)}
-                onSubmit={handleUserUpdate}
-                teams={teamDetails}
-                accessToken={accessToken}
-                userID={userId}
-                userRole={userRole}
-                userModels={userModels}
-                possibleUIRoles={possibleUIRoles}
-                objectPermission={userData.object_permission}
-                premiumUser={premiumUser === true}
-              />
-            ) : (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 <div>
                   <p className="font-medium">{t("pages.users.userId")}</p>
                   <div className="flex items-center cursor-pointer">
@@ -725,18 +616,15 @@ export default function UserInfoView({
                     {JSON.stringify(userData.metadata || {}, null, 2)}
                   </pre>
                 </div>
-
-              </div>
-            )}
+            </div>
           </Card>
         </TabsContent>
       </Tabs>
-      <OnboardingModal
-        isInvitationLinkModalVisible={isInvitationLinkModalVisible}
-        setIsInvitationLinkModalVisible={setIsInvitationLinkModalVisible}
-        baseUrl={baseUrl || ""}
-        invitationLinkData={invitationLinkData}
-        modalType="resetPassword"
+      <SetPasswordModal
+        open={isSetPasswordOpen}
+        onOpenChange={setIsSetPasswordOpen}
+        accessToken={accessToken}
+        user={userData ? { user_id: userId, user_email: userData.user_email, user_alias: userData.user_alias } : null}
       />
 
       {/* Delete Team Member Modal */}

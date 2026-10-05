@@ -35,6 +35,15 @@ func Module(h Gate) httpx.Module {
 		reg.Handle("GET /v2/user/info", func(w http.ResponseWriter, r *http.Request) { UserInfo(h, w, r) })
 		reg.Handle("POST /user/update", func(w http.ResponseWriter, r *http.Request) { UserUpdate(h, w, r) })
 		reg.Handle("POST /user/delete", func(w http.ResponseWriter, r *http.Request) { UserDelete(h, w, r) })
+		// Setting somebody else's password. This replaces the reset link the
+		// product used to mint: that link led to an onboarding page with no
+		// backend behind it, so the password typed into it went nowhere. A
+		// platform administrator reaches every account; a team or organization
+		// administrator reaches the people under them, and the decision refuses
+		// an account that administers the platform or another organization.
+		reg.Handle("POST /user/set_password", func(w http.ResponseWriter, r *http.Request) { UserSetPassword(h, w, r) })
+		// The path form, so a caller can name the account in the URL.
+		reg.Handle("POST /user/{user_id}/password", func(w http.ResponseWriter, r *http.Request) { UserSetPassword(h, w, r) })
 
 		// Organizations. A member sees the organization that owns their team.
 		// An organization administrator runs that organization. Budget and

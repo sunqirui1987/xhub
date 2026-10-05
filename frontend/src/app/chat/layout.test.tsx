@@ -50,8 +50,8 @@ describe("ChatLayout", () => {
     mockUiHref.mockClear();
   });
 
-  it("renders the chat shell when enable_chat_ui is on", () => {
-    state.enableChatUI = true;
+  it("renders the chat shell for any signed-in account", () => {
+    state.enableChatUI = false;
     render(
       <ChatLayout>
         <div data-testid="page-content" />
@@ -59,28 +59,6 @@ describe("ChatLayout", () => {
     );
     expect(screen.getByTestId("chat-shell")).toBeInTheDocument();
     expect(screen.getByTestId("page-content")).toBeInTheDocument();
-    expect(mockReplace).not.toHaveBeenCalled();
-  });
-
-  it("redirects to the dashboard when enable_chat_ui is off", () => {
-    state.enableChatUI = false;
-    render(
-      <ChatLayout>
-        <div data-testid="page-content" />
-      </ChatLayout>,
-    );
-    expect(screen.queryByTestId("chat-shell")).not.toBeInTheDocument();
-    expect(mockReplace).toHaveBeenCalledWith("/mocked-ui/");
-  });
-
-  it("renders nothing while UI settings are still loading", () => {
-    state.isUISettingsLoading = true;
-    render(
-      <ChatLayout>
-        <div data-testid="page-content" />
-      </ChatLayout>,
-    );
-    expect(screen.queryByTestId("chat-shell")).not.toBeInTheDocument();
     expect(mockReplace).not.toHaveBeenCalled();
   });
 });

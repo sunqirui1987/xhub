@@ -296,7 +296,7 @@ export default function KeyInfoView({
     try {
       setDeleteLoading(true);
       if (!accessToken) return;
-      await keyDeleteCall(accessToken as string, currentKeyData.token || currentKeyData.token_id);
+      await keyDeleteCall(accessToken as string, currentKeyData.token_id || currentKeyData.token);
       toast.success(t("Key deleted successfully"));
       await queryClient.invalidateQueries({ queryKey: keyKeys.lists() });
       if (onDelete) {
@@ -383,7 +383,7 @@ export default function KeyInfoView({
   const canBlockKey = isKeyAdmin;
 
   const handleResetSpend = () => {
-    resetKeySpend(currentKeyData.token || currentKeyData.token_id, {
+    resetKeySpend(currentKeyData.token_id || currentKeyData.token, {
       onSuccess: () => {
         setCurrentKeyData((prevData) => (prevData ? { ...prevData, spend: 0 } : undefined));
         if (onKeyDataUpdate) {
@@ -403,7 +403,7 @@ export default function KeyInfoView({
 
   const handleToggleBlocked = () => {
     setKeyBlockedState(
-      { keyToken: currentKeyData.token || currentKeyData.token_id, blocked: !isBlocked },
+      { keyToken: currentKeyData.token_id || currentKeyData.token, blocked: !isBlocked },
       {
         onSuccess: (response) => {
           const blocked = response.blocked === true;

@@ -23,6 +23,11 @@ var logTraceOnceHandlers sync.Once
 
 // UserNew creates an account. Only a platform administrator may, because the
 // account's existence changes what every other decision can see.
+//
+// The account, its team membership, its organization administration and its
+// budget are all set here rather than by follow-up calls: a create that half
+// succeeded used to leave a person who existed but could reach nothing, and the
+// console had to guess whether the second call was needed.
 func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceHandlers.Do(func() { logx.Trace("enter identity.UserNew") })
 
@@ -33,14 +38,29 @@ func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	}
 	body := readMap(r)
 	in := iam.UserInput{
-		Email:     str(body["user_email"]),
-		Name:      str(body["user_alias"]),
-		Password:  str(body["password"]),
-		Role:      iam.StoreRole(str(body["user_role"])),
-		MaxBudget: floatPtr(body["max_budget"]),
+		Email:       str(body["user_email"]),
+		Name:        str(body["user_alias"]),
+		Password:    str(body["password"]),
+		Role:        iam.StoreRole(str(body["user_role"])),
+		MaxBudget:   floatPtr(body["max_budget"]),
+		TeamID:      str(body["team_id"]),
+		AdminOrgIDs: stringList(body["admin_organization_ids"]),
+	}
+	// A team role is read whenever the caller sent one, including alongside no
+	// team. Reading it only next to a team would silently drop the field, and a
+	// request that asked to make somebody a team administrator while naming no
+	// team would be answered as an ordinary create. The store refuses the
+	// mismatched pair instead.
+	if has(body, "team_role") {
+		in.TeamRole = teamRole(str(body["team_role"]))
 	}
 	if in.Name == "" {
 		in.Name = str(body["user_name"])
+	}
+	// An organization the console names one at a time, so an administrator who
+	// administers exactly one organization does not have to build a list.
+	if orgID := str(body["organization_id"]); orgID != "" {
+		in.AdminOrgIDs = append(in.AdminOrgIDs, orgID)
 	}
 	if err := g.Authorize(r, p, authz.ActionUserCreate, authz.Object{Type: authz.ObjectUser}); err != nil {
 		g.WriteAuthz(w, r, err)
@@ -54,18 +74,32 @@ func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, userPublic(u, nil))
 }
 
-// UserList lists accounts. Only a platform administrator reaches the store: a
-// signed-in member reads other people through the member listing of a team,
-// which returns public fields under the team scope.
+// UserList lists accounts the caller may see. A platform administrator sees
+// every account. An organization administrator sees the people in that
+// organization's teams. A team administrator sees the people in the teams they
+// administer. Everyone else sees only themselves.
 func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
-	p := g.RequireManage(w, r)
+	p := g.RequireUser(w, r)
 	if p == nil {
 		return
 	}
 	limit := queryInt(r, "page_size", 100)
 	offset := pageOffset(r, limit)
-	rows, err := g.Identity().ListUsers(r.Context(), r.URL.Query().Get("search"), limit, offset)
+	search := r.URL.Query().Get("search")
+	var rows []iam.User
+	var err error
+	var watch []string
+	if p.PlatformAdmin() {
+		rows, err = g.Identity().ListUsers(r.Context(), search, limit, offset)
+	} else {
+		watch, err = g.Identity().OversightTeamIDs(r.Context(), p.UserID)
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		rows, err = g.Identity().ListScopedUsers(r.Context(), p.UserID, watch, search, limit, offset)
+	}
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
@@ -74,6 +108,24 @@ func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
+	}
+	if !p.PlatformAdmin() {
+		keep := map[string]bool{}
+		for _, id := range watch {
+			keep[id] = true
+		}
+		for id, list := range roles {
+			if id == p.UserID {
+				continue
+			}
+			kept := list[:0]
+			for _, m := range list {
+				if keep[str(m["team_id"])] {
+					kept = append(kept, m)
+				}
+			}
+			roles[id] = kept
+		}
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for i := range rows {
@@ -200,14 +252,22 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
-	if self && !p.PlatformAdmin() {
-		// A person edits their own profile and password, never their own role,
-		// status or budget: those would be self-elevation.
+	if self {
+		// A person edits their own profile and password. This branch runs for
+		// everybody, including a platform administrator: their own name and
+		// password are not an administrative change, and routing them past it
+		// left the deployment's own administrator unable to change their
+		// password at all.
 		if err := updateProfile(g, r, p, target, body); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
-	} else {
+	}
+	// A regular user stops after their own profile: a role, a status or a
+	// budget on their own account would be self-elevation, so those fields are
+	// never read for them. A platform administrator's own save falls through,
+	// because a name and a password alone are a complete request for them too.
+	if !self || p.PlatformAdmin() {
 		in := iam.UserUpdate{
 			Role:      storedRolePtr(body),
 			Status:    statusPtr(body),
@@ -215,10 +275,11 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 			MaxBudget: optionalFloat(body, "max_budget"),
 		}
 		if in.Role == nil && in.Status == nil && in.Email == nil && in.MaxBudget == nil {
-			httpx.WriteError(w, 400, "invalid_request", "no supported field to update")
-			return
-		}
-		if _, err := g.Identity().AdminUpdateUser(r.Context(), actorOf(p), target, in); err != nil {
+			if !self {
+				httpx.WriteError(w, 400, "invalid_request", "no supported field to update")
+				return
+			}
+		} else if _, err := g.Identity().AdminUpdateUser(r.Context(), actorOf(p), target, in); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
@@ -269,6 +330,55 @@ func updateProfile(g Gate, r *http.Request, p *auth.Principal, id string, body m
 		}
 	}
 	return nil
+}
+
+// UserSetPassword sets somebody else's password. It is what the console calls
+// when a person has forgotten theirs, and it replaces the reset link the
+// product used to generate: that link pointed at an onboarding page which has
+// no backend behind it, so the flow could not work and a password typed into it
+// was discarded.
+//
+// A platform administrator may reset any account. A team administrator may
+// reset a member of a team they administer, and an organization administrator
+// a member of any team in their organization. That is narrower than the power
+// to change a role, and the decision in authz refuses an account that runs the
+// platform or administers another organization.
+//
+// The new password is checked by the store, not here: the eight-character
+// minimum lives with the hash so every writer of a password obeys it. Sessions
+// the account has open end immediately, because a reset is the one moment the
+// change must take effect before the next request rather than at the next login.
+func UserSetPassword(g Gate, w http.ResponseWriter, r *http.Request) {
+	httpx.SetCallID(w, httpx.CallID())
+	p := g.RequireUser(w, r)
+	if p == nil {
+		return
+	}
+	body := readMap(r)
+	target := r.PathValue("user_id")
+	if target == "" {
+		target = str(body["user_id"])
+	}
+	if target == "" {
+		httpx.WriteError(w, 400, "invalid_request", "user_id required")
+		return
+	}
+	password := str(body["password"])
+	if password == "" {
+		httpx.WriteError(w, 400, "invalid_request", "password required")
+		return
+	}
+	if err := g.Authorize(r, p, authz.ActionUserPassword, authz.Object{Type: authz.ObjectUser, ID: target}); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
+	if err := g.Identity().SetPassword(r.Context(), actorOf(p), target, password); err != nil {
+		g.WriteIAMError(w, r, err)
+		return
+	}
+	// The answer carries no password, and no confirmation of the stored one:
+	// the caller already knows what they typed.
+	httpx.WriteJSON(w, 200, map[string]any{"user_id": target, "password_updated": true})
 }
 
 // UserDelete removes an account. Its memberships go with it and its personal

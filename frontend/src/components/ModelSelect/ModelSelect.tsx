@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/combobox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/cva.config";
 import type { Team } from "@/components/key_team_helpers/key_list";
 import { splitWildcardModels } from "./modelUtils";
 import { t } from "@/i18n";
@@ -55,6 +56,13 @@ export interface ModelSelectProps {
   value?: string[];
   onChange: (values: string[]) => void;
   style?: React.CSSProperties;
+  /**
+   * Renders the picker read-only. Team settings pass this for anybody who is
+   * not a platform administrator, because the model ceiling is the platform's
+   * to set. The prop used to be passed and dropped, so the picker stayed
+   * editable and only the server's refusal stopped the write.
+   */
+  disabled?: boolean;
 }
 
 type ModelOption = {
@@ -129,7 +137,7 @@ const filterModels = (
 
 export const ModelSelect = (props: ModelSelectProps) => {
   const anchor = useComboboxAnchor();
-  const { id, teamID, organizationID, options, context, dataTestId, value = [], onChange, style } = props;
+  const { id, teamID, organizationID, options, context, dataTestId, value = [], onChange, style, disabled } = props;
   const { showAllProxyModelsOverride, includeSpecialOptions } = options || {};
   const { data: allProxyModels, isLoading: isLoadingAllProxyModels } = useAllProxyModels();
   const { data: team, isLoading: isLoadingTeam, isFetching: isFetchingTeam } = useTeam(teamID);
@@ -240,10 +248,16 @@ export const ModelSelect = (props: ModelSelectProps) => {
         items={groups}
         value={selectedOptions}
         onValueChange={handleChange}
+        disabled={disabled}
         isItemEqualToValue={(option: ModelOption, selected: ModelOption) => option.value === selected.value}
         itemToStringLabel={(option: ModelOption) => option.label}
       >
-        <ComboboxChips render={<div ref={anchor} />} data-testid={dataTestId} style={style} className="w-full">
+        <ComboboxChips
+          render={<div ref={anchor} />}
+          data-testid={dataTestId}
+          style={style}
+          className={cn("w-full", disabled && "pointer-events-none opacity-50")}
+        >
           <ComboboxValue>
             {(selected: ModelOption[]) => (
               <>

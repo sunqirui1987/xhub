@@ -25,6 +25,7 @@
 | [14 团队管理](14-team-management.md) | 当前控制台和网关实际支持的团队、成员、模型和预算 |
 | [15 用户管理](15-user-management.md) | 账号角色和团队角色怎么分开，创建用户时该选什么 |
 | [16 权限](16-permissions.md) | 平台管理员、组织管理员、团队管理员和成员各自能做什么，列表怎么收窄 |
+| [17 验证数据](17-demo-data.md) | 可选的验证租户。不是启动时的默认数据 |
 
 数据契约：[请求事件](schemas/request-event.md)、[用量](schemas/usage.md)、[结算](schemas/settlement.md)、[异步任务](schemas/async-task.md)。
 

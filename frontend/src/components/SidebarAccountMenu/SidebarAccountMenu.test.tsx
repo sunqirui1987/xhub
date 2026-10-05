@@ -11,6 +11,9 @@ interface AuthMock {
   accessToken: string;
 }
 
+let mockOrgAdmin = false;
+let mockTeamAdmin = false;
+
 let mockUseAuthorizedImpl: () => AuthMock = () => ({
   userId: "test-user-id",
   userEmail: "test@example.com",
@@ -31,6 +34,18 @@ let mockGetLocalStorageItemImpl = (key: string): string | null => {
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: () => mockUseAuthorizedImpl(),
+}));
+
+vi.mock("@/app/(dashboard)/hooks/useIsOrgAdmin", () => ({
+  default: () => mockOrgAdmin,
+}));
+
+vi.mock("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity", () => ({
+  useSessionIdentity: () => ({
+    data: {
+      teams: mockTeamAdmin ? [{ team_id: "team-1", role: "team_admin" }] : [],
+    },
+  }),
 }));
 
 vi.mock("@/app/(dashboard)/hooks/useDisableShowPrompts", () => ({
@@ -71,6 +86,8 @@ describe("SidebarAccountMenu", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockOrgAdmin = false;
+    mockTeamAdmin = false;
     mockUseAuthorizedImpl = () => ({
       userId: "test-user-id",
       userEmail: "test@example.com",
@@ -102,6 +119,14 @@ describe("SidebarAccountMenu", () => {
     expect(screen.queryByText("test@example.com")).not.toBeInTheDocument();
   });
 
+  it("offers a password change for the signed-in account", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
+    await openMenu(user);
+    await user.click(screen.getByRole("button", { name: "Change account password" }));
+    expect(screen.getByRole("dialog", { name: "Set a new password" })).toBeInTheDocument();
+  });
+
   it("should show email, user ID, and role when the menu is opened", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
@@ -110,33 +135,34 @@ describe("SidebarAccountMenu", () => {
 
     expect(screen.getAllByText("test@example.com").length).toBeGreaterThan(0);
     expect(screen.getByText("test-user-id")).toBeInTheDocument();
-    expect(screen.getAllByText("Admin").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Platform administrator").length).toBeGreaterThan(0);
   });
 
-  it("should display Standard tier for non-premium users", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
-
-    await openMenu(user);
-
-    expect(screen.getByText("Standard")).toBeInTheDocument();
-  });
-
-  it("should display Premium tier for premium users", async () => {
+  it("shows team management and organization administration when the account holds them", async () => {
     const user = userEvent.setup();
     mockUseAuthorizedImpl = () => ({
       userId: "test-user-id",
-      userEmail: "test@example.com",
-      userRoleLabel: "Admin",
+      userEmail: "111@qq.com",
+      userRoleLabel: "Internal User",
       premiumUser: true,
       accessToken: "test-token",
     });
-
+    mockOrgAdmin = true;
+    mockTeamAdmin = true;
     renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
-
     await openMenu(user);
+    expect(screen.getByRole("link", { name: "Organization administrator" })).toHaveAttribute("href", "/organizations");
+    expect(screen.getByRole("link", { name: "Team management" })).toHaveAttribute("href", "/teams");
+    expect(screen.queryByText("Internal User")).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Premium")).toBeInTheDocument();
+  it("does not show a tier or the new-feature toggle", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
+    await openMenu(user);
+    expect(screen.queryByText("Tier")).not.toBeInTheDocument();
+    expect(screen.queryByText("Standard")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Toggle hide new feature indicators")).not.toBeInTheDocument();
   });
 
   it("should render the version as text without an outbound link", async () => {
@@ -194,57 +220,7 @@ describe("SidebarAccountMenu", () => {
     expect(mockOnLogout).toHaveBeenCalledTimes(1);
   });
 
-  it("should toggle hide new feature indicators on", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
 
-    await openMenu(user);
-
-    const toggle = screen.getByLabelText("Toggle hide new feature indicators");
-    expect(toggle).not.toBeChecked();
-
-    await user.click(toggle);
-
-    const localStorageUtils = vi.mocked(await import("@/utils/localStorageUtils"));
-    expect(localStorageUtils.setLocalStorageItem).toHaveBeenCalledWith("disableShowNewBadge", "true");
-    expect(localStorageUtils.emitLocalStorageChange).toHaveBeenCalledWith("disableShowNewBadge");
-  });
-
-  it("should toggle hide new feature indicators off", async () => {
-    const user = userEvent.setup();
-    mockGetLocalStorageItemImpl = (key: string): string | null => {
-      if (key === "disableShowNewBadge") return "true";
-      return null;
-    };
-
-    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
-
-    await openMenu(user);
-
-    const toggle = screen.getByLabelText("Toggle hide new feature indicators");
-    expect(toggle).toBeChecked();
-
-    await user.click(toggle);
-
-    const localStorageUtils = vi.mocked(await import("@/utils/localStorageUtils"));
-    expect(localStorageUtils.removeLocalStorageItem).toHaveBeenCalledWith("disableShowNewBadge");
-    expect(localStorageUtils.emitLocalStorageChange).toHaveBeenCalledWith("disableShowNewBadge");
-  });
-
-  it("should initialize hide new feature indicators from localStorage", async () => {
-    const user = userEvent.setup();
-    mockGetLocalStorageItemImpl = (key: string): string | null => {
-      if (key === "disableShowNewBadge") return "true";
-      return null;
-    };
-
-    renderWithProviders(<SidebarAccountMenu onLogout={mockOnLogout} />);
-
-    await openMenu(user);
-
-    const toggle = screen.getByLabelText("Toggle hide new feature indicators");
-    expect(toggle).toBeChecked();
-  });
 
   it("should show Account in the trigger for the default placeholder user id", () => {
     mockUseAuthorizedImpl = () => ({

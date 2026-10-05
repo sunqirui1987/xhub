@@ -197,7 +197,7 @@ describe("useOrganizations", () => {
     expect(organizationListCall).not.toHaveBeenCalled();
   });
 
-  it("does not call the organization API for a role that cannot access management endpoints", () => {
+  it("calls the organization API for a signed-in user who is not a platform administrator", async () => {
     mockUseAuthorized.mockReturnValue({
       accessToken: "test-access-token",
       userId: "test-user-id",
@@ -211,9 +211,8 @@ describe("useOrganizations", () => {
 
     const { result } = renderHook(() => useOrganizations(), { wrapper });
 
-    expect(result.current.isLoading).toBe(false);
-    expect(result.current.isFetched).toBe(false);
-    expect(organizationListCall).not.toHaveBeenCalled();
+    await waitFor(() => expect(result.current.isFetched).toBe(true));
+    expect(organizationListCall).toHaveBeenCalled();
   });
 
   it("does not call the organization API when the session is not premium", async () => {

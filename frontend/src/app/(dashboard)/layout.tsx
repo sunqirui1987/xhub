@@ -7,12 +7,10 @@ import LoadingScreen from "@/components/common_components/LoadingScreen";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import SidebarProvider from "@/app/(dashboard)/components/SidebarProvider";
-import { useRouter, useSearchParams } from "next/navigation";
 import { DebugWarningBanner } from "@/components/DebugWarningBanner";
 import { NoRedisWarningBanner } from "@/components/NoRedisWarningBanner";
 import { EnvCredentialLoginWarningBanner } from "@/components/EnvCredentialLoginWarningBanner";
 import { UserBanner } from "@/components/UserBanner";
-import { uiHref } from "@/utils/uiHref";
 import { PluginModeProvider, usePluginMode } from "@/contexts/PluginModeContext";
 import { createApiClient } from "@/lib/http/client";
 import { getProxyBaseUrl } from "@/components/networking";
@@ -142,20 +140,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 }
 
 function LayoutContent({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const { accessToken, authLoading } = useAuth();
-  const isInvitationFlow = Boolean(searchParams.get("invitation_id"));
 
-  // Legacy invitation links point at /ui/?invitation_id=; the onboarding form now lives at its own
-  // /onboarding route. Redirect once ui-config has loaded so uiHref resolves the SERVER_ROOT_PATH base.
-  useEffect(() => {
-    if (!authLoading && isInvitationFlow) {
-      router.replace(`${uiHref("onboarding")}?${searchParams.toString()}`);
-    }
-  }, [authLoading, isInvitationFlow, router, searchParams]);
-
-  if (authLoading || isInvitationFlow) {
+  if (authLoading) {
     return <LoadingScreen />;
   }
 

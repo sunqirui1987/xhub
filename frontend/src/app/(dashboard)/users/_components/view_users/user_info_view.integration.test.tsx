@@ -54,7 +54,6 @@ vi.mock("@/components/networking", () => {
     userDeleteCall: vi.fn(),
     userUpdateUserCall: (...args: unknown[]) => mockUserUpdateUserCall(...args),
     modelAvailableCall: vi.fn().mockResolvedValue({ data: [] }),
-    invitationCreateCall: vi.fn(),
     teamInfoCall: (...args: unknown[]) => mockTeamInfoCall(...args),
     teamListCall: (...args: unknown[]) => mockTeamListCall(...args),
     teamMemberAddCall: (...args: unknown[]) => mockTeamMemberAddCall(...args),
@@ -129,72 +128,11 @@ describe("UserInfoView add-to-team form", () => {
   // handleUserUpdate refreshes the local copy field by field rather than refetching,
   // so a field it forgets reads back stale the next time the form is opened and the
   // operator sees the save they just made apparently undone.
-  describe("per-model budgets survive a save", () => {
-    // Edit Settings lives on the details tab and is gated on write access.
-    const budgetProps = {
-      ...defaultProps,
-      userRole: "Admin",
-      initialTab: 1,
-    };
-
-    const openEditor = async (user: ReturnType<typeof userEvent.setup>) => {
-      await user.click(await screen.findByRole("button", { name: /edit settings/i }));
-      return screen.findByPlaceholderText("Max spend ($)");
-    };
-
-    beforeEach(() => {
-      mockUserGetInfoV2.mockResolvedValue({
-        ...MOCK_USER_DATA,
-        model_max_budget: { "gpt-4": { budget_limit: 5, time_period: "30d" } },
-      });
-      mockUserUpdateUserCall.mockResolvedValue({});
-    });
-
-    it("shows the saved cap, not the pre-save one, when the form is reopened", async () => {
-      const user = setup();
-      render(<UserInfoView {...budgetProps} />);
-
-      fireEvent.change(await openEditor(user), { target: { value: "42" } });
-      await user.click(screen.getByRole("button", { name: /save changes/i }));
-
-      await waitFor(() => {
-        expect(mockUserUpdateUserCall).toHaveBeenCalled();
-      });
-      expect(mockUserUpdateUserCall.mock.calls[0][1].model_max_budget).toEqual({
-        "gpt-4": { budget_limit: 42, time_period: "30d" },
-      });
-
-      expect(await openEditor(user)).toHaveValue(42);
-    });
-
-    it("should keep Unlimited selected after saving and reopening the user", async () => {
-      const user = setup();
-      render(<UserInfoView {...budgetProps} />);
-
-      await openEditor(user);
-      await user.click(screen.getByRole("checkbox", { name: "Unlimited Budget" }));
-      await user.click(screen.getByRole("button", { name: /save changes/i }));
-
-      await waitFor(() => expect(mockUserUpdateUserCall).toHaveBeenCalled());
-      expect(mockUserUpdateUserCall.mock.calls[0][1]).toMatchObject({ max_budget: null });
-      await openEditor(user);
-      expect(screen.getByRole("checkbox", { name: "Unlimited Budget" })).toBeChecked();
-    });
-
-    it("should keep a cleared reset period after saving and reopening the user", async () => {
-      const user = setup();
-      render(<UserInfoView {...budgetProps} />);
-
-      await openEditor(user);
-      await user.click(screen.getByRole("combobox", { name: "Reset Budget" }));
-      await user.click(await screen.findByRole("option", { name: "n/a" }));
-      await user.click(screen.getByRole("button", { name: /save changes/i }));
-
-      await waitFor(() => expect(mockUserUpdateUserCall).toHaveBeenCalled());
-      expect(mockUserUpdateUserCall.mock.calls[0][1]).toMatchObject({ budget_duration: null });
-      await openEditor(user);
-      expect(screen.getByRole("combobox", { name: "Reset Budget" })).toHaveTextContent("n/a");
-    });
+  it("does not offer an editor for the account", async () => {
+    const user = setup();
+    render(<UserInfoView {...defaultProps} userRole="Admin" initialTab={1} />);
+    await user.click(await screen.findByRole("tab", { name: "Details" }));
+    expect(screen.queryByRole("button", { name: /edit settings/i })).not.toBeInTheDocument();
   });
 
   it("offers only the teams the user is not already a member of", async () => {

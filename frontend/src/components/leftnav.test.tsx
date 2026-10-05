@@ -165,8 +165,8 @@ describe("Sidebar (leftnav)", () => {
       const text = labels().join(" | ");
       expect(text).toContain("Virtual Keys");
       expect(text).toContain("Usage");
-      expect(text).toContain("Permissions");
       expect(text).toContain("Organizations");
+      expect(text).toContain("Users");
       expect(text).toContain("Models + Endpoints");
       expect(text).toContain("Router Settings");
     });
@@ -178,6 +178,8 @@ describe("Sidebar (leftnav)", () => {
       // The deployment's own configuration is not a team's business, and the
       // server refuses every one of these routes to this caller.
       expect(text).not.toContain("Organizations");
+      expect(text).not.toContain("Teams");
+      expect(text).not.toContain("Users");
       expect(text).not.toContain("Internal Users");
       expect(text).not.toContain("Models + Endpoints");
       expect(text).not.toContain("Router Settings");
@@ -191,8 +193,9 @@ describe("Sidebar (leftnav)", () => {
       expect(text).toContain("Virtual Keys");
       expect(text).toContain("Usage");
       expect(text).toContain("Logs");
-      expect(text).toContain("Teams");
-      expect(text).toContain("Permissions");
+      expect(text).not.toContain("Teams");
+      expect(text).not.toContain("Organizations");
+      expect(text).not.toContain("Users");
     });
 
     it("gives a caller who belongs to no team no team group", () => {
@@ -212,7 +215,7 @@ describe("Sidebar (leftnav)", () => {
       renderWithProviders(<Sidebar {...defaultProps} />);
       const text = labels().join(" | ");
       expect(text).toContain("Teams");
-      expect(text).toContain("Permissions");
+      expect(text).toContain("Users");
       expect(text).not.toContain("Organizations");
       expect(text).not.toContain("Models + Endpoints");
     });
@@ -222,7 +225,7 @@ describe("Sidebar (leftnav)", () => {
     it("keeps the team group together and in one place", () => {
       // The team's scope is one menu, not scattered across the sidebar: a team
       // administrator manages the same pages a member reads.
-      for (const page of ["teams", "projects", "permissions"]) {
+      for (const page of ["teams", "projects", "organizations", "users"]) {
         expect(placementsOf(page)).toEqual(["nav.groups.team"]);
       }
       // The removed features must not linger in the menu: a link to a page
@@ -233,7 +236,7 @@ describe("Sidebar (leftnav)", () => {
     });
 
     it("keeps every platform page in the platform group", () => {
-      for (const page of ["organizations", "users", "models", "price-data", "guardrails"]) {
+      for (const page of ["models", "price-data", "guardrails"]) {
         expect(placementsOf(page)).toEqual(["nav.groups.platform"]);
       }
     });

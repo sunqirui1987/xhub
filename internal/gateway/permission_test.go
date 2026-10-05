@@ -411,8 +411,8 @@ func TestMemberMustBeInTheTeam(t *testing.T) {
 		// The add succeeded, which is allowed: a team admin may add anyone by
 		// email. Confirm it did not escalate beyond team A.
 		status, body = f.call(f.outsider, "GET", "/user/list", nil)
-		if status == 200 && !bodyIsEmptyList(t, body) {
-			t.Fatalf("adding a member granted platform-wide user listing: %s", trim(body))
+		if status == 200 && strings.Contains(string(body), f.admin.user.Email) {
+			t.Fatalf("adding a member granted a look at accounts outside the team: %s", trim(body))
 		}
 		return
 	}

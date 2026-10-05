@@ -70,9 +70,6 @@ describe("ChatShell", () => {
         <div />
       </ChatShell>,
     );
-    fireEvent.click(screen.getByRole("button", { name: translate("en", "pages.chat.integrations") }));
-    expect(mockPush).toHaveBeenCalledWith("/ui/chat/integrations");
-
     fireEvent.click(screen.getByRole("button", { name: translate("en", "pages.chat.usage") }));
     expect(mockPush).toHaveBeenCalledWith("/ui/chat/usage");
 

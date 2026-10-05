@@ -96,7 +96,7 @@ export function RegenerateKeyModal({ selectedToken, visible, onClose, onKeyUpdat
 
     const formValues = buildRegenerateKeyPayload(values);
     try {
-      const response = await regenerateKeyCall(accessToken, selectedToken.token || selectedToken.token_id, formValues);
+      const response = await regenerateKeyCall(accessToken, selectedToken.token_id || selectedToken.token, formValues);
       setRegeneratedKey(response.key);
       toast.success(t("Virtual Key regenerated successfully"));
 

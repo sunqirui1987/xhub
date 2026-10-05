@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useCustomers } from "@/app/(dashboard)/hooks/customers/useCustomers";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import useIsOrgAdmin from "@/app/(dashboard)/hooks/useIsOrgAdmin";
+import { useIsTeamAdminForAnyTeam } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import { useCurrentUser } from "@/app/(dashboard)/hooks/users/useCurrentUser";
 import { hasCapability } from "@/utils/capabilities";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
@@ -107,6 +108,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   const isAdmin = all_admin_roles.includes(userRole || "");
   const canViewTagUsage = isAdmin || internalUserRoles.includes(userRole || "");
   const isOrgAdmin = useIsOrgAdmin();
+  const isTeamAdmin = useIsTeamAdminForAnyTeam();
   const canViewOrganizationUsage = hasCapability(userRole, "viewOrganizationUsage", isOrgAdmin);
 
   // For admins: null means global view (all users), a string means filter by that user
@@ -483,6 +485,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
         userRole={userRole}
         canViewTagUsage={canViewTagUsage}
         isOrgAdmin={isOrgAdmin}
+        isTeamAdmin={isTeamAdmin}
       />
       <PaginationStatusAlerts
         isFetchingMore={paginatedResult.isFetchingMore}

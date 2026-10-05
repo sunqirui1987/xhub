@@ -5,7 +5,6 @@ import BulkCreateUsersButton from "./bulk_create_users_button";
 
 vi.mock("./networking", () => ({
   userCreateCall: vi.fn(),
-  invitationCreateCall: vi.fn(),
   getProxyUISettings: vi.fn().mockResolvedValue({
     PROXY_BASE_URL: null,
     PROXY_LOGOUT_URL: null,

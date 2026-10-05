@@ -58,7 +58,9 @@ func availableCard(entry config.ModelEntry) map[string]any {
 		card["provider"] = firstString(entry.LiteLLMParams, nil, "custom_llm_provider")
 	}
 	if card["category"] == "" {
-		card["category"] = "other"
+		// A deployment that never set a mode is a chat model. The playground
+		// hides anything that is not chat from the chat endpoint picker.
+		card["category"] = "chat"
 	}
 	for _, capability := range []struct{ field, name string }{
 		{"supports_function_calling", "tools"}, {"supports_response_schema", "structured"},

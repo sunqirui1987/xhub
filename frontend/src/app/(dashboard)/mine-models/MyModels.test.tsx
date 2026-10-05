@@ -104,8 +104,8 @@ describe("MyModels", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Sort models" }), "input");
     expect(screen.getAllByTestId(/^my-model-/).map((node) => node.getAttribute("data-testid"))).toEqual([
       "my-model-gpt-allowed",
-      "my-model-eye-allowed",
       "my-model-unpriced",
+      "my-model-eye-allowed",
     ]);
   });
 

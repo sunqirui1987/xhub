@@ -111,7 +111,7 @@ export const toKeyEditFormValues = (keyData: KeyResponse): KeyEditFormValues => 
   logging_settings: extractLoggingSettings(keyData.metadata),
   metadata: formatMetadataForDisplay(stripTagsFromMetadata(keyData.metadata)),
   duration: (keyData as { duration?: string }).duration ?? "",
-  token: keyData.token || keyData.token_id,
+  token: keyData.token_id || keyData.token,
   disabled_callbacks: Array.isArray(readMetadata(keyData, "litellm_disabled_callbacks"))
     ? mapInternalToDisplayNames(readMetadata(keyData, "litellm_disabled_callbacks") as string[])
     : [],

@@ -7,7 +7,6 @@ import { clearTokenCookies, getCookie } from "@/utils/cookieUtils";
 import { isJwtExpired } from "@/utils/jwtUtils";
 import { effectiveSessionRole } from "@/utils/roles";
 import { getUiConfig, setGlobalLitellmHeaderName } from "@/components/networking";
-import { t } from "@/i18n";
 
 function deleteCookie(name: string, path = "/") {
   document.cookie = `${name}=; Max-Age=0; Path=${path}`;
@@ -47,7 +46,32 @@ type AuthContextValue = {
   setShowSSOBanner: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const ignoreStateUpdate = () => undefined;
+
+// Server rendering of a client page does not always see the provider that the
+// root layout wraps around it. A loading value lets that pass finish; the
+// browser then renders inside the real provider. Missing the provider on the
+// client still leaves the page on the loading screen instead of throwing.
+const fallbackAuth: AuthContextValue = {
+  authLoading: true,
+  token: null,
+  userID: null,
+  userRole: "",
+  userEmail: null,
+  accessToken: null,
+  premiumUser: false,
+  disabledPersonalKeyCreation: false,
+  showSSOBanner: false,
+  setToken: ignoreStateUpdate,
+  setUserID: ignoreStateUpdate,
+  setUserRole: ignoreStateUpdate,
+  setUserEmail: ignoreStateUpdate,
+  setAccessToken: ignoreStateUpdate,
+  setPremiumUser: ignoreStateUpdate,
+  setShowSSOBanner: ignoreStateUpdate,
+};
+
+const AuthContext = createContext<AuthContextValue>(fallbackAuth);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
@@ -162,9 +186,5 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error(t("useAuth must be used within an AuthProvider"));
-  }
-  return ctx;
+  return useContext(AuthContext);
 }

@@ -33,6 +33,7 @@ export interface MemberTableProps {
   onEdit: (member: Member) => void;
   onDelete: (member: Member) => void;
   onAddMember?: () => void;
+  addLabel?: string;
   roleColumnTitle?: string;
   roleTooltip?: string;
   extraColumns?: MemberTableColumn[];
@@ -201,6 +202,7 @@ export default function MemberTable({
   onEdit,
   onDelete,
   onAddMember,
+  addLabel,
   roleColumnTitle = "Role",
   roleTooltip,
   extraColumns = [],
@@ -293,7 +295,7 @@ export default function MemberTable({
       {onAddMember && canEdit && (
         <Button onClick={onAddMember} className="self-start">
           <UserPlus className="size-4" />
-          {t("Add Member")}
+          {addLabel ?? t("Add Member")}
         </Button>
       )}
     </div>

@@ -5,8 +5,9 @@
 //
 //   - The request-log family (/spend/logs/ui, its detail route) is readable by
 //     any signed-in caller, narrowed by authz.LogsScope: your own personal logs,
-//     plus your teams' service-key logs if you administer them. Reading someone
-//     else's content as a platform administrator writes an audit row.
+//     plus every log under a team you administer or an organization you
+//     administer. Reading someone else's content as a platform administrator
+//     writes an audit row.
 //   - The global spend family (/global/spend/*) is a platform-wide view and is
 //     gated on a platform administrator session.
 package usage

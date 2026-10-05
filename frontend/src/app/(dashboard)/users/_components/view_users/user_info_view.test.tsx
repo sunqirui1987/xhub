@@ -55,7 +55,6 @@ vi.mock("@/components/networking", () => {
     userDeleteCall: vi.fn(),
     userUpdateUserCall: (...args: unknown[]) => mockUserUpdateUserCall(...args),
     modelAvailableCall: vi.fn().mockResolvedValue({ data: [] }),
-    invitationCreateCall: vi.fn(),
     teamInfoCall: (...args: any[]) => mockTeamInfoCall(...args),
     teamListCall: (...args: any[]) => mockTeamListCall(...args),
     teamMemberAddCall: (...args: any[]) => mockTeamMemberAddCall(...args),

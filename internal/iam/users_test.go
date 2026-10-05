@@ -2,56 +2,20 @@ package iam
 
 import (
 	"context"
-	"fmt"
-	"net/url"
-	"os"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/sunqirui1987/xhub/internal/testsupport"
 )
 
 // testDB opens the identity store on a private schema, so a test never touches
 // the tables a running gateway is using and never has to clean up after itself.
 func testDB(t *testing.T) *DB {
 	t.Helper()
-	dsn := os.Getenv("XHUB_TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable"
-	}
-	u, err := url.Parse(dsn)
-	if err != nil {
-		t.Skipf("test database url unusable: %v", err)
-	}
-	schema := fmt.Sprintf("iam_test_%d", time.Now().UnixNano())
-	ctx := context.Background()
-
-	root, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		t.Skipf("no test database at %s: %v", dsn, err)
-	}
-	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
-		root.Close(ctx)
-		t.Fatalf("create schema: %v", err)
-	}
-	root.Close(ctx)
-
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, err := Open(ctx, u.String())
+	db, err := Open(context.Background(), testsupport.Postgres(t, "iam"))
 	if err != nil {
 		t.Fatalf("open iam: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = db.Close()
-		c, err := pgx.Connect(context.Background(), dsn)
-		if err != nil {
-			return
-		}
-		defer c.Close(context.Background())
-		_, _ = c.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
-	})
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 

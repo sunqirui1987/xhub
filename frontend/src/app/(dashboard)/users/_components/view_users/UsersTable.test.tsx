@@ -38,7 +38,7 @@ interface HarnessOverrides {
   selectionEnabled?: boolean;
   onUserClick?: (userId: string, openInEditMode?: boolean) => void;
   onDeleteUser?: (user: UserInfo) => void;
-  onResetPassword?: (userId: string) => void;
+  onResetPassword?: (user: UserInfo) => void;
   onSortingChange?: Mock;
 }
 
@@ -168,26 +168,21 @@ describe("UsersTable", () => {
     expect(onUserClick).toHaveBeenCalledWith("user-1", false);
   });
 
-  it("opens the detail view in edit mode from the row menu", async () => {
+  it("does not offer an edit action, and resets the password from the row menu", async () => {
     const user = userEvent.setup();
-    const onUserClick = vi.fn();
-    render(<Harness onUserClick={onUserClick} />);
+    const onResetPassword = vi.fn();
+    render(<Harness onResetPassword={onResetPassword} />);
 
     await openRowMenu(user, "user-1");
-    await user.click(await screen.findByTestId("user-action-edit"));
-
-    expect(onUserClick).toHaveBeenCalledWith("user-1", true);
+    expect(screen.queryByTestId("user-action-edit")).not.toBeInTheDocument();
+    await user.click(await screen.findByTestId("user-action-reset-password"));
+    expect(onResetPassword).toHaveBeenCalledWith(expect.objectContaining({ user_id: "user-1" }));
   });
 
-  it("delegates delete and reset-password from the row menu", async () => {
+  it("delegates delete from the row menu", async () => {
     const user = userEvent.setup();
     const onDeleteUser = vi.fn();
-    const onResetPassword = vi.fn();
-    render(<Harness onDeleteUser={onDeleteUser} onResetPassword={onResetPassword} />);
-
-    await openRowMenu(user, "user-1");
-    await user.click(await screen.findByTestId("user-action-reset-password"));
-    expect(onResetPassword).toHaveBeenCalledWith("user-1");
+    render(<Harness onDeleteUser={onDeleteUser} />);
 
     await openRowMenu(user, "user-1");
     await user.click(await screen.findByTestId("user-action-delete"));
