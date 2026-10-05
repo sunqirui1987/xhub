@@ -11,7 +11,33 @@ Playground 复制出来的调用示例，以及控制台自己的请求，都指
 
 文档：[设计修复方案](docs/README.md)
 
-登录控制台：http://localhost:3000/login ，用户名 `admin`，密码是配置里的 `master_key`。
+## 权限模型
+
+资源层级是**组织 → 团队 → 项目**。角色只有两个维度，没有第三个：
+
+| 作用域 | 取值 | 怎么得到 |
+| --- | --- | --- |
+| 账号 | `admin`（平台管理员）、`user` | 由平台管理员创建，不开放自助注册 |
+| 团队 | `team_admin`、`member` | 加进团队时指定 |
+
+用户**只通过团队**获得权限：没有组织成员，没有项目管理员，没有访问组角色。团队管理员在本团队内能改团队资料、管成员、建项目和项目下的服务密钥，但不能删团队、不能改团队预算上限、不能给别人平台管理员。组织只由平台管理员维护。
+
+几条容易踩的规则：
+
+- 成员只能从**本团队**里选，且必须输入完整邮箱；邮箱不存在和已禁用返回同一个错误，防止拿它枚举全平台账号。
+- 一个团队必须始终有至少一位团队管理员，所以移除最后一位会被拒绝。
+- 服务密钥属于团队或项目。团队管理员只能**收窄**它的可用模型，不能超出团队范围。
+- 逐条调用日志带请求/响应内容，所以只有本人、本团队管理员和平台管理员能看，且平台管理员每次查看都会写审计。
+
+密钥分两种：**个人密钥**属于某个人，绑自己所在的团队/项目，只有自己能看；**服务密钥**属于团队或项目，团队管理员能轮换、禁用、删除。调用的归属（谁、哪个团队、哪个项目）在写入时就快照到用量事件上，所以成员离开团队不会带走他已经产生的用量，删团队也不会抹掉历史。
+
+`master_key` 不是账号，也不能当密码登录。它只能调 `/bootstrap` 和应急管理接口；模型、密钥、团队这些管理接口都要管理员会话，用主密钥访问返回 403。
+
+### 登录
+
+控制台：http://localhost:3000/login ，用 `general_settings.admin_email` 和 `admin_password` 配置的账号登录。默认是 `admin@xhub.local` / `admin-pass-1234`，**上线前必须改掉**。
+
+管理员账号在启动时按 `admin_email` 创建，只在数据库里还没有这个邮箱时才建。配置里的密码是**初始密码**：之后改配置**不会**重置已存在的账号密码，改线上密码要走控制台。没配这两项时不创建，此时用 `master_key` 调 `POST /bootstrap` 手工建第一个管理员。
 
 调用网关：
 
@@ -19,7 +45,7 @@ Playground 复制出来的调用示例，以及控制台自己的请求，都指
 import openai
 
 client = openai.OpenAI(
-    api_key="sess-... 或虚拟密钥",
+    api_key="虚拟密钥",
     base_url="http://localhost:4000",
 )
 ```
@@ -28,9 +54,21 @@ client = openai.OpenAI(
 
 ## 安装
 
+数据库必须**全新**。这次身份与权限是重建的 schema（`internal/iam/schema.sql`），没有从旧库迁移的路径：旧表结构和新的对不上，进程启动时会直接报错退出（例如 `column "email" does not exist`），不会静默降级。请建一个新库，或先删掉旧库再启动。`users`、`teams`、`organizations`、`api_keys`、用量和审计这些表都由 `internal/iam` 拥有；`internal/store` 只留框架表（键值设置、UI 会话、花费队列），它们不带权限。
+
 第一次启动只写入 `fennoai` 和 `qiniu` 两个凭证，不写入模型。`XHUB_BUILTIN_PROVIDERS` 默认开启；设为 `off` 则不安装。从供应商目录添加的模型和手填的一样，只保存模型名和凭证名。目录地址是 fennoai `https://api.fenno.ai/v1/models`、七牛 `https://api.qnaigc.com/v1/models`。调用地址在凭证上：fennoai `https://api.fenno.ai`，七牛 `https://api.qnaigc.com/bypass/openai/v1`。key 分别读 `FENNOAI_API_KEY` 和 `QINIU_API_KEY`。
 
-控制台密码是配置里的 `master_key`，不用再导出环境变量。`redis_url` 可以留空；留空时网关不连 Redis，花费日志只走 PostgreSQL。Docker 模式使用镜像里的 `configs/config.docker.yaml`。源代码模式复制 `configs/config.example.yaml` 为 `configs/config.yaml` 后再改。
+`master_key` 现在可以留空；留空时没有应急凭据，一切按账号走。`redis_url` 也可以留空；留空时网关不连 Redis，花费日志只走 PostgreSQL。Docker 模式使用镜像里的 `configs/config.docker.yaml`。源代码模式复制 `configs/config.example.yaml` 为 `configs/config.yaml` 后再改。
+
+生产环境不要把管理员密码写在配置文件里，用 `os.environ/` 从环境变量取：
+
+```yaml
+general_settings:
+  admin_email: os.environ/XHUB_ADMIN_EMAIL
+  admin_password: os.environ/XHUB_ADMIN_PASSWORD
+```
+
+变量没设时解析成空串，此时就不创建管理员，不会退化成用占位符当密码。账号建好之后想彻底关掉这条路径，设 `disable_env_credential_login: true`。
 
 ### Docker 模式
 
@@ -43,7 +81,7 @@ sh deploy/build.sh
 docker compose up -d
 ```
 
-`docker-compose.yml` 拉起 PostgreSQL、Redis、网关和控制台。镜像内配置是 `configs/config.docker.yaml`，`master_key` 为 `sk-local-master`。控制台 http://localhost:3000/login ，网关 http://localhost:4000 。PostgreSQL 映射在本机 `5433`，容器名 `xhub-postgres`。
+`docker-compose.yml` 拉起 PostgreSQL、Redis、网关和控制台。镜像内配置是 `configs/config.docker.yaml`，管理员是 `admin@xhub.local`。控制台 http://localhost:3000/login ，网关 http://localhost:4000 。PostgreSQL 映射在本机 `5433`，容器名 `xhub-postgres`。
 
 ### 源代码模式
 
@@ -53,15 +91,17 @@ docker compose up -d
 | --- | --- | --- |
 | Go | 1.25 | 网关 `cmd/gateway` |
 | Node.js | `>=24.14.1` | 控制台 `frontend/` |
-| PostgreSQL | 16 即可 | 必填。`general_settings.database_url` 必须是 `postgres://`，不支持 SQLite |
+| PostgreSQL | 16 即可 | 必填且必须全新。`general_settings.database_url` 必须是 `postgres://`，不支持 SQLite |
 | Redis | 7 即可 | 可选。配置了 `redis_url` 才连接 |
 
 本机装好 PostgreSQL 后建库，并把 `configs/config.yaml` 指到它。示例配置默认是本机 `5432`：
 
 ```yaml
 general_settings:
-  master_key: sk-local-master
   database_url: postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable
+  admin_email: admin@xhub.local
+  admin_password: admin-pass-1234
+  admin_name: Admin
 ```
 
 ```bash
@@ -70,4 +110,7 @@ make run
 make ui
 ```
 
-`make test` 跑 Go 测试。`make e2e` 跑浏览器测试；第一次先执行 `cd frontend && npx playwright install chromium`。端到端测试会使用上面的 `xhub-postgres` 容器。
+`make test` 跑 Go 测试。涉及数据库的测试会在本机连不上库时**跳过**而不是失败，所以它绿不代表权限逻辑真的跑过；要真正执行，先起 `xhub-postgres` 容器（映射在本机 `5433`），或设 `XHUB_TEST_DATABASE_URL` 指向一个可用库。这些测试各自建独立的 schema 并在结束时删掉，不会碰你自己的数据。
+
+`make e2e` 跑浏览器测试；第一次先执行 `cd frontend && npx playwright install chromium`。端到端测试会使用上面的 `xhub-postgres` 容器。
+

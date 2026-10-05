@@ -33,7 +33,6 @@ import TeamsPage from "./teams/page";
 import ProjectsPage from "./projects/page";
 import UsersPage from "./users/page";
 import OrganizationsPage from "./organizations/page";
-import AccessGroupsPage from "./access-groups/page";
 import RouterSettingsPage from "./router-settings/page";
 import LoggingPage from "./logging-and-alerts/page";
 import CostTrackingPage from "./cost-tracking/page";
@@ -53,7 +52,6 @@ const livePages = [
   ["projects", "/projects", ProjectsPage],
   ["users", "/users", UsersPage],
   ["organizations", "/organizations", OrganizationsPage],
-  ["access-groups", "/access-groups", AccessGroupsPage],
   ["router-settings", "/router-settings", RouterSettingsPage],
   ["logging-and-alerts", "/logging-and-alerts", LoggingPage],
   ["cost-tracking", "/cost-tracking", CostTrackingPage],

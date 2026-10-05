@@ -2,7 +2,7 @@
 package gateway
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -13,6 +13,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/router"
@@ -43,31 +44,38 @@ func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 	w.Header().Set("x-litellm-model-api-base", apiBase)
 	w.Header().Set("x-litellm-version", Version)
 	if p.Key != nil {
-		if p.Key.TPMLimit.Valid {
-			w.Header().Set("x-litellm-key-tpm-limit", strconv.FormatInt(p.Key.TPMLimit.Int64, 10))
+		if p.Key.TPMLimit != nil {
+			w.Header().Set("x-litellm-key-tpm-limit", strconv.Itoa(*p.Key.TPMLimit))
 		}
-		if p.Key.RPMLimit.Valid {
-			w.Header().Set("x-litellm-key-rpm-limit", strconv.FormatInt(p.Key.RPMLimit.Int64, 10))
+		if p.Key.RPMLimit != nil {
+			w.Header().Set("x-litellm-key-rpm-limit", strconv.Itoa(*p.Key.RPMLimit))
 		}
-		if p.Key.MaxBudget.Valid {
-			w.Header().Set("x-litellm-key-max-budget", catalog.Format(p.Key.MaxBudget.Float64))
+		if p.Key.MaxBudget != nil {
+			w.Header().Set("x-litellm-key-max-budget", catalog.Format(*p.Key.MaxBudget))
 		}
 		w.Header().Set("x-litellm-key-spend", catalog.Format(p.Key.Spend))
 	}
 }
 
 // recordSpend records this call's spend. With Redis it updates the hot path and queues a log instead of writing PostgreSQL inside the request.
-func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string) {
+func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias, op string, usage map[string]any, start time.Time, cacheHit bool, status int, depID string) {
 	if usage == nil {
 		usage = map[string]any{}
 	}
 	pt := asInt(usage["prompt_tokens"])
 	ct := asInt(usage["completion_tokens"])
 	total, in, out, okc := catalog.Cost(alias, pt, ct)
+	// A cache hit is a request fact, but it is not a second upstream generation.
+	// Keep the token metadata for observability while making the billable delta
+	// explicitly zero. This must happen before both the Redis and PostgreSQL
+	// persistence paths so the two paths cannot disagree.
+	if cacheHit {
+		total, in, out = 0, 0, 0
+	}
 	// LiteLLM stores response_cost or 0.0. Unknown models still get a row, with spend 0.
-	logged := sql.NullFloat64{Float64: 0, Valid: true}
+	spend := 0.0
 	if okc {
-		logged = sql.NullFloat64{Float64: total, Valid: true}
+		spend = total
 		w.Header().Set("x-litellm-response-cost", catalog.Format(total))
 		w.Header().Set("x-litellm-response-cost-original", catalog.Format(total))
 		w.Header().Set("x-litellm-response-cost-input", catalog.Format(in))
@@ -75,20 +83,25 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		if p.Key != nil {
 			shown := p.Key.Spend + total
 			if s.Live != nil {
-				shown = p.Key.Spend + s.Live.HotSpend(p.Hash) + total
+				shown = p.Key.Spend + s.Live.HotSpend(live.SpendRef("key", p.Hash)) + total
 			}
 			w.Header().Set("x-litellm-key-spend", catalog.Format(shown))
 		}
 	}
 	hash := ""
-	teamID, userID, orgID := "", "", ""
+	ownerType := ""
+	teamID, userID, orgID, projectID := "", "", "", ""
 	if p != nil {
 		hash = p.Hash
+		ownerType = p.OwnerType
 		userID = p.UserID
 		if p.Key != nil {
-			teamID, orgID = p.Key.TeamID, p.Key.OrganizationID
-			if p.Key.UserID != "" {
-				userID = p.Key.UserID
+			teamID, projectID = p.Key.TeamID, deref(p.Key.ProjectID)
+			// A key carries no organization of its own; its team's is the
+			// billing scope above it, snapshotted onto the usage row.
+			orgID = s.teamOrg(p.Key.TeamID)
+			if p.Key.UserID != nil {
+				userID = *p.Key.UserID
 			}
 		}
 	}
@@ -99,40 +112,75 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	}
 	s.noteUsage(depID, tokens)
 	ex := s.takeExchange(callID)
+	callType := strings.TrimSpace(op)
+	if callType == "" {
+		callType = "chat"
+	}
+	rowStatus := "success"
+	if status >= 400 {
+		rowStatus = "error"
+		// Failed gateway requests are observations, not billable completions.
+		// Keep the response usage for diagnostics but never turn an upstream 4xx/5xx
+		// into spend or route-usage.
+		spend = 0
+		tokens = 0
+	}
 	row := live.SpendLog{
-		RequestID: callID, CallType: "chat", Model: alias, APIKey: hash,
-		Prompt: pt, Completion: ct, Spend: logged.Float64, SpendValid: logged.Valid,
+		RequestID: callID, CallType: callType, Model: alias, APIKey: hash,
+		KeyID:  p.KeyID,
+		Prompt: pt, Completion: ct, Spend: spend, SpendValid: true,
 		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
-		CacheHit: cacheHit, Status: "success", TeamID: teamID, UserID: userID, OrgID: orgID,
+		CacheHit: cacheHit, Status: rowStatus, OwnerType: ownerType,
+		TeamID: teamID, UserID: userID, OrgID: orgID, ProjectID: projectID,
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
 	}
-	if s.Live != nil && s.Live.EnqueueLog(row) == nil {
-		if okc {
-			_ = s.Live.ChargeSpend(hash, total)
-			_ = s.Live.ChargeSpend(teamID, total)
-			_ = s.Live.ChargeSpend(userID, total)
-			_ = s.Live.ChargeSpend(orgID, total)
-		}
+	if s.Live != nil && s.Live.EnqueueSpend(row) == nil {
 		return
 	}
-	s.persistSpend(hash, teamID, userID, orgID, callID, alias, pt, ct, logged, start, end, cacheHit, total, okc && hash != "", ex)
+	s.persistSpend(row, spend, ex, start, end)
 }
 
 // persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
-func (s *Server) persistSpend(hash, teamID, userID, orgID, callID, alias string, pt, ct int, logged sql.NullFloat64, start, end time.Time, cacheHit bool, total float64, charge bool, ex promptExchange) {
-	if charge {
-		_ = s.Store.AddSpend(hash, total)
-		if teamID != "" {
-			_ = s.Store.AddTeamSpend(teamID, total)
-		}
-		if userID != "" {
-			_ = s.Store.AddUserSpend(userID, total)
-		}
-		if orgID != "" {
-			_ = s.Store.AddOrgSpend(orgID, total)
-		}
+func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchange, start, end time.Time) {
+	if s.IAM == nil {
+		return
 	}
-	_ = s.Store.InsertSpendLogWithPrompt(callID, "chat", alias, hash, pt, ct, logged, start, end, cacheHit, "success", userID, ex.messages, ex.response, ex.proxy)
+	// The event, its stored bodies, the daily roll-up and all five billing scopes
+	// commit together and deduplicate by request_id.
+	rec := iam.UsageRecord{
+		RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
+		UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
+		Model: row.Model, CallType: row.CallType, Status: row.Status,
+		PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
+		DurationMS: int(end.Sub(start).Milliseconds()),
+		RequestBody: ex.messages, ResponseBody: ex.response,
+	}
+	if err := s.IAM.RecordUsage(context.Background(), []iam.UsageRecord{rec}); err != nil {
+		logx.Error("persist spend failed: %v", err)
+	}
+}
+
+// teamOrg returns the organization that owns a team, for the ownership snapshot
+// written onto a usage row. A lookup failure records an empty organization rather
+// than dropping the row: the spend itself is already known and must be billed.
+func (s *Server) teamOrg(teamID string) string {
+	if s.IAM == nil || teamID == "" {
+		return ""
+	}
+	team, err := s.IAM.GetTeam(context.Background(), teamID)
+	if err != nil {
+		logx.Error("usage organization lookup failed team=%s err=%v", teamID, err)
+		return ""
+	}
+	return team.OrganizationID
+}
+
+// deref reads an optional string. A nil pointer is the empty string.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // promptExchange is the request and response saved on one spend log. Empty strings mean prompt storage was off.
@@ -273,18 +321,21 @@ func redactSecretText(s string) string {
 }
 
 // writeCacheHit returns a cached body and records a cache-hit spend log.
-func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck string, hit []byte, start time.Time) {
+func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time) {
 	w.Header().Set("cache_hit", "true")
 	w.Header().Set("x-litellm-cache-hit", "true")
 	w.Header().Set("x-litellm-cache-key", ck)
 	w.Header().Set("x-litellm-model-name", alias)
 	w.Header().Set("x-litellm-version", Version)
 	var parsed map[string]any
+	var usage map[string]any
 	if json.Unmarshal(hit, &parsed) == nil {
-		if usage, ok := parsed["usage"].(map[string]any); ok {
-			s.recordSpend(w, p, callID, alias, usage, start, true, "")
-		}
+		usage, _ = parsed["usage"].(map[string]any)
 	}
+	// Always write the cache-hit request log, even when the cached response has
+	// no usage object. Missing usage is different from a missing request fact;
+	// recordSpend will keep the row and, because cacheHit is true, charge zero.
+	s.recordSpend(w, p, callID, alias, op, usage, start, true, http.StatusOK, "")
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("x-litellm-response-duration-ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))
 	w.WriteHeader(200)
@@ -294,7 +345,9 @@ func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID,
 // writeChatJSON writes the upstream JSON back to the client and records the spend.
 func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string) {
 	if op == "audio_speech" {
-		s.recordSpend(w, p, callID, alias, map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}, start, false, depID)
+		// Speech responses do not carry chat-token usage. Do not manufacture
+		// 8/2/10 tokens: that corrupts both usage reports and billing.
+		s.recordSpend(w, p, callID, alias, op, nil, start, false, status, depID)
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", "audio/mpeg")
 		}
@@ -343,14 +396,17 @@ func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID,
 				}
 			}
 		}
+		// Some providers omit usage (especially non-chat operations). Keep the
+		// request log, but do not turn an unknown measurement into fake tokens.
+		// Providers that do return usage are normalized below.
 		if usage == nil {
-			usage = map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}
+			usage = map[string]any{}
 		}
 		if _, ok := usage["prompt_tokens"]; !ok {
 			usage["prompt_tokens"] = usage["input_tokens"]
 			usage["completion_tokens"] = usage["output_tokens"]
 		}
-		s.recordSpend(w, p, callID, alias, usage, start, false, depID)
+		s.recordSpend(w, p, callID, alias, op, usage, start, false, status, depID)
 		respBody, _ = json.Marshal(parsed)
 		s.Cache.Set(ck, respBody)
 	}

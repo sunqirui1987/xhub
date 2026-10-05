@@ -2,19 +2,20 @@
 package gateway
 
 import (
-	"fmt"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/gateway/models"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/iam"
 
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/live"
@@ -32,6 +33,10 @@ const Version = family.ProxyVersion
 type Server struct {
 	Cfg                *config.Config
 	Store              *store.Store
+	// IAM is the identity store: users, teams, organizations, projects, keys
+	// and the audit log. Authz is the single authorization layer over it.
+	IAM                *iam.DB
+	Authz              *authz.Authorizer
 	Client             *http.Client
 	engine             *gin.Engine
 	registered         map[string]struct{}
@@ -66,75 +71,22 @@ type tokHit struct {
 	n int
 }
 
-type sessionRec struct {
-	Role      string
-	UserID    string
-	ExpiresAt time.Time
-}
-
-// ValidateKeyRelations rejects keys that point at missing or contradictory identity objects.
-func (s *Server) ValidateKeyRelations(k store.Key) error {
-	if s == nil || s.Store == nil {
-		return nil
-	}
-	var team *store.Entity
-	if k.UserID != "" {
-		if user, err := s.Store.GetUser(k.UserID); err != nil {
-			return fmt.Errorf("user not found")
-		} else if user.BlockedState() {
-			return fmt.Errorf("user blocked")
-		}
-	}
-	if k.TeamID != "" {
-		var err error
-		team, err = s.Store.GetTeam(k.TeamID)
-		if err != nil {
-			return fmt.Errorf("team not found")
-		}
-		if team.BlockedState() {
-			return fmt.Errorf("team blocked")
-		}
-	}
-	if k.OrganizationID != "" {
-		org, err := s.Store.GetOrg(k.OrganizationID)
-		if err != nil {
-			return fmt.Errorf("organization not found")
-		}
-		if org.BlockedState() {
-			return fmt.Errorf("organization blocked")
-		}
-		if team != nil && team.TeamID != k.OrganizationID {
-			return fmt.Errorf("team does not belong to organization")
-		}
-	}
-	if k.ProjectID != "" {
-		project, err := s.Store.GetProject(k.ProjectID)
-		if err != nil {
-			return fmt.Errorf("project not found")
-		}
-		if project.BlockedState() {
-			return fmt.Errorf("project blocked")
-		}
-		projectOrg, _ := project.Extra()["organization_id"].(string)
-		if k.OrganizationID != "" && projectOrg != "" && projectOrg != k.OrganizationID {
-			return fmt.Errorf("project does not belong to organization")
-		}
-		if team != nil && project.TeamID != "" && project.TeamID != team.ID {
-			return fmt.Errorf("project does not belong to team")
-		}
-	}
-	return nil
-}
+// ValidateKeyRelations is gone with the old store: a key's ownership is
+// resolved from the database by the authorization layer on every request, so
+// there is no separate validation step that could disagree with it.
 
 var logTraceOnceServer sync.Once
 
 // New assembles the gateway. It loads the catalog, merges router settings, and registers dedicated routes plus the remaining catalog routes.
-func New(cfg *config.Config, st *store.Store) *Server {
+// The identity store is required: a gateway without one could not tell who is calling.
+func New(cfg *config.Config, st *store.Store, db *iam.DB) *Server {
 	logTraceOnceServer.Do(func() { logx.Trace("enter gateway.New") })
 
 	s := &Server{
 		Cfg:                cfg,
 		Store:              st,
+		IAM:                db,
+		Authz:              authz.New(db),
 		Client:             &http.Client{Timeout: time.Duration(cfg.RouterSettings.Timeout) * time.Second},
 		engine:             newEngine(),
 		registered:         map[string]struct{}{},
@@ -157,6 +109,7 @@ func New(cfg *config.Config, st *store.Store) *Server {
 	}
 	prefs.ApplyTyped(s, prefs.MergedRouter(s))
 	models.LoadStored(s)
+	s.seedAdmin()
 	s.installModules()
 	s.mountModules()
 	// mountCatalog registers each catalog route on Gin by itself. Unregistered paths are not swallowed by a "/" handler that would hide 404s.

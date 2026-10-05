@@ -82,7 +82,7 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 		info["created_at"] = time.Now().UTC().Format(time.RFC3339)
 	}
 	entry := config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info}
-	if err := s.DB().UpsertProxyModel(proxyModel(entry)); err != nil {
+	if err := s.RecordStore().UpsertProxyModel(proxyModel(entry)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
@@ -145,7 +145,7 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.ModelInfo["db_model"] = true
-	if err := s.DB().UpsertProxyModel(proxyModel(m)); err != nil {
+	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
@@ -178,7 +178,7 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be deleted on the dashboard. Delete it from the config file.")
 		return
 	}
-	if err := s.DB().DeleteProxyModel(str(m.ModelInfo["id"])); err != nil {
+	if err := s.RecordStore().DeleteProxyModel(str(m.ModelInfo["id"])); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
@@ -232,7 +232,7 @@ func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 	}
 	m.ModelInfo["blocked"] = blocked
 	(*s.ModelTable())[i] = m
-	if err := s.DB().UpsertProxyModel(proxyModel(m)); err != nil {
+	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
@@ -333,17 +333,17 @@ func proxyModel(m config.ModelEntry) store.ProxyModel {
 // LoadStored merges database models into this process's model table.
 // Entries that exist only in the config file are not in this table, so after a restart they still come only from YAML and cannot be deleted from the page.
 func LoadStored(s Host) {
-	if s.DB() == nil {
+	if s.RecordStore() == nil {
 		return
 	}
 	dropProviderShells(s)
-	rows, err := s.DB().ListProxyModels()
+	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
 		return
 	}
 	for _, row := range rows {
 		if clearCopiedMode(&row) {
-			if err := s.DB().UpsertProxyModel(row); err != nil {
+			if err := s.RecordStore().UpsertProxyModel(row); err != nil {
 				logx.Error("builtin model %s: %v", row.ID, err)
 			}
 		}

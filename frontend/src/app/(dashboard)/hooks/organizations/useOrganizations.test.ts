@@ -197,6 +197,25 @@ describe("useOrganizations", () => {
     expect(organizationListCall).not.toHaveBeenCalled();
   });
 
+  it("does not call the organization API for a role that cannot access management endpoints", () => {
+    mockUseAuthorized.mockReturnValue({
+      accessToken: "test-access-token",
+      userId: "test-user-id",
+      userRole: "Internal User",
+      token: "test-token",
+      userEmail: "test@example.com",
+      premiumUser: true,
+      disabledPersonalKeyCreation: null,
+      showSSOBanner: false,
+    });
+
+    const { result } = renderHook(() => useOrganizations(), { wrapper });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isFetched).toBe(false);
+    expect(organizationListCall).not.toHaveBeenCalled();
+  });
+
   it("does not call the organization API when the session is not premium", async () => {
     mockUseAuthorized.mockReturnValue({
       accessToken: "test-access-token",

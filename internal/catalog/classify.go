@@ -49,10 +49,15 @@ func AuthOf(path string) AuthClass {
 	return AuthManagement
 }
 
-// IsMixedPath reports paths such as agents, MCP, and skills that were removed from the product but remain in the catalog.
+// IsMixedPath reports the catalog paths that were removed from the product and
+// are refused rather than served.
+//
+// /v1/skills is deliberately absent: it is a real route again, serving the
+// organization's skills. A path leaves this list when a dedicated handler takes
+// it over, or the refusal would answer before the handler ever ran.
 func IsMixedPath(path string) bool {
 	for _, p := range []string{
-		"/v1/agents", "/v1beta/agents", "/v1/skills", "/v1/memory",
+		"/v1/agents", "/v1beta/agents", "/v1/memory",
 		"/v1/workflows", "/v1/tool", "/agent", "/mcp", "/v1/mcp",
 	} {
 		if HasPrefix(path, p) {

@@ -14,7 +14,7 @@ import (
 // Config returns the in-process config pointer. ApplyTyped changes its routing strategy, retries, and timeout, the same fields as before this package was split, and it does not add a lock.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
-	DB() *store.Store
+	RecordStore() *store.Store
 	Config() *config.Config
 }
 

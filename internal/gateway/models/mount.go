@@ -20,6 +20,10 @@ func Module(h Host) httpx.Module {
 		reg.Handle("GET /v1/models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /model/available", func(w http.ResponseWriter, r *http.Request) { Available(h, w, r) })
+		// The console's Models and Endpoints page reads this and nothing else.
+		// Without it the page fell through to the catalog's generic store and
+		// rendered an empty table.
+		reg.Handle("GET /v2/model/info", func(w http.ResponseWriter, r *http.Request) { Info(h, w, r) })
 		reg.Handle("GET /model/cost_map/source", func(w http.ResponseWriter, r *http.Request) { CostMapSource(h, w, r) })
 		reg.Handle("POST /reload/model_cost_map", func(w http.ResponseWriter, r *http.Request) { ReloadCostMap(h, w, r) })
 		reg.Handle("POST /schedule/model_cost_map_reload", func(w http.ResponseWriter, r *http.Request) { ScheduleCostMapReload(h, w, r) })

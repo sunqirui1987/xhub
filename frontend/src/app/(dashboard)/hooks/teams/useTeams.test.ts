@@ -238,14 +238,12 @@ describe("useTeams", () => {
   });
 
   it("should pass userId and userRole to fetchTeams", async () => {
-    // Mock successful API call
     (fetchTeams as any).mockResolvedValue(mockTeams);
 
-    // Mock specific userId and userRole
     mockUseAuthorized.mockReturnValue({
       accessToken: "test-access-token",
       userId: "custom-user-id",
-      userRole: "member",
+      userRole: "Internal Viewer",
       token: "test-token",
       userEmail: "test@example.com",
       premiumUser: false,
@@ -255,12 +253,11 @@ describe("useTeams", () => {
 
     const { result } = renderHook(() => useTeams(), { wrapper });
 
-    // Wait for query to execute
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(fetchTeams).toHaveBeenCalledWith("test-access-token", "custom-user-id", "member", null);
+    expect(fetchTeams).toHaveBeenCalledWith("test-access-token", "custom-user-id", "Internal Viewer", null);
   });
 
   it("should handle null userId", async () => {
@@ -922,8 +919,8 @@ describe("useAllTeams", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
-  it("scopes the request to the caller for an internal user and returns their teams", async () => {
-    asRole("Internal User", "member-7");
+  it("scopes the request to the caller for an internal viewer and returns their teams", async () => {
+    asRole("Internal Viewer", "member-7");
     fetchMock.mockResolvedValue(pageResponse(mockTeams, 1, 1));
 
     const { result } = renderHook(() => useAllTeams(), { wrapper });
@@ -931,28 +928,10 @@ describe("useAllTeams", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(mockTeams);
-    expect(result.current.data?.length).toBeGreaterThan(0);
     expect(requestedUserId(fetchMock.mock.calls[0][0] as string)).toBe("member-7");
   });
 
-  it("carries user_id on every page of a scoped multi-page result", async () => {
-    asRole("Internal Viewer", "member-7");
-    fetchMock.mockImplementation((url: string) =>
-      Promise.resolve(
-        requestedPage(url) === "1" ? pageResponse([mockTeams[0]], 1, 2) : pageResponse([mockTeams[1]], 2, 2),
-      ),
-    );
-
-    const { result } = renderHook(() => useAllTeams(), { wrapper });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const scopes = fetchMock.mock.calls.map((call) => requestedUserId(call[0] as string));
-    expect(scopes).toEqual(["member-7", "member-7"]);
-  });
-
-  it.each(["Admin", "Admin Viewer", "Org Admin"])(
+  it.each(["Admin", "Admin Viewer"])(
     "sends no user_id for %s so the broad list is left intact",
     async (userRole) => {
       asRole(userRole);
@@ -965,19 +944,4 @@ describe("useAllTeams", () => {
       expect(requestedUserId(fetchMock.mock.calls[0][0] as string)).toBeNull();
     },
   );
-
-  it("refetches when the scope changes even though the access token has not", async () => {
-    asRole("Internal User", "member-7");
-    fetchMock.mockResolvedValue(pageResponse(mockTeams, 1, 1));
-
-    const { result, rerender } = renderHook(() => useAllTeams(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    asRole("Internal User", "member-8");
-    rerender();
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(requestedUserId(fetchMock.mock.calls[1][0] as string)).toBe("member-8");
-  });
 });

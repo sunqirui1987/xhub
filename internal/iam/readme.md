@@ -1,0 +1,97 @@
+# iam
+
+## Purpose
+
+`iam` is the identity store: accounts, organizations, teams, memberships, projects, access groups, virtual keys, usage, request logs and the audit trail. `schema.sql` owns the constraints (composite foreign keys, CHECKs, a case-insensitive email) and xorm owns every read and write. There is no migration from the previous JSON-membership schema and no compatibility layer: the database is rebuilt, and this schema is the whole of it.
+
+Membership is only ever read from `team_members`. There is no mirror of members anywhere else, which is what makes removing a member take effect on the next request rather than at the next login.
+
+## The model
+
+Two account roles and two team roles, and nothing else:
+
+| Scope | Values |
+| --- | --- |
+| Account (`users.role`) | `admin`, `user` |
+| Team (`team_members.role`) | `team_admin`, `member` |
+
+Resources descend **organization → team → project**. An organization is maintained by platform administrators only. A user gains permission only through team membership: there is no org membership, no project admin, and no access-group role.
+
+Ownership of an inference call is **snapshotted** onto `usage_events` at write time. `usage_events` therefore has no foreign keys at all: a member who leaves a team does not move the spend they already produced, and deleting a team does not erase history.
+
+## Files
+
+| File | Contents |
+| --- | --- |
+| `schema.sql` | Every table, index and constraint. Applied by `Migrate`. |
+| `db.go` | `Open`, `Migrate`, the transaction helper, error mapping, and the audit writer. |
+| `models.go` | The table beans and the role/status constants. |
+| `users.go` | Accounts: create, read, profile, password, admin update, delete, `EnsureAdmin`. |
+| `teams.go` | Organizations, teams, memberships, projects, and access-group assignment. |
+| `keys.go` | Virtual keys, their narrowing, access groups, and the model-resolution functions. |
+| `usage.go` | The usage write path: events, request logs, the daily roll-up, live spend. |
+| `usage_read.go` | The scoped read API over usage and request logs. |
+
+## The model set
+
+`allowedModels` is the only function the catalog and the inference path use. Every scope resolves to a single team and capabilities are never merged across teams:
+
+```
+team    = union of the team's active access groups
+project = team ∩ project narrowing   (when the scope names a project)
+key     = (project or team) ∩ key narrowing   (when the scope names a key)
+```
+
+Two callers wrap it:
+
+- `AllowedModelsForTeam(ctx, teamID)` — a team's set, used before a key exists
+- `AllowedModelsForKey(ctx, k)` — a key's effective set
+
+An empty narrowing list on a project or a key means **inherit**, not **deny**. An empty set is not a denial either: nothing has been assigned yet.
+
+## Reading usage and logs
+
+`usage_events` and `usage_daily` are read through `UsageQuery`, which takes a `builder.Cond` produced by `authz.UsageScope` or `authz.LogsScope`. The scope is applied **first** and every other filter only narrows inside it, so a `user_id` or `api_key` taken from a query string can never widen a read. This package does not import `authz`; the caller passes the condition in, which keeps the policy in one place and the query layer free of it.
+
+| Function | Returns |
+| --- | --- |
+| `ListUsage` | Events in scope, newest first |
+| `CountUsage` | How many, for paging |
+| `GetUsageEvent` | One event in scope, or `ErrNotFound` outside it |
+| `GetRequestLog` | The stored bodies of one event |
+| `DailyUsage` | The roll-up per day |
+| `DailyUsageByModel` | The roll-up per day and model |
+| `RollupByModel` | Totals per model |
+| `RollupByKey` | Totals per key, with a display name |
+| `RollupByTeam` | Totals per team |
+| `AuditLogRead` | Writes the audit row for reading someone else's log |
+
+## How another package uses it
+
+```go
+db, err := iam.Open(ctx, cfg.GeneralSettings.DatabaseURL)
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+
+p, err := auth.Resolve(ctx, cfg, db, r)          // who is calling
+g, err := authz.New(db).Guard(ctx, p.Actor())    // what they may do
+sc, err := g.UsageScope(ctx, teamID)             // what rows they may read
+rows, err := db.ListUsage(ctx, iam.UsageQuery{Cond: sc.Cond, Limit: 50})
+```
+
+Two details matter when adding a query:
+
+- A **read projection** must carry xorm tags. xorm maps result columns by its own `xorm:` tag and never by `json:`, so a struct with only json tags scans every column into the zero value without reporting an error.
+- A `models` column holds a JSON array in a `TEXT` column. Project it into a struct with `xorm:"json 'models'"`; projecting it straight into a `[]string` returns the raw document as a single element.
+
+## Seeding the first administrator
+
+`EnsureAdmin` creates a platform administrator from configuration if no account with that address exists, and reports whether it created one. It **never** updates an existing row: the configured password is an initial password, so changing the value in a config file does not reset a live account. `Bootstrapped` is the marker the console reads; both the seeding pass and `POST /bootstrap` set it.
+
+## What this package does not do
+
+It does not decide authorization. Every predicate — who may read whose usage, who may manage which team — lives in `authz`, and this package only applies the resulting filter. It does not hash or verify session tokens; `auth` does.
+
+中文使用说明见同目录的 readme_cn.md。

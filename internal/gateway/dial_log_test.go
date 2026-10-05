@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"log"
 	"net"
 	"net/http"
@@ -10,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/hooks"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 )
 
@@ -24,11 +27,24 @@ func TestHandlerDialFailureLogKeepsHostWithoutURL(t *testing.T) {
 	addr := ln.Addr().String()
 	ln.Close()
 
+	// The session is backed by a real account: identity is read from the user
+	// row on every request, so a hand-written session record with no row behind
+	// it is refused rather than trusted.
+	db := testIdentityStore(t)
+	user, err := db.CreateUser(context.Background(), testActor, iam.UserInput{
+		Email: "dial@example.com", Name: "Dial", Password: "password123", Role: iam.RoleUser,
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
 		idem:       map[string]idemRec{},
-		sessions:   map[string]sessionRec{"session-token": {Role: "proxy_admin", UserID: "u"}},
+		IAM:        db,
+		Authz:      authz.New(db),
+		sessions:   map[string]sessionRec{"session-token": {UserID: user.ID, Version: user.SessionVersion, ExpiresAt: time.Now().Add(time.Hour)}},
 		Cfg: &config.Config{
 			ModelList: []config.ModelEntry{{
 				ModelName: "gpt-4o-mini",

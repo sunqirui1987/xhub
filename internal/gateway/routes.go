@@ -96,15 +96,23 @@ func healthModule(s *Server) httpx.Module {
 	})
 }
 
-// sessionModule serves username-password login and the SSO session exchange.
+// sessionModule serves username-password login, logout, and the identity the
+// console builds its pages from. The SSO code exchange is gone: it minted an
+// administrator session from an unauthenticated code.
 func sessionModule(s *Server) httpx.Module {
 	return httpx.Bind("session", func(reg httpx.Registrar) {
 		reg.Handle("POST /login", s.login)
 		reg.Handle("POST /v2/login", s.login)
 		reg.Handle("POST /v3/login", s.login)
-		reg.Handle("POST /v3/login/exchange", s.loginExchange)
-		reg.Handle("GET /onboarding/get_token", s.onboardingGetToken)
-		reg.Handle("POST /onboarding/claim_token", s.onboardingClaim)
+		reg.Handle("POST /logout", s.logout)
+		reg.Handle("POST /v2/logout", s.logout)
+		reg.Handle("POST /v3/logout", s.logout)
+		reg.Handle("GET /auth/me", s.me)
+		reg.Handle("POST /auth/logout", s.logout)
+		// Bootstrap creates the first platform administrator and runs once. It
+		// is the only route that accepts the master key.
+		reg.Handle("POST /bootstrap", s.bootstrap)
+		reg.Handle("GET /bootstrap/status", s.bootstrapStatus)
 		reg.Handle("GET /authorize/flow", s.authorizeFlow)
 		reg.Handle("POST /authorize/complete", s.authorizeComplete)
 		reg.Handle("POST /v1/mcp/server/oauth/{server_id}/token", s.mcpOAuthToken)
@@ -154,7 +162,6 @@ func ingressModule(s *Server) httpx.Module {
 // accessModule serves SSO, email events, cache probes, customers, and SCIM.
 func accessModule(s *Server) httpx.Module {
 	return httpx.Bind("access", func(reg httpx.Registrar) {
-		reg.Handle("GET /sso/key/generate", s.ssoGenerate)
 		reg.Handle("GET /email/event_settings", s.emailEventSettings)
 		reg.Handle("PATCH /email/event_settings", s.emailEventSettings)
 		reg.Handle("POST /email/event_settings/reset", s.emailEventSettingsReset)

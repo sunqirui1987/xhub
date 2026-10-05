@@ -3,6 +3,7 @@ import {
   all_admin_roles,
   effectiveSessionRole,
   hasProxyWideSpendView,
+  canAccessManagement,
   isAdminRole,
   spendScopeUserId,
   isOrgAdminForAnyOrg,
@@ -35,6 +36,25 @@ describe("roles", () => {
       expect(isAdminRole("Internal Viewer")).toBe(false);
       expect(isAdminRole("regular_user")).toBe(false);
       expect(isAdminRole("")).toBe(false);
+    });
+  });
+
+  describe("canAccessManagement", () => {
+    it("allows the session labels the gateway accepts on management routes", () => {
+      expect(canAccessManagement("Admin")).toBe(true);
+      expect(canAccessManagement("Admin Viewer")).toBe(true);
+      expect(canAccessManagement(effectiveSessionRole("proxy_admin"))).toBe(true);
+      expect(canAccessManagement(effectiveSessionRole("proxy_admin_viewer"))).toBe(true);
+    });
+
+    it("rejects roles the gateway answers with Not allowed to access management endpoints", () => {
+      expect(canAccessManagement("Internal User")).toBe(false);
+      expect(canAccessManagement("Internal Viewer")).toBe(false);
+      expect(canAccessManagement("Org Admin")).toBe(false);
+      expect(canAccessManagement(effectiveSessionRole("org_admin"))).toBe(false);
+      expect(canAccessManagement(effectiveSessionRole("internal_user"))).toBe(false);
+      expect(canAccessManagement("")).toBe(false);
+      expect(canAccessManagement(null)).toBe(false);
     });
   });
 

@@ -11,23 +11,40 @@ import (
 
 var logTraceOnceMount sync.Once
 
-// Module is users, teams, organizations, projects, and budgets. The process implements Gate. This package does not import gateway.
+// Module is users, organizations, teams, members, projects, access groups and
+// the audit trail. The process implements Gate. This package does not import
+// gateway.
+//
+// The paths are the LiteLLM-compatible ones the console already calls, mounted
+// over the new authorization. The routes whose subject does not exist in the new
+// model are gone rather than stubbed: there is no budget object to create, no
+// organization member, no account role beyond the two the matrix has, and no
+// bulk role assignment.
 func Module(h Gate) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter identity.Module") })
 
 	traceModule("identity")
 	return httpx.Bind("identity", func(reg httpx.Registrar) {
+		// Accounts. Only a platform administrator reaches the store; a member
+		// reads other people through a team's member list.
 		reg.Handle("POST /user/new", func(w http.ResponseWriter, r *http.Request) { UserNew(h, w, r) })
 		reg.Handle("GET /user/list", func(w http.ResponseWriter, r *http.Request) { UserList(h, w, r) })
 		reg.Handle("GET /user/filter/ui", func(w http.ResponseWriter, r *http.Request) { UserFilterUI(h, w, r) })
 		reg.Handle("GET /user/available_users", func(w http.ResponseWriter, r *http.Request) { AvailableUsers(h, w, r) })
-		reg.Handle("GET /user/available_roles", func(w http.ResponseWriter, r *http.Request) { UserAvailableRoles(h, w, r) })
-		reg.Handle("POST /user/bulk_update", func(w http.ResponseWriter, r *http.Request) { UserBulkUpdate(h, w, r) })
 		reg.Handle("GET /user/info", func(w http.ResponseWriter, r *http.Request) { UserInfo(h, w, r) })
-		reg.Handle("GET /v2/user/info", func(w http.ResponseWriter, r *http.Request) { UserInfoV2(h, w, r) })
-		reg.Handle("GET /sso/get/ui_settings", func(w http.ResponseWriter, r *http.Request) { UiSettings(h, w, r) })
+		reg.Handle("GET /v2/user/info", func(w http.ResponseWriter, r *http.Request) { UserInfo(h, w, r) })
 		reg.Handle("POST /user/update", func(w http.ResponseWriter, r *http.Request) { UserUpdate(h, w, r) })
 		reg.Handle("POST /user/delete", func(w http.ResponseWriter, r *http.Request) { UserDelete(h, w, r) })
+
+		// Organizations. A member sees the name of the organization that owns
+		// their team; only a platform administrator changes one.
+		reg.Handle("POST /organization/new", func(w http.ResponseWriter, r *http.Request) { OrgNew(h, w, r) })
+		reg.Handle("GET /organization/list", func(w http.ResponseWriter, r *http.Request) { OrgList(h, w, r) })
+		reg.Handle("GET /organization/info", func(w http.ResponseWriter, r *http.Request) { OrgInfo(h, w, r) })
+		reg.Handle("PATCH /organization/update", func(w http.ResponseWriter, r *http.Request) { OrgUpdate(h, w, r) })
+		reg.Handle("DELETE /organization/delete", func(w http.ResponseWriter, r *http.Request) { OrgDelete(h, w, r) })
+
+		// Teams.
 		reg.Handle("POST /team/new", func(w http.ResponseWriter, r *http.Request) { TeamNew(h, w, r) })
 		reg.Handle("GET /team/list", func(w http.ResponseWriter, r *http.Request) { TeamList(h, w, r) })
 		reg.Handle("GET /v2/team/list", func(w http.ResponseWriter, r *http.Request) { TeamListV2(h, w, r) })
@@ -35,20 +52,16 @@ func Module(h Gate) httpx.Module {
 		reg.Handle("GET /team/info", func(w http.ResponseWriter, r *http.Request) { TeamInfo(h, w, r) })
 		reg.Handle("POST /team/update", func(w http.ResponseWriter, r *http.Request) { TeamUpdate(h, w, r) })
 		reg.Handle("POST /team/delete", func(w http.ResponseWriter, r *http.Request) { TeamDelete(h, w, r) })
+		reg.Handle("POST /team/move", func(w http.ResponseWriter, r *http.Request) { TeamMove(h, w, r) })
+		reg.Handle("GET /team/models", func(w http.ResponseWriter, r *http.Request) { TeamModels(h, w, r) })
+
+		// Members.
+		reg.Handle("GET /team/member_list", func(w http.ResponseWriter, r *http.Request) { TeamMembers(h, w, r) })
 		reg.Handle("POST /team/member_add", func(w http.ResponseWriter, r *http.Request) { TeamMemberAdd(h, w, r) })
-		reg.Handle("POST /team/bulk_member_add", func(w http.ResponseWriter, r *http.Request) { TeamMemberAdd(h, w, r) })
-		reg.Handle("POST /team/member_delete", func(w http.ResponseWriter, r *http.Request) { TeamMemberDelete(h, w, r) })
 		reg.Handle("POST /team/member_update", func(w http.ResponseWriter, r *http.Request) { TeamMemberUpdate(h, w, r) })
-		reg.Handle("POST /team/block", func(w http.ResponseWriter, r *http.Request) { TeamBlock(h, w, r) })
-		reg.Handle("POST /team/unblock", func(w http.ResponseWriter, r *http.Request) { TeamUnblock(h, w, r) })
-		reg.Handle("POST /organization/new", func(w http.ResponseWriter, r *http.Request) { OrgNew(h, w, r) })
-		reg.Handle("GET /organization/list", func(w http.ResponseWriter, r *http.Request) { OrgList(h, w, r) })
-		reg.Handle("GET /organization/info", func(w http.ResponseWriter, r *http.Request) { OrgInfo(h, w, r) })
-		reg.Handle("PATCH /organization/update", func(w http.ResponseWriter, r *http.Request) { OrgUpdate(h, w, r) })
-		reg.Handle("DELETE /organization/delete", func(w http.ResponseWriter, r *http.Request) { OrgDelete(h, w, r) })
-		reg.Handle("POST /organization/member_add", func(w http.ResponseWriter, r *http.Request) { OrgMemberAdd(h, w, r) })
-		reg.Handle("DELETE /organization/member_delete", func(w http.ResponseWriter, r *http.Request) { OrgMemberDelete(h, w, r) })
-		reg.Handle("PATCH /organization/member_update", func(w http.ResponseWriter, r *http.Request) { OrgMemberUpdate(h, w, r) })
+		reg.Handle("POST /team/member_delete", func(w http.ResponseWriter, r *http.Request) { TeamMemberRemove(h, w, r) })
+
+		// Projects.
 		reg.Handle("POST /project/new", func(w http.ResponseWriter, r *http.Request) { ProjectNew(h, w, r) })
 		reg.Handle("GET /project/list", func(w http.ResponseWriter, r *http.Request) { ProjectList(h, w, r) })
 		reg.Handle("POST /project/list", func(w http.ResponseWriter, r *http.Request) { ProjectList(h, w, r) })
@@ -56,26 +69,8 @@ func Module(h Gate) httpx.Module {
 		reg.Handle("POST /project/info", func(w http.ResponseWriter, r *http.Request) { ProjectInfo(h, w, r) })
 		reg.Handle("POST /project/update", func(w http.ResponseWriter, r *http.Request) { ProjectUpdate(h, w, r) })
 		reg.Handle("POST /project/delete", func(w http.ResponseWriter, r *http.Request) { ProjectDelete(h, w, r) })
-		reg.Handle("POST /budget/new", func(w http.ResponseWriter, r *http.Request) { BudgetNew(h, w, r) })
-		reg.Handle("GET /budget/list", func(w http.ResponseWriter, r *http.Request) { BudgetList(h, w, r) })
-		reg.Handle("GET /budgets", func(w http.ResponseWriter, r *http.Request) { BudgetList(h, w, r) })
-		reg.Handle("GET /management/v1/budgets", func(w http.ResponseWriter, r *http.Request) { BudgetListPaged(h, w, r) })
-		reg.Handle("GET /management/v1/spend_logs/end_users", func(w http.ResponseWriter, r *http.Request) { SpendLogEndUsers(h, w, r) })
-		reg.Handle("GET /management/v1/spend_logs/users", func(w http.ResponseWriter, r *http.Request) { SpendLogUsers(h, w, r) })
-		reg.Handle("POST /budget/info", func(w http.ResponseWriter, r *http.Request) { BudgetInfo(h, w, r) })
-		reg.Handle("POST /budget/update", func(w http.ResponseWriter, r *http.Request) { BudgetUpdate(h, w, r) })
-		reg.Handle("POST /budget/delete", func(w http.ResponseWriter, r *http.Request) { BudgetDelete(h, w, r) })
-		reg.Handle("GET /budget/settings", func(w http.ResponseWriter, r *http.Request) { BudgetSettings(h, w, r) })
-		reg.Handle("GET /spend/logs", func(w http.ResponseWriter, r *http.Request) { SpendLogs(h, w, r) })
-		reg.Handle("GET /spend/logs/ui", func(w http.ResponseWriter, r *http.Request) { SpendLogs(h, w, r) })
-		reg.Handle("GET /global/spend", func(w http.ResponseWriter, r *http.Request) { GlobalSpend(h, w, r) })
-		reg.Handle("GET /v2/model/info", func(w http.ResponseWriter, r *http.Request) { ModelInfo(h, w, r) })
-		reg.Handle("GET /v1/model/info", func(w http.ResponseWriter, r *http.Request) { ModelInfo(h, w, r) })
-		reg.Handle("GET /model/info", func(w http.ResponseWriter, r *http.Request) { ModelInfo(h, w, r) })
-		reg.Handle("GET /get/ui_settings", func(w http.ResponseWriter, r *http.Request) { UiSettings(h, w, r) })
-		reg.Handle("PATCH /update/ui_settings", func(w http.ResponseWriter, r *http.Request) { UpdateUISettings(h, w, r) })
-		reg.Handle("GET /get/user_banner", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
-		reg.Handle("GET /get_image", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
-		reg.Handle("GET /get_logo_url", func(w http.ResponseWriter, r *http.Request) { EmptyOK(h, w, r) })
+
+		// Audit.
+		reg.Handle("GET /audit/logs", func(w http.ResponseWriter, r *http.Request) { AuditLog(h, w, r) })
 	})
 }

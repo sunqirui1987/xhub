@@ -15,10 +15,10 @@ import (
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/hooks"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
-	"github.com/sunqirui1987/xhub/internal/store"
 )
 
 // logHost is the gateway surface Serve needs. Failure paths return before spend and Redis are used.
@@ -59,17 +59,17 @@ func (h *logHost) RouterDocument() map[string]any  { return nil }
 func (h *logHost) GuardrailBlocks(map[string]any) (bool, string) {
 	return false, ""
 }
-func (h *logHost) AttachCredential(dep config.ModelEntry) config.ModelEntry { return dep }
-func (h *logHost) IncBusy(string)                                           {}
-func (h *logHost) DecBusy(string)                                           {}
-func (h *logHost) NoteFailure(string)                                       {}
-func (h *logHost) NoteLatency(string, float64)                              {}
+func (h *logHost) AttachCredential(dep config.ModelEntry) (config.ModelEntry, error) { return dep, nil }
+func (h *logHost) IncBusy(string)                                                    {}
+func (h *logHost) DecBusy(string)                                                    {}
+func (h *logHost) NoteFailure(string)                                                {}
+func (h *logHost) NoteLatency(string, float64)                                       {}
 func (h *logHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, string) {
 }
-func (h *logHost) RecordSpend(http.ResponseWriter, *auth.Principal, string, string, map[string]any, time.Time, bool, string) {
+func (h *logHost) RecordSpend(http.ResponseWriter, *auth.Principal, string, string, string, map[string]any, time.Time, bool, int, string) {
 }
 func (h *logHost) RememberExchange(string, *http.Request, []byte, []byte) {}
-func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, []byte, time.Time) {
+func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, string, []byte, time.Time) {
 }
 func (h *logHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {
 }
@@ -79,7 +79,7 @@ func (h *logHost) EnforceIdentityLimits(http.ResponseWriter, string, *auth.Princ
 func (h *logHost) Redis() *live.Client         { return nil }
 func (h *logHost) Models() []config.ModelEntry { return h.cfg.ModelList }
 func (h *logHost) BusyMap() map[string]int     { return map[string]int{} }
-func (h *logHost) SpendStore() *store.Store    { return nil }
+func (h *logHost) Identity() *iam.DB           { return nil }
 
 func chatConfig(entries ...config.ModelEntry) *config.Config {
 	return &config.Config{

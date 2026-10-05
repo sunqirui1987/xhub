@@ -23,8 +23,8 @@ import {
   Activity,
   BarChart3,
   Bell,
-  Building2,
   Boxes,
+  Building2,
   ChevronRight,
   ExternalLink,
   Folder,
@@ -48,13 +48,9 @@ import { useMemo, useState } from "react";
 import { cn } from "@/lib/cva.config";
 import { rolesWithCapability } from "../utils/capabilities";
 import {
-  all_admin_roles,
-  internalUserRoles,
-  isAdminRole,
-  isUserTeamAdminForAnyTeam,
-  rolesAllowedToViewWriteScopedPages,
-  rolesWithWriteAccess,
-} from "../utils/roles";
+  useSessionIdentity,
+  CAPABILITIES,
+} from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import BetaBadge from "./BetaBadge";
 import SidebarAccountMenu from "./SidebarAccountMenu/SidebarAccountMenu";
 import SidebarUsageCard from "./SidebarUsageCard";
@@ -91,7 +87,15 @@ interface MenuItem {
 interface MenuGroup {
   groupLabel: string;
   items: MenuItem[];
-  roles?: string[];
+  /**
+   * When true the whole group is shown only to a platform administrator.
+   *
+   * It is a group-level switch rather than a role on each item because the
+   * group is a statement about who the pages are for: the deployment's own
+   * configuration, which no team scopes. Listing the same role on five items
+   * would say the same thing five times and let one of them drift.
+   */
+  requiresPlatformAdmin?: boolean;
 }
 
 // Menu groups organized by category - defined outside component for export.
@@ -99,17 +103,11 @@ interface MenuGroup {
 // icons changed to lucide as part of the sidebar redesign.
 const menuGroups: MenuGroup[] = [
   {
+    // Everything a signed-in person owns, whatever their role: their own keys,
+    // their own model access, and the playground.
     groupLabel: "nav.groups.mine",
     items: [
       { key: "api-keys", page: "api-keys", label: "nav.apiKeys", icon: <KeyRound {...ICON} /> },
-      {
-        key: "llm-playground",
-        page: "llm-playground",
-        route: "playground",
-        label: "nav.playground",
-        icon: <PlayCircle {...ICON} />,
-        roles: rolesWithWriteAccess,
-      },
       {
         key: "my-models",
         page: "my-models",
@@ -117,125 +115,75 @@ const menuGroups: MenuGroup[] = [
         label: "nav.myModels",
         icon: <Boxes {...ICON} />,
       },
+      {
+        key: "llm-playground",
+        page: "llm-playground",
+        route: "playground",
+        label: "nav.playground",
+        icon: <PlayCircle {...ICON} />,
+      },
     ],
   },
   {
-    groupLabel: "nav.groups.gateway",
-    items: [
-      {
-        key: "models",
-        page: "models",
-        route: "models-and-endpoints",
-        label: "nav.models",
-        icon: <Network {...ICON} />,
-        roles: rolesAllowedToViewWriteScopedPages,
-      },
-      {
-        key: "price-data",
-        page: "price-data",
-        route: "price-data",
-        label: "nav.priceData",
-        icon: <Tags {...ICON} />,
-        roles: all_admin_roles,
-      },
-      { key: "guardrails", page: "guardrails", label: "nav.guardrails", icon: <Shield {...ICON} /> },
-    ],
-  },
-  {
+    // Usage, logs and guardrail outcomes. The pages are visible to everyone and
+    // the server narrows each answer to what the caller may see: a member gets
+    // their own rows, a team administrator their team's, an administrator all.
     groupLabel: "nav.groups.observability",
     items: [
-      {
-        key: "new_usage",
-        page: "new_usage",
-        route: "usage",
-        icon: <BarChart3 {...ICON} />,
-        roles: [...all_admin_roles, ...internalUserRoles],
-        label: "nav.usage",
-      },
+      { key: "new_usage", page: "new_usage", route: "usage", label: "nav.usage", icon: <BarChart3 {...ICON} /> },
       { key: "logs", page: "logs", label: "nav.logs", icon: <Activity {...ICON} /> },
       {
         key: "guardrails-monitor",
         page: "guardrails-monitor",
         label: "nav.guardrailsMonitor",
         icon: <HeartPulse {...ICON} />,
-        roles: rolesWithCapability("viewGuardrailUsage"),
       },
     ],
   },
   {
-    groupLabel: "nav.groups.access",
+    // The team's own corner. A member sees the teams they belong to and can
+    // read the projects and grants inside them; a team administrator manages
+    // those; a platform administrator sees all of it. One menu for the whole
+    // scope, because the pages are the same pages and only the reach differs.
+    groupLabel: "nav.groups.team",
     items: [
-      {
-        key: "organizations",
-        page: "organizations",
-        label: "nav.organizations",
-        icon: <Building2 {...ICON} />,
-        roles: all_admin_roles,
-      },
       { key: "teams", page: "teams", label: "nav.teams", icon: <Users {...ICON} /> },
-      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} />, roles: all_admin_roles },
+      { key: "projects", page: "projects", label: "nav.projects", icon: <Folder {...ICON} />, beta: true },
     ],
   },
   {
-    groupLabel: "nav.groups.scope",
+    // Platform administration: the deployment's own configuration, which no
+    // team scopes. Hidden from everyone who is not a platform administrator,
+    // because the server refuses every one of these routes to anyone else.
+    groupLabel: "nav.groups.platform",
+    requiresPlatformAdmin: true,
     items: [
+      { key: "organizations", page: "organizations", label: "nav.organizations", icon: <Building2 {...ICON} /> },
+      { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} /> },
       {
-        key: "projects",
-        page: "projects",
-        label: "nav.projects",
-        beta: true,
-        icon: <Folder {...ICON} />,
-        roles: all_admin_roles,
+        key: "models",
+        page: "models",
+        route: "models-and-endpoints",
+        label: "nav.models",
+        icon: <Network {...ICON} />,
       },
-      {
-        key: "access-groups",
-        page: "access-groups",
-        label: "nav.accessGroups",
-        icon: <Boxes {...ICON} />,
-        roles: all_admin_roles,
-      },
+      { key: "price-data", page: "price-data", label: "nav.priceData", icon: <Tags {...ICON} /> },
+      { key: "guardrails", page: "guardrails", label: "nav.guardrails", icon: <Shield {...ICON} /> },
     ],
   },
   {
     groupLabel: "nav.groups.settings",
+    requiresPlatformAdmin: true,
     items: [
+      { key: "router-settings", page: "router-settings", label: "nav.routerSettings", icon: <Route {...ICON} /> },
       {
-        key: "settings",
-        page: "settings",
-        label: "nav.settings",
-        icon: <SettingsIcon {...ICON} />,
-        roles: all_admin_roles,
-        children: [
-          {
-            key: "router-settings",
-            page: "router-settings",
-            label: "nav.routerSettings",
-            icon: <Route {...ICON} />,
-            roles: all_admin_roles,
-          },
-          {
-            key: "logging-and-alerts",
-            page: "logging-and-alerts",
-            label: "nav.loggingAndAlerts",
-            icon: <Bell {...ICON} />,
-            roles: all_admin_roles,
-          },
-          {
-            key: "cost-tracking",
-            page: "cost-tracking",
-            label: "nav.costTracking",
-            icon: <BarChart3 {...ICON} />,
-            roles: all_admin_roles,
-          },
-          {
-            key: "admin-panel",
-            page: "admin-panel",
-            label: "nav.adminPanel",
-            icon: <Lock {...ICON} />,
-            roles: all_admin_roles,
-          },
-        ],
+        key: "logging-and-alerts",
+        page: "logging-and-alerts",
+        label: "nav.loggingAndAlerts",
+        icon: <Bell {...ICON} />,
       },
+      { key: "cost-tracking", page: "cost-tracking", label: "nav.costTracking", icon: <BarChart3 {...ICON} /> },
+      { key: "admin-panel", page: "admin-panel", label: "nav.adminPanel", icon: <Lock {...ICON} /> },
     ],
   },
 ];
@@ -335,58 +283,32 @@ const Sidebar_: React.FC<SidebarProps> = ({
     }
   }
 
-  const isTeamAdmin = useMemo(() => isUserTeamAdminForAnyTeam(teams ?? null, userId ?? ""), [teams, userId]);
+  // What the gateway says this session may do. The menu is built from that
+  // answer rather than from the role label in the token, so a page is offered
+  // exactly when the server would serve it.
+  const { data: identity } = useSessionIdentity();
+  const isPlatformAdmin = Boolean(identity?.capabilities?.includes(CAPABILITIES.platformAdmin));
+  const isTeamMember = Boolean(identity?.teams?.length);
 
-  const filterItemsByRole = (items: MenuItem[]): MenuItem[] => {
-    const isAdmin = isAdminRole(userRole);
-    return items
-      .map((item) => ({ ...item, children: item.children ? filterItemsByRole(item.children) : undefined }))
+  const filterItems = (items: MenuItem[]): MenuItem[] =>
+    items
+      .map((item) => ({ ...item, children: item.children ? filterItems(item.children) : undefined }))
       .filter((item) => {
         // A parent whose children were all filtered out renders as a leaf link
         // to its own page id, which is not a real route. Drop it instead.
         if (item.children && item.children.length === 0) return false;
-        if (item.key === "llm-playground" && isViewOnly) return false;
-        if (item.key === "price-data" && isViewOnly) return false;
-        if (item.key === "organizations" || item.key === "users") {
-          const hasRoleAccess = !item.roles || item.roles.includes(userRole) || isOrgAdmin;
-          if (!hasRoleAccess) return false;
-          if (!isAdmin && enabledPagesInternalUsers != null) return enabledPagesInternalUsers.includes(item.page);
-          return true;
-        }
+        // Projects are a team-scoped feature and the deployment can turn the UI
+        // off; when it is off the route still exists but nothing links to it.
         if (item.key === "projects" && !enableProjectsUI) return false;
-        // Every signed-in user can inspect the models granted to their own account.
-        // This page is backed by /models and must not depend on the configurable
-        // admin-page allowlist used for internal users.
-        if (item.key === "my-models") return true;
-        if (
-          !isAdmin &&
-          item.key === "agents" &&
-          disableAgentsForInternalUsers &&
-          !(allowAgentsForTeamAdmins && isTeamAdmin)
-        )
-          return false;
-        if (
-          !isAdmin &&
-          item.key === "vector-stores" &&
-          disableVectorStoresForInternalUsers &&
-          !(allowVectorStoresForTeamAdmins && isTeamAdmin)
-        )
-          return false;
-        if (item.roles && !item.roles.includes(userRole)) return false;
-        if (!isAdmin && enabledPagesInternalUsers != null) {
-          if (item.children && item.children.length > 0) {
-            const hasVisibleChildren = item.children.some((child) => enabledPagesInternalUsers.includes(child.page));
-            if (hasVisibleChildren) return true;
-          }
-          return enabledPagesInternalUsers.includes(item.page);
-        }
+        // The team's own scope: a member reads it, a team administrator manages
+        // it, a platform administrator sees every team.
+        if (item.key === "teams") return isPlatformAdmin || isTeamMember;
         return true;
       });
-  };
 
   const visibleGroups = menuGroups
-    .filter((group) => !group.roles || group.roles.includes(userRole))
-    .map((group) => ({ groupLabel: group.groupLabel, items: filterItemsByRole(group.items) }))
+    .filter((group) => !group.requiresPlatformAdmin || isPlatformAdmin)
+    .map((group) => ({ groupLabel: group.groupLabel, items: filterItems(group.items) }))
     .filter((group) => group.items.length > 0);
 
   const toggleGroup = (key: string) => {
@@ -536,7 +458,9 @@ const Sidebar_: React.FC<SidebarProps> = ({
       </nav>
 
       <SidebarFooter>
-        {isAdminRole(userRole) && (
+        {/* Every signed-in person has usage of their own, and the card reads
+            whatever the server scopes to them. */}
+        {accessToken && (
           <SidebarUsageCard
             accessToken={accessToken}
             collapsed={collapsed}

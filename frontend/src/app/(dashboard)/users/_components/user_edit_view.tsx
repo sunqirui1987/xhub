@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { z } from "zod/v4";
 import { all_admin_roles } from "@/utils/roles";
+import { iamRoles as iam } from "@/utils/iamRoles";
 import BudgetDurationDropdown from "@/components/common_components/budget_duration_dropdown";
 import { ModelMaxBudget, ModelMaxBudgetField } from "@/components/key_team_helpers/ModelMaxBudgetEditor";
 import { modelMaxBudgetUpdate } from "@/components/key_team_helpers/modelMaxBudgetPayload";
@@ -188,11 +189,17 @@ export function UserEditView({
     ...userModels.map((model) => ({ label: getModelDisplayName(model), value: model })),
   ];
 
-  const roleOptions = Object.entries(possibleUIRoles ?? {}).map(([role, { ui_label, description }]) => ({
-    value: role,
-    label: ui_label,
-    description,
-  }));
+  // The account has exactly two roles. A role the server does not define would
+  // be refused on save, so the menu offers only these two however the server
+  // labels them, and whatever an older deployment once sent.
+  //
+  // Team administration is deliberately absent: it is per-team and is chosen by
+  // adding someone to a team, not by giving them an account-wide role. Offering
+  // it here is what made the old menu list roles that no longer existed.
+  const roleOptions = [
+    { value: iam.RoleAdmin, label: t("Administrator") },
+    { value: iam.RoleUser, label: t("User") },
+  ];
 
   return (
     <TooltipProvider>
@@ -217,10 +224,7 @@ export function UserEditView({
           <FormField
             control={form.control}
             name="user_role"
-            label={labelWithHint(
-              t("pages.users.role"),
-              t("This is the role that the user will globally on the proxy. This role is independent of any team/org specific roles."),
-            )}
+            label={t("pages.users.role")}
           >
             {({ id, value, onChange }) => (
               <Select
@@ -235,7 +239,6 @@ export function UserEditView({
                   {roleOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       <span>{option.label}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

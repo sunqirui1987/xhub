@@ -191,7 +191,7 @@ func SetBuiltinClient(c *http.Client) {
 // SeedBuiltins removes leftover provider rows and creates the two credentials when they are missing.
 // It does not insert models. A model added later is the same row a person would save by hand.
 func SeedBuiltins(s Host) {
-	if s == nil || s.DB() == nil || !BuiltinsEnabled() {
+	if s == nil || s.RecordStore() == nil || !BuiltinsEnabled() {
 		return
 	}
 	dropProviderShells(s)
@@ -203,7 +203,7 @@ func SeedBuiltins(s Host) {
 // dropProviderShells deletes fennoai and qiniu rows that were stored as models.
 // They are credentials. Leaving them in the model table makes the playground list the provider name.
 func dropProviderShells(s Host) {
-	rows, err := s.DB().ListProxyModels()
+	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
 		logx.Error("builtin providers list: %v", err)
 		return
@@ -215,7 +215,7 @@ func dropProviderShells(s Host) {
 		if _, ok := builtinByID(str(row.Info["builtin"])); !ok {
 			continue
 		}
-		if err := s.DB().DeleteProxyModel(row.ID); err != nil {
+		if err := s.RecordStore().DeleteProxyModel(row.ID); err != nil {
 			logx.Error("builtin provider %s: %v", row.ID, err)
 		}
 	}
@@ -294,7 +294,7 @@ func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entry := addedModel(spec.ID, id)
-		if err := s.DB().UpsertProxyModel(proxyModel(entry)); err != nil {
+		if err := s.RecordStore().UpsertProxyModel(proxyModel(entry)); err != nil {
 			httpx.WriteError(w, 500, "internal", err.Error())
 			return
 		}
@@ -331,7 +331,7 @@ func openBuiltin(s Host, w http.ResponseWriter, r *http.Request) (Builtin, []sto
 		httpx.WriteError(w, 400, "invalid_request", "provider must be fennoai or qiniu")
 		return Builtin{}, nil, "", nil, false
 	}
-	rows, err := s.DB().ListProxyModels()
+	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return Builtin{}, nil, "", nil, false
@@ -369,10 +369,10 @@ func realKey(raw string) string {
 }
 
 func credentialAPIKey(s Host, id string) string {
-	if s.DB() == nil {
+	if s.RecordStore() == nil {
 		return ""
 	}
-	rec, err := s.DB().GetKV("credentials", id)
+	rec, err := s.RecordStore().GetKV("credentials", id)
 	if err != nil {
 		return ""
 	}
@@ -501,7 +501,7 @@ func clearCopiedMode(row *store.ProxyModel) bool {
 }
 
 func seedCredential(s Host, spec Builtin, key string) {
-	if _, err := s.DB().GetKV("credentials", spec.ID); err == nil {
+	if _, err := s.RecordStore().GetKV("credentials", spec.ID); err == nil {
 		return
 	}
 	raw, err := json.Marshal(map[string]any{
@@ -519,7 +519,7 @@ func seedCredential(s Host, spec Builtin, key string) {
 	if err != nil {
 		return
 	}
-	if err := s.DB().PutKV("credentials", spec.ID, string(raw)); err != nil {
+	if err := s.RecordStore().PutKV("credentials", spec.ID, string(raw)); err != nil {
 		logx.Error("builtin credential %s: %v", spec.ID, err)
 	}
 }

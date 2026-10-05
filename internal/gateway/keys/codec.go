@@ -1,14 +1,14 @@
-// Package keys shares JSON readers used while assembling a virtual key. An empty body becomes an empty map, and a bad number stays invalid instead of becoming 0.
+// Package keys shares JSON readers used while assembling a virtual key. An empty body becomes an empty map, and a bad number stays unset instead of becoming 0.
 package keys
 
 import (
-	"database/sql"
 	"encoding/json"
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"io"
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 var logTraceOnceCodec sync.Once
@@ -32,20 +32,6 @@ func str(v any) string {
 	return s
 }
 
-// boolOf accepts a bool, the strings true and 1, or a non-zero number. Every other value, including a missing one, is false.
-func boolOf(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true" || t == "1"
-	case float64:
-		return t != 0
-	default:
-		return false
-	}
-}
-
 // idsFrom reads an id list from the body. The plural key wins, and a non-empty singular field is appended.
 func idsFrom(body map[string]any, plural, singular string) []string {
 	var out []string
@@ -65,20 +51,39 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 	return out
 }
 
-// nullFloatMap turns a nullable float into a JSON number or null.
-func nullFloatMap(v sql.NullFloat64) any {
-	if !v.Valid {
+// stringList reads a model or access-group list. A missing or unrecognized
+// value is an empty list, which means "inherit" rather than "deny".
+func stringList(v any) []string {
+	switch t := v.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			if s, ok := x.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	default:
 		return nil
 	}
-	return v.Float64
 }
 
-// nullIntMap turns a nullable integer into a JSON number or null.
-func nullIntMap(v sql.NullInt64) any {
-	if !v.Valid {
+// floatJSON turns an optional float into a JSON number or null.
+func floatJSON(v *float64) any {
+	if v == nil {
 		return nil
 	}
-	return v.Int64
+	return *v
+}
+
+// intJSON turns an optional integer into a JSON number or null.
+func intJSON(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // emptyNil turns an empty string into null so public JSON can tell an unset field from an empty one.
@@ -89,47 +94,44 @@ func emptyNil(s string) any {
 	return s
 }
 
-// encodeModels stores a model list as a JSON string. An unrecognized type becomes an empty array.
-func encodeModels(v any) string {
-	switch t := v.(type) {
-	case []any:
-		b, _ := json.Marshal(t)
-		return string(b)
-	case []string:
-		b, _ := json.Marshal(t)
-		return string(b)
-	default:
-		return "[]"
+// deref reads an optional string. A nil pointer is the empty string.
+func deref(s *string) string {
+	if s == nil {
+		return ""
 	}
+	return *s
 }
 
-// parseNullFloat converts a JSON number or numeric string into a nullable float. An empty or unparseable value stays invalid and is not written as 0.
-func parseNullFloat(v any) sql.NullFloat64 {
+// parseFloat converts a JSON number or numeric string into an optional float. An
+// empty or unparseable value stays unset, so a bad patch never silently writes 0.
+func parseFloat(v any) *float64 {
 	switch t := v.(type) {
 	case float64:
-		return sql.NullFloat64{Float64: t, Valid: true}
+		return &t
 	case string:
 		if t == "" {
-			return sql.NullFloat64{}
+			return nil
 		}
 		f, err := strconv.ParseFloat(t, 64)
 		if err != nil {
-			return sql.NullFloat64{}
+			return nil
 		}
-		return sql.NullFloat64{Float64: f, Valid: true}
+		return &f
 	default:
-		return sql.NullFloat64{}
+		return nil
 	}
 }
 
-// parseNullInt converts a JSON number into a nullable integer. A float64 is truncated. Any other type stays invalid.
-func parseNullInt(v any) sql.NullInt64 {
+// parseInt converts a JSON number into an optional integer. A float64 is
+// truncated. Any other type stays unset.
+func parseInt(v any) *int {
 	switch t := v.(type) {
 	case float64:
-		return sql.NullInt64{Int64: int64(t), Valid: true}
+		n := int(t)
+		return &n
 	case int:
-		return sql.NullInt64{Int64: int64(t), Valid: true}
+		return &t
 	default:
-		return sql.NullInt64{}
+		return nil
 	}
 }

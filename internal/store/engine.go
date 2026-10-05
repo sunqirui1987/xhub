@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync/atomic"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -16,68 +15,54 @@ import (
 	"xorm.io/xorm/log"
 )
 
-type stmtLog struct {
-	n    *int64
-	show bool
-	lvl  log.LogLevel
+// quietLog discards xorm's own logging. SQL text carries key hashes and
+// credential values, so it is never printed.
+type quietLog struct {
+	lvl log.LogLevel
 }
+
+// Debugf discards debug logs.
+func (l *quietLog) Debugf(string, ...interface{}) {}
+
+// Errorf discards error logs. Callers log their own failures with context.
+func (l *quietLog) Errorf(string, ...interface{}) {}
+
+// Infof discards info logs.
+func (l *quietLog) Infof(string, ...interface{}) {}
+
+// Warnf discards warning logs.
+func (l *quietLog) Warnf(string, ...interface{}) {}
+
+// Debug discards debug logs.
+func (l *quietLog) Debug(...interface{}) {}
+
+// Info discards info logs.
+func (l *quietLog) Info(...interface{}) {}
+
+// Warn discards warning logs.
+func (l *quietLog) Warn(...interface{}) {}
+
+// Error discards error logs.
+func (l *quietLog) Error(...interface{}) {}
+
+// Level returns the current log level.
+func (l *quietLog) Level() log.LogLevel { return l.lvl }
+
+// SetLevel sets the log level.
+func (l *quietLog) SetLevel(v log.LogLevel) { l.lvl = v }
+
+// ShowSQL is accepted and ignored. SQL recording stays off.
+func (l *quietLog) ShowSQL(...bool) {}
+
+// IsShowSQL reports that SQL is not recorded.
+func (l *quietLog) IsShowSQL() bool { return false }
 
 var logTraceOnceEngine sync.Once
 
-// BeforeSQL does not count. The statement has not been sent yet.
-func (l *stmtLog) BeforeSQL(log.LogContext) {
-	logTraceOnceEngine.Do(func() { logx.Trace("enter store.BeforeSQL") })
-}
-
-// AfterSQL increments once for each statement actually sent to the database. A cache hit does not reach here.
-func (l *stmtLog) AfterSQL(log.LogContext) {
-	atomic.AddInt64(l.n, 1)
-}
-
-// Debugf discards debug logs so SQL text is not printed again.
-func (l *stmtLog) Debugf(string, ...interface{}) {}
-
-// Errorf discards error logs. The statement count looks only at AfterSQL.
-func (l *stmtLog) Errorf(string, ...interface{}) {}
-
-// Infof discards info logs.
-func (l *stmtLog) Infof(string, ...interface{}) {}
-
-// Warnf discards warning logs.
-func (l *stmtLog) Warnf(string, ...interface{}) {}
-
-// Debug discards debug logs.
-func (l *stmtLog) Debug(...interface{}) {}
-
-// Info discards info logs.
-func (l *stmtLog) Info(...interface{}) {}
-
-// Warn discards warning logs.
-func (l *stmtLog) Warn(...interface{}) {}
-
-// Error discards error logs.
-func (l *stmtLog) Error(...interface{}) {}
-
-// Level returns the current log level.
-func (l *stmtLog) Level() log.LogLevel { return l.lvl }
-
-// SetLevel sets the log level.
-func (l *stmtLog) SetLevel(v log.LogLevel) { l.lvl = v }
-
-// ShowSQL turns SQL recording on. With no argument it is treated as on.
-func (l *stmtLog) ShowSQL(show ...bool) {
-	if len(show) == 0 {
-		l.show = true
-		return
-	}
-	l.show = show[0]
-}
-
-// IsShowSQL reports whether SQL is recorded. When it is off, AfterSQL is not called.
-func (l *stmtLog) IsShowSQL() bool { return l.show }
-
 // openEngine connects to PostgreSQL, turns the cache on, and syncs structs into tables.
 func openEngine(databaseURL string) (*xorm.Engine, *sql.DB, *int64, error) {
+	logTraceOnceEngine.Do(func() { logx.Trace("enter store.openEngine") })
+
 	schema, err := ensureSchema(databaseURL)
 	if err != nil {
 		return nil, nil, nil, err
@@ -93,27 +78,25 @@ func openEngine(databaseURL string) (*xorm.Engine, *sql.DB, *int64, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	counter := new(int64)
-	logger := &stmtLog{n: counter, show: true, lvl: log.LOG_INFO}
-	engine.SetLogger(logger)
-	engine.ShowSQL(true)
+	engine.SetLogger(&quietLog{lvl: log.LOG_INFO})
+	engine.ShowSQL(false)
 	if schema != "" {
 		engine.SetSchema(schema)
 	}
+	// The query cache covers framework reads only. Identity and session reads go
+	// through internal/iam, which deliberately installs no cache.
 	engine.SetDefaultCacher(caches.NewLRUCacher(caches.NewMemoryStore(), 10000))
 	if err := engine.Ping(); err != nil {
 		engine.Close()
 		return nil, nil, nil, err
 	}
-	// Sync must not drop the UNIQUE constraint on dashboard projects, or the process cannot start. The structs declare no unique index, so this sync does not add or drop constraints.
 	if _, err := engine.SyncWithOptions(xorm.SyncOptions{IgnoreConstrains: true},
-		new(userRow), new(teamRow), new(orgRow), new(projectRow), new(budgetRow),
-		new(kvRow), new(tokenRow), new(spendRow), new(proxyModelRow), new(configRow),
+		new(kvRow), new(proxyModelRow), new(configRow),
 	); err != nil {
 		engine.Close()
 		return nil, nil, nil, err
 	}
-	return engine, engine.DB().DB, counter, nil
+	return engine, engine.DB().DB, nil, nil
 }
 
 // ensureSchema creates the schema named by search_path when the connection string has one. Otherwise it uses public.

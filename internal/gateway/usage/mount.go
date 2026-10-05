@@ -26,6 +26,12 @@ func Module(h mountHost) httpx.Module {
 	return httpx.Bind("usage", func(reg httpx.Registrar) {
 		reg.Handle("GET /global/spend/teams", func(w http.ResponseWriter, r *http.Request) { SpendTeams(h, w, r) })
 		reg.Handle("GET /spend/logs/v2", func(w http.ResponseWriter, r *http.Request) { LogsV2(h, w, r) })
+		// The console's Logs page reads this collection route, and only the
+		// per-request variant was registered. Its request fell through to the
+		// catalog's generic key-value store and answered an empty list, so the
+		// page rendered no rows however much traffic the deployment had. It is
+		// the same read as v2, so it is served by the same handler.
+		reg.Handle("GET /spend/logs/ui", func(w http.ResponseWriter, r *http.Request) { LogsV2(h, w, r) })
 		reg.Handle("GET /spend/logs/ui/{request_id}", func(w http.ResponseWriter, r *http.Request) { LogByID(h, w, r) })
 		reg.Handle("GET /global/spend/logs", func(w http.ResponseWriter, r *http.Request) { SpendLogs(h, w, r) })
 		reg.Handle("GET /global/spend/keys", func(w http.ResponseWriter, r *http.Request) { SpendKeys(h, w, r) })

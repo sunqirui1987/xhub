@@ -9,6 +9,7 @@ import { CheckCircleIcon, XCircleIcon, ExclamationIcon } from "@heroicons/react/
 import { CopyToClipboard } from "react-copy-to-clipboard";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
+import { iamRoles as iam } from "@/utils/iamRoles";
 
 interface BulkCreateUsersProps {
   accessToken: string;
@@ -191,8 +192,10 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
               if (!user.user_role) {
                 errors.push("Role is required");
               } else {
-                // Validate user role
-                const validRoles = ["proxy_admin", "proxy_admin_viewer", "internal_user", "internal_user_viewer"];
+                // Validate user role against the roles the gateway stores. It
+                // accepts exactly these two, so anything else would be refused
+                // on save rather than caught here.
+                const validRoles = [iam.RoleAdmin, iam.RoleUser];
                 if (!validRoles.includes(user.user_role)) {
                   errors.push(`Invalid role "${user.user_role}". Must be one of: ${validRoles.join(", ")}`);
                 }
@@ -556,7 +559,7 @@ const BulkCreateUsersButton: React.FC<BulkCreateUsersProps> = ({
                         <div>
                           <p className="font-medium">user_role</p>
                           <p className="text-sm text-muted-foreground">
-                            {t("User's role (one of: \"proxy_admin\", \"proxy_admin_viewer\", \"internal_user\", \"internal_user_viewer\")")}
+                            {t("User's role (one of: \"admin\", \"user\")")}
                           </p>
                         </div>
                       </div>

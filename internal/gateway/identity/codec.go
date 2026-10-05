@@ -1,173 +1,204 @@
-// Package identity shares JSON and time helpers. A parse failure stays empty instead of writing a bad input as 0.
+// Package identity shares the JSON readers these handlers assemble requests
+// from. A parse failure stays unset rather than being written as zero, so a bad
+// patch never silently clears a budget or a narrowing list.
 package identity
 
 import (
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"github.com/sunqirui1987/xhub/internal/logx"
+	"io"
 	"net/http"
-	"sort"
 	"strconv"
 	"sync"
-	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 var logTraceOnceCodec sync.Once
 
+// readMap reads a JSON object from a request. An empty body or a parse failure
+// returns an empty map, and later writes on the returned map are local.
+func readMap(r *http.Request) map[string]any {
+	logTraceOnceCodec.Do(func() { logx.Trace("enter identity.readMap") })
+
+	var body map[string]any
+	b, _ := io.ReadAll(r.Body)
+	_ = json.Unmarshal(b, &body)
+	if body == nil {
+		body = map[string]any{}
+	}
+	return body
+}
+
 // str reads v as a string. A non-string returns an empty string and does not panic.
 func str(v any) string {
-	logTraceOnceCodec.Do(func() { logx.Trace("enter identity.str") })
-
 	s, _ := v.(string)
 	return s
 }
 
-// boolOf accepts a bool, the strings true and 1, or a non-zero number. Every other type is false.
-func boolOf(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		return t == "true" || t == "1"
-	case float64:
-		return t != 0
-	default:
-		return false
-	}
+// has reports whether the body carried the key at all. A partial update needs
+// this to tell "leave it alone" from "clear it".
+func has(body map[string]any, key string) bool {
+	_, ok := body[key]
+	return ok
 }
 
-// parseNullFloat converts a JSON number or numeric string into a nullable float. An empty or unparseable value stays invalid and is not written as 0.
-func parseNullFloat(v any) sql.NullFloat64 {
+// floatPtr reads an optional float. An empty or unparseable value stays unset,
+// so a bad patch never writes 0.
+func floatPtr(v any) *float64 {
 	switch t := v.(type) {
 	case float64:
-		return sql.NullFloat64{Float64: t, Valid: true}
+		return &t
 	case string:
 		if t == "" {
-			return sql.NullFloat64{}
+			return nil
 		}
 		f, err := strconv.ParseFloat(t, 64)
 		if err != nil {
-			return sql.NullFloat64{}
+			return nil
 		}
-		return sql.NullFloat64{Float64: f, Valid: true}
+		return &f
 	default:
-		return sql.NullFloat64{}
+		return nil
 	}
 }
 
-// parseNullInt converts a JSON number into a nullable integer. A float64 is truncated. Any other type stays invalid.
-func parseNullInt(v any) sql.NullInt64 {
+// intPtr reads an optional integer. A float64 is truncated; any other type
+// stays unset.
+func intPtr(v any) *int {
 	switch t := v.(type) {
 	case float64:
-		return sql.NullInt64{Int64: int64(t), Valid: true}
+		n := int(t)
+		return &n
 	case int:
-		return sql.NullInt64{Int64: int64(t), Valid: true}
+		return &t
 	default:
-		return sql.NullInt64{}
+		return nil
 	}
 }
 
-// cloneMap shallow-copies a map. Later edits to the copy do not change the original.
-func cloneMap(m map[string]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
+// optionalFloat is a two-level optional for a budget patch: nil means the field
+// was absent, a non-nil pointer to nil means the body asked to clear it.
+func optionalFloat(body map[string]any, key string) **float64 {
+	if !has(body, key) {
+		return nil
+	}
+	v := floatPtr(body[key])
+	return &v
+}
+
+// stringPtr reads an optional string. A field that was absent returns nil.
+func stringPtr(body map[string]any, key string) *string {
+	if !has(body, key) {
+		return nil
+	}
+	s := str(body[key])
+	return &s
+}
+
+// stringList reads a model or access-group list. A missing or unrecognized
+// value is nil, which means "inherit" rather than "deny".
+func stringList(v any) []string {
+	switch t := v.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, x := range t {
+			if s, ok := x.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	default:
+		return nil
+	}
+}
+
+// queryInt reads a query parameter as an integer. A missing or bad value
+// returns the fallback.
+func queryInt(r *http.Request, key string, fallback int) int {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+// pageOffset turns a 1-based page into a row offset for a page size. A missing
+// or non-positive page reads as the first one, so a bad value never skips rows.
+func pageOffset(r *http.Request, limit int) int {
+	if limit < 1 {
+		return 0
+	}
+	off := (queryInt(r, "page", 1) - 1) * limit
+	if off < 0 {
+		return 0
+	}
+	return off
+}
+
+// idsFrom reads an id list from the body. The plural key wins, and a non-empty
+// singular field is appended.
+func idsFrom(body map[string]any, plural, singular string) []string {
+	var out []string
+	switch v := body[plural].(type) {
+	case []any:
+		for _, x := range v {
+			if s, ok := x.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+	case []string:
+		out = append(out, v...)
+	}
+	if s := str(body[singular]); s != "" {
+		out = append(out, s)
 	}
 	return out
 }
 
-// pagedListBody slices one page and adds meta and links. A page below 1 is page 1. A size below 1 is 50.
-func pagedListBody(path string, list []map[string]any, page, size int) map[string]any {
-	if list == nil {
-		list = []map[string]any{}
+// nonNilStrings keeps the JSON list shape stable: a record with no narrowing
+// emits an empty list rather than null.
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
 	}
-	if size < 1 {
-		size = 50
-	}
-	if page < 1 {
-		page = 1
-	}
-	total := len(list)
-	pages := total / size
-	if total%size != 0 {
-		pages++
-	}
-	if pages < 1 {
-		pages = 1
-	}
-	data := sliceMaps(list, page, size)
-	self := fmt.Sprintf("%s?page=%d&page_size=%d", path, page, size)
-	links := map[string]any{
-		"self":  self,
-		"first": fmt.Sprintf("%s?page=1&page_size=%d", path, size),
-		"last":  fmt.Sprintf("%s?page=%d&page_size=%d", path, pages, size),
-		"next":  nil,
-		"prev":  nil,
-	}
-	if page < pages {
-		links["next"] = fmt.Sprintf("%s?page=%d&page_size=%d", path, page+1, size)
-	}
-	if page > 1 {
-		links["prev"] = fmt.Sprintf("%s?page=%d&page_size=%d", path, page-1, size)
-	}
-	return map[string]any{
-		"data":  data,
-		"meta":  map[string]any{"page": page, "page_size": size, "total_count": total, "total_pages": pages},
-		"links": links,
-	}
+	return in
 }
 
-// spendTimeInRange reports whether a log time falls between start_date and end_date. Both empty, or an unparseable time, keeps the row.
-func spendTimeInRange(ts string, r *http.Request) bool {
-	start := r.URL.Query().Get("start_date")
-	end := r.URL.Query().Get("end_date")
-	if start == "" && end == "" {
-		return true
+// emptyNil turns an empty string into null, so public JSON can tell an unset
+// field from an empty one.
+func emptyNil(s string) any {
+	if s == "" {
+		return nil
 	}
-	at, ok := parseSpendTime(ts)
-	if !ok {
-		return true
-	}
-	if bound, ok := parseSpendTime(start); ok && at.Before(bound) {
-		return false
-	}
-	if bound, ok := parseSpendTime(end); ok && at.After(bound) {
-		return false
-	}
-	return true
+	return s
 }
 
-// parseSpendTime parses RFC3339 or 2006-01-02 15:04:05. An empty string or an unrecognized format returns false.
-func parseSpendTime(ts string) (time.Time, bool) {
-	if ts == "" {
-		return time.Time{}, false
+// deref reads an optional string. A nil pointer is the empty string.
+func deref(s *string) string {
+	if s == nil {
+		return ""
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04"} {
-		if t, err := time.Parse(layout, ts); err == nil {
-			return t.UTC(), true
-		}
-	}
-	return time.Time{}, false
+	return *s
 }
 
-// sortSpendLogs orders logs by startTime, newest first. A time that cannot be compared stays later.
-func sortSpendLogs(list []map[string]any) {
-	sort.Slice(list, func(i, j int) bool {
-		return str(list[i]["startTime"]) > str(list[j]["startTime"])
-	})
+// floatJSON turns an optional float into a JSON number or null.
+func floatJSON(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
-// encodeModels stores a model list as a JSON string. An unrecognized type becomes an empty array.
-func encodeModels(v any) string {
-	switch t := v.(type) {
-	case []any:
-		b, _ := json.Marshal(t)
-		return string(b)
-	case []string:
-		b, _ := json.Marshal(t)
-		return string(b)
-	default:
-		return "[]"
+// intJSON turns an optional integer into a JSON number or null.
+func intJSON(v *int) any {
+	if v == nil {
+		return nil
 	}
+	return *v
 }

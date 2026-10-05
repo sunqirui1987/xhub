@@ -3,6 +3,7 @@ import { Organization, organizationInfoCall, organizationListCall } from "@/comp
 import { useQuery, useQueryClient, UseQueryResult } from "@tanstack/react-query";
 import { createQueryKeys } from "../common/queryKeysFactory";
 import { t } from "@/i18n";
+import { canAccessManagement } from "@/utils/roles";
 
 export const organizationKeys = createQueryKeys("organizations");
 
@@ -23,16 +24,16 @@ export const useOrganizations = (filters?: OrganizationListFilters): UseQueryRes
         : {},
     ),
     queryFn: async () => await organizationListCall(accessToken!, orgId, orgAlias),
-    enabled: hasSession && premiumUser === true,
+    enabled: hasSession && premiumUser === true && canAccessManagement(userRole),
   });
 };
 
 export const useOrganization = (organizationID?: string) => {
   const queryClient = useQueryClient();
-  const { accessToken, premiumUser } = useAuthorized();
+  const { accessToken, premiumUser, userRole } = useAuthorized();
   return useQuery<Organization>({
     queryKey: organizationKeys.detail(organizationID!),
-    enabled: Boolean(accessToken && organizationID) && premiumUser === true,
+    enabled: Boolean(accessToken && organizationID) && premiumUser === true && canAccessManagement(userRole),
 
     queryFn: async () => {
       if (!accessToken || !organizationID) {

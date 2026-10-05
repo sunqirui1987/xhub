@@ -6,7 +6,15 @@ router_settings:
   timeout: 60
 
 general_settings:
-  master_key: sk-local-master
   database_url: postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable
   redis_url: redis://127.0.0.1:6379/1
   store_model_in_db: true
+
+  # First platform administrator, created at startup when no account with this
+  # email exists. The password is an INITIAL password: a later change here never
+  # rewrites the stored one. Use the os.environ/NAME form in production so the
+  # password is not read from a file that may sit in a repository.
+  admin_email: os.environ/XHUB_ADMIN_EMAIL
+  admin_password: os.environ/XHUB_ADMIN_PASSWORD
+  # Refuse the config-supplied account entirely, e.g. once real accounts exist.
+  disable_env_credential_login: false

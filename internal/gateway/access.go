@@ -14,47 +14,11 @@ import (
 
 var logTraceOnceAccess sync.Once
 
-// ssoGenerate issues a one-time SSO code. It requires a management identity.
-func (s *Server) ssoGenerate(w http.ResponseWriter, r *http.Request) {
-	logTraceOnceAccess.Do(func() { logx.Trace("enter gateway.ssoGenerate") })
-
-	httpx.SetCallID(w, httpx.CallID())
-	code := "sso-" + httpx.CallID()[:10]
-	s.mu.Lock()
-	s.ssoCodes[code] = true
-	s.mu.Unlock()
-	ret := r.URL.Query().Get("return_to")
-	if ret == "" {
-		ret = r.URL.Query().Get("redirect_to")
-	}
-	url := "/login?code=" + code
-	if ret != "" {
-		url += "&redirect_to=" + ret
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"url": url, "login_url": url})
-}
-
-// loginExchange trades an SSO code for a session. A missing or already used code fails.
-func (s *Server) loginExchange(w http.ResponseWriter, r *http.Request) {
-	httpx.SetCallID(w, httpx.CallID())
-	var body struct {
-		Code string `json:"code"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	ok := s.ssoCodes[body.Code]
-	delete(s.ssoCodes, body.Code)
-	s.mu.Unlock()
-	if !ok && body.Code == "" {
-		httpx.WriteError(w, 401, "invalid_api_key", "invalid sso code")
-		return
-	}
-	if !ok {
-		httpx.WriteError(w, 401, "invalid_api_key", "invalid sso code")
-		return
-	}
-	s.loginSuccess(w, "admin", "proxy_admin")
-}
+// The SSO code generator and its exchange are gone. The pair minted an
+// administrator session from an unauthenticated request: ssoGenerate handed out
+// a code to anyone and loginExchange turned it into user "admin" with role
+// "proxy_admin" without consulting any account. Authentication is now
+// username-plus-password against the users table and nothing else.
 
 type emailEventSetting struct {
 	Event   string `json:"event"`
@@ -295,44 +259,79 @@ func (s *Server) callbackDelete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// scimUsers is the minimal SCIM user collection. A write that is not implemented returns a clear error.
+// scimUsers is the minimal SCIM user collection. It reads the accounts from the
+// identity store; the fields SCIM has no equivalent for are not invented.
 func (s *Server) scimUsers(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceAccess.Do(func() { logx.Trace("enter gateway.scimUsers") })
+
 	if s.requireManage(w, r) == nil {
 		return
 	}
-	users, _ := s.Store.ListUsers()
 	resources := []map[string]any{}
-	for _, u := range users {
-		resources = append(resources, map[string]any{
-			"schemas":  []any{"urn:ietf:params:scim:schemas:core:2.0:User"},
-			"id":       u.ID,
-			"userName": u.Email,
-			"active":   true,
-			"emails":   []any{map[string]any{"value": u.Email, "primary": true}},
-			"name":     map[string]any{"formatted": u.Alias},
-			"meta":     map[string]any{"resourceType": "User"},
-		})
+	if s.IAM != nil {
+		users, err := s.IAM.ListUsers(r.Context(), "", 500, 0)
+		if err != nil {
+			s.writeIAMError(w, r, err)
+			return
+		}
+		for _, u := range users {
+			resources = append(resources, map[string]any{
+				"schemas":  []any{"urn:ietf:params:scim:schemas:core:2.0:User"},
+				"id":       u.ID,
+				"userName": u.Email,
+				"active":   u.Active(),
+				"emails":   []any{map[string]any{"value": u.Email, "primary": true}},
+				"name":     map[string]any{"formatted": u.Name},
+				"meta":     map[string]any{"resourceType": "User"},
+			})
+		}
 	}
 	httpx.WriteJSON(w, 200, scimList("User", resources))
 }
 
-// scimGroups is the minimal SCIM group collection.
+// scimGroups is the minimal SCIM group collection. A team maps to a SCIM group
+// and its members are the team's memberships, read from the one membership
+// source rather than from a mirror.
 func (s *Server) scimGroups(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
 	}
-	teams, _ := s.Store.ListTeams()
 	resources := []map[string]any{}
-	for _, t := range teams {
-		resources = append(resources, map[string]any{
-			"schemas":     []any{"urn:ietf:params:scim:schemas:core:2.0:Group"},
-			"id":          t.ID,
-			"displayName": t.Alias,
-			"members":     t.ExtraList("members_with_roles"),
-			"meta":        map[string]any{"resourceType": "Group"},
-		})
+	if s.IAM != nil {
+		teams, err := s.IAM.ListTeams(r.Context(), "", "")
+		if err != nil {
+			s.writeIAMError(w, r, err)
+			return
+		}
+		for _, t := range teams {
+			resources = append(resources, map[string]any{
+				"schemas":     []any{"urn:ietf:params:scim:schemas:core:2.0:Group"},
+				"id":          t.ID,
+				"displayName": t.Name,
+				"members":     s.scimMembers(r, t.ID),
+				"meta":        map[string]any{"resourceType": "Group"},
+			})
+		}
 	}
 	httpx.WriteJSON(w, 200, scimList("Group", resources))
+}
+
+// scimMembers renders a team's memberships in the SCIM member shape. A failed
+// lookup yields an empty list rather than a broken group entry.
+func (s *Server) scimMembers(r *http.Request, teamID string) []map[string]any {
+	members, err := s.IAM.ListMembers(r.Context(), teamID)
+	if err != nil {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(members))
+	for _, m := range members {
+		out = append(out, map[string]any{
+			"value":   m.UserID,
+			"display": m.Email,
+			"role":    m.Role,
+		})
+	}
+	return out
 }
 
 // scimList wraps resources as a SCIM ListResponse. A nil resources value becomes an empty array, totalResults is the final length, and startIndex stays 1 because this list is not paged.

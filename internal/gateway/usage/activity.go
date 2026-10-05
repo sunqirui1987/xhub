@@ -5,43 +5,85 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
-	"github.com/sunqirui1987/xhub/internal/store"
-	"sync"
 )
 
 const activityPageSize = 50
 
 var logTraceOnceActivity sync.Once
 
-// UserDailyActivity is GET /user/daily/activity. It groups stored spend logs into the daily rollup the usage page reads.
+// UserDailyActivity is GET /user/daily/activity. It groups stored usage into the
+// daily rollup the usage page reads, newest day first and paged.
 func UserDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceActivity.Do(func() { logx.Trace("enter usage.UserDailyActivity") })
 
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
+	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, 200, dailyActivityResponse(loadActivity(s, r), pageFromQuery(r), false))
+	rows, err := loadActivity(s, r, sc)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, dailyActivityResponse(rows, pageFromQuery(r), false))
 }
 
-// UserDailyActivityAggregated is GET /user/daily/activity/aggregated. Same rollup, returned as one page.
+// UserDailyActivityAggregated is GET /user/daily/activity/aggregated. The same
+// rollup in a single response, which is what the usage page loads first.
 func UserDailyActivityAggregated(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
+	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, 200, dailyActivityResponse(loadActivity(s, r), 1, true))
+	rows, err := loadActivity(s, r, sc)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, dailyActivityResponse(rows, 1, true))
 }
 
-// GatewayDailyActivity is GET /gateway/daily/activity. Request counts come from the same spend logs, split by outcome and route.
+// GatewayDailyActivity is GET /gateway/daily/activity. Request counts come from
+// the same usage rows, split by outcome and route. The scope decides whose calls
+// are counted: a platform administrator sees the gateway, anyone else sees only
+// their own calls and the calls inside the teams they belong to.
 func GatewayDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
+	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, 200, gatewayActivityBody(loadActivity(s, r)))
+	rows, err := loadActivity(s, r, sc)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, gatewayActivityBody(rows))
+}
+
+// openActivity accepts any signed-in caller and returns the usage scope that
+// narrows every row the handler will read. A key reaches only its own usage; a
+// session reaches its own rows plus the teams it belongs to; a platform
+// administrator reaches everything. The scope is required rather than optional,
+// so a handler cannot fall through to an unfiltered read.
+func openActivity(s Host, w http.ResponseWriter, r *http.Request, teamID string) (*authz.Scope, bool) {
+	p := s.RequireUser(w, r)
+	if p == nil {
+		return nil, false
+	}
+	sc, err := s.UsageScope(r, p, teamID)
+	if err != nil {
+		s.WriteAuthz(w, r, err)
+		return nil, false
+	}
+	return sc, true
 }
 
 type activityRow struct {
@@ -131,59 +173,105 @@ type dayMetric struct {
 	routes    map[string]*metric
 }
 
-func loadActivity(s Host, r *http.Request) []activityRow {
-	list, _ := s.DB().ListSpendLogs()
-	keys, _ := s.DB().ListKeys()
-	return selectActivity(list, keys, r.URL.Query().Get("start_date"), r.URL.Query().Get("end_date"), r.URL.Query().Get("timezone"), r.URL.Query().Get("user_id"), r.URL.Query().Get("api_key"))
+// loadActivity reads the usage rows the caller may see and turns them into the
+// flat rows the rollup folds.
+//
+// The scope is applied first and the query's own filters only narrow within it,
+// never widen it. That ordering matters: `user_id` and `api_key` arrive straight
+// from the query string, so a caller could otherwise ask for another account's
+// rows by passing their id. Inside the scope the worst that reaches is a row the
+// caller was already allowed to see, and a filter that names someone else simply
+// returns the empty intersection.
+func loadActivity(s Host, r *http.Request, sc *authz.Scope) ([]activityRow, error) {
+	db := s.Identity()
+	if db == nil {
+		return nil, nil
+	}
+	events, err := db.ListUsage(r.Context(), activityQuery(r, sc))
+	if err != nil {
+		return nil, err
+	}
+	return eventsToActivity(events, uiTimezone(r)), nil
 }
 
-func selectActivity(list []map[string]any, keys []store.Key, start, end, timezone, wantUser, wantKey string) []activityRow {
-	byHash := map[string]store.Key{}
-	for _, k := range keys {
-		byHash[k.TokenHash] = k
+// activityQuery builds the scoped query from the request. The scope comes from
+// authz and is never nil, so an actor who may see nothing gets a filter that
+// matches nothing rather than no filter at all.
+func activityQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
+	raw := r.URL.Query()
+	return iam.UsageQuery{
+		Cond: sc.Cond,
+		From: parseDay(raw.Get("start_date")),
+		// The end date covers the whole day. The console sends the same date for
+		// start and end when the user picks a single day, and a bare midnight
+		// bound would leave that day's calls out of the window.
+		To:     parseDayEnd(raw.Get("end_date")),
+		UserID: raw.Get("user_id"),
+		TeamID: raw.Get("team_id"),
+		KeyID:  raw.Get("api_key"),
+		Limit:  activityScanLimit,
+		Offset: pageOffset(r, activityScanLimit),
 	}
-	offsetMin, _ := strconv.Atoi(timezone)
+}
+
+// eventsToActivity flattens the stored events into the rows the rollup folds.
+// Provider comes from the price map, falling back to the model name so an
+// unknown model is still attributed rather than dropped.
+func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 	prices := catalog.CostMap()
-	out := make([]activityRow, 0, len(list))
-	for _, row := range list {
-		apiKey := str(row["api_key"])
-		owner := byHash[apiKey]
-		if wantKey != "" && apiKey != wantKey {
+	out := make([]activityRow, 0, len(events))
+	for _, e := range events {
+		if e.Cost == 0 {
 			continue
 		}
-		ownerID := str(row["user_id"])
-		if ownerID == "" {
-			ownerID = owner.UserID
-		}
-		if wantUser != "" && ownerID != wantUser {
-			continue
-		}
-		day := activityDay(str(row["startTime"]), offsetMin)
-		if !dayInRange(day, start, end) {
-			continue
-		}
-		model := str(row["model"])
+		model := e.Model
 		if model == "" {
 			model = "unknown"
 		}
-		status := str(row["status"])
 		out = append(out, activityRow{
-			day:        day,
+			day:        activityDay(e.TS, tzMinutes),
 			model:      model,
 			provider:   providerName(model, prices),
-			apiKey:     apiKey,
-			keyAlias:   owner.KeyAlias,
-			teamID:     owner.TeamID,
-			userID:     ownerID,
-			route:      llmRoute(str(row["call_type"])),
-			prompt:     asInt(row["prompt_tokens"]),
-			completion: asInt(row["completion_tokens"]),
-			spend:      asFloat(row["spend"]),
-			success:    status == "" || status == "success" || status == "succeeded",
+			apiKey:     e.KeyID,
+			teamID:     e.TeamID,
+			userID:     e.UserID,
+			route:      llmRoute(e.CallType),
+			prompt:     e.PromptTokens,
+			completion: e.CompletionTokens,
+			spend:      e.Cost,
+			success:    e.Status == "" || e.Status == "success" || e.Status == "succeeded",
 		})
 	}
 	return out
 }
+
+// uiTimezone reads the browser's UTC offset in minutes. The console sends
+// Date.getTimezoneOffset(), which is positive west of Greenwich, so the sign is
+// flipped to get the offset east of it that the day boundary needs.
+func uiTimezone(r *http.Request) int {
+	off, err := strconv.Atoi(r.URL.Query().Get("timezone"))
+	if err != nil {
+		return 0
+	}
+	return -off
+}
+
+// parseDay reads a YYYY-MM-DD date filter. An unset or unparseable value leaves
+// that side of the window open rather than filtering everything out.
+func parseDay(v string) time.Time {
+	if v == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse("2006-01-02", v)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// activityScanLimit bounds how many events one request folds. It is a request
+// bound, not an authorization one: the scope already decided what is visible.
+const activityScanLimit = 5000
 
 func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[string]any {
 	days := rollupDays(rows)
@@ -425,20 +513,14 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-func activityDay(ts string, offsetMin int) string {
-	shift := -time.Duration(offsetMin) * time.Minute
-	if ts == "" {
-		return time.Now().UTC().Add(shift).Format("2006-01-02")
+// activityDay renders the calendar day of an event in the caller's timezone.
+// The roll-up is folded per rendered day, so the offset is applied here rather
+// than in SQL: the event carries a timestamp, not a day.
+func activityDay(ts time.Time, tzMinutes int) string {
+	if ts.IsZero() {
+		return time.Now().UTC().Add(time.Duration(tzMinutes) * time.Minute).Format("2006-01-02")
 	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-		if t, err := time.Parse(layout, ts); err == nil {
-			return t.UTC().Add(shift).Format("2006-01-02")
-		}
-	}
-	if len(ts) >= 10 {
-		return ts[:10]
-	}
-	return ts
+	return ts.UTC().Add(time.Duration(tzMinutes) * time.Minute).Format("2006-01-02")
 }
 
 func dayInRange(day, start, end string) bool {

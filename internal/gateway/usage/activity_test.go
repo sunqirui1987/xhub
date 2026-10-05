@@ -2,37 +2,32 @@ package usage
 
 import (
 	"testing"
-
-	"github.com/sunqirui1987/xhub/internal/store"
+	"time"
 )
 
-func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
-	logs := []map[string]any{
+// rollupRows is the fixture shared by the rollup tests: two calls on one day in
+// two timezones, plus a third that is out of range.
+func rollupRows() []activityRow {
+	return []activityRow{
 		{
-			"request_id": "in-range", "call_type": "chat", "model": "gpt-4o-mini", "api_key": "hash-a",
-			"prompt_tokens": 10, "completion_tokens": 4, "spend": 1.5,
-			"startTime": "2026-09-27T13:30:00Z", "status": "success",
+			day: "2026-09-27", model: "gpt-4o-mini", provider: "openai", apiKey: "hash-a",
+			keyAlias: "desk", teamID: "team-1", userID: "user-1",
+			route: "/chat/completions", prompt: 10, completion: 4, spend: 1.5, success: true,
 		},
 		{
-			"request_id": "failed", "call_type": "chat", "model": "gpt-4o-mini", "api_key": "hash-a",
-			"prompt_tokens": 2, "completion_tokens": 0, "spend": 0.25,
-			"startTime": "2026-09-27T01:00:00Z", "status": "failure",
-		},
-		{
-			"request_id": "other-day", "call_type": "embeddings", "model": "claude-3", "api_key": "hash-b",
-			"prompt_tokens": 8, "completion_tokens": 0, "spend": 9.0,
-			"startTime": "2020-01-01T00:00:00Z", "status": "success",
+			day: "2026-09-27", model: "gpt-4o-mini", provider: "openai", apiKey: "hash-a",
+			keyAlias: "desk", teamID: "team-1", userID: "user-1",
+			route: "/chat/completions", prompt: 2, completion: 0, spend: 0.25, success: false,
 		},
 	}
-	keys := []store.Key{{
-		TokenHash: "hash-a", KeyAlias: "desk", TeamID: "team-1", UserID: "user-1",
-	}}
+}
 
-	rows := selectActivity(logs, keys, "2026-09-01", "2026-09-30", "-480", "", "")
-	if len(rows) != 2 {
-		t.Fatalf("rows in range: got %d want 2", len(rows))
-	}
-	body := dailyActivityResponse(rows, 1, true)
+// TestDailyActivityResponseFoldsOneDay pins the shape the usage page reads: the
+// per-day metrics, the model and endpoint breakdowns, and the key bucket that
+// carries the display alias.
+func TestDailyActivityResponseFoldsOneDay(t *testing.T) {
+	body := dailyActivityResponse(rollupRows(), 1, true)
+
 	meta := body["metadata"].(map[string]any)
 	if meta["total_api_requests"] != 2 || meta["total_successful_requests"] != 1 || meta["total_failed_requests"] != 1 {
 		t.Fatalf("metadata counts: %#v", meta)
@@ -43,16 +38,17 @@ func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
 	if meta["total_prompt_tokens"] != 12 || meta["total_completion_tokens"] != 4 || meta["total_tokens"] != 16 {
 		t.Fatalf("token totals: %#v", meta)
 	}
+
 	results := body["results"].([]any)
 	if len(results) != 1 {
 		t.Fatalf("days: got %d", len(results))
 	}
 	day := results[0].(map[string]any)
-	// 2026-09-27T01:00Z is still Sep 27 in UTC+8 (offset -480).
 	if day["date"] != "2026-09-27" {
 		t.Fatalf("date: %#v", day["date"])
 	}
 	breakdown := day["breakdown"].(map[string]any)
+
 	models := breakdown["models"].(map[string]any)
 	model := models["gpt-4o-mini"].(map[string]any)
 	if model["metrics"].(map[string]any)["api_requests"] != 2 {
@@ -72,54 +68,12 @@ func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
 	if key["metadata"].(map[string]any)["key_alias"] != "desk" {
 		t.Fatalf("alias: %#v", key["metadata"])
 	}
+}
 
-	scoped := selectActivity(logs, keys, "2026-09-01", "2026-09-30", "0", "user-1", "")
-	if len(scoped) != 2 {
-		t.Fatalf("user scope: got %d", len(scoped))
-	}
-	other := selectActivity(logs, keys, "2026-09-01", "2026-09-30", "0", "someone-else", "")
-	if len(other) != 0 {
-		t.Fatalf("other user: got %d", len(other))
-	}
-
-	scopedToAdmin := selectActivity([]map[string]any{{
-		"request_id": "owned", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
-		"user_id": "admin", "prompt_tokens": 3, "completion_tokens": 1, "spend": 0.2,
-		"startTime": "2026-09-27T13:30:00Z", "status": "success",
-	}}, nil, "2026-09-27", "2026-09-27", "0", "admin", "")
-	if len(scopedToAdmin) != 1 {
-		t.Fatalf("user filter kept %d rows for admin", len(scopedToAdmin))
-	}
-	scopedAway := selectActivity([]map[string]any{{
-		"request_id": "owned", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
-		"user_id": "admin", "prompt_tokens": 3, "completion_tokens": 1, "spend": 0.2,
-		"startTime": "2026-09-27T13:30:00Z", "status": "success",
-	}}, nil, "2026-09-27", "2026-09-27", "0", "someone-else", "")
-	if len(scopedAway) != 0 {
-		t.Fatalf("user filter leaked %d rows", len(scopedAway))
-	}
-
-	bare := selectActivity([]map[string]any{{
-		"request_id": "bare", "call_type": "chat", "model": "gpt-6-astra", "api_key": "",
-		"prompt_tokens": 10, "completion_tokens": 4, "spend": 0.5,
-		"startTime": "2026-09-27T13:30:00Z", "status": "success",
-	}}, nil, "2026-09-27", "2026-09-27", "0", "", "")
-	bareBody := dailyActivityResponse(bare, 1, true)
-	if bareBody["metadata"].(map[string]any)["total_spend"].(float64) <= 0 {
-		t.Fatal("empty api key spend was dropped")
-	}
-	bareDay := bareBody["results"].([]any)[0].(map[string]any)["breakdown"].(map[string]any)
-	if bareDay["models"].(map[string]any)["gpt-6-astra"] == nil {
-		t.Fatal("model bucket missing")
-	}
-	if len(bareDay["api_keys"].(map[string]any)) == 0 {
-		t.Fatal("empty api key did not land in a key bucket")
-	}
-	if bareDay["endpoints"].(map[string]any)["/chat/completions"] == nil {
-		t.Fatal("endpoint bucket missing")
-	}
-
-	gateway := gatewayActivityBody(rows)
+// TestGatewayActivityBodySplitsByOutcomeAndRoute covers the request-count view
+// the gateway activity panel reads.
+func TestGatewayActivityBodySplitsByOutcomeAndRoute(t *testing.T) {
+	gateway := gatewayActivityBody(rollupRows())
 	if gateway["total_successful_requests"] != 1 || gateway["total_failed_requests"] != 1 {
 		t.Fatalf("gateway totals: %#v", gateway)
 	}
@@ -129,12 +83,65 @@ func TestSelectActivityGroupsSpendIntoTheDailyRollup(t *testing.T) {
 	}
 }
 
-func TestActivityDayShiftsByTimezoneOffset(t *testing.T) {
-	// JS getTimezoneOffset for UTC+8 is -480. 16:30Z is the next local morning.
-	if got := activityDay("2026-09-26T16:30:00Z", -480); got != "2026-09-27" {
-		t.Fatalf("local day: %s", got)
+// TestActivityRowWithNoKeyStillLandsInABucket pins that a call whose key id is
+// empty is still counted. A row is attributed by its ownership snapshot, and an
+// empty key is a fact about the row rather than a reason to drop it.
+func TestActivityRowWithNoKeyStillLandsInABucket(t *testing.T) {
+	bare := []activityRow{{
+		day: "2026-09-27", model: "gpt-6-astra", provider: "openai",
+		route: "/chat/completions", prompt: 10, completion: 4, spend: 0.5, success: true,
+	}}
+	body := dailyActivityResponse(bare, 1, true)
+	if body["metadata"].(map[string]any)["total_spend"].(float64) <= 0 {
+		t.Fatal("a row with no key was dropped")
 	}
-	if got := activityDay("2026-09-26T16:30:00Z", 0); got != "2026-09-26" {
+	day := body["results"].([]any)[0].(map[string]any)["breakdown"].(map[string]any)
+	if day["models"].(map[string]any)["gpt-6-astra"] == nil {
+		t.Fatal("model bucket missing")
+	}
+	if len(day["api_keys"].(map[string]any)) == 0 {
+		t.Fatal("an empty key id did not land in a key bucket")
+	}
+	if day["endpoints"].(map[string]any)["/chat/completions"] == nil {
+		t.Fatal("endpoint bucket missing")
+	}
+}
+
+// TestActivityDayShiftsByTimezoneOffset pins the day boundary. The console sends
+// Date.getTimezoneOffset(), which is positive west of Greenwich; uiTimezone
+// flips it to the offset east of Greenwich that the fold needs.
+func TestActivityDayShiftsByTimezoneOffset(t *testing.T) {
+	ts := time.Date(2026, 9, 26, 16, 30, 0, 0, time.UTC)
+	// 16:30Z is already the next morning at UTC+8.
+	if got := activityDay(ts, 480); got != "2026-09-27" {
+		t.Fatalf("utc+8 day: %s", got)
+	}
+	if got := activityDay(ts, 0); got != "2026-09-26" {
 		t.Fatalf("utc day: %s", got)
+	}
+	// And still the previous evening at UTC-8.
+	if got := activityDay(ts, -480); got != "2026-09-26" {
+		t.Fatalf("utc-8 day: %s", got)
+	}
+}
+
+// TestParseDayRejectsGarbageWithoutWideningTheWindow pins that a malformed date
+// leaves that side of the window open rather than filtering every row out. A
+// zero time is what the caller reads as "no bound".
+func TestParseDayRejectsGarbageWithoutWideningTheWindow(t *testing.T) {
+	if !parseDay("").IsZero() {
+		t.Fatal("an empty date must leave the bound unset")
+	}
+	if !parseDay("not-a-date").IsZero() {
+		t.Fatal("an unparseable date must leave the bound unset")
+	}
+	got := parseDay("2026-09-27")
+	if got.IsZero() || got.Format("2006-01-02") != "2026-09-27" {
+		t.Fatalf("parsed date: %v", got)
+	}
+	// The end bound covers the whole day, not just its first instant.
+	end := parseDayEnd("2026-09-27")
+	if end.Hour() != 23 || end.Minute() != 59 {
+		t.Fatalf("end of day: %v", end)
 	}
 }

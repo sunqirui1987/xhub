@@ -101,7 +101,7 @@ func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 	emptyVars := map[string]any{}
 	cbs := []any{}
 	for _, kind := range []string{"callback", "callbacks"} {
-		list, _ := s.DB().ListKV(kind)
+		list, _ := s.RecordStore().ListKV(kind)
 		for _, row := range list {
 			name := str(row["callback_name"])
 			if name == "" {

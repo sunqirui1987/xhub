@@ -44,7 +44,7 @@ func Base(s Host) map[string]any {
 
 // MergedRouter overlays database router settings on the baseline. Keys absent from the database keep the YAML value.
 func MergedRouter(s Host) map[string]any {
-	db, err := s.DB().ListConfig("router_settings")
+	db, err := s.RecordStore().ListConfig("router_settings")
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
@@ -60,7 +60,7 @@ func MergedGeneral(s Host) map[string]any {
 		}
 		base[k] = v
 	}
-	db, err := s.DB().ListConfig("general_settings")
+	db, err := s.RecordStore().ListConfig("general_settings")
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
@@ -76,7 +76,7 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 	case "general_settings":
 		current = MergedGeneral(s)
 	default:
-		db, err := s.DB().ListConfig(namespace)
+		db, err := s.RecordStore().ListConfig(namespace)
 		if err != nil || db == nil {
 			db = map[string]any{}
 		}
@@ -84,7 +84,7 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 	}
 	merged := MergePatch(current, patch)
 	for k := range patch {
-		if err := s.DB().PutConfig(namespace, k, merged[k]); err != nil {
+		if err := s.RecordStore().PutConfig(namespace, k, merged[k]); err != nil {
 			return err
 		}
 	}
@@ -160,7 +160,7 @@ func GeneralList(s Host) []map[string]any {
 	for k, v := range s.Config().GeneralRaw {
 		yamlBase[k] = v
 	}
-	db, err := s.DB().ListConfig("general_settings")
+	db, err := s.RecordStore().ListConfig("general_settings")
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
@@ -208,7 +208,7 @@ func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = "general_settings"
 	}
-	if err := s.DB().PutConfig(ns, name, body["field_value"]); err != nil {
+	if err := s.RecordStore().PutConfig(ns, name, body["field_value"]); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
@@ -230,7 +230,7 @@ func FieldDelete(s Host, w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = "general_settings"
 	}
-	if err := s.DB().DeleteConfig(ns, name); err != nil {
+	if err := s.RecordStore().DeleteConfig(ns, name); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}

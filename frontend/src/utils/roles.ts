@@ -28,6 +28,17 @@ export const isAdminRole = (role: string): boolean => {
   return all_admin_roles.includes(role);
 };
 
+// Session labels that may call management routes. The gateway accepts only
+// proxy_admin and proxy_admin_viewer. useAuthorized().userRole is the effective
+// label, so both of those arrive as "Admin" (the viewer is also isViewOnly).
+// "Admin Viewer" is kept for a session that still carries the formatted label.
+// Org Admin and internal users are rejected with
+// "Not allowed to access management endpoints", so the UI must not call.
+const managementSessionRoles = ["Admin", "Admin Viewer"];
+
+export const canAccessManagement = (userRole?: string | null): boolean =>
+  managementSessionRoles.includes(userRole ?? "");
+
 export const isProxyAdminRole = (role: string): boolean => {
   return role === "proxy_admin" || role === "Admin";
 };

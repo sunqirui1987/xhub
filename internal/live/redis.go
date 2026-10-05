@@ -21,6 +21,17 @@ type Client struct {
 	rdb *redis.Client
 }
 
+// SpendRef namespaces hot-spend counters by owner type. API-key, team, user,
+// organization, and project identifiers come from different tables but are
+// not globally unique; using the bare identifier would let two scopes share a
+// Redis budget during the flush window.
+func SpendRef(kind, id string) string {
+	if kind == "" || id == "" {
+		return id
+	}
+	return kind + "/" + id
+}
+
 var logTraceOnceRedis sync.Once
 
 // Open parses the Redis URL and pings it. On failure it closes the client and returns the error.
@@ -307,6 +318,9 @@ type SpendLog struct {
 	CallType     string  `json:"call_type"`
 	Model        string  `json:"model"`
 	APIKey       string  `json:"api_key"`
+	// KeyID is the api_keys row id, which is what usage_events keys ownership
+	// by. APIKey stays the token hash, because that is the live-spend reference.
+	KeyID        string  `json:"key_id,omitempty"`
 	Prompt       int     `json:"prompt_tokens"`
 	Completion   int     `json:"completion_tokens"`
 	Spend        float64 `json:"spend"`
@@ -315,15 +329,55 @@ type SpendLog struct {
 	End          string  `json:"end"`
 	CacheHit     bool    `json:"cache_hit"`
 	Status       string  `json:"status"`
+	OwnerType    string  `json:"owner_type,omitempty"`
 	TeamID       string  `json:"team_id"`
 	UserID       string  `json:"user_id"`
 	OrgID        string  `json:"org_id"`
+	ProjectID    string  `json:"project_id,omitempty"`
 	Messages     string  `json:"messages,omitempty"`
 	Response     string  `json:"response,omitempty"`
 	ProxyRequest string  `json:"proxy_server_request,omitempty"`
 }
 
 // EnqueueLog pushes a log onto the Redis list. The request path does only this step.
+// EnqueueSpend publishes the log and its hot budget deltas in one Redis operation.
+// A flusher cannot acknowledge a log before its matching deltas exist.
+func (c *Client) EnqueueSpend(row SpendLog) error {
+	if c == nil {
+		return nil
+	}
+	raw, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	args := []any{raw, 0.0}
+	if row.SpendValid {
+		args[1] = row.Spend
+	}
+	for _, ref := range []struct{ kind, id string }{
+		{"key", row.APIKey}, {"team", row.TeamID}, {"user", row.UserID},
+		{"org", row.OrgID}, {"project", row.ProjectID},
+	} {
+		id := SpendRef(ref.kind, ref.id)
+		if id != "" {
+			args = append(args, id)
+		}
+	}
+	return enqueueSpendScript.Run(context.Background(), c.rdb, []string{"xhub:spendlog"}, args...).Err()
+}
+
+var enqueueSpendScript = redis.NewScript(`
+local delta = tonumber(ARGV[2])
+for i = 3, #ARGV do
+  if delta ~= 0 then
+    redis.call('INCRBYFLOAT', 'xhub:spend:' .. ARGV[i], delta)
+    redis.call('SADD', 'xhub:spend:ids', ARGV[i])
+  end
+end
+redis.call('RPUSH', KEYS[1], ARGV[1])
+return 1
+`)
+
 func (c *Client) EnqueueLog(row SpendLog) error {
 	if c == nil {
 		return nil

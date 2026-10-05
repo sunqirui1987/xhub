@@ -103,10 +103,10 @@ func CostMapReloadStatus(s Host, w http.ResponseWriter, r *http.Request) {
 
 // loadCostReload reads the saved timer. A missing record is treated as off.
 func loadCostReload(s Host) costReloadPlan {
-	if s.DB() == nil {
+	if s.RecordStore() == nil {
 		return costReloadPlan{}
 	}
-	cfg, err := s.DB().ListConfig(costReloadNS)
+	cfg, err := s.RecordStore().ListConfig(costReloadNS)
 	if err != nil {
 		return costReloadPlan{}
 	}
@@ -133,10 +133,10 @@ func loadCostReload(s Host) costReloadPlan {
 
 // saveCostReload stores the timer. The next status read uses this record.
 func saveCostReload(s Host, plan costReloadPlan) error {
-	if s.DB() == nil {
+	if s.RecordStore() == nil {
 		return nil
 	}
-	return s.DB().PutConfig(costReloadNS, costReloadKey, plan.public())
+	return s.RecordStore().PutConfig(costReloadNS, costReloadKey, plan.public())
 }
 
 // public is the JSON the dashboard reads for a cost reload plan. An unset time is null.

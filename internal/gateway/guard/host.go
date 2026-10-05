@@ -12,7 +12,7 @@ import (
 // Host is what a guardrail trial and a config read ask the process for. *gateway.Server implements it. This package does not import gateway.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
-	DB() *store.Store
+	RecordStore() *store.Store
 }
 
 // traceModule records that guardrail routes are being mounted.

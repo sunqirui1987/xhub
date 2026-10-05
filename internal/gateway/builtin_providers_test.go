@@ -53,7 +53,7 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 	t.Setenv("XHUB_BUILTIN_PROVIDERS", "1")
 	t.Setenv("FENNOAI_API_KEY", "fenno-test-key")
 	t.Setenv("QINIU_API_KEY", "qiniu-test-key")
-	_ = New(cfg, st)
+	_ = New(cfg, st, nil)
 
 	rows, err := st.ListProxyModels()
 	if err != nil {
@@ -82,9 +82,11 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 		t.Fatalf("startup fetched a model list %#v", hits)
 	}
 
-	gw := httptest.NewServer(New(cfg, st).Handler())
+	db := testIdentityStore(t)
+	gw := httptest.NewServer(New(cfg, st, db).Handler())
 	defer gw.Close()
-	status, body := authed(t, gw.URL, cfg.GeneralSettings.MasterKey, http.MethodPost, "/model/builtin/add", []byte(`{"provider":"qiniu","model_ids":["extra/id"]}`))
+	sess := adminSession(t, gw.URL, db)
+	status, body := authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/add", []byte(`{"provider":"qiniu","model_ids":["extra/id"]}`))
 	if status != http.StatusOK {
 		t.Fatalf("add %d %s", status, trim(body))
 	}
@@ -103,7 +105,7 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 		t.Fatalf("row is not a plain model params=%#v info=%#v", added.Params, added.Info)
 	}
 
-	status, body = authed(t, gw.URL, cfg.GeneralSettings.MasterKey, http.MethodPost, "/model/builtin/refresh", []byte(`{"provider":"qiniu"}`))
+	status, body = authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/refresh", []byte(`{"provider":"qiniu"}`))
 	if status != http.StatusOK {
 		t.Fatalf("refresh %d %s", status, trim(body))
 	}
@@ -122,7 +124,7 @@ func TestBuiltinProvidersStayOutWhenDisabled(t *testing.T) {
 	t.Setenv("XHUB_BUILTIN_PROVIDERS", "off")
 	t.Setenv("FENNOAI_API_KEY", "fenno-test-key")
 	t.Setenv("QINIU_API_KEY", "qiniu-test-key")
-	_ = New(cfg, st)
+	_ = New(cfg, st, nil)
 	rows, err := st.ListProxyModels()
 	if err != nil {
 		t.Fatal(err)

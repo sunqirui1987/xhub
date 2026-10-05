@@ -74,17 +74,9 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			return
 		}
 	}
-	done, reason := h.HookEngine().Begin(p.Key)
-	if reason == "budget" {
-		logx.Error("process path=%s step=budget model=%s", r.URL.Path, alias)
-		httpx.WriteTypedError(w, r.URL.Path, 429, "budget_exceeded", "Budget has been exceeded")
-		return
-	}
-	if reason == "parallel" {
-		logx.Error("process path=%s step=parallel model=%s", r.URL.Path, alias)
-		httpx.WriteTypedError(w, r.URL.Path, 429, "rate_limit", "max_parallel_requests exceeded")
-		return
-	}
+	// Budget was already checked against the whole hierarchy by
+	// EnforceIdentityLimits. This only bounds in-flight calls for one key.
+	done := h.HookEngine().Begin(p.KeyID)
 	if done != nil {
 		defer done()
 	}
@@ -107,7 +99,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			logx.Debug("process path=%s step=cache hit=true model=%s", r.URL.Path, alias)
 			logMetrics(r.URL.Path, alias, true, pt, ct, elapsed, elapsed)
 			h.RememberExchange(callID, r, raw, hit)
-			h.WriteCacheHit(w, p, callID, alias, ck, hit, start)
+			h.WriteCacheHit(w, p, callID, alias, ck, op, hit, start)
 			return
 		}
 		logx.Trace("process path=%s step=cache hit=false model=%s", r.URL.Path, alias)
@@ -138,8 +130,11 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 
 	for di, rawDep := range pool {
 		if di > 0 {
+			// A retry is a new request against the upstream, so the credential
+			// is resolved again: a key revoked between attempts must not carry
+			// the retry, and the hierarchy is re-checked before spend is added.
 			p2, err := h.ResolveRequest(r)
-			if err != nil || p2 == nil || !p2.CanLLM(cfg) {
+			if err != nil || p2 == nil || !p2.CanInfer() {
 				httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 				return
 			}
@@ -148,7 +143,12 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 				return
 			}
 		}
-		dep := h.AttachCredential(rawDep)
+		dep, credentialErr := h.AttachCredential(rawDep)
+		if credentialErr != nil {
+			missingCredential = true
+			logx.Debug("skip deployment path=%s model=%s reason=credential_unavailable", r.URL.Path, alias)
+			continue
+		}
 		upstreamModel := dep.ParamString("model", alias)
 		provider, realModel := config.SplitProviderModel(upstreamModel)
 		if custom := dep.ParamString("custom_llm_provider", ""); custom != "" {
@@ -244,7 +244,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 					pt, ct := usageCounts(usage)
 					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
 					h.RememberExchange(callID, r, raw, streamed)
-					h.RecordSpend(w, p, callID, alias, usage, start, false, router.DeploymentID(rawDep))
+					h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusOK, router.DeploymentID(rawDep))
 					return
 				}
 				lastErr = errEmptyUpstream

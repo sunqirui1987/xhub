@@ -74,7 +74,7 @@ export default function ApiKeysDashboard() {
     <main className="flex h-full min-h-0 flex-col">
       <VirtualKeysTable
         headerActions={
-          isViewOnly ? undefined : (
+          isViewOnly && userRole === "Admin" ? undefined : (
             <CreateKey
               team={null}
               teams={teams}

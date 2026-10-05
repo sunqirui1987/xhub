@@ -36,15 +36,37 @@ type RouterSettings struct {
 	Timeout         float64 `yaml:"timeout"`
 }
 
-// GeneralSettings holds the master key, database, Redis, and a few switches. Other general-settings keys stay in Config.GeneralRaw.
+// GeneralSettings holds the database, Redis, the platform administrator, and a
+// few switches. Other general-settings keys stay in Config.GeneralRaw.
+//
+// MasterKey is optional and is not a login. The console administrator is the
+// admin_email account. An empty master key means there is no emergency
+// credential.
 type GeneralSettings struct {
-	MasterKey                 string `yaml:"master_key"`
-	DatabaseURL               string `yaml:"database_url"`
-	RedisURL                  string `yaml:"redis_url"`
-	StoreModelInDB            bool   `yaml:"store_model_in_db"`
-	StorePromptsInSpendLogs   bool   `yaml:"store_prompts_in_spend_logs"`
-	AllowMasterKeyLLM         bool   `yaml:"allow_master_key_llm"`
-	DisableEnvCredentialLogin bool   `yaml:"disable_env_credential_login"`
+	MasterKey               string `yaml:"master_key"`
+	DatabaseURL             string `yaml:"database_url"`
+	RedisURL                string `yaml:"redis_url"`
+	StoreModelInDB          bool   `yaml:"store_model_in_db"`
+	StorePromptsInSpendLogs bool   `yaml:"store_prompts_in_spend_logs"`
+	AllowMasterKeyLLM       bool   `yaml:"allow_master_key_llm"`
+	// AdminEmail and AdminPassword seed the first platform administrator at
+	// startup, so a deployment does not have to call POST /bootstrap by hand.
+	//
+	// The password is an initial password, not a managed one: the account is
+	// created only when no account with AdminEmail exists yet, and a later
+	// change to this value never rewrites a stored password. Changing the
+	// password of a live account goes through the normal account routes.
+	//
+	// Both values accept the os.environ/NAME form every other config string does,
+	// so a password can come from the environment instead of the file.
+	AdminEmail    string `yaml:"admin_email"`
+	AdminPassword string `yaml:"admin_password"`
+	AdminName     string `yaml:"admin_name"`
+	// DisableEnvCredentialLogin turns the seeding off entirely. It is the same
+	// switch LiteLLM uses to refuse the environment-credential account, so an
+	// operator who has already provisioned accounts is not given a second
+	// administrator by a config file.
+	DisableEnvCredentialLogin bool `yaml:"disable_env_credential_login"`
 }
 
 var logTraceOnceConfig sync.Once
@@ -64,6 +86,9 @@ func Load(path string) (*Config, error) {
 	c.GeneralSettings.MasterKey = resolve(c.GeneralSettings.MasterKey)
 	c.GeneralSettings.DatabaseURL = resolve(c.GeneralSettings.DatabaseURL)
 	c.GeneralSettings.RedisURL = resolve(c.GeneralSettings.RedisURL)
+	c.GeneralSettings.AdminEmail = resolve(c.GeneralSettings.AdminEmail)
+	c.GeneralSettings.AdminPassword = resolve(c.GeneralSettings.AdminPassword)
+	c.GeneralSettings.AdminName = resolve(c.GeneralSettings.AdminName)
 	var doc struct {
 		RouterSettings  map[string]any `yaml:"router_settings"`
 		GeneralSettings map[string]any `yaml:"general_settings"`
@@ -100,13 +125,13 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
-	if c.GeneralSettings.MasterKey == "" {
-		return nil, fmt.Errorf("general_settings.master_key is required")
-	}
 	return &c, nil
 }
 
-// resolve expands environment placeholders in a config string. A missing variable keeps the original text instead of becoming empty.
+// resolve expands environment placeholders in a config string. A variable that
+// is not set becomes the empty string, which is what makes "os.environ/NAME"
+// safe to write: the feature that key configures stays off rather than acting on
+// placeholder text.
 func resolve(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "os.environ/") {

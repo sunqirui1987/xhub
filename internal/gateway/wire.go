@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/gateway/guard"
-	"github.com/sunqirui1987/xhub/internal/gateway/keys"
 	"github.com/sunqirui1987/xhub/internal/gateway/models"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/hooks"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
@@ -63,7 +64,7 @@ func (s *Server) GuardrailBlocks(body map[string]any) (bool, string) {
 }
 
 // AttachCredential fills a deployment from the secret store using litellm_credential_name. With no name the deployment is returned unchanged.
-func (s *Server) AttachCredential(dep config.ModelEntry) config.ModelEntry {
+func (s *Server) AttachCredential(dep config.ModelEntry) (config.ModelEntry, error) {
 	return s.withCredential(dep)
 }
 
@@ -85,8 +86,8 @@ func (s *Server) SetChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 }
 
 // RecordSpend records this call's tokens on the hot path and, when Redis is configured, queues the log instead of writing PostgreSQL immediately.
-func (s *Server) RecordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias string, usage map[string]any, start time.Time, cacheHit bool, depID string) {
-	s.recordSpend(w, p, callID, alias, usage, start, cacheHit, depID)
+func (s *Server) RecordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias, op string, usage map[string]any, start time.Time, cacheHit bool, status int, depID string) {
+	s.recordSpend(w, p, callID, alias, op, usage, start, cacheHit, status, depID)
 }
 
 // RememberExchange holds the request and response until this call's spend row is written.
@@ -95,8 +96,8 @@ func (s *Server) RememberExchange(callID string, r *http.Request, reqBody, respB
 }
 
 // WriteCacheHit writes a cached body back and records a cache-hit spend row with a zero delta.
-func (s *Server) WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck string, hit []byte, start time.Time) {
-	s.writeCacheHit(w, p, callID, alias, ck, hit, start)
+func (s *Server) WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time) {
+	s.writeCacheHit(w, p, callID, alias, ck, op, hit, start)
 }
 
 // WriteChatJSON writes the upstream JSON to the caller and records spend. A non-success status is not cached as a successful body.
@@ -118,9 +119,6 @@ func (s *Server) Models() []config.ModelEntry { return s.Cfg.ModelList }
 // BusyMap returns how many requests each deployment is handling inside this process.
 func (s *Server) BusyMap() map[string]int { return s.Busy }
 
-// SpendStore returns the PostgreSQL store where spend and logs are written.
-func (s *Server) SpendStore() *store.Store { return s.Store }
-
 // routerState returns the runtime state handed to the router. The implementation is in dataplane.
 func (s *Server) routerState() router.State { return dataplane.State(s) }
 
@@ -139,22 +137,14 @@ func (s *Server) flushLoop() { dataplane.FlushLoop(s) }
 // FlushSpend writes spend and logs that are still in Redis into PostgreSQL.
 func (s *Server) FlushSpend() { dataplane.Flush(s) }
 
+// RequireUser accepts any signed-in session or virtual key. On failure it has already written 401.
+func (s *Server) RequireUser(w http.ResponseWriter, r *http.Request) *auth.Principal {
+	return s.requireUser(w, r)
+}
+
 // RequireManage requires a management identity. On failure it has already written 401 and returns nil.
 func (s *Server) RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	return s.requireManage(w, r)
-}
-
-// DB returns the PostgreSQL store used by management handlers.
-func (s *Server) DB() *store.Store { return s.Store }
-
-// MakeKey builds the key to store from the plaintext and the request body. An illegal model list returns an error.
-func (s *Server) MakeKey(plain string, body map[string]any) (store.Key, error) {
-	return keys.FromBody(plain, body)
-}
-
-// KeyJSON is the public JSON for a virtual key. The plaintext is omitted when includePlain is false.
-func (s *Server) KeyJSON(k store.Key, plain string, includePlain bool) map[string]any {
-	return keys.Response(k, plain, includePlain)
 }
 
 // ModelList returns a copy of the current model list. The lock is held while copying, and the caller may read the result freely afterward.
@@ -179,8 +169,8 @@ func (s *Server) ModelTable() *[]config.ModelEntry { return &s.Cfg.ModelList }
 // Resolve resolves the identity of the current request. On failure it does not write a response.
 func (s *Server) Resolve(r *http.Request) (*auth.Principal, error) { return s.resolve(r) }
 
-// AllowLLM reports whether this identity may call inference. The decision uses the process config, not the model table.
-func (s *Server) AllowLLM(p *auth.Principal) bool { return p.CanLLM(s.Cfg) }
+// AllowLLM reports whether this identity may call inference.
+func (s *Server) AllowLLM(p *auth.Principal) bool { return p.CanInfer() }
 
 // RequireLLM requires an identity that may call inference. The master key may not by default. On failure it has already written 401.
 func (s *Server) RequireLLM(w http.ResponseWriter, r *http.Request) *auth.Principal {
@@ -190,6 +180,119 @@ func (s *Server) RequireLLM(w http.ResponseWriter, r *http.Request) *auth.Princi
 // RequireMixed accepts either a management identity or an inference identity. If it is neither, it has already written 401.
 func (s *Server) RequireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	return s.requireMixed(w, r)
+}
+
+// Identity returns the identity store. A handler reads its rows from here, but
+// only after Authorize has permitted the action that reads them.
+func (s *Server) Identity() *iam.DB { return s.IAM }
+
+// RecordStore returns the framework record store: proxy models, the price-map
+// reload plan, provider credentials and general settings. It answers no
+// authorization question, and every identity read goes through Identity instead.
+func (s *Server) RecordStore() *store.Store { return s.Store }
+
+// Authorize decides one action for an already resolved caller and returns nil
+// when it is permitted. It is the only way a handler may reach identity data:
+// the object names what is being acted on and the guard reads its real
+// ownership from the database, so a handler cannot pass a team the row does not
+// belong to.
+//
+// A refusal is returned rather than written, because a handler that makes
+// several decisions needs to know which one failed. WriteAuthz turns it into the
+// response.
+func (s *Server) Authorize(r *http.Request, p *auth.Principal, action authz.Action, obj authz.Object) error {
+	g, err := s.guard(r.Context(), p)
+	if err != nil {
+		return err
+	}
+	return s.Authz.Authorize(r.Context(), g, action, obj)
+}
+
+// KeysScope returns the key-listing scope for an already resolved caller. The
+// listing is narrowed in SQL by the scope rather than filtered after the rows
+// are read, so a large table never widens what a handler returns.
+func (s *Server) KeysScope(r *http.Request, p *auth.Principal) (*authz.Scope, error) {
+	g, err := s.guard(r.Context(), p)
+	if err != nil {
+		return nil, err
+	}
+	return g.KeysScope(r.Context())
+}
+
+// UsageScope returns the usage-listing scope for an already resolved caller,
+// optionally narrowed to one team. The scope is applied as a WHERE fragment, so
+// the narrowing happens in SQL and the roll-up is never read in full.
+func (s *Server) UsageScope(r *http.Request, p *auth.Principal, teamID string) (*authz.Scope, error) {
+	g, err := s.guard(r.Context(), p)
+	if err != nil {
+		return nil, err
+	}
+	return g.UsageScope(r.Context(), teamID)
+}
+
+// LogsScope returns the request-log scope for an already resolved caller: their
+// own personal logs, plus the service-key logs of the teams they administer. A
+// platform administrator receives every row, which the handler audits on read.
+func (s *Server) LogsScope(r *http.Request, p *auth.Principal) (*authz.Scope, error) {
+	g, err := s.guard(r.Context(), p)
+	if err != nil {
+		return nil, err
+	}
+	return g.LogsScope(r.Context())
+}
+
+// AuditLogRead records that a platform administrator read a request log they do
+// not own. The evidence row is the access, not the content: it names the request
+// id and the ownership snapshot that was read.
+func (s *Server) AuditLogRead(r *http.Request, p *auth.Principal, requestID string, e iam.UsageEvent) error {
+	if s.IAM == nil {
+		return nil
+	}
+	return s.IAM.AuditLogRead(r.Context(), iam.Actor{ID: p.UserID, Kind: string(p.Kind)}, requestID, e)
+}
+
+// TeamFilter returns the teams whose rows a listing may include. A nil slice
+// means every team, which only a platform administrator receives; an empty slice
+// means no team. It is fail-closed: a guard that could not be built is an error
+// rather than an unfiltered listing.
+func (s *Server) TeamFilter(r *http.Request, p *auth.Principal) ([]string, error) {
+	g, err := s.guard(r.Context(), p)
+	if err != nil {
+		return nil, err
+	}
+	return g.TeamFilter(), nil
+}
+
+// WriteAuthz turns a refused authorization into the response: 404 when the
+// object does not exist or is not visible, 403 when it is visible but not
+// permitted, 500 when the ownership could not be read. It reports whether a
+// response was written.
+func (s *Server) WriteAuthz(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	s.writeAuthzError(w, r, err)
+	return true
+}
+
+// WriteAuthError turns a failed identification or a failed identity write into
+// the response. It reports whether a response was written.
+func (s *Server) WriteAuthError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	s.writeAuthError(w, r, err)
+	return true
+}
+
+// WriteIAMError turns a store failure into the response. It reports whether a
+// response was written.
+func (s *Server) WriteIAMError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return false
+	}
+	s.writeIAMError(w, r, err)
+	return true
 }
 
 // DataPlane hands this inference call to dataplane.Serve. op is the operation name that was already recognized.

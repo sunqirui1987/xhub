@@ -1,9 +1,11 @@
 package gateway
 
 import (
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"strings"
 	"sync"
+
+	"github.com/sunqirui1987/xhub/internal/catalog"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 var logTraceOnceRemoved sync.Once
@@ -32,4 +34,16 @@ func removedColumnRoute(path string) bool {
 		}
 	}
 	return false
+}
+
+// IsRetiredPath reports whether a path belongs to the catalog's retired class.
+//
+// These are the "mixed" routes the catalog still lists but the product removed.
+// They are answered with 410 rather than served, so a test that walks the route
+// inventory has to expect that and not a 200.
+//
+// It asks the catalog for the classification rather than repeating the prefix
+// list, so a path cannot be retired in one place and served in the other.
+func IsRetiredPath(path string) bool {
+	return catalog.IsMixedPath(path)
 }

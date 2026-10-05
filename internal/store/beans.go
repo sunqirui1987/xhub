@@ -1,101 +1,18 @@
-// Package store declares the live table rows. Column types match the PostgreSQL tables already in use.
+// Package store declares the framework table rows: key-value documents,
+// dashboard-saved proxy models, and namespaced configuration. Column types match
+// the PostgreSQL tables already in use.
+//
+// Identity is not here. Users, organizations, teams, memberships, projects,
+// access groups, keys, usage and the audit log belong to internal/iam, which
+// owns their schema and their constraints.
 package store
 
 import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"sync"
-	"time"
 )
 
-type userRow struct {
-	UserID     string   `xorm:"pk text 'user_id'"`
-	UserEmail  string   `xorm:"text 'user_email'"`
-	UserRole   string   `xorm:"text 'user_role'"`
-	UserAlias  string   `xorm:"text 'user_alias'"`
-	ModelsJSON string   `xorm:"text 'models_json'"`
-	MaxBudget  *float64 `xorm:"'max_budget'"`
-	Spend      float64  `xorm:"'spend'"`
-	Password   string   `xorm:"text 'password'"`
-	CreatedAt  string   `xorm:"text 'created_at'"`
-	ExtraJSON  string   `xorm:"text 'extra_json'"`
-}
-
 var logTraceOnceBeans sync.Once
-
-// TableName returns the users table name.
-func (userRow) TableName() string {
-	logTraceOnceBeans.Do(func() { logx.Trace("enter store.TableName") })
-	return "users"
-}
-
-type teamRow struct {
-	TeamID         string   `xorm:"pk text 'team_id'"`
-	TeamAlias      string   `xorm:"text 'team_alias'"`
-	OrganizationID string   `xorm:"text 'organization_id'"`
-	ModelsJSON     string   `xorm:"text 'models_json'"`
-	MaxBudget      *float64 `xorm:"'max_budget'"`
-	Spend          float64  `xorm:"'spend'"`
-	CreatedAt      string   `xorm:"text 'created_at'"`
-	ExtraJSON      string   `xorm:"text 'extra_json'"`
-}
-
-// TableName returns the teams table name.
-func (teamRow) TableName() string { return "teams" }
-
-type orgRow struct {
-	ID        string    `xorm:"pk text 'id'"`
-	Name      string    `xorm:"text 'name'"`
-	Status    string    `xorm:"text 'status'"`
-	CreatedAt time.Time `xorm:"'created_at'"`
-	UpdatedAt time.Time `xorm:"'updated_at'"`
-	ExtraJSON string    `xorm:"text 'extra_json'"`
-}
-
-// TableName returns the organizations table name.
-func (orgRow) TableName() string { return "organizations" }
-
-type projectRow struct {
-	ID             string    `xorm:"pk text 'id'"`
-	OrganizationID string    `xorm:"text 'organization_id'"`
-	Name           string    `xorm:"text 'name'"`
-	Environment    string    `xorm:"text 'environment'"`
-	CreatedAt      time.Time `xorm:"'created_at'"`
-	UpdatedAt      time.Time `xorm:"'updated_at'"`
-	Blocked        int       `xorm:"'blocked'"`
-	ExtraJSON      string    `xorm:"text 'extra_json'"`
-}
-
-// TableName returns the projects table name.
-func (projectRow) TableName() string { return "projects" }
-
-type budgetRow struct {
-	ID               string    `xorm:"pk text 'id'"`
-	OrganizationID   string    `xorm:"text 'organization_id'"`
-	ProjectID        string    `xorm:"text 'project_id'"`
-	Name             string    `xorm:"text 'name'"`
-	Status           string    `xorm:"text 'status'"`
-	Version          string    `xorm:"text 'version'"`
-	ScopeType        string    `xorm:"text 'scope_type'"`
-	ScopeID          string    `xorm:"text 'scope_id'"`
-	LimitAmount      float64   `xorm:"numeric 'limit_amount'"`
-	SpentAmount      float64   `xorm:"numeric 'spent_amount'"`
-	Currency         string    `xorm:"text 'currency'"`
-	Period           string    `xorm:"text 'period'"`
-	SoftLimitPercent *int      `xorm:"'soft_limit_percent'"`
-	OveragePolicy    string    `xorm:"text 'overage_policy'"`
-	CreatedAt        time.Time `xorm:"'created_at'"`
-	UpdatedAt        time.Time `xorm:"'updated_at'"`
-	SoftBudget       *float64  `xorm:"'soft_budget'"`
-	MaxParallel      *int      `xorm:"'max_parallel_requests'"`
-	BudgetResetAt    string    `xorm:"text 'budget_reset_at'"`
-	ModelMaxBudget   string    `xorm:"text 'model_max_budget'"`
-	TPM              *int      `xorm:"'tpm_limit'"`
-	RPM              *int      `xorm:"'rpm_limit'"`
-	Duration         string    `xorm:"text 'budget_duration'"`
-}
-
-// TableName returns the budgets table name.
-func (budgetRow) TableName() string { return "budgets" }
 
 type kvRow struct {
 	Kind      string `xorm:"pk text 'kind'"`
@@ -105,58 +22,10 @@ type kvRow struct {
 }
 
 // TableName returns the key-value table name.
-func (kvRow) TableName() string { return "kv" }
-
-type tokenRow struct {
-	Token        string   `xorm:"pk text 'token'"`
-	KeyAlias     string   `xorm:"text 'key_alias'"`
-	KeyName      string   `xorm:"text 'key_name'"`
-	UserID       string   `xorm:"text 'user_id'"`
-	TeamID       string   `xorm:"text 'team_id'"`
-	OrgID        string   `xorm:"text 'organization_id'"`
-	ProjectID    string   `xorm:"text 'project_id'"`
-	AgentID      string   `xorm:"text 'agent_id'"`
-	BudgetID     string   `xorm:"text 'budget_id'"`
-	KeyType      string   `xorm:"text 'key_type'"`
-	ModelsJSON   string   `xorm:"text 'models_json'"`
-	MaxBudget    *float64 `xorm:"'max_budget'"`
-	SoftBudget   *float64 `xorm:"'soft_budget'"`
-	Spend        float64  `xorm:"'spend'"`
-	TPM          *int     `xorm:"'tpm_limit'"`
-	RPM          *int     `xorm:"'rpm_limit'"`
-	MaxParallel  *int     `xorm:"'max_parallel_requests'"`
-	Blocked      *int     `xorm:"'blocked'"`
-	ExpiresAt    string   `xorm:"text 'expires_at'"`
-	Duration     string   `xorm:"text 'budget_duration'"`
-	ResetAt      string   `xorm:"text 'budget_reset_at'"`
-	MetadataJSON string   `xorm:"text 'metadata_json'"`
-	TagsJSON     string   `xorm:"text 'tags_json'"`
-	CreatedAt    string   `xorm:"text 'created_at'"`
+func (kvRow) TableName() string {
+	logTraceOnceBeans.Do(func() { logx.Trace("enter store.TableName") })
+	return "kv"
 }
-
-// TableName returns the verification-token table name.
-func (tokenRow) TableName() string { return "verification_tokens" }
-
-type spendRow struct {
-	RequestID        string   `xorm:"pk text 'request_id'"`
-	CallType         string   `xorm:"text 'call_type'"`
-	Model            string   `xorm:"text 'model'"`
-	APIKey           string   `xorm:"text 'api_key'"`
-	Prompt           int      `xorm:"'prompt_tokens'"`
-	Completion       int      `xorm:"'completion_tokens'"`
-	Spend            *float64 `xorm:"'spend'"`
-	StartTime        string   `xorm:"text 'start_time'"`
-	EndTime          string   `xorm:"text 'end_time'"`
-	CacheHit         int      `xorm:"'cache_hit'"`
-	Status           string   `xorm:"text 'status'"`
-	UserID           string   `xorm:"text 'user_id'"`
-	MessagesJSON     string   `xorm:"text 'messages_json'"`
-	ResponseJSON     string   `xorm:"text 'response_json'"`
-	ProxyRequestJSON string   `xorm:"text 'proxy_server_request_json'"`
-}
-
-// TableName returns the spend-log table name.
-func (spendRow) TableName() string { return "spend_logs" }
 
 type proxyModelRow struct {
 	ID        string `xorm:"pk text 'id'"`

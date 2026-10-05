@@ -257,7 +257,7 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 			return
 		}
 		if id != "" {
-			m, err := s.DB().GetKV(kind, id)
+			m, err := s.RecordStore().GetKV(kind, id)
 			if err != nil {
 				if kind == "files" || kind == "batches" {
 					httpx.WriteError(w, 404, "not_found", singular(kind)+" not found")
@@ -269,17 +269,17 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 			httpx.WriteJSON(w, 200, m)
 			return
 		}
-		list, _ := s.DB().ListKV(kind)
+		list, _ := s.RecordStore().ListKV(kind)
 		httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": list})
 	case http.MethodDelete:
 		if id == "" {
 			id = str(body["id"])
 		}
-		_ = s.DB().DeleteKV(kind, id)
+		_ = s.RecordStore().DeleteKV(kind, id)
 		httpx.WriteJSON(w, 200, map[string]any{"id": id, "object": singular(kind), "deleted": true})
 	default:
 		if id != "" {
-			m, err := s.DB().GetKV(kind, id)
+			m, err := s.RecordStore().GetKV(kind, id)
 			if err == nil {
 				for k, v := range body {
 					m[k] = v
@@ -288,7 +288,7 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 					m["status"] = "cancelled"
 				}
 				b, _ := json.Marshal(m)
-				_ = s.DB().PutKV(kind, id, string(b))
+				_ = s.RecordStore().PutKV(kind, id, string(b))
 				httpx.WriteJSON(w, 200, m)
 				return
 			}
@@ -296,7 +296,7 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 		obj := nativeResource(kind, body)
 		id = str(obj["id"])
 		b, _ := json.Marshal(obj)
-		_ = s.DB().PutKV(kind, id, string(b))
+		_ = s.RecordStore().PutKV(kind, id, string(b))
 		httpx.WriteJSON(w, 200, obj)
 	}
 }
@@ -524,12 +524,24 @@ func singular(kind string) string {
 	}
 }
 
-// ServeMixed accepts a management or inference identity, then reads or writes the catalog through writeCatalogPersist.
+// ServeMixed answers the catalog's "mixed" paths, such as /v1/agents, /v1/skills
+// and /v1/workflows.
+//
+// These were removed from the product and only remain in the catalog. They are
+// refused rather than served: the generic store behind them is one shared
+// key-value namespace keyed by resource kind, with no owner and no team column,
+// so serving them let any signed-in member — and any inference key — create
+// records that every other principal could then list. Refusing is what the
+// classification has always described; this makes the code match.
+//
+// The identity is still required before the refusal, so an anonymous caller
+// learns nothing beyond the fact that the path exists.
 func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireMixed(w, r) == nil {
 		return
 	}
-	writeCatalogPersist(s, w, r, readMap(r))
+	logx.Debug("process %s %s step=catalog class=mixed retired=true", r.Method, r.URL.Path)
+	httpx.WriteError(w, http.StatusGone, "removed", "this endpoint was removed and is not available")
 }
 
 // ServeMgmt handles management catalog paths. It requires a management identity, then reads or writes by resource kind.
@@ -569,7 +581,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 	}
 	switch action {
 	case "list":
-		list, _ := s.DB().ListKV(kind)
+		list, _ := s.RecordStore().ListKV(kind)
 		if list == nil {
 			list = []map[string]any{}
 		}
@@ -582,7 +594,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 			httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": []any{}})
 			return
 		}
-		m, err := s.DB().GetKV(kind, id)
+		m, err := s.RecordStore().GetKV(kind, id)
 		if err != nil {
 			m = map[string]any{"id": id, idField(kind): id, "object": singular(kind)}
 		}
@@ -595,7 +607,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		}
 		n := 0
 		for _, x := range ids {
-			if s.DB().DeleteKV(kind, x) == nil {
+			if s.RecordStore().DeleteKV(kind, x) == nil {
 				n++
 			}
 		}
@@ -604,7 +616,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		if id == "" {
 			id = singular(kind) + "_" + httpx.CallID()[:12]
 		}
-		m, err := s.DB().GetKV(kind, id)
+		m, err := s.RecordStore().GetKV(kind, id)
 		if err != nil {
 			m = map[string]any{"id": id, idField(kind): id, "created_at": time.Now().UTC().Format(time.RFC3339)}
 		}
@@ -622,7 +634,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		m[idField(kind)] = id
 		Freeze(kind, m)
 		b, _ := json.Marshal(m)
-		_ = s.DB().PutKV(kind, id, string(b))
+		_ = s.RecordStore().PutKV(kind, id, string(b))
 		httpx.WriteJSON(w, 200, redactCredentialObject(kind, m, true))
 	default:
 		if id == "" && kind == "memory" {
@@ -663,7 +675,7 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 		}
 		Freeze(kind, obj)
 		b, _ := json.Marshal(obj)
-		_ = s.DB().PutKV(kind, id, string(b))
+		_ = s.RecordStore().PutKV(kind, id, string(b))
 		httpx.WriteJSON(w, 200, redactCredentialObject(kind, obj, false))
 	}
 }

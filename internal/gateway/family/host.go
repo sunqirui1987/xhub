@@ -17,7 +17,9 @@ type Host interface {
 	RequireLLM(w http.ResponseWriter, r *http.Request) *auth.Principal
 	RequireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
-	DB() *store.Store
+	// RecordStore holds the catalog key-value records: guardrails, prompts,
+	// skills, credentials and the rest. It answers no authorization question.
+	RecordStore() *store.Store
 	// DataPlane hands an already recognized inference operation to the upstream loop. Do not call it when op is empty.
 	DataPlane(w http.ResponseWriter, r *http.Request, op string)
 	// EnforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false.

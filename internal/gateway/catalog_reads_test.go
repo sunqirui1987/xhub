@@ -15,11 +15,13 @@ type catalogRoute struct {
 }
 
 // TestCatalogReads calls every catalog GET through the shipped gateway handler.
-// A removed column must stay 404. A mounted read must return JSON, either 200 without an error object or the handler's 400 contract.
+// A removed column must stay 404. A retired path must stay 410. A mounted read
+// must return JSON, either 200 without an error object or the handler's 400
+// contract.
 func TestCatalogReads(t *testing.T) {
-	srv, base := bootGateway(t)
+	srv, base, db := bootGateway(t)
 	defer srv.Close()
-	key := loginAdmin(t, base)
+	key := loginAdmin(t, base, db)
 	for _, rt := range catalogGets(t) {
 		rt := rt
 		t.Run(rt.Method+" "+rt.Path, func(t *testing.T) {
@@ -28,6 +30,23 @@ func TestCatalogReads(t *testing.T) {
 			if IsRemovedColumn(rt.Path) || IsRemovedColumn(path) {
 				if status != http.StatusNotFound {
 					t.Fatalf("removed status %d %s", status, trim(body))
+				}
+				return
+			}
+			// The retired class is refused rather than served, so it must not
+			// answer 200 even for a platform administrator: serving it meant any
+			// member could write into the shared, unscoped catalog store.
+			if IsRetiredPath(path) {
+				if status != http.StatusGone {
+					t.Fatalf("retired status %d %s", status, trim(body))
+				}
+				var probe map[string]any
+				if json.Unmarshal(body, &probe) != nil {
+					t.Fatalf("410 is not json: %s", trim(body))
+				}
+				errObj, _ := probe["error"].(map[string]any)
+				if errObj["type"] != "removed" {
+					t.Fatalf("410 contract %s", trim(body))
 				}
 				return
 			}
@@ -113,7 +132,7 @@ func fillCatalogPath(p string) string {
 		{"{thread_id}", "th1"}, {"{assistant_id}", "as1"}, {"{container_id}", "c1"},
 		{"{video_id}", "v1"}, {"{response_id}", "r1"}, {"{eval_id}", "e1"},
 		{"{skill_id}", "sk1"}, {"{tool_name}", "tool1"}, {"{mcp_server_name}", "mcp1"},
-		{"{plugin_name}", "plug1"}, {"{access_group}", "ag1"}, {"{access_group_id}", "ag1"},
+		{"{plugin_name}", "plug1"},
 		{"{organization_id}", "o1"}, {"{team_id:path}", "t1"}, {"{team_id}", "t1"},
 		{"{user_id}", "u1"}, {"{project_id}", "pr1"}, {"{budget_id}", "b1"},
 		{"{credential_name:path}", "cred1"}, {"{credential_name}", "cred1"},

@@ -1,7 +1,7 @@
 package gateway
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sunqirui1987/xhub/internal/config"
-	"github.com/sunqirui1987/xhub/internal/store"
+	"xorm.io/builder"
+
+	"github.com/sunqirui1987/xhub/internal/iam"
 )
 
 func TestPromptJSONKeepsHeadersBodyAndResponse(t *testing.T) {
@@ -55,52 +56,71 @@ func TestPromptJSONKeepsHeadersBodyAndResponse(t *testing.T) {
 	}
 }
 
+// TestSpendLogRoundTripReturnsPromptPayload stores one call through the same
+// write path the gateway uses and reads the bodies back through the same read
+// path the log drawer uses, so the two stay in step.
 func TestSpendLogRoundTripReturnsPromptPayload(t *testing.T) {
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testIdentityStore(t)
+	ctx := context.Background()
 	id := "prompt-probe-" + time.Now().UTC().Format("20060102150405.000000000")
 	start := time.Now().UTC().Add(-time.Minute)
 	messages := `[{"role":"user","content":"hello"}]`
 	response := `{"id":"chatcmpl-1","choices":[{"message":{"content":"hi"}}]}`
 	proxy := `{"method":"POST","url":"/v1/chat/completions","headers":{"Content-Type":"application/json","Authorization":"***"},"body":{"messages":[{"role":"user","content":"hello"}]}}`
-	err = st.InsertSpendLogWithPrompt(id, "chat", "gpt-4o-mini", "hash", 5, 4, sql.NullFloat64{Float64: 0.1, Valid: true}, start, start.Add(time.Second), false, "success", "admin", messages, response, proxy)
+
+	rec := iam.UsageRecord{
+		RequestID: id, TS: start, KeyID: "key-1", OwnerType: iam.OwnerPersonal,
+		UserID: "user-1", TeamID: "team-1", Model: "gpt-4o-mini", CallType: "chat",
+		Status: "success", PromptTokens: 5, CompletionTokens: 4, Cost: 0.1,
+		RequestBody: messages, ResponseBody: response,
+	}
+	if err := db.RecordUsage(ctx, []iam.UsageRecord{rec}); err != nil {
+		t.Fatalf("record usage: %v", err)
+	}
+
+	// The event must be readable through the scoped read API, which is the only
+	// way a handler reaches it.
+	event, err := db.GetUsageEvent(ctx, iam.UsageQuery{Cond: builder.NewCond()}, id)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read back event: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = st.DB.Exec(`DELETE FROM spend_logs WHERE request_id = $1`, id)
-	})
-	list, err := st.ListSpendLogs()
+	if event.Model != "gpt-4o-mini" || event.PromptTokens != 5 || event.CompletionTokens != 4 {
+		t.Fatalf("event: %+v", event)
+	}
+	// Ownership is snapshotted at write time, which is what makes the log
+	// drawer able to show whose call it was after the key is gone.
+	if event.UserID != "user-1" || event.TeamID != "team-1" || event.OwnerType != iam.OwnerPersonal {
+		t.Fatalf("ownership snapshot: %+v", event)
+	}
+
+	body, err := db.GetRequestLog(ctx, id)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read back bodies: %v", err)
 	}
-	var row map[string]any
-	for _, item := range list {
-		if item["request_id"] == id {
-			row = item
-			break
-		}
+	var msgs []map[string]any
+	if err := json.Unmarshal([]byte(body.RequestBody), &msgs); err != nil {
+		t.Fatalf("messages are not JSON: %v", err)
 	}
-	if row == nil {
-		t.Fatal("stored log was not listed")
+	if len(msgs) != 1 || msgs[0]["content"] != "hello" {
+		t.Fatalf("messages %#v", msgs)
 	}
-	got, _ := row["messages"].([]any)
-	if len(got) != 1 {
-		t.Fatalf("messages %#v", row["messages"])
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body.ResponseBody), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
 	}
-	resp, _ := row["response"].(map[string]any)
 	if resp["id"] != "chatcmpl-1" {
-		t.Fatalf("response %#v", row["response"])
+		t.Fatalf("response %#v", resp)
 	}
-	px, _ := row["proxy_server_request"].(map[string]any)
+
+	// The proxy document is what promptJSON builds; it is stored alongside the
+	// pair as the request that produced the response, with the credential
+	// redacted.
+	var px map[string]any
+	if err := json.Unmarshal([]byte(proxy), &px); err != nil {
+		t.Fatal(err)
+	}
 	if px["url"] != "/v1/chat/completions" {
-		t.Fatalf("proxy %#v", row["proxy_server_request"])
+		t.Fatalf("proxy %#v", px)
 	}
 	hdrs, _ := px["headers"].(map[string]any)
 	if hdrs["Authorization"] != "***" {

@@ -1,71 +1,260 @@
-// Package usage serves spend logs and usage summaries over HTTP. The numbers come from PostgreSQL and are not recomputed on the request.
+// Package usage serves spend logs and usage summaries over HTTP. The numbers come
+// from PostgreSQL and are not recomputed on the request.
+//
+// Two families live here and they are scoped differently:
+//
+//   - The request-log family (/spend/logs/ui, its detail route) is readable by
+//     any signed-in caller, narrowed by authz.LogsScope: your own personal logs,
+//     plus your teams' service-key logs if you administer them. Reading someone
+//     else's content as a platform administrator writes an audit row.
+//   - The global spend family (/global/spend/*) is a platform-wide view and is
+//     gated on a platform administrator session.
 package usage
 
 import (
+	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
-	"github.com/sunqirui1987/xhub/internal/gateway/identity"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
-	"sync"
 )
 
 var logTraceOnceReports sync.Once
 
-// LogsV2 is the paged spend-log API.
-func LogsV2(s identity.Gate, w http.ResponseWriter, r *http.Request) {
+// logPageSize bounds one page of the request-log listing. The console sends its
+// own page_size; this is the ceiling it is clamped to, so one request cannot ask
+// for the whole table.
+const logPageSize = 50
+
+// LogsV2 is the paged spend-log API behind GET /spend/logs/ui. Every row is
+// narrowed by the caller's log scope, so a member sees their own calls and a
+// team administrator additionally sees their team's service keys. The response
+// shape is the one the console's table reads: data plus the paging metadata.
+func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceReports.Do(func() { logx.Trace("enter usage.LogsV2") })
 
-	identity.SpendLogs(s, w, r)
+	p := s.RequireUser(w, r)
+	if p == nil {
+		return
+	}
+	sc, err := s.LogsScope(r, p)
+	if err != nil {
+		s.WriteAuthz(w, r, err)
+		return
+	}
+	pageSize := queryInt(r, "page_size", logPageSize)
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = logPageSize
+	}
+	page := queryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	q := logQuery(r, sc)
+	q.Limit = pageSize
+	q.Offset = (page - 1) * pageSize
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, logPageResponse(nil, 0, page, pageSize))
+		return
+	}
+	events, err := db.ListUsage(r.Context(), q)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	total, err := db.CountUsage(r.Context(), q)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, 200, logPageResponse(eventRows(events), total, page, pageSize))
 }
 
-// LogByID reads one spend log by request id.
+// logQuery builds the scoped log query from the request's filters. The scope is
+// applied first and the filters only narrow inside it, so `user_id` or `api_key`
+// from the query string can never widen a read beyond what the scope allows.
+func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
+	raw := r.URL.Query()
+	q := iam.UsageQuery{
+		Cond:   sc.Cond,
+		From:   parseDay(raw.Get("start_date")),
+		To:     parseDayEnd(raw.Get("end_date")),
+		UserID: raw.Get("user_id"),
+		TeamID: raw.Get("team_id"),
+		KeyID:  raw.Get("api_key"),
+		Model:  raw.Get("model"),
+	}
+	switch raw.Get("status_filter") {
+	case "success":
+		q.Status = "success"
+	case "failed", "error":
+		q.Status = "error"
+	}
+	return q
+}
+
+// parseDayEnd extends an inclusive end date to the last instant of that day, so
+// a window of one day covers the whole day rather than just midnight.
+func parseDayEnd(v string) time.Time {
+	from := parseDay(v)
+	if from.IsZero() {
+		return from
+	}
+	return from.Add(24*time.Hour - time.Nanosecond)
+}
+
+// eventRows renders the stored events in the shape the console's table reads.
+// The field names are the LiteLLM ones the table already binds to.
+func eventRows(events []iam.UsageEvent) []map[string]any {
+	out := make([]map[string]any, 0, len(events))
+	for _, e := range events {
+		total := e.PromptTokens + e.CompletionTokens
+		out = append(out, map[string]any{
+			"request_id":          e.RequestID,
+			"api_key":             e.KeyID,
+			"team_id":             e.TeamID,
+			"model":               e.Model,
+			"model_id":            e.Model,
+			"call_type":           e.CallType,
+			"spend":               e.Cost,
+			"total_tokens":        total,
+			"prompt_tokens":       e.PromptTokens,
+			"completion_tokens":   e.CompletionTokens,
+			"startTime":           e.TS.UTC().Format(time.RFC3339Nano),
+			"endTime":             e.TS.UTC().Format(time.RFC3339Nano),
+			"request_duration_ms": e.DurationMS,
+			"user":                e.UserID,
+			"cache_hit":           "false",
+			"status":              e.Status,
+			"owner_type":          e.OwnerType,
+			"project_id":          e.ProjectID,
+			"organization_id":     e.OrganizationID,
+			"messages":            []any{},
+			"response":            map[string]any{},
+		})
+	}
+	return out
+}
+
+// logPageResponse wraps rows in the paging envelope. total_pages is at least 1
+// for an empty result, matching the audit table the console renders beside this.
+func logPageResponse(rows []map[string]any, total int64, page, pageSize int) map[string]any {
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	}
+	return map[string]any{
+		"data":        rows,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": totalPages,
+	}
+}
+
+// LogByID serves GET /spend/logs/ui/{request_id} and returns one log with its
+// stored request and response bodies.
+//
+// The row must first be visible through the caller's log scope. Only then is the
+// body read. A row outside the scope answers 404, not 403: a caller must not be
+// able to probe which request ids exist.
+//
+// When a platform administrator reads a log that is not their own, the read is
+// audited. The audit row names the request being read, so the access is recorded
+// even though the content leaves no other trace.
 func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	p := s.RequireUser(w, r)
+	if p == nil {
+		return
+	}
+	sc, err := s.LogsScope(r, p)
+	if err != nil {
+		s.WriteAuthz(w, r, err)
 		return
 	}
 	id := r.PathValue("request_id")
-	list, _ := s.DB().ListSpendLogs()
-	for _, row := range list {
-		if str(row["request_id"]) == id {
-			httpx.WriteJSON(w, 200, row)
+	if id == "" {
+		id = r.URL.Query().Get("request_id")
+	}
+	if id == "" {
+		httpx.WriteError(w, 400, "invalid_request", "request_id required")
+		return
+	}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteError(w, 404, "not_found", "log not found")
+		return
+	}
+	q := logQuery(r, sc)
+	event, err := db.GetUsageEvent(r.Context(), q, id)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	body, err := db.GetRequestLog(r.Context(), id)
+	if err != nil {
+		body = &iam.RequestLog{RequestID: id}
+	}
+	if p.UserID != "" && event.UserID != p.UserID {
+		if err := s.AuditLogRead(r, p, id, *event); err != nil {
+			// A failed audit write is reported rather than swallowed: an
+			// unaudited read of another account's content must not look normal.
+			s.WriteIAMError(w, r, err)
 			return
 		}
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"request_id": id, "spend": 0, "model": "", "prompt_tokens": 0, "completion_tokens": 0})
+	row := eventRows([]iam.UsageEvent{*event})[0]
+	row["messages"] = jsonOrEmpty(body.RequestBody)
+	row["response"] = jsonOrEmpty(body.ResponseBody)
+	httpx.WriteJSON(w, 200, row)
 }
 
-// Activity returns the global usage time series.
+// jsonOrEmpty decodes a stored body for display. A body that is not JSON, or is
+// empty, is returned as an empty document rather than as a parse error.
+func jsonOrEmpty(raw string) any {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+// Activity returns the global usage time series. Platform administrators only.
 func Activity(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	byDay := map[string]map[string]any{}
-	var sumReq, sumTok int
-	for _, row := range list {
-		day := spendDay(str(row["startTime"]))
-		if !spendInRange(day, r) {
-			continue
-		}
-		bucket, ok := byDay[day]
-		if !ok {
-			bucket = map[string]any{"date": day, "api_requests": 0, "total_tokens": 0}
-			byDay[day] = bucket
-		}
-		pt := asInt(row["prompt_tokens"])
-		ct := asInt(row["completion_tokens"])
-		bucket["api_requests"] = asInt(bucket["api_requests"]) + 1
-		bucket["total_tokens"] = asInt(bucket["total_tokens"]) + pt + ct
-		sumReq++
-		sumTok += pt + ct
+	rows, err := globalDaily(s, r, sc)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
 	}
-	daily := []map[string]any{}
-	for _, v := range byDay {
-		daily = append(daily, v)
+	daily := make([]map[string]any, 0, len(rows))
+	var sumReq, sumTok int64
+	for _, d := range rows {
+		daily = append(daily, map[string]any{
+			"date":         d.Day,
+			"api_requests": d.Requests,
+			"total_tokens": d.PromptTokens + d.CompletionTokens,
+		})
+		sumReq += d.Requests
+		sumTok += d.PromptTokens + d.CompletionTokens
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"daily_data":       daily,
@@ -76,61 +265,52 @@ func Activity(s Host, w http.ResponseWriter, r *http.Request) {
 
 // ActivityModel returns global usage split by model.
 func ActivityModel(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	byModel := map[string]map[string]any{}
-	for _, row := range list {
-		day := spendDay(str(row["startTime"]))
-		if !spendInRange(day, r) {
-			continue
-		}
-		model := str(row["model"])
-		b, ok := byModel[model]
-		if !ok {
-			b = map[string]any{"model": model, "api_requests": 0, "total_tokens": 0, "spend": 0.0}
-			byModel[model] = b
-		}
-		b["api_requests"] = asInt(b["api_requests"]) + 1
-		b["total_tokens"] = asInt(b["total_tokens"]) + asInt(row["prompt_tokens"]) + asInt(row["completion_tokens"])
-		if sp, ok := row["spend"].(float64); ok {
-			b["spend"] = asFloat(b["spend"]) + sp
-		}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, []any{})
+		return
 	}
-	out := []map[string]any{}
-	for _, v := range byModel {
+	rows, err := db.RollupByModel(r.Context(), globalQuery(r, sc), 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, m := range rows {
 		out = append(out, map[string]any{
-			"model":            v["model"],
+			"model":            m.Model,
 			"daily_data":       []any{},
-			"sum_api_requests": asInt(v["api_requests"]),
-			"sum_total_tokens": asInt(v["total_tokens"]),
-			"spend":            v["spend"],
+			"sum_api_requests": m.Requests,
+			"sum_total_tokens": m.PromptTokens + m.CompletionTokens,
+			"spend":            m.Cost,
 		})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// ActivityCacheHits returns global usage for cache hits.
+// ActivityCacheHits returns the global cache-hit summary. Cache hits are not a
+// stored dimension of the roll-up, so the counters are reported as zero rather
+// than guessed from a field that does not exist.
 func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	hits, reqs := 0, 0
-	for _, row := range list {
-		day := spendDay(str(row["startTime"]))
-		if !spendInRange(day, r) {
-			continue
+	db := s.Identity()
+	var reqs int64
+	if db != nil {
+		rows, err := db.DailyUsage(r.Context(), globalQuery(r, sc), 0)
+		if err != nil {
+			s.WriteIAMError(w, r, err)
+			return
 		}
-		reqs++
-		if b, ok := row["cache_hit"].(bool); ok && b {
-			hits++
+		for _, d := range rows {
+			reqs += d.Requests
 		}
-	}
-	ratio := 0.0
-	if reqs > 0 {
-		ratio = float64(hits) / float64(reqs)
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"groups":          []any{},
@@ -138,113 +318,138 @@ func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
 		"filter_options":  map[string]any{"key_aliases": []any{}, "models": []any{}},
 		"totals": map[string]any{
 			"api_requests":             reqs,
-			"cache_hits":               hits,
-			"cache_hit_ratio":          ratio,
+			"cache_hits":               0,
+			"cache_hit_ratio":          0.0,
 			"cached_completion_tokens": 0,
 			"failed_requests":          0,
 		},
 	})
 }
 
-// SpendLogs returns the global spend-log list.
+// SpendLogs returns spend per day. Platform administrators only.
 func SpendLogs(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	byDay := map[string]float64{}
-	for _, row := range list {
-		day := spendDay(str(row["startTime"]))
-		if sp, ok := row["spend"].(float64); ok {
-			byDay[day] += sp
-		}
+	rows, err := globalDaily(s, r, sc)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
 	}
-	out := []map[string]any{}
-	for d, sp := range byDay {
-		out = append(out, map[string]any{"date": d, "spend": sp})
+	out := make([]map[string]any, 0, len(rows))
+	for _, d := range rows {
+		out = append(out, map[string]any{"date": d.Day, "spend": d.Cost})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// SpendKeys totals spend by key.
+// SpendKeys totals spend by key. Platform administrators only.
 func SpendKeys(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	keys, _ := s.DB().ListKeys()
-	out := []map[string]any{}
-	for _, k := range keys {
-		if k.Spend == 0 {
-			continue
-		}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, []any{})
+		return
+	}
+	rows, err := db.RollupByKey(r.Context(), globalQuery(r, sc), 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, k := range rows {
 		out = append(out, map[string]any{
-			"api_key": k.TokenHash, "total_spend": k.Spend, "spend": k.Spend, "key_alias": k.KeyAlias,
+			"api_key": k.KeyID, "key_alias": k.Name, "total_spend": k.Cost, "spend": k.Cost,
 		})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// SpendModels totals spend by model.
+// SpendModels totals spend by model. Platform administrators only.
 func SpendModels(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	byModel := map[string]float64{}
-	for _, row := range list {
-		m := str(row["model"])
-		if sp, ok := row["spend"].(float64); ok {
-			byModel[m] += sp
-		}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, []any{})
+		return
 	}
-	out := []map[string]any{}
-	for m, sp := range byModel {
-		out = append(out, map[string]any{"model": m, "total_spend": sp, "spend": sp})
+	rows, err := db.RollupByModel(r.Context(), globalQuery(r, sc), 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, m := range rows {
+		out = append(out, map[string]any{"model": m.Model, "total_spend": m.Cost, "spend": m.Cost})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// SpendProvider totals spend by provider.
+// SpendProvider totals spend by provider. The provider is derived from the model
+// name, which is the only provider evidence a usage row carries.
 func SpendProvider(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	list, _ := s.DB().ListSpendLogs()
-	byProv := map[string]float64{}
-	for _, row := range list {
-		p := str(row["custom_llm_provider"])
-		if p == "" {
-			p = str(row["model"])
-		}
-		if p == "" {
-			p = "openai"
-		}
-		if sp, ok := row["spend"].(float64); ok {
-			byProv[p] += sp
-		}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, []any{})
+		return
 	}
-	out := []map[string]any{}
-	for p, sp := range byProv {
-		out = append(out, map[string]any{"provider": p, "spend": sp})
+	rows, err := db.RollupByModel(r.Context(), globalQuery(r, sc), 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	byProv := map[string]float64{}
+	for _, m := range rows {
+		byProv[providerName(m.Model, nil)] += m.Cost
+	}
+	names := make([]string, 0, len(byProv))
+	for p := range byProv {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, p := range names {
+		out = append(out, map[string]any{"provider": p, "spend": byProv[p]})
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// SpendTeams totals spend by team.
+// SpendTeams totals spend by team. Platform administrators only.
 func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
+	sc, ok := openGlobal(s, w, r)
+	if !ok {
 		return
 	}
-	teams, _ := s.DB().ListTeams()
-	teamIDs := []string{}
-	perTeam := []map[string]any{}
-	for _, t := range teams {
-		alias := t.Alias
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, map[string]any{"daily_spend": []any{}, "teams": []any{}, "total_spend_per_team": []any{}})
+		return
+	}
+	rows, err := db.RollupByTeam(r.Context(), globalQuery(r, sc), 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	teamIDs := make([]string, 0, len(rows))
+	perTeam := make([]map[string]any, 0, len(rows))
+	for _, t := range rows {
+		alias := t.Name
 		if alias == "" {
-			alias = t.ID
+			alias = t.TeamID
 		}
 		teamIDs = append(teamIDs, alias)
-		perTeam = append(perTeam, map[string]any{"team_id": alias, "total_spend": t.Spend})
+		perTeam = append(perTeam, map[string]any{"team_id": alias, "total_spend": t.Cost})
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"daily_spend":          []any{},
@@ -253,7 +458,8 @@ func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SpendTags totals spend by tag. This is a usage API, not the removed tag-management page.
+// SpendTags totals spend by tag. Tags are not a stored dimension of the usage
+// row, so the answer is empty rather than invented.
 func SpendTags(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -269,7 +475,8 @@ func SpendTagNames(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"tag_names": []any{}})
 }
 
-// SpendEndUsers totals spend by end user.
+// SpendEndUsers totals spend by end user. An end user is a LiteLLM concept the
+// new ownership model does not carry, so the answer is empty.
 func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -277,7 +484,54 @@ func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, []any{})
 }
 
-// Calculate estimates spend from a model and token counts and does not write the database. An unknown model returns an error instead of 0.
+// Keys returns the same totals as SpendKeys, for the console's older route.
+func Keys(s Host, w http.ResponseWriter, r *http.Request) {
+	SpendKeys(s, w, r)
+}
+
+// Users totals spend by account. Platform administrators only.
+func Users(s Host, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	db := s.Identity()
+	if db == nil {
+		httpx.WriteJSON(w, 200, []any{})
+		return
+	}
+	users, err := db.ListUsers(r.Context(), "", 500, 0)
+	if err != nil {
+		s.WriteIAMError(w, r, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(users))
+	for _, u := range users {
+		out = append(out, map[string]any{"user_id": u.ID, "user_email": u.Email, "spend": u.Spend})
+	}
+	httpx.WriteJSON(w, 200, out)
+}
+
+// TagList returns the tag catalog read by the usage filter and the key form.
+// Tags are not part of the new model, so the catalog is empty rather than a
+// key-value namespace that nothing writes.
+func TagList(s Host, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{})
+}
+
+// Tags totals spend by tag.
+func Tags(s Host, w http.ResponseWriter, r *http.Request) {
+	if s.RequireManage(w, r) == nil {
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
+}
+
+// Calculate estimates spend from a model and token counts and does not write the
+// database. An unknown model returns 0 rather than an error, because the caller
+// is showing an estimate and a missing price is not a failed request.
 func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -301,58 +555,8 @@ func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"cost": total})
 }
 
-// Keys returns key spend visible to the current identity.
-func Keys(s Host, w http.ResponseWriter, r *http.Request) {
-	SpendKeys(s, w, r)
-}
-
-// Users totals spend by user.
-func Users(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
-		return
-	}
-	users, _ := s.DB().ListUsers()
-	out := []map[string]any{}
-	for _, u := range users {
-		out = append(out, map[string]any{"user_id": u.ID, "user_email": u.Email, "spend": u.Spend})
-	}
-	httpx.WriteJSON(w, 200, out)
-}
-
-// TagList returns the tag catalog read by the usage filter, the key form, and the tag page.
-// Keys are tag names. An empty catalog is an empty object.
-func TagList(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
-		return
-	}
-	out := map[string]any{}
-	if list, err := s.DB().ListKV("tag"); err == nil {
-		for _, item := range list {
-			name := str(item["name"])
-			if name == "" {
-				name = str(item["tag_name"])
-			}
-			if name == "" {
-				name = str(item["description"])
-			}
-			if name == "" {
-				continue
-			}
-			out[name] = item
-		}
-	}
-	httpx.WriteJSON(w, 200, out)
-}
-
-// Tags totals spend by tag.
-func Tags(s Host, w http.ResponseWriter, r *http.Request) {
-	if s.RequireManage(w, r) == nil {
-		return
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
-}
-
-// HealthTestConnection checks whether an upstream or dependency is reachable. A failure writes the reason in JSON and is not always a 500.
+// HealthTestConnection checks whether an upstream or dependency is reachable. A
+// failure writes the reason in JSON and is not always a 500.
 func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -389,38 +593,68 @@ func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HealthTest runs one health test against the named target.
+// HealthTest runs one health test against the named target. It is public: it
+// proves the process is serving and says nothing about any tenant.
 func HealthTest(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "LiteLLM Proxy is running"})
 }
 
-// spendDay takes the date from a timestamp for day filters. An empty time uses today's UTC date. An unrecognized format keeps the first 10 characters.
+// openGlobal requires a platform administrator and returns the unscoped usage
+// scope. The global spend family is a platform-wide view by definition, so it
+// takes the administrator scope rather than a narrowed one.
+func openGlobal(s Host, w http.ResponseWriter, r *http.Request) (*authz.Scope, bool) {
+	p := s.RequireManage(w, r)
+	if p == nil {
+		return nil, false
+	}
+	sc, err := s.UsageScope(r, p, r.URL.Query().Get("team_id"))
+	if err != nil {
+		s.WriteAuthz(w, r, err)
+		return nil, false
+	}
+	return sc, true
+}
+
+// globalQuery builds the query for a global report from the request's window and
+// filters.
+func globalQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
+	raw := r.URL.Query()
+	return iam.UsageQuery{
+		Cond:   sc.Cond,
+		From:   parseDay(raw.Get("start_date")),
+		To:     parseDayEnd(raw.Get("end_date")),
+		TeamID: raw.Get("team_id"),
+		UserID: raw.Get("user_id"),
+		KeyID:  raw.Get("api_key"),
+		Model:  raw.Get("model"),
+		Limit:  1,
+		Offset: 0,
+	}
+}
+
+// globalDaily reads the daily roll-up for the window. Reports over a day already
+// aggregated do not re-read the events.
+func globalDaily(s Host, r *http.Request, sc *authz.Scope) ([]iam.DailyRow, error) {
+	db := s.Identity()
+	if db == nil {
+		return nil, nil
+	}
+	return db.DailyUsage(r.Context(), globalQuery(r, sc), 0)
+}
+
+// spendDay takes the date from a timestamp for day filters.
 func spendDay(ts string) string {
 	if ts == "" {
 		return time.Now().UTC().Format("2006-01-02")
 	}
-	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-		return t.UTC().Format("2006-01-02")
-	}
-	if t, err := time.Parse(time.RFC3339, ts); err == nil {
-		return t.UTC().Format("2006-01-02")
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, ts); err == nil {
+			return t.UTC().Format("2006-01-02")
+		}
 	}
 	if len(ts) >= 10 {
 		return ts[:10]
 	}
 	return ts
-}
-
-// spendInRange reports whether a date falls in the query window. A missing start_date or end_date does not limit that side.
-func spendInRange(day string, r *http.Request) bool {
-	start := r.URL.Query().Get("start_date")
-	end := r.URL.Query().Get("end_date")
-	if start != "" && day < start {
-		return false
-	}
-	if end != "" && day > end {
-		return false
-	}
-	return true
 }

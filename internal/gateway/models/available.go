@@ -10,25 +10,24 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// Available serves model cards for the current inference identity. It exposes only display metadata.
+// Available serves model cards for the signed-in caller. It exposes only display metadata.
+// A view-only session may read the models granted to it. Calling a model stays on AllowLLM.
 func Available(s Host, w http.ResponseWriter, r *http.Request) {
 	logx.Trace("enter models.Available")
 	p, err := s.Resolve(r)
-	if err != nil {
+	if err != nil || p == nil {
 		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
-		return
-	}
-	if !s.AllowLLM(p) {
-		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Not allowed to access LLM endpoints")
 		return
 	}
 	s.LockModels()
 	list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
 	s.UnlockModels()
+	teamID := r.URL.Query().Get("team_id")
+	ctx := r.Context()
 	data := make([]map[string]any, 0)
 	seen := map[string]struct{}{}
 	for _, entry := range list {
-		if nonModelEntry(entry) || modelBlocked(entry) || !AllowsModel(s, p, entry.ModelName) {
+		if nonModelEntry(entry) || modelBlocked(entry) || !AllowsModel(s, ctx, p, teamID, entry.ModelName) {
 			continue
 		}
 		if _, ok := seen[entry.ModelName]; ok {

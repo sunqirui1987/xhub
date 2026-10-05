@@ -55,11 +55,12 @@ describe("ApiKeysDashboard", () => {
     sessionStorage.clear();
   });
 
-  it("scopes the team list to the signed-in user for non-admin roles", () => {
-    authorizedSession.mockReturnValue(session({ userRole: "Internal User" }));
+  it("scopes the team list to the signed-in user for an internal viewer", () => {
+    authorizedSession.mockReturnValue(session({ userRole: "Internal Viewer", isViewOnly: true }));
     render(<ApiKeysDashboard />);
 
     expect(teamListCall).toHaveBeenCalledWith("sk-access", 1, 100, { userID: "u-123" });
+    expect(screen.getByRole("button", { name: "Create Key" })).toBeInTheDocument();
   });
 
   it("renders the keys table with a Create Key action for roles that can write", () => {

@@ -3,10 +3,12 @@ package usage
 
 import (
 	"encoding/json"
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 var logTraceOnceCodec sync.Once
@@ -28,6 +30,34 @@ func readMap(r *http.Request) map[string]any {
 func str(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// queryInt reads an integer query parameter. A missing or unparseable value
+// returns the fallback rather than an error, because every caller here has a
+// sensible default.
+func queryInt(r *http.Request, key string, fallback int) int {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+// pageOffset turns a 1-based page into a row offset for a page size. A missing
+// or nonsensical page returns the first row.
+func pageOffset(r *http.Request, limit int) int {
+	if limit < 1 {
+		return 0
+	}
+	off := (queryInt(r, "page", 1) - 1) * limit
+	if off < 0 {
+		return 0
+	}
+	return off
 }
 
 // asFloat converts a JSON number to float64. An int is accepted. Any other type returns 0.

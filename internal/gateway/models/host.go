@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
@@ -14,7 +15,14 @@ import (
 // Update, delete, and block write the database while holding the model lock. The lock covers the same critical section as before this package was split.
 type Host interface {
 	RequireManage(w http.ResponseWriter, r *http.Request) *auth.Principal
-	DB() *store.Store
+	// RecordStore holds the framework records this package writes: proxy models, the
+	// price-map reload plan, and provider credentials. It never answers an
+	// authorization question.
+	RecordStore() *store.Store
+	// Identity owns every identity question: which models a team or a key may
+	// reach. The model list and the inference path both read it, so a listed
+	// model is always a usable model.
+	Identity() *iam.DB
 	// LockModels and UnlockModels are a pair. Lock before changing the model table on a request path.
 	LockModels()
 	UnlockModels()

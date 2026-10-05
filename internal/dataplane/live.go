@@ -2,13 +2,13 @@
 package dataplane
 
 import (
-	"database/sql"
+	"context"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/router"
-	"github.com/sunqirui1987/xhub/internal/store"
 	"sync"
 )
 
@@ -100,7 +100,7 @@ var SpendAck = func(c *live.Client, deltas map[string]float64, n int, head strin
 // Hot spend and the log prefix are acknowledged together so one side is not dropped without the other.
 func Flush(h Host) {
 	redis := h.Redis()
-	db := h.SpendStore()
+	db := h.Identity()
 	if redis == nil || db == nil {
 		return
 	}
@@ -110,12 +110,8 @@ func Flush(h Host) {
 		return
 	}
 	head := raw[0]
-	rows := make([]store.SpendLogRow, 0, len(logs))
+	records := make([]iam.UsageRecord, 0, len(logs))
 	for _, row := range logs {
-		logged := sql.NullFloat64{}
-		if row.SpendValid {
-			logged = sql.NullFloat64{Float64: row.Spend, Valid: true}
-		}
 		start, err := time.Parse(time.RFC3339Nano, row.Start)
 		if err != nil {
 			start = time.Now()
@@ -124,19 +120,25 @@ func Flush(h Host) {
 		if err != nil {
 			end = time.Now()
 		}
-		rows = append(rows, store.SpendLogRow{
-			RequestID: row.RequestID, CallType: row.CallType, Model: row.Model, APIKey: row.APIKey,
-			Prompt: row.Prompt, Completion: row.Completion, Spend: logged,
-			Start: start, End: end, CacheHit: row.CacheHit, Status: row.Status,
-			TeamID: row.TeamID, UserID: row.UserID, OrgID: row.OrgID,
-			Messages: row.Messages, Response: row.Response, ProxyRequest: row.ProxyRequest,
+		spend := 0.0
+		if row.SpendValid {
+			spend = row.Spend
+		}
+		records = append(records, iam.UsageRecord{
+			RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
+			UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
+			Model: row.Model, CallType: row.CallType, Status: row.Status,
+			PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
+			DurationMS: int(end.Sub(start).Milliseconds()),
+			RequestBody: row.Messages, ResponseBody: row.Response,
 		})
 	}
-	if len(rows) == 0 {
+	if len(records) == 0 {
 		_ = SpendAck(redis, nil, n, head)
 		return
 	}
-	if err := db.ApplySpendBatch(rows); err != nil {
+	if err := db.RecordUsage(context.Background(), records); err != nil {
+		logx.Error("spend flush failed: %v", err)
 		return
 	}
 	_ = SpendAck(redis, hotDeltas(logs), n, head)
@@ -149,7 +151,11 @@ func hotDeltas(logs []live.SpendLog) map[string]float64 {
 		if !row.SpendValid || row.Spend == 0 {
 			continue
 		}
-		for _, id := range []string{row.APIKey, row.TeamID, row.UserID, row.OrgID} {
+		for _, ref := range []struct{ kind, id string }{
+			{"key", row.APIKey}, {"team", row.TeamID}, {"user", row.UserID},
+			{"org", row.OrgID}, {"project", row.ProjectID},
+		} {
+			id := live.SpendRef(ref.kind, ref.id)
 			if id != "" {
 				out[id] += row.Spend
 			}

@@ -96,13 +96,13 @@ func evalNamed(s Host, name, text string) (action, out string) {
 
 // listGuardrails returns the guardrails in the current config. An unconfigured proxy returns an empty slice.
 func listGuardrails(s Host) []map[string]any {
-	if s == nil || s.DB() == nil {
+	if s == nil || s.RecordStore() == nil {
 		logx.Debug("guardrails skipped reason=no store")
 		return []map[string]any{}
 	}
 	var out []map[string]any
 	for _, kind := range []string{"guardrails", "guardrail"} {
-		list, _ := s.DB().ListKV(kind)
+		list, _ := s.RecordStore().ListKV(kind)
 		out = append(out, list...)
 	}
 	if out == nil {

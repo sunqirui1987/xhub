@@ -4,6 +4,7 @@ package models
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
@@ -31,7 +32,7 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 
 	httpx.SetCallID(w, httpx.CallID())
 	p, err := s.Resolve(r)
-	if err != nil || (!s.AllowLLM(p) && !p.CanManage()) {
+	if err != nil || (!s.AllowLLM(p) && !p.PlatformAdmin()) {
 		if err != nil {
 			httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 			return
@@ -54,13 +55,19 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
 
-// availableNames computes visible model names from the key and team allow-lists. An admin with scope=expand ignores the key restriction and sees every deployment that is not fully blocked. only_model_access_groups keeps only access-group names.
+// availableNames computes visible model names from the caller's permitted set.
+// A platform administrator with scope=expand sees every deployment that is not
+// fully blocked. only_model_access_groups keeps only access-group names.
 func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	q := r.URL.Query()
 	includeGroups := queryBool(q.Get("include_model_access_groups"))
 	onlyGroups := queryBool(q.Get("only_model_access_groups"))
 	returnWild := queryBool(q.Get("return_wildcard_routes"))
 	scope := q.Get("scope")
+	// A session browses one team's catalog; a key is bound to its own team and
+	// ignores this parameter.
+	teamID := q.Get("team_id")
+	ctx := r.Context()
 
 	s.LockModels()
 	list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
@@ -75,14 +82,14 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 		base = append([]string{}, proxyNames...)
 	} else {
 		for _, name := range proxyNames {
-			if AllowsModel(s, p, name) {
+			if AllowsModel(s, ctx, p, teamID, name) {
 				base = append(base, name)
 			}
 		}
 		if includeGroups {
 			for group, members := range groups {
 				for _, member := range members {
-					if AllowsModel(s, p, member) {
+					if AllowsModel(s, ctx, p, teamID, member) {
 						base = append(base, group)
 						break
 					}
@@ -91,12 +98,12 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 		}
 	}
 	if returnWild && !adminExpand && p != nil && p.Key != nil {
-		for _, granted := range p.Key.Models() {
+		for _, granted := range p.Key.Models {
 			if !strings.Contains(granted, "*") {
 				continue
 			}
 			for _, name := range proxyNames {
-				if AllowsModel(s, p, name) && wildcardMatches(granted, name) {
+				if AllowsModel(s, ctx, p, teamID, name) && wildcardMatches(granted, name) {
 					base = append(base, granted)
 					break
 				}
@@ -124,15 +131,11 @@ func wildcardMatches(pattern, name string) bool {
 	return ok && strings.HasPrefix(name, prefix)
 }
 
-// hasAdminModelView reports that the master key, proxy_admin, and proxy_admin_viewer may bypass the key model restriction when scope=expand. An ordinary identity may not.
+// hasAdminModelView reports that the platform administrator may bypass the key
+// model restriction when scope=expand. An ordinary identity may not, and a key
+// never does, whatever role its owner holds.
 func hasAdminModelView(p *auth.Principal) bool {
-	if p == nil {
-		return false
-	}
-	if p.Kind == "master" || p.Role == "proxy_admin" || p.Role == "proxy_admin_viewer" {
-		return true
-	}
-	return false
+	return p.IsMaster() || p.PlatformAdmin()
 }
 
 // queryBool treats the query values 1, true, yes, and on as true, ignoring case. Everything else, including an empty string, is false.
@@ -265,6 +268,9 @@ func expandGrantedModels(granted, teamModels, proxy []string, groups map[string]
 	all := append([]string{}, granted...)
 	if keyPass && containsStr(all, allTeamModels) {
 		all = append([]string{}, teamModels...)
+		if len(all) == 0 {
+			all = append(all, proxy...)
+		}
 		if containsStr(all, allTeamModels) {
 			all = removeStr(all, allTeamModels)
 			all = append(all, proxy...)
@@ -439,4 +445,97 @@ func removeStr(list []string, drop string) []string {
 		}
 	}
 	return out
+}
+
+// Info serves GET /v2/model/info, the deployment list behind the console's
+// Models and Endpoints page and its auto-router lookups.
+//
+// The page reads this route and nothing else, so without a handler it fell
+// through to the catalog's generic key-value store and answered an empty list —
+// a page that looked like an empty deployment table rather than a missing
+// endpoint.
+//
+// Each row is the deployment JSON the page renders, filtered to the models the
+// caller may actually use so the table never offers a model the gateway would
+// refuse. A platform administrator sees every deployment, matching the list
+// route, where a missing grant means unrestricted rather than denied.
+func Info(s Host, w http.ResponseWriter, r *http.Request) {
+	httpx.SetCallID(w, httpx.CallID())
+	p, err := s.Resolve(r)
+	if err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
+		return
+	}
+	// The page is management UI: an inference key has no business enumerating
+	// deployments, and its own list route answers a different shape.
+	if !p.PlatformAdmin() {
+		httpx.WriteError(w, 403, "forbidden", "this credential cannot list deployments")
+		return
+	}
+
+	teamID := r.URL.Query().Get("team_id")
+
+	s.LockModels()
+	list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
+	s.UnlockModels()
+
+	rows := make([]map[string]any, 0, len(list))
+	for _, m := range list {
+		if m.ModelName == "" || providerShell(m.ModelInfo) {
+			continue
+		}
+		if !AllowsModel(s, r.Context(), p, teamID, m.ModelName) {
+			continue
+		}
+		row := Public(m)
+		// The page switches on these two fields to decide which rows it may
+		// edit, and they are not part of the stored record.
+		row["id"] = str(m.ModelInfo["id"])
+		row["db_model"] = modelIsDB(m)
+		rows = append(rows, row)
+	}
+
+	// The page paginates, so the envelope carries the counts it reads. The rows
+	// are already narrowed, so the totals describe what this caller can see.
+	page, size := queryIntDefault(r, "page", 1), queryIntDefault(r, "size", 50)
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 {
+		size = 50
+	}
+	total := len(rows)
+	start := (page - 1) * size
+	if start > total {
+		start = total
+	}
+	end := start + size
+	if end > total {
+		end = total
+	}
+	pages := 1
+	if total > 0 {
+		pages = (total + size - 1) / size
+	}
+	httpx.WriteJSON(w, 200, map[string]any{
+		"data":         rows[start:end],
+		"total_count":  total,
+		"current_page": page,
+		"total_pages":  pages,
+		"size":         size,
+	})
+}
+
+// queryIntDefault reads an integer query parameter, falling back to def when it
+// is absent or unparsable.
+func queryIntDefault(r *http.Request, name string, def int) int {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	return n
 }

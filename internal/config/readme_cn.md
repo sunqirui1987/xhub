@@ -6,11 +6,33 @@
 
 ## 功能
 
-- `Load` 读 YAML，并把主密钥、数据库地址、Redis 地址里的 `os.environ/NAME` 换成环境变量。
+- `Load` 读 YAML，并把主密钥、数据库地址、Redis 地址、以及配置里的管理员凭据中的 `os.environ/NAME` 换成环境变量。
 - `RouterSettings` 和 `GeneralSettings` 覆盖进程直接读取的字段。
 - `RouterRaw` 和 `GeneralRaw` 保留其余 YAML 键，数据库覆盖某一键时不会丢掉其它键。
 - `ModelEntry.ParamString` 读取一个上游参数，没有时用你给的默认值。
 - `SplitProviderModel` 拆开 `provider/model`。
+
+## 配置里的默认管理员
+
+`general_settings.admin_email` 和 `admin_password` 指定首位平台管理员。启动时如果该邮箱还没有账号，网关就创建它，因此新部署不必手动调 `POST /bootstrap`。
+
+这个密码是**初始密码**，不是被托管的密码：
+
+- 只在邮箱未知时创建账号
+- 之后改这个值**不会**重写已存的密码
+- 改线上密码走账号接口，不走配置文件
+
+两个值都支持 `os.environ/NAME`，部署时用它把密码留在文件之外。变量没设时解析成空串，而 `admin_email` 或 `admin_password` 为空就完全不执行创建。`disable_env_credential_login: true` 则彻底拒绝配置提供的账号。
+
+```yaml
+general_settings:
+  master_key: sk-local-master
+  database_url: postgres://xhub:xhub@127.0.0.1:5433/xhub?sslmode=disable
+  admin_email: admin@example.com
+  admin_password: os.environ/XHUB_ADMIN_PASSWORD
+  admin_name: Platform Admin
+  disable_env_credential_login: false
+```
 
 ## 其它包怎么用
 
@@ -21,8 +43,8 @@ cfg, err := config.Load("configs/config.yaml")
 if err != nil {
     log.Fatal(err)
 }
-st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-srv := gateway.New(cfg, st)
+iamDB, err := iam.Open(ctx, cfg.GeneralSettings.DatabaseURL)
+srv := gateway.New(cfg, st, iamDB)
 ```
 
 YAML 里一个模型是这样写的：
@@ -34,9 +56,6 @@ model_list:
       model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
       api_base: https://api.openai.com/v1
-general_settings:
-  master_key: sk-local-master
-  database_url: postgres://xhub:xhub@127.0.0.1:5433/xhub?sslmode=disable
 router_settings:
   routing_strategy: simple-shuffle
 ```
