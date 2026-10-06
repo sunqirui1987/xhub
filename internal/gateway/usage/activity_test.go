@@ -3,6 +3,9 @@ package usage
 import (
 	"testing"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/authz"
+	"github.com/sunqirui1987/xhub/internal/iam"
 )
 
 // rollupRows is the fixture shared by the rollup tests: two calls on one day in
@@ -104,6 +107,43 @@ func TestActivityRowWithNoKeyStillLandsInABucket(t *testing.T) {
 	}
 	if day["endpoints"].(map[string]any)["/chat/completions"] == nil {
 		t.Fatal("endpoint bucket missing")
+	}
+}
+
+// TestActivityBodyGroupsByTheRequestedEntity checks the breakdown the team,
+// organization, and user views read. The key is the id the console already
+// has, and the label comes from the lookup rather than from the raw id.
+func TestActivityBodyGroupsByTheRequestedEntity(t *testing.T) {
+	body := activityBody(rollupRows(), 1, true, entityTeam, entityLabels{
+		teams: map[string]iam.Team{"team-1": {Name: "Desk"}},
+	})
+	day := body["results"].([]any)[0].(map[string]any)
+	entities := day["breakdown"].(map[string]any)["entities"].(map[string]any)
+	team := entities["team-1"].(map[string]any)
+	if team["metrics"].(map[string]any)["spend"] != 1.75 {
+		t.Fatalf("team spend: %#v", team["metrics"])
+	}
+	if team["metadata"].(map[string]any)["team_alias"] != "Desk" {
+		t.Fatalf("team alias: %#v", team["metadata"])
+	}
+
+	plain := dailyActivityResponse(rollupRows(), 1, true)
+	plainDay := plain["results"].([]any)[0].(map[string]any)
+	if len(plainDay["breakdown"].(map[string]any)["entities"].(map[string]any)) != 0 {
+		t.Fatal("a response with no entity dimension must leave entities empty")
+	}
+}
+
+// TestKeepVisibleRefusesAnEmptyIntersection checks that a filter naming only
+// unseen ids does not collapse into "no filter".
+func TestKeepVisibleRefusesAnEmptyIntersection(t *testing.T) {
+	seen := map[string]struct{}{"a": {}}
+	kept, err := keepVisible([]string{"a", "b"}, seen)
+	if err != nil || len(kept) != 1 || kept[0] != "a" {
+		t.Fatalf("kept: %v %v", kept, err)
+	}
+	if _, err := keepVisible([]string{"b"}, seen); !authz.IsNotFound(err) {
+		t.Fatalf("unseen only: %v", err)
 	}
 }
 

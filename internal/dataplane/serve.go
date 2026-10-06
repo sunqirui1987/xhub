@@ -108,6 +108,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		tenant = p.Hash
 	}
 	ck := cache.Key(tenant, op, alias, string(raw))
+	plan := h.PlanRoute(r, alias, body, p)
 	stream, _ := body["stream"].(bool)
 	if !stream {
 		if hit, ok := h.ResponseCache().Get(ck); ok {
@@ -116,6 +117,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			logx.Debug("process path=%s step=cache hit=true model=%s", r.URL.Path, alias)
 			logMetrics(r.URL.Path, alias, true, pt, ct, elapsed, elapsed)
 			h.RememberExchange(callID, r, raw, hit)
+			h.AnnotateCall(callID, CallNote{SessionID: plan.SessionID, CacheKey: ck, CacheHit: true})
 			h.WriteCacheHit(w, p, callID, alias, ck, op, hit, start)
 			return
 		}
@@ -128,6 +130,7 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		return
 	}
 	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
+	pool = preferDeployment(pool, plan.Pinned)
 	pool, paused := dropPaused(pool)
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
@@ -261,13 +264,17 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 				}
 				h.DecBusy(did)
 				if wrote {
-					if usage == nil {
-						usage = map[string]any{"prompt_tokens": EstimateTokens(body), "completion_tokens": 0}
-					}
+					usage = completeUsage(usage, body, streamed)
 					pt, ct := usageCounts(usage)
 					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
+					depID := router.DeploymentID(rawDep)
 					h.RememberExchange(callID, r, raw, streamed)
-					h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusOK, router.DeploymentID(rawDep))
+					h.AnnotateCall(callID, CallNote{
+						TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck,
+						SessionID: plan.SessionID, DeploymentID: depID,
+					})
+					h.CommitRoute(plan, depID, responseID(streamed))
+					h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusOK, depID)
 					return
 				}
 				lastErr = errEmptyUpstream
@@ -284,8 +291,11 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			pt, ct := bodyUsage(respBody)
 			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, provider, realModel)
 			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
+			depID := router.DeploymentID(rawDep)
 			h.RememberExchange(callID, r, raw, respBody)
-			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, router.DeploymentID(rawDep))
+			h.AnnotateCall(callID, CallNote{Provider: provider, CacheKey: ck, SessionID: plan.SessionID, DeploymentID: depID})
+			h.CommitRoute(plan, depID, responseID(respBody))
+			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, depID)
 			return
 		}
 	}
@@ -312,6 +322,59 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	logx.Error("dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
+}
+
+func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
+	if id == "" {
+		return pool
+	}
+	for i, entry := range pool {
+		if router.DeploymentID(entry) != id {
+			continue
+		}
+		if i == 0 {
+			return pool
+		}
+		out := make([]config.ModelEntry, 0, len(pool))
+		out = append(out, entry)
+		out = append(out, pool[:i]...)
+		out = append(out, pool[i+1:]...)
+		return out
+	}
+	return pool
+}
+
+func ttftMillis(d time.Duration) *int {
+	if d <= 0 {
+		return nil
+	}
+	ms := int(d.Milliseconds())
+	if ms < 1 {
+		ms = 1
+	}
+	return &ms
+}
+
+func responseID(raw []byte) string {
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) == nil {
+		if id, ok := doc["id"].(string); ok {
+			return id
+		}
+	}
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
+		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
+			continue
+		}
+		if json.Unmarshal(line, &doc) != nil {
+			continue
+		}
+		if id, ok := doc["id"].(string); ok && id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 // applyExtensions runs extensions in registration order before the upstream HTTP call. A refusal has already written the response and returns true.
@@ -437,6 +500,61 @@ func tokensPerSecond(completion int, window time.Duration) float64 {
 		return 0
 	}
 	return float64(completion) / window.Seconds()
+}
+
+// completeUsage fills token counts the stream did not report. A Responses
+// stream often ends without a usage object; the assistant text is still there,
+// and billing it as zero completion tokens drops the output cost.
+func completeUsage(usage map[string]any, body map[string]any, streamed []byte) map[string]any {
+	if usage == nil {
+		usage = map[string]any{}
+	}
+	pt, ct := usageCounts(usage)
+	if pt == 0 {
+		if n := EstimateTokens(body); n > 0 {
+			usage["prompt_tokens"] = n
+		}
+	}
+	if ct == 0 {
+		if n := outputTokens(streamed); n > 0 {
+			usage["completion_tokens"] = n
+		}
+	}
+	return usage
+}
+
+func outputTokens(raw []byte) int {
+	var b strings.Builder
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
+		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
+			continue
+		}
+		var doc map[string]any
+		if json.Unmarshal(line, &doc) != nil {
+			continue
+		}
+		if choices, ok := doc["choices"].([]any); ok && len(choices) > 0 {
+			choice, _ := choices[0].(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
+			if part, ok := delta["content"].(string); ok {
+				b.WriteString(part)
+			}
+		}
+		if doc["type"] == "response.output_text.delta" {
+			if part, ok := doc["delta"].(string); ok {
+				b.WriteString(part)
+			}
+		}
+	}
+	if b.Len() == 0 {
+		return 0
+	}
+	n := b.Len() / 4
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // usageCounts reads prompt and completion counts. input_tokens and output_tokens are accepted when the OpenAI names are absent.

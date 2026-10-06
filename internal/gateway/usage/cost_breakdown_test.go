@@ -42,3 +42,30 @@ func TestEventRowCarriesTheBill(t *testing.T) {
 		t.Fatalf("charged total: %#v", bill["total_cost"])
 	}
 }
+
+func TestEventRowExposesTheConsoleColumns(t *testing.T) {
+	ttft := 420
+	cached := 100
+	end := time.Now().UTC()
+	start := end.Add(-time.Second)
+	rows := eventRows([]iam.UsageEvent{{
+		RequestID: "r-cols", Model: "gpt-4o", PromptTokens: 10, CompletionTokens: 2,
+		Cost: 0.01, TS: start, EndedAt: &end, TTFTMs: &ttft, CacheHit: true,
+		KeyHash: "hash-1", KeyAlias: "key-1", TeamAlias: "team-1",
+		Provider: "openai", CachedTokens: &cached, SessionID: "sess-1", CacheKey: "ck-1",
+	}})
+	row := rows[0]
+	meta := row["metadata"].(map[string]any)
+	if meta["user_api_key"] != "hash-1" || meta["user_api_key_alias"] != "key-1" || meta["user_api_key_team_alias"] != "team-1" {
+		t.Fatalf("snapshot %#v", meta)
+	}
+	if row["completionStartTime"] == nil || row["cache_hit"] != "true" || row["session_id"] != "sess-1" {
+		t.Fatalf("row %#v", row)
+	}
+	if row["custom_llm_provider"] != "openai" || row["cache_key"] != "ck-1" || meta["cached_tokens"] != 100 {
+		t.Fatalf("provider/cache %#v", row)
+	}
+	if row["endTime"] == row["startTime"] {
+		t.Fatal("end time collapsed onto start")
+	}
+}

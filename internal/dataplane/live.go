@@ -124,14 +124,19 @@ func Flush(h Host) {
 		if row.SpendValid {
 			spend = row.Spend
 		}
-		records = append(records, iam.UsageRecord{
+		rec := iam.UsageRecord{
 			RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
 			UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
 			Model: row.Model, CallType: row.CallType, Status: row.Status,
 			PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
-			DurationMS: int(end.Sub(start).Milliseconds()),
-			RequestBody: row.Messages, ResponseBody: row.Response,
-		})
+			DurationMS:  int(end.Sub(start).Milliseconds()),
+			RequestBody: row.Messages, ResponseBody: row.Response, ProxyRequest: row.ProxyRequest,
+			EndedAt: end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
+			KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
+			Provider: row.Provider, CachedTokens: row.CachedTokens,
+			SessionID: row.SessionID, CacheKey: row.CacheKey,
+		}
+		records = append(records, rec)
 	}
 	if len(records) == 0 {
 		_ = SpendAck(redis, nil, n, head)

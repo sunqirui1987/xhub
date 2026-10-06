@@ -205,6 +205,25 @@ func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, er
 	return out, err
 }
 
+// UsersByIDs loads the accounts named by ids. An empty list is an empty map,
+// not every account. Callers use it to label rows they have already scoped.
+func (db *DB) UsersByIDs(ctx context.Context, ids []string) (map[string]User, error) {
+	out := map[string]User{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []User
+	if err := s.In("id", ids).Find(&rows); err != nil {
+		return nil, mapErr(err)
+	}
+	for _, u := range rows {
+		out[u.ID] = u
+	}
+	return out, nil
+}
+
 // GetUser loads one account.
 func (db *DB) GetUser(ctx context.Context, id string) (*User, error) {
 	s := db.session(ctx)

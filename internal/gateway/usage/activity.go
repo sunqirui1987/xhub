@@ -20,35 +20,19 @@ const activityPageSize = 50
 var logTraceOnceActivity sync.Once
 
 // UserDailyActivity is GET /user/daily/activity. It groups stored usage into the
-// daily rollup the usage page reads, newest day first and paged.
+// daily rollup the usage page reads, newest day first and paged. The entity
+// breakdown is per user, which is what "用户用量" renders, and the scope is the
+// caller's own rows plus the teams they oversee.
 func UserDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceActivity.Do(func() { logx.Trace("enter usage.UserDailyActivity") })
-
-	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
-	if !ok {
-		return
-	}
-	rows, err := loadActivity(s, r, sc)
-	if err != nil {
-		s.WriteIAMError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, 200, dailyActivityResponse(rows, pageFromQuery(r), false))
+	writeDailyActivity(s, w, r, entityUser, false)
 }
 
 // UserDailyActivityAggregated is GET /user/daily/activity/aggregated. The same
-// rollup in a single response, which is what the usage page loads first.
+// rollup in a single response, which is what "你的用量" and the global view load
+// first. A user id on the query narrows to that account inside the scope.
 func UserDailyActivityAggregated(s Host, w http.ResponseWriter, r *http.Request) {
-	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
-	if !ok {
-		return
-	}
-	rows, err := loadActivity(s, r, sc)
-	if err != nil {
-		s.WriteIAMError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, 200, dailyActivityResponse(rows, 1, true))
+	writeDailyActivity(s, w, r, entityUser, true)
 }
 
 // GatewayDailyActivity is GET /gateway/daily/activity. Request counts come from
@@ -87,18 +71,20 @@ func openActivity(s Host, w http.ResponseWriter, r *http.Request, teamID string)
 }
 
 type activityRow struct {
-	day        string
-	model      string
-	provider   string
-	apiKey     string
-	keyAlias   string
-	teamID     string
-	userID     string
-	route      string
-	prompt     int
-	completion int
-	spend      float64
-	success    bool
+	day            string
+	model          string
+	provider       string
+	apiKey         string
+	keyAlias       string
+	teamID         string
+	teamAlias      string
+	organizationID string
+	userID         string
+	route          string
+	prompt         int
+	completion     int
+	spend          float64
+	success        bool
 }
 
 type metric struct {
@@ -171,6 +157,7 @@ type dayMetric struct {
 	endpoints map[string]*namedMetric
 	keys      map[string]*keyMetric
 	routes    map[string]*metric
+	entities  map[string]*entityBucket
 }
 
 // loadActivity reads the usage rows the caller may see and turns them into the
@@ -183,11 +170,17 @@ type dayMetric struct {
 // caller was already allowed to see, and a filter that names someone else simply
 // returns the empty intersection.
 func loadActivity(s Host, r *http.Request, sc *authz.Scope) ([]activityRow, error) {
+	return loadActivityQuery(s, r, activityQuery(r, sc))
+}
+
+// loadActivityQuery reads the events for a query that already carries the scope
+// and any narrowing filters, then flattens them for the roll-up.
+func loadActivityQuery(s Host, r *http.Request, q iam.UsageQuery) ([]activityRow, error) {
 	db := s.Identity()
 	if db == nil {
 		return nil, nil
 	}
-	events, err := db.ListUsage(r.Context(), activityQuery(r, sc))
+	events, err := db.ListUsage(r.Context(), q)
 	if err != nil {
 		return nil, err
 	}
@@ -229,17 +222,20 @@ func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 			model = "unknown"
 		}
 		out = append(out, activityRow{
-			day:        activityDay(e.TS, tzMinutes),
-			model:      model,
-			provider:   providerName(model, prices),
-			apiKey:     e.KeyID,
-			teamID:     e.TeamID,
-			userID:     e.UserID,
-			route:      llmRoute(e.CallType),
-			prompt:     e.PromptTokens,
-			completion: e.CompletionTokens,
-			spend:      e.Cost,
-			success:    e.Status == "" || e.Status == "success" || e.Status == "succeeded",
+			day:            activityDay(e.TS, tzMinutes),
+			model:          model,
+			provider:       providerName(model, prices),
+			apiKey:         e.KeyID,
+			keyAlias:       e.KeyAlias,
+			teamID:         e.TeamID,
+			teamAlias:      e.TeamAlias,
+			organizationID: e.OrganizationID,
+			userID:         e.UserID,
+			route:          llmRoute(e.CallType),
+			prompt:         e.PromptTokens,
+			completion:     e.CompletionTokens,
+			spend:          e.Cost,
+			success:        e.Status == "" || e.Status == "success" || e.Status == "succeeded",
 		})
 	}
 	return out
@@ -274,7 +270,14 @@ func parseDay(v string) time.Time {
 const activityScanLimit = 5000
 
 func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[string]any {
-	days := rollupDays(rows)
+	return activityBody(rows, page, aggregated, entityNone, entityLabels{})
+}
+
+// activityBody is the usage-page payload. dim chooses the breakdown.entities
+// key: a team, an organization, or a user. entityNone leaves that map empty,
+// which is what the gateway count view and the older callers want.
+func activityBody(rows []activityRow, page int, aggregated bool, dim entityDim, labels entityLabels) map[string]any {
+	days := rollupDays(rows, dim)
 	names := dayNames(days, true)
 	totalPages := 1
 	selected := names
@@ -298,7 +301,7 @@ func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[st
 				"api_keys":     keysJSON(day.keys),
 				"endpoints":    namedJSON(day.endpoints),
 				"mcp_servers":  map[string]any{},
-				"entities":     map[string]any{},
+				"entities":     entitiesJSON(day.entities, dim, labels),
 			},
 		})
 	}
@@ -309,7 +312,7 @@ func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[st
 }
 
 func gatewayActivityBody(rows []activityRow) map[string]any {
-	days := rollupDays(rows)
+	days := rollupDays(rows, entityNone)
 	names := dayNames(days, false)
 	byDate := make([]any, 0, len(names))
 	routes := map[string]*metric{}
@@ -401,7 +404,7 @@ func pageFromQuery(r *http.Request) int {
 	return n
 }
 
-func rollupDays(rows []activityRow) map[string]*dayMetric {
+func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 	days := map[string]*dayMetric{}
 	for _, row := range rows {
 		day := days[row.day]
@@ -430,6 +433,9 @@ func rollupDays(rows []activityRow) map[string]*dayMetric {
 			day.routes[row.route] = route
 		}
 		route.add(row.prompt, row.completion, row.spend, row.success)
+		if dim != entityNone {
+			addEntity(day, dim, row)
+		}
 	}
 	return days
 }

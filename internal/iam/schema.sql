@@ -137,19 +137,45 @@ CREATE TABLE IF NOT EXISTS usage_events (
     prompt_tokens     INT NOT NULL DEFAULT 0,
     completion_tokens INT NOT NULL DEFAULT 0,
     cost              NUMERIC NOT NULL DEFAULT 0,
-    duration_ms       INT NOT NULL DEFAULT 0
+    duration_ms       INT NOT NULL DEFAULT 0,
+    ended_at          TIMESTAMPTZ,
+    ttft_ms           INT,
+    cache_hit         BOOLEAN NOT NULL DEFAULT false,
+    key_hash          TEXT NOT NULL DEFAULT '',
+    key_alias         TEXT NOT NULL DEFAULT '',
+    team_alias        TEXT NOT NULL DEFAULT '',
+    provider          TEXT NOT NULL DEFAULT '',
+    cached_tokens     INT,
+    session_id        TEXT NOT NULL DEFAULT '',
+    cache_key         TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS usage_events_team_ts ON usage_events (team_id, ts);
 CREATE INDEX IF NOT EXISTS usage_events_user_ts ON usage_events (user_id, ts);
 CREATE INDEX IF NOT EXISTS usage_events_key_ts ON usage_events (key_id, ts);
 CREATE INDEX IF NOT EXISTS usage_events_org_ts ON usage_events (organization_id, ts);
 
+-- Tables created before these columns existed keep their rows. New installs
+-- already have the columns from CREATE TABLE, so each ADD is a no-op there.
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS ttft_ms INT;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS key_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS key_alias TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS team_alias TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cached_tokens INT;
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_key TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS usage_events_session_ts ON usage_events (session_id, ts);
+
 CREATE TABLE IF NOT EXISTS request_logs (
     request_id    TEXT PRIMARY KEY REFERENCES usage_events (request_id) ON DELETE CASCADE,
     request_body  TEXT NOT NULL DEFAULT '',
     response_body TEXT NOT NULL DEFAULT '',
-    error         TEXT NOT NULL DEFAULT ''
+    error         TEXT NOT NULL DEFAULT '',
+    proxy_request TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS proxy_request TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS usage_daily (
     day               DATE NOT NULL,

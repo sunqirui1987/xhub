@@ -1572,7 +1572,6 @@ export const teamDailyActivityAggregatedCall = async (
       },
     });
   } catch (error) {
-    console.error("Failed to fetch aggregated team daily activity:", error);
     throw error;
   }
 };

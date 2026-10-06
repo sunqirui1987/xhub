@@ -266,10 +266,12 @@ describe("LogDetailContent", () => {
     expect(screen.getByText("JSON")).toBeInTheDocument();
 
     await user.click(screen.getByText("JSON"));
-    expect(screen.getByRole("tab", { name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Headers" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Response" })).toBeInTheDocument();
 
     await user.click(screen.getByText("Pretty"));
-    expect(screen.queryByRole("tab", { name: "Request" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Headers" })).toBeInTheDocument();
   });
 
   it.each(["object", "serialized", "messages only", "null captures"])(
@@ -294,7 +296,7 @@ describe("LogDetailContent", () => {
       expect(screen.getByText("legacy classifier prompt")).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Classifier input" })).not.toBeInTheDocument();
       await user.click(screen.getByRole("tab", { name: "JSON", exact: true }));
-      await user.click(screen.getByRole("button", { name: "Copy JSON", exact: true }));
+      await user.click(screen.getByRole("button", { name: "Copy request", exact: true }));
       expect(await navigator.clipboard.readText()).toBe(
         JSON.stringify(shape === "messages only" ? messages : request, null, 2),
       );
@@ -331,8 +333,9 @@ describe("LogDetailContent", () => {
 
     await user.click(screen.getByText("JSON"));
 
-    expect(screen.getByRole("tab", { name: "Request" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Response" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Headers" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Response" })).toBeInTheDocument();
   });
 
   it("should display response not available message when no response and Response tab is selected", async () => {
@@ -347,7 +350,6 @@ describe("LogDetailContent", () => {
     );
 
     await user.click(screen.getByText("JSON"));
-    await user.click(screen.getByRole("tab", { name: "Response" }));
 
     expect(screen.getByText("Response data not available")).toBeInTheDocument();
   });

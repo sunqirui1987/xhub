@@ -75,6 +75,14 @@ func (db *DB) Migrate(ctx context.Context) error {
 		logx.Error("iam schema apply failed: %v", err)
 		return err
 	}
+	// Names and hashes that already exist on the referenced rows. TTFT and
+	// headers were never stored, so they stay empty.
+	_, _ = db.Engine.Context(ctx).Exec(`
+		UPDATE usage_events e SET team_alias = t.name
+		FROM teams t WHERE e.team_id = t.id AND e.team_alias = '' AND e.team_id <> ''`)
+	_, _ = db.Engine.Context(ctx).Exec(`
+		UPDATE usage_events e SET key_alias = k.name, key_hash = k.token_hash
+		FROM api_keys k WHERE e.key_id = k.id AND e.key_alias = '' AND e.key_id <> ''`)
 	return nil
 }
 

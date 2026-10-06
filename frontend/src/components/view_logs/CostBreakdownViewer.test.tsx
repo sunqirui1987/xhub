@@ -69,22 +69,23 @@ describe("CostBreakdownViewer", () => {
     renderWithProviders(
       <CostBreakdownViewer
         costBreakdown={{
-          input_cost: 0.000384,
-          output_cost: 0,
-          original_cost: 0.000384,
-          total_cost: 0.000384,
+          input_cost: 0.027556,
+          output_cost: 0.00018,
+          original_cost: 0.027736,
+          total_cost: 0.027736,
           input_cost_per_token: 0.000004,
-          output_cost_per_token: 0.000016,
+          output_cost_per_token: 0.00002,
         }}
-        totalSpend={0.000384}
-        promptTokens={96}
-        completionTokens={0}
+        totalSpend={0.027736}
+        promptTokens={6889}
+        completionTokens={9}
       />,
     );
 
     await expandCostBreakdown();
-    expect(screen.getByText(/96 prompt tokens ×/)).toBeInTheDocument();
-    expect(screen.getByText(/0 completion tokens ×/)).toBeInTheDocument();
+    expect(screen.getByText(/0.69万 prompt tokens × \$4.00\/1M/)).toBeInTheDocument();
+    expect(screen.getByText(/9 completion tokens × \$20.00\/1M/)).toBeInTheDocument();
+    expect(screen.getAllByText("$0.03").length).toBeGreaterThan(0);
     expect(screen.getByText("Original LLM Cost:")).toBeInTheDocument();
     expect(screen.getByText("Final Calculated Cost:")).toBeInTheDocument();
   });

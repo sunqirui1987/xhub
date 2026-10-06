@@ -39,6 +39,25 @@ func (db *DB) CreateOrg(ctx context.Context, by Actor, name string, maxBudget *f
 	return out, err
 }
 
+// OrgsByIDs loads the organizations named by ids. An empty list is an empty
+// map, not every organization.
+func (db *DB) OrgsByIDs(ctx context.Context, ids []string) (map[string]Organization, error) {
+	out := map[string]Organization{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []Organization
+	if err := s.In("id", ids).Find(&rows); err != nil {
+		return nil, mapErr(err)
+	}
+	for _, o := range rows {
+		out[o.ID] = o
+	}
+	return out, nil
+}
+
 // GetOrg loads one organization.
 func (db *DB) GetOrg(ctx context.Context, id string) (*Organization, error) {
 	s := db.session(ctx)
@@ -156,6 +175,25 @@ func (db *DB) CreateTeam(ctx context.Context, by Actor, in TeamInput) (*Team, er
 			Detail: map[string]any{"organization_id": in.OrganizationID, "admin": in.AdminUserID, "models": len(in.Models)}})
 	})
 	return out, err
+}
+
+// TeamsByIDs loads the teams named by ids. An empty list is an empty map, not
+// every team.
+func (db *DB) TeamsByIDs(ctx context.Context, ids []string) (map[string]Team, error) {
+	out := map[string]Team{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	s := db.session(ctx)
+	defer s.Close()
+	var rows []Team
+	if err := s.In("id", ids).Find(&rows); err != nil {
+		return nil, mapErr(err)
+	}
+	for _, team := range rows {
+		out[team.ID] = team
+	}
+	return out, nil
 }
 
 // GetTeam loads one team.

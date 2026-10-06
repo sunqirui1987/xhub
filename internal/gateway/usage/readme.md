@@ -12,6 +12,7 @@ Call the HTTP paths and the Go entry points in the sections below. Authenticate 
 
 - `GET /spend/logs/v2` lists request logs. `cache_hit` is a boolean. One log is `GET /spend/logs/ui/{request_id}`.
 - `GET /global/spend/keys`, `/global/spend/models`, `/global/spend/provider`, `/global/spend/teams`, and `/global/spend/tags` group spend for the charts.
+- `GET /user/daily/activity` and `/user/daily/activity/aggregated` are "你的用量" and "用户用量". `GET /team/daily/activity/aggregated` is "团队用量". `GET /organization/daily/activity` is "组织用量". Each one is limited to the caller's own rows plus the teams they administer.
 - `GET /global/activity` and `/global/activity/cache_hits` feed the activity panels.
 - `POST /spend/calculate` estimates a cost from the token counts you send. It does not write a log row.
 - `GET /auto_router/benchmarks` returns stored benchmark rows, or an empty list.

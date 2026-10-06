@@ -11,6 +11,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/gateway/models"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
@@ -31,8 +32,8 @@ const Version = family.ProxyVersion
 // Keys live in keys, settings in prefs, and guardrails in guard. The console is a separate process; this server does not proxy it.
 // Users and budgets live in identity, models in models, usage in usage, catalog resources in family, and the inference loop in dataplane.
 type Server struct {
-	Cfg                *config.Config
-	Store              *store.Store
+	Cfg   *config.Config
+	Store *store.Store
 	// IAM is the identity store: users, teams, organizations, projects, keys
 	// and the audit log. Authz is the single authorization layer over it.
 	IAM                *iam.DB
@@ -57,6 +58,9 @@ type Server struct {
 	modules            []httpx.Module
 	modulesReady       bool
 	exchanges          map[string]promptExchange
+	callNotes          map[string]dataplane.CallNote
+	affinity           map[string]affinityPin
+	affinityMu         sync.Mutex
 }
 
 type idemRec struct {

@@ -12,6 +12,7 @@
 
 - `GET /spend/logs/v2` 列出请求日志。`cache_hit` 是布尔值。单条日志是 `GET /spend/logs/ui/{request_id}`。
 - `GET /global/spend/keys`、`/global/spend/models`、`/global/spend/provider`、`/global/spend/teams`、`/global/spend/tags` 给图表做分组。
+- `GET /user/daily/activity` 和 `/user/daily/activity/aggregated` 是「你的用量」和「用户用量」。`GET /team/daily/activity/aggregated` 是「团队用量」。`GET /organization/daily/activity` 是「组织用量」。范围都是调用者自己的行，加上他管辖的团队。
 - `GET /global/activity` 和 `/global/activity/cache_hits` 给活动面板。
 - `POST /spend/calculate` 按你提交的 token 数估算成本。它不写日志行。
 - `GET /auto_router/benchmarks` 返回已保存的基准行，没有则是空列表。

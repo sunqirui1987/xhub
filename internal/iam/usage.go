@@ -16,22 +16,32 @@ var logTraceOnceUsage sync.Once
 // Nothing here is a foreign key: a member who leaves a team does not move the
 // spend they already produced, and deleting a team does not erase history.
 type UsageEvent struct {
-	ID               int64     `xorm:"pk autoincr 'id'" json:"-"`
-	RequestID        string    `xorm:"'request_id'" json:"request_id"`
-	TS               time.Time `xorm:"'ts'" json:"ts"`
-	KeyID            string    `xorm:"'key_id'" json:"key_id"`
-	OwnerType        string    `xorm:"'owner_type'" json:"owner_type"`
-	UserID           string    `xorm:"'user_id'" json:"user_id"`
-	TeamID           string    `xorm:"'team_id'" json:"team_id"`
-	ProjectID        string    `xorm:"'project_id'" json:"project_id"`
-	OrganizationID   string    `xorm:"'organization_id'" json:"organization_id"`
-	Model            string    `xorm:"'model'" json:"model"`
-	CallType         string    `xorm:"'call_type'" json:"call_type"`
-	Status           string    `xorm:"'status'" json:"status"`
-	PromptTokens     int       `xorm:"'prompt_tokens'" json:"prompt_tokens"`
-	CompletionTokens int       `xorm:"'completion_tokens'" json:"completion_tokens"`
-	Cost             float64   `xorm:"'cost'" json:"cost"`
-	DurationMS       int       `xorm:"'duration_ms'" json:"duration_ms"`
+	ID               int64      `xorm:"pk autoincr 'id'" json:"-"`
+	RequestID        string     `xorm:"'request_id'" json:"request_id"`
+	TS               time.Time  `xorm:"'ts'" json:"ts"`
+	KeyID            string     `xorm:"'key_id'" json:"key_id"`
+	OwnerType        string     `xorm:"'owner_type'" json:"owner_type"`
+	UserID           string     `xorm:"'user_id'" json:"user_id"`
+	TeamID           string     `xorm:"'team_id'" json:"team_id"`
+	ProjectID        string     `xorm:"'project_id'" json:"project_id"`
+	OrganizationID   string     `xorm:"'organization_id'" json:"organization_id"`
+	Model            string     `xorm:"'model'" json:"model"`
+	CallType         string     `xorm:"'call_type'" json:"call_type"`
+	Status           string     `xorm:"'status'" json:"status"`
+	PromptTokens     int        `xorm:"'prompt_tokens'" json:"prompt_tokens"`
+	CompletionTokens int        `xorm:"'completion_tokens'" json:"completion_tokens"`
+	Cost             float64    `xorm:"'cost'" json:"cost"`
+	DurationMS       int        `xorm:"'duration_ms'" json:"duration_ms"`
+	EndedAt          *time.Time `xorm:"'ended_at'" json:"ended_at,omitempty"`
+	TTFTMs           *int       `xorm:"'ttft_ms'" json:"ttft_ms,omitempty"`
+	CacheHit         bool       `xorm:"'cache_hit'" json:"cache_hit"`
+	KeyHash          string     `xorm:"'key_hash'" json:"key_hash"`
+	KeyAlias         string     `xorm:"'key_alias'" json:"key_alias"`
+	TeamAlias        string     `xorm:"'team_alias'" json:"team_alias"`
+	Provider         string     `xorm:"'provider'" json:"provider"`
+	CachedTokens     *int       `xorm:"'cached_tokens'" json:"cached_tokens,omitempty"`
+	SessionID        string     `xorm:"'session_id'" json:"session_id"`
+	CacheKey         string     `xorm:"'cache_key'" json:"cache_key"`
 }
 
 func (UsageEvent) TableName() string { return "usage_events" }
@@ -44,6 +54,7 @@ type RequestLog struct {
 	RequestBody  string `xorm:"'request_body'" json:"request_body"`
 	ResponseBody string `xorm:"'response_body'" json:"response_body"`
 	Error        string `xorm:"'error'" json:"error"`
+	ProxyRequest string `xorm:"'proxy_request'" json:"proxy_request"`
 }
 
 func (RequestLog) TableName() string { return "request_logs" }
@@ -91,6 +102,17 @@ type UsageRecord struct {
 	RequestBody      string
 	ResponseBody     string
 	Error            string
+	ProxyRequest     string
+	EndedAt          time.Time
+	TTFTMs           *int
+	CacheHit         bool
+	KeyHash          string
+	KeyAlias         string
+	TeamAlias        string
+	Provider         string
+	CachedTokens     *int
+	SessionID        string
+	CacheKey         string
 }
 
 // RecordUsage writes the event, its stored request/response, the daily roll-up
@@ -139,14 +161,22 @@ func (db *DB) RecordUsage(ctx context.Context, records []UsageRecord) error {
 // report "not new". Raising instead would abort the surrounding transaction on
 // PostgreSQL, which would fail the whole batch over one duplicate.
 func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
+	var ended any
+	if !r.EndedAt.IsZero() {
+		ended = r.EndedAt.UTC()
+	}
 	res, err := s.Exec(`INSERT INTO usage_events
         (request_id, ts, key_id, owner_type, user_id, team_id, project_id, organization_id,
-         model, call_type, status, prompt_tokens, completion_tokens, cost, duration_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         model, call_type, status, prompt_tokens, completion_tokens, cost, duration_ms,
+         ended_at, ttft_ms, cache_hit, key_hash, key_alias, team_alias, provider,
+         cached_tokens, session_id, cache_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (request_id) DO NOTHING`,
 		r.RequestID, stamp(r.TS), r.KeyID, ownerType(r), r.UserID, r.TeamID, r.ProjectID,
 		r.OrganizationID, r.Model, r.CallType, status(r),
-		r.PromptTokens, r.CompletionTokens, r.Cost, r.DurationMS)
+		r.PromptTokens, r.CompletionTokens, r.Cost, r.DurationMS,
+		ended, r.TTFTMs, r.CacheHit, r.KeyHash, r.KeyAlias, r.TeamAlias, r.Provider,
+		r.CachedTokens, r.SessionID, r.CacheKey)
 	if err != nil {
 		return false, mapErr(err)
 	}
@@ -161,7 +191,7 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
 // so "prompt storage was off" stays distinguishable from "the row is gone".
 func putRequestLog(s *xorm.Session, r UsageRecord) error {
 	row := RequestLog{RequestID: r.RequestID, RequestBody: r.RequestBody,
-		ResponseBody: r.ResponseBody, Error: r.Error}
+		ResponseBody: r.ResponseBody, Error: r.Error, ProxyRequest: r.ProxyRequest}
 	if _, err := s.Insert(&row); err != nil {
 		return mapErr(err)
 	}

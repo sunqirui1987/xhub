@@ -69,6 +69,11 @@ func (h *logHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, s
 func (h *logHost) RecordSpend(http.ResponseWriter, *auth.Principal, string, string, string, map[string]any, time.Time, bool, int, string) {
 }
 func (h *logHost) RememberExchange(string, *http.Request, []byte, []byte) {}
+func (h *logHost) PlanRoute(*http.Request, string, map[string]any, *auth.Principal) RoutePlan {
+	return RoutePlan{}
+}
+func (h *logHost) CommitRoute(RoutePlan, string, string) {}
+func (h *logHost) AnnotateCall(string, CallNote)         {}
 func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, string, []byte, time.Time) {
 }
 func (h *logHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {

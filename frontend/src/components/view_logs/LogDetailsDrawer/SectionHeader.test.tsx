@@ -8,8 +8,8 @@ describe("SectionHeader", () => {
     render(<SectionHeader type="input" tokens={1234} cost={0.000123} turnCount={3} onCopy={vi.fn()} />);
 
     expect(screen.getByText("Input")).toBeInTheDocument();
-    expect(screen.getByText("Tokens: 1,234")).toBeInTheDocument();
-    expect(screen.getByText("Cost: $0.000123")).toBeInTheDocument();
+    expect(screen.getByText("Tokens: 0.12万")).toBeInTheDocument();
+    expect(screen.getByText("Cost: $0.00")).toBeInTheDocument();
     expect(screen.getByText("Turns: 3")).toBeInTheDocument();
   });
 

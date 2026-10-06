@@ -20,6 +20,15 @@ interface SectionHeaderProps {
 
 const SUMMARY_CLASSES = "flex flex-1 items-center gap-4";
 
+function formatHeaderTokens(tokens: number): string {
+  if (Math.abs(tokens) >= 1000) {
+    const wan = tokens / 10000;
+    const digits = Math.abs(wan) >= 10 ? 1 : 2;
+    return `${wan.toFixed(digits)}万`;
+  }
+  return tokens.toLocaleString("en-US");
+}
+
 export function SectionHeader({
   type,
   tokens,
@@ -47,9 +56,13 @@ export function SectionHeader({
         <span className="text-sm font-medium">{type === "input" ? t("Input") : t("Output")}</span>
       </div>
 
-      {tokens !== undefined && <span className="text-xs text-muted-foreground">Tokens: {tokens.toLocaleString()}</span>}
+      {tokens !== undefined && tokens > 0 && (
+        <span className="text-xs text-muted-foreground">Tokens: {formatHeaderTokens(tokens)}</span>
+      )}
 
-      {cost !== undefined && <span className="text-xs text-muted-foreground">Cost: ${cost.toFixed(6)}</span>}
+      {cost !== undefined && cost > 0 && (
+        <span className="text-xs text-muted-foreground">Cost: ${cost.toFixed(2)}</span>
+      )}
 
       {turnCount !== undefined && turnCount > 0 && (
         <span className="text-xs text-muted-foreground">Turns: {turnCount}</span>

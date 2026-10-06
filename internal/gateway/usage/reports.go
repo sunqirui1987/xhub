@@ -77,7 +77,64 @@ func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 		s.WriteIAMError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, 200, logPageResponse(eventRows(events), total, page, pageSize))
+	rows := eventRows(events)
+	if r.URL.Query().Get("group_by_session") == "true" {
+		rows = collapseSessions(rows)
+	}
+	httpx.WriteJSON(w, 200, logPageResponse(rows, total, page, pageSize))
+}
+
+// SessionLogs lists every call in one session. The list route folds a session
+// into a single row; this route is what the drawer opens when that row is clicked.
+func SessionLogs(s Host, w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.URL.Query().Get("session_id")) == "" {
+		httpx.WriteJSON(w, 200, logPageResponse(nil, 0, 1, logPageSize))
+		return
+	}
+	q := r.URL.Query()
+	q.Del("group_by_session")
+	r.URL.RawQuery = q.Encode()
+	LogsV2(s, w, r)
+}
+
+// collapseSessions keeps one row per non-empty session and totals the calls
+// that landed on this page. A request with no session stays on its own row.
+func collapseSessions(rows []map[string]any) []map[string]any {
+	type agg struct {
+		row   map[string]any
+		count int
+		spend float64
+		tok   int
+	}
+	order := []string{}
+	groups := map[string]*agg{}
+	var solo []map[string]any
+	for _, row := range rows {
+		sid, _ := row["session_id"].(string)
+		if sid == "" {
+			solo = append(solo, row)
+			continue
+		}
+		g := groups[sid]
+		if g == nil {
+			g = &agg{row: row}
+			groups[sid] = g
+			order = append(order, sid)
+		}
+		g.count++
+		g.spend += asFloat(row["spend"])
+		g.tok += asInt(row["total_tokens"])
+	}
+	out := make([]map[string]any, 0, len(solo)+len(order))
+	for _, sid := range order {
+		g := groups[sid]
+		g.row["session_total_count"] = g.count
+		g.row["session_total_spend"] = g.spend
+		g.row["session_total_tokens"] = g.tok
+		g.row["session_llm_count"] = g.count
+		out = append(out, g.row)
+	}
+	return append(out, solo...)
 }
 
 // logQuery builds the scoped log query from the request's filters. The scope is
@@ -86,13 +143,14 @@ func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	q := iam.UsageQuery{
-		Cond:   sc.Cond,
-		From:   parseDay(raw.Get("start_date")),
-		To:     parseDayEnd(raw.Get("end_date")),
-		UserID: raw.Get("user_id"),
-		TeamID: raw.Get("team_id"),
-		KeyID:  raw.Get("api_key"),
-		Model:  raw.Get("model"),
+		Cond:      sc.Cond,
+		From:      parseDay(raw.Get("start_date")),
+		To:        parseDayEnd(raw.Get("end_date")),
+		UserID:    raw.Get("user_id"),
+		TeamID:    raw.Get("team_id"),
+		KeyID:     raw.Get("api_key"),
+		Model:     raw.Get("model"),
+		SessionID: raw.Get("session_id"),
 	}
 	switch raw.Get("status_filter") {
 	case "success":
@@ -119,7 +177,24 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 	out := make([]map[string]any, 0, len(events))
 	for _, e := range events {
 		total := e.PromptTokens + e.CompletionTokens
-		out = append(out, map[string]any{
+		end := e.TS
+		if e.EndedAt != nil && !e.EndedAt.IsZero() {
+			end = *e.EndedAt
+		}
+		cacheHit := "false"
+		if e.CacheHit {
+			cacheHit = "true"
+		}
+		meta := map[string]any{
+			"cost_breakdown":          costBreakdown(e.Model, e.PromptTokens, e.CompletionTokens, e.Cost),
+			"user_api_key_team_alias": e.TeamAlias,
+			"user_api_key":            e.KeyHash,
+			"user_api_key_alias":      e.KeyAlias,
+		}
+		if e.CachedTokens != nil {
+			meta["cached_tokens"] = *e.CachedTokens
+		}
+		row := map[string]any{
 			"request_id":          e.RequestID,
 			"api_key":             e.KeyID,
 			"team_id":             e.TeamID,
@@ -131,18 +206,25 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 			"prompt_tokens":       e.PromptTokens,
 			"completion_tokens":   e.CompletionTokens,
 			"startTime":           e.TS.UTC().Format(time.RFC3339Nano),
-			"endTime":             e.TS.UTC().Format(time.RFC3339Nano),
+			"endTime":             end.UTC().Format(time.RFC3339Nano),
 			"request_duration_ms": e.DurationMS,
 			"user":                e.UserID,
-			"cache_hit":           "false",
+			"cache_hit":           cacheHit,
+			"cache_key":           e.CacheKey,
+			"session_id":          e.SessionID,
 			"status":              e.Status,
 			"owner_type":          e.OwnerType,
 			"project_id":          e.ProjectID,
 			"organization_id":     e.OrganizationID,
+			"custom_llm_provider": e.Provider,
 			"messages":            []any{},
 			"response":            map[string]any{},
-			"metadata":            map[string]any{"cost_breakdown": costBreakdown(e.Model, e.PromptTokens, e.CompletionTokens, e.Cost)},
-		})
+			"metadata":            meta,
+		}
+		if e.TTFTMs != nil && *e.TTFTMs > 0 {
+			row["completionStartTime"] = e.TS.Add(time.Duration(*e.TTFTMs) * time.Millisecond).UTC().Format(time.RFC3339Nano)
+		}
+		out = append(out, row)
 	}
 	return out
 }
@@ -240,6 +322,9 @@ func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 	row := eventRows([]iam.UsageEvent{*event})[0]
 	row["messages"] = jsonOrEmpty(body.RequestBody)
 	row["response"] = jsonOrEmpty(body.ResponseBody)
+	if strings.TrimSpace(body.ProxyRequest) != "" {
+		row["proxy_server_request"] = jsonOrEmpty(body.ProxyRequest)
+	}
 	httpx.WriteJSON(w, 200, row)
 }
 

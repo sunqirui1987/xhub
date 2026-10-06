@@ -26,7 +26,7 @@ import { VectorStoreViewer } from "../VectorStoreViewer";
 import { TruncatedValue } from "./TruncatedValue";
 import { TokenFlow } from "./TokenFlow";
 import { JsonViewer } from "./JsonViewer";
-import { loggedResponse } from "./prettyMessagesUtils";
+import { loggedResponse, requestBody, requestHeaders } from "./prettyMessagesUtils";
 import { RoutingDecisionCard, type RoutingDecision } from "./RoutingDecisionCard";
 import {
   formatData,
@@ -41,11 +41,8 @@ import {
   DRAWER_CONTENT_PADDING,
   API_BASE_MAX_WIDTH,
   METADATA_MAX_HEIGHT,
-  TAB_REQUEST,
-  TAB_RESPONSE,
   FONT_SIZE_SMALL,
   FONT_FAMILY_MONO,
-  SPACING_XLARGE,
 } from "./constants";
 import { ToolsSection } from "../ToolsSection";
 import { PrettyMessagesView } from "./PrettyMessagesView";
@@ -570,6 +567,34 @@ function MetricsSection({ logEntry, metadata }: { logEntry: LogEntry; metadata: 
   );
 }
 
+function JsonPanel({
+  title,
+  data,
+  copyLabel,
+  empty,
+}: {
+  title: string;
+  data: unknown;
+  copyLabel: string;
+  empty?: string;
+}) {
+  return (
+    <section className="rounded-md border">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+        <CopyButton getText={() => JSON.stringify(data ?? {}, null, 2)} label={copyLabel} disabled={data == null} />
+      </div>
+      <div className="p-3">
+        {data == null ? (
+          <p className="text-sm italic text-muted-foreground">{empty}</p>
+        ) : (
+          <JsonViewer data={data} mode="formatted" />
+        )}
+      </div>
+    </section>
+  );
+}
+
 interface RequestResponseSectionProps {
   hasResponse: boolean;
   hasError: boolean;
@@ -586,13 +611,7 @@ function RequestResponseSection({
   logEntry,
 }: RequestResponseSectionProps) {
   const [open, setOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<typeof TAB_REQUEST | typeof TAB_RESPONSE>(TAB_REQUEST);
   const [viewMode, setViewMode] = useState<"pretty" | "json">("pretty");
-
-  const getCopyText = () => {
-    const data = activeTab === TAB_REQUEST ? getRawRequest() : getFormattedResponse();
-    return JSON.stringify(data, null, 2);
-  };
 
   const totalSpend = logEntry.spend ?? 0;
   const promptTokens = logEntry.prompt_tokens || 0;
@@ -640,45 +659,16 @@ function RequestResponseSection({
                 />
               </TabsContent>
               <TabsContent value="json">
-                <Tabs
-                  value={activeTab}
-                  onValueChange={(key) => setActiveTab(key as typeof TAB_REQUEST | typeof TAB_RESPONSE)}
-                >
-                  <div className="flex items-center justify-between">
-                    <TabsList>
-                      <TabsTrigger value={TAB_REQUEST}>{t("Request")}</TabsTrigger>
-                      <TabsTrigger value={TAB_RESPONSE}>{t("Response")}</TabsTrigger>
-                    </TabsList>
-                    <CopyButton
-                      getText={getCopyText}
-                      label={t("Copy JSON")}
-                      disabled={activeTab === TAB_RESPONSE && !hasResponse && !hasError}
-                    />
-                  </div>
-                  <TabsContent value={TAB_REQUEST}>
-                    <div style={{ paddingTop: SPACING_XLARGE, paddingBottom: SPACING_XLARGE }}>
-                      <JsonViewer data={getRawRequest()} mode="formatted" />
-                    </div>
-                  </TabsContent>
-                  <TabsContent value={TAB_RESPONSE}>
-                    <div style={{ paddingTop: SPACING_XLARGE, paddingBottom: SPACING_XLARGE }}>
-                      {hasResponse || hasError ? (
-                        <JsonViewer data={getFormattedResponse()} mode="formatted" />
-                      ) : (
-                        <div
-                          style={{
-                            textAlign: "center",
-                            padding: 20,
-                            color: "var(--color-muted-foreground)",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          {t("Response data not available")}
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                <div className="space-y-4 p-4">
+                  <JsonPanel title="Headers" data={requestHeaders(getRawRequest()) ?? {}} copyLabel="Copy headers" />
+                  <JsonPanel title="Request" data={requestBody(getRawRequest())} copyLabel="Copy request" />
+                  <JsonPanel
+                    title="Response"
+                    data={hasResponse || hasError ? getFormattedResponse() : null}
+                    copyLabel="Copy response"
+                    empty={t("Response data not available")}
+                  />
+                </div>
               </TabsContent>
             </div>
           </CollapsibleContent>

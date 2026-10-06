@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { t } from "@/i18n";
 
 export interface CostBreakdown {
@@ -35,12 +34,23 @@ interface CostBreakdownViewerProps {
 
 const formatCost = (cost: number | undefined): string => {
   if (cost === undefined || cost === null) return "-";
-  return `$${formatNumberWithCommas(cost, 8)}`;
+  return `$${cost.toFixed(2)}`;
 };
+
+const formatTokens = (tokens: number): string => {
+  if (Math.abs(tokens) >= 1000) {
+    const wan = tokens / 10000;
+    const digits = Math.abs(wan) >= 100 ? 0 : Math.abs(wan) >= 10 ? 1 : 2;
+    return `${wan.toFixed(digits)}万`;
+  }
+  return tokens.toLocaleString("en-US");
+};
+
+const formatMillionRate = (rate: number): string => `$${(rate * 1_000_000).toFixed(2)}/1M`;
 
 const rateLine = (tokens: number | undefined, unit: string, rate: number | undefined): string | null => {
   if (tokens === undefined || rate === undefined || rate === null) return null;
-  return `${tokens.toLocaleString("en-US")} ${unit} × ${formatCost(rate)}/token`;
+  return `${formatTokens(tokens)} ${unit} × ${formatMillionRate(rate)}`;
 };
 
 const formatPercent = (percent: number | undefined): string => {

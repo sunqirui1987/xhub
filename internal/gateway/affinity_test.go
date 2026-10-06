@@ -1,0 +1,85 @@
+package gateway
+
+import (
+	"net/http"
+	"testing"
+)
+
+func TestSessionIDSticksToThePromptPrefix(t *testing.T) {
+	body := map[string]any{
+		"model": "gpt-5.6-sol",
+		"messages": []any{
+			map[string]any{"role": "system", "content": "You are Codex."},
+			map[string]any{"role": "user", "content": "hello"},
+			map[string]any{"role": "user", "content": "again"},
+		},
+	}
+	first := sessionID(&http.Request{Header: http.Header{}}, body)
+	body["messages"] = []any{
+		map[string]any{"role": "system", "content": "You are Codex."},
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "assistant", "content": "hi"},
+		map[string]any{"role": "user", "content": "second turn"},
+	}
+	second := sessionID(&http.Request{Header: http.Header{}}, body)
+	if first == "" || first != second {
+		t.Fatalf("prefix session changed: %q vs %q", first, second)
+	}
+}
+
+func TestSessionIDPrefersAnExplicitHeader(t *testing.T) {
+	h := http.Header{}
+	h.Set("session-id", "conv-1")
+	got := sessionID(&http.Request{Header: h}, map[string]any{"prompt_cache_key": "other"})
+	if got != "conv-1" {
+		t.Fatalf("session id %q", got)
+	}
+}
+
+func TestSessionIDReadsClaudeMetadataAndClientHeaders(t *testing.T) {
+	legacy := "user_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2_account__session_123e4567-e89b-12d3-a456-426614174000"
+	body := map[string]any{
+		"metadata":         map[string]any{"user_id": legacy},
+		"prompt_cache_key": "cache-should-lose",
+	}
+	if got := sessionID(nil, body); got != "123e4567-e89b-12d3-a456-426614174000" {
+		t.Fatalf("legacy metadata session %q", got)
+	}
+	body["metadata"] = map[string]any{"user_id": `{"device_id":"dev","session_id":"json-sess"}`}
+	if got := sessionID(nil, body); got != "json-sess" {
+		t.Fatalf("json metadata session %q", got)
+	}
+	h := http.Header{}
+	h.Set("X-Session-Id", "opencode-1")
+	if got := sessionID(&http.Request{Header: h}, map[string]any{"prompt_cache_key": "body"}); got != "opencode-1" {
+		t.Fatalf("header session %q", got)
+	}
+	if got := sessionID(nil, map[string]any{"prompt_cache_key": "cache-1"}); got != "cache-1" {
+		t.Fatalf("cache key session %q", got)
+	}
+	if got := sessionID(nil, map[string]any{"previous_response_id": "resp_chain"}); got != "prev:resp_chain" {
+		t.Fatalf("previous response session %q", got)
+	}
+}
+
+func TestContentSessionStaysStableAsTheTranscriptGrows(t *testing.T) {
+	first := map[string]any{"input": []any{
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hello"}}},
+	}}
+	second := map[string]any{"input": []any{
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hello"}}},
+		map[string]any{"role": "assistant", "content": "pong"},
+		map[string]any{"role": "user", "content": "next"},
+	}}
+	if sessionID(nil, first) == "" || sessionID(nil, first) != sessionID(nil, second) {
+		t.Fatalf("responses session drifted: %q %q", sessionID(nil, first), sessionID(nil, second))
+	}
+}
+
+func TestAffinityPinIsReused(t *testing.T) {
+	s := &Server{}
+	s.affinitySet(sessionPinKey("gpt", "user:1", "conv-1"), "dep-a")
+	if got := s.affinityGet(sessionPinKey("gpt", "user:1", "conv-1")); got != "dep-a" {
+		t.Fatalf("pin %q", got)
+	}
+}

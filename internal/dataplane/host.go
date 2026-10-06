@@ -39,6 +39,12 @@ type Host interface {
 	RecordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias, op string, usage map[string]any, start time.Time, cacheHit bool, status int, depID string)
 	// RememberExchange keeps this call's headers and bodies until spend is recorded. The gateway stores them only when prompt storage is on.
 	RememberExchange(callID string, r *http.Request, reqBody, respBody []byte)
+	// PlanRoute resolves the session pin before a deployment is chosen.
+	PlanRoute(r *http.Request, alias string, body map[string]any, p *auth.Principal) RoutePlan
+	// CommitRoute stores the deployment that served this session.
+	CommitRoute(plan RoutePlan, deploymentID, responseID string)
+	// AnnotateCall attaches timing and identity the spend row must keep.
+	AnnotateCall(callID string, note CallNote)
 	WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time)
 	WriteChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string)
 	EnforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool
@@ -48,6 +54,24 @@ type Host interface {
 	// Identity is the store the spend flusher writes usage into. It is nil when
 	// PostgreSQL is not configured, and the flusher then does nothing.
 	Identity() *iam.DB
+}
+
+// RoutePlan is the session pin chosen before a deployment is tried.
+type RoutePlan struct {
+	Alias     string
+	SessionID string
+	Caller    string
+	Pinned    string
+}
+
+// CallNote is the request facts written onto the usage row.
+type CallNote struct {
+	TTFTMs       *int
+	Provider     string
+	CacheKey     string
+	CacheHit     bool
+	SessionID    string
+	DeploymentID string
 }
 
 // traceHop records that one inference call entered the data plane. The path is enough; the body and the key stay out.

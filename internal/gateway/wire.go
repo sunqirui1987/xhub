@@ -95,6 +95,26 @@ func (s *Server) RememberExchange(callID string, r *http.Request, reqBody, respB
 	s.rememberExchange(callID, r, reqBody, respBody)
 }
 
+func (s *Server) AnnotateCall(callID string, note dataplane.CallNote) {
+	if s == nil || callID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.callNotes == nil {
+		s.callNotes = map[string]dataplane.CallNote{}
+	}
+	s.callNotes[callID] = note
+}
+
+func (s *Server) takeNote(callID string) dataplane.CallNote {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	note := s.callNotes[callID]
+	delete(s.callNotes, callID)
+	return note
+}
+
 // WriteCacheHit writes a cached body back and records a cache-hit spend row with a zero delta.
 func (s *Server) WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time) {
 	s.writeCacheHit(w, p, callID, alias, ck, op, hit, start)

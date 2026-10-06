@@ -80,9 +80,36 @@ const classifyResponse = (response: unknown): ResponsePayload => {
  * Parse request messages and response message from log data
  */
 export const parseMessages = (request: unknown, response: unknown): ParsedMessages => ({
-  requestMessages: parseRequestMessages(classifyRequest(request)),
+  requestMessages: parseRequestMessages(classifyRequest(requestBody(request))),
   responseMessage: parseResponseMessage(classifyResponse(loggedResponse(response))),
 });
+
+// requestHeaders and requestBody split a stored proxy document into the three
+// panels the log drawer shows. Older rows are only a message list.
+export const requestHeaders = (request: unknown): Record<string, string> | null => {
+  if (!isRecord(request) || !isRecord(request.headers)) return null;
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(request.headers)) {
+    if (value == null) continue;
+    headers[key] = typeof value === "string" ? value : JSON.stringify(value);
+  }
+  return Object.keys(headers).length > 0 ? headers : null;
+};
+
+export const requestLine = (request: unknown): string | null => {
+  if (!isRecord(request)) return null;
+  const method = typeof request.method === "string" ? request.method : "";
+  const url = typeof request.url === "string" ? request.url : "";
+  const line = `${method} ${url}`.trim();
+  return line.length > 0 ? line : null;
+};
+
+export const requestBody = (request: unknown): unknown => {
+  if (isRecord(request) && request.body != null && (request.headers != null || request.method != null)) {
+    return request.body;
+  }
+  return request;
+};
 
 // loggedResponse reads a stored event stream back into the final response.
 // Console calls are often streamed, and the log keeps that stream under body
@@ -106,19 +133,52 @@ export const loggedResponse = (response: unknown): unknown => {
     };
   }
   let content = "";
+  let reasoning = "";
+  const tools = new Map<number, { id: string; name: string; args: string }>();
   for (const doc of events) {
     const choices = doc.choices;
     if (!Array.isArray(choices) || !isRecord(choices[0])) continue;
     const choice = choices[0];
     const delta = isRecord(choice.delta) ? choice.delta : undefined;
     if (typeof delta?.content === "string") content += delta.content;
+    if (typeof delta?.reasoning_content === "string") reasoning += delta.reasoning_content;
+    collectStreamTools(tools, delta?.tool_calls);
     const message = isRecord(choice.message) ? choice.message : undefined;
     if (typeof message?.content === "string" && message.content.length > 0) content = message.content;
+    collectStreamTools(tools, message?.tool_calls);
   }
-  if (content.length > 0) {
-    return { choices: [{ message: { role: "assistant", content } }] };
+  if (content.length > 0 || reasoning.length > 0 || tools.size > 0) {
+    const message: Record<string, unknown> = { role: "assistant", content };
+    if (reasoning.length > 0) message.reasoning_content = reasoning;
+    if (tools.size > 0) {
+      message.tool_calls = [...tools.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, tool]) => ({
+          id: tool.id,
+          type: "function",
+          function: { name: tool.name, arguments: tool.args },
+        }));
+    }
+    return { choices: [{ message }] };
   }
   return response;
+};
+
+const collectStreamTools = (
+  tools: Map<number, { id: string; name: string; args: string }>,
+  raw: unknown,
+) => {
+  if (!Array.isArray(raw)) return;
+  raw.forEach((item, fallback) => {
+    if (!isRecord(item)) return;
+    const index = typeof item.index === "number" ? item.index : fallback;
+    const current = tools.get(index) ?? { id: "", name: "", args: "" };
+    if (typeof item.id === "string" && item.id.length > 0) current.id = item.id;
+    const fn = isRecord(item.function) ? item.function : {};
+    if (typeof fn.name === "string" && fn.name.length > 0) current.name = fn.name;
+    if (typeof fn.arguments === "string") current.args += fn.arguments;
+    tools.set(index, current);
+  });
 };
 
 const eventStreamText = (response: unknown): string | null => {

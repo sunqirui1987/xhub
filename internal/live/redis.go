@@ -314,10 +314,10 @@ func (c *Client) TakeSpend() map[string]float64 {
 
 // SpendLog is one spend log waiting in the queue to be written to PostgreSQL.
 type SpendLog struct {
-	RequestID    string  `json:"request_id"`
-	CallType     string  `json:"call_type"`
-	Model        string  `json:"model"`
-	APIKey       string  `json:"api_key"`
+	RequestID string `json:"request_id"`
+	CallType  string `json:"call_type"`
+	Model     string `json:"model"`
+	APIKey    string `json:"api_key"`
 	// KeyID is the api_keys row id, which is what usage_events keys ownership
 	// by. APIKey stays the token hash, because that is the live-spend reference.
 	KeyID        string  `json:"key_id,omitempty"`
@@ -337,6 +337,14 @@ type SpendLog struct {
 	Messages     string  `json:"messages,omitempty"`
 	Response     string  `json:"response,omitempty"`
 	ProxyRequest string  `json:"proxy_server_request,omitempty"`
+	TTFTMs       *int    `json:"ttft_ms,omitempty"`
+	KeyHash      string  `json:"key_hash,omitempty"`
+	KeyAlias     string  `json:"key_alias,omitempty"`
+	TeamAlias    string  `json:"team_alias,omitempty"`
+	Provider     string  `json:"provider,omitempty"`
+	CachedTokens *int    `json:"cached_tokens,omitempty"`
+	SessionID    string  `json:"session_id,omitempty"`
+	CacheKey     string  `json:"cache_key,omitempty"`
 }
 
 // EnqueueLog pushes a log onto the Redis list. The request path does only this step.
@@ -476,4 +484,24 @@ func (c *Client) DrainLogs(n int) []SpendLog {
 		out = append(out, row)
 	}
 	return out
+}
+
+// GetString reads one Redis string. A missing key returns ok false.
+func (c *Client) GetString(ctx context.Context, key string) (string, bool) {
+	if c == nil || c.rdb == nil || key == "" {
+		return "", false
+	}
+	v, err := c.rdb.Get(ctx, key).Result()
+	if err != nil || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
+// SetString stores one Redis string with a TTL. A nil client does nothing.
+func (c *Client) SetString(ctx context.Context, key, value string, ttl time.Duration) {
+	if c == nil || c.rdb == nil || key == "" {
+		return
+	}
+	_ = c.rdb.Set(ctx, key, value, ttl).Err()
 }

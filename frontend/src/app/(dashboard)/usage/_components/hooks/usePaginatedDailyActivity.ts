@@ -262,9 +262,8 @@ export function usePaginatedDailyActivity({
           setProgress({ currentPage: 1, totalPages: 1 });
           setLoading(false);
           return;
-        } catch (error) {
+        } catch {
           if (isStale()) return;
-          console.error("Aggregated daily activity failed, falling back to pagination:", error);
         }
       }
 

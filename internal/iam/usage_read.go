@@ -29,8 +29,15 @@ type UsageQuery struct {
 	KeyID     string
 	Model     string
 	Status    string
-	Limit     int
-	Offset    int
+	SessionID string
+	// TeamIDs, ExcludeTeamIDs and OrganizationIDs are caller filters. They only
+	// narrow a scope that was already decided; an empty slice adds no predicate,
+	// so it cannot turn into "every team".
+	TeamIDs         []string
+	ExcludeTeamIDs  []string
+	OrganizationIDs []string
+	Limit           int
+	Offset          int
 }
 
 // scopedSession builds a session with the scope and the shared filters applied.
@@ -63,15 +70,45 @@ func (q UsageQuery) scopedSession(db *DB, ctx context.Context, table string) *xo
 	if q.Status != "" {
 		s = s.And("status = ?", q.Status)
 	}
+	if q.SessionID != "" {
+		s = s.And("session_id = ?", q.SessionID)
+	}
+	return q.applyLists(s)
+}
+
+// applyLists adds the caller's id filters. Each one is optional. A filter that
+// is absent must not become a predicate, and a present filter is an AND, so it
+// can only remove rows the scope already allowed.
+func (q UsageQuery) applyLists(s *xorm.Session) *xorm.Session {
+	if len(q.TeamIDs) > 0 {
+		s = s.And(builder.In("team_id", q.TeamIDs))
+	}
+	if len(q.ExcludeTeamIDs) > 0 {
+		s = s.And(builder.NotIn("team_id", q.ExcludeTeamIDs))
+	}
+	if len(q.OrganizationIDs) > 0 {
+		s = s.And(builder.In("organization_id", q.OrganizationIDs))
+	}
 	return s
 }
 
+// maxUsageRead is the most events one read may return. The activity page asks
+// for the whole window it will fold; a log page asks for far fewer.
+const maxUsageRead = 5000
+
 // ListUsage returns usage events inside the scope, newest first.
+//
+// A missing limit is a page of logs. A caller that names a limit gets that
+// many rows, capped here. Clamping an over-large limit down to a small page
+// would make the usage screen report a sample as the whole window.
 func (db *DB) ListUsage(ctx context.Context, q UsageQuery) ([]UsageEvent, error) {
 	logTraceOnceRead.Do(func() { logx.Trace("enter iam.ListUsage") })
 	limit := q.Limit
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 {
 		limit = 100
+	}
+	if limit > maxUsageRead {
+		limit = maxUsageRead
 	}
 	var out []UsageEvent
 	err := q.scopedSession(db, ctx, "usage_events").Desc("ts").Limit(limit, q.Offset).Find(&out)
@@ -173,7 +210,7 @@ func (q UsageQuery) dailyScope(db *DB, ctx context.Context, tzMinutes int) *xorm
 	if q.Model != "" {
 		s = s.And("model = ?", q.Model)
 	}
-	return s
+	return q.applyLists(s)
 }
 
 // DailyUsage totals the roll-up per day inside the scope.

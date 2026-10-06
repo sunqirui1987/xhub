@@ -193,7 +193,9 @@ export function LogDetailsDrawer({
 
   const currentLog = useMemo(() => {
     if (!isSessionMode) return logEntry;
-    if (!sessionLogs.length) return null;
+    // The clicked row stays visible while the rest of the session loads, and
+    // if that fetch fails. An empty session list used to close the drawer.
+    if (!sessionLogs.length) return logEntry;
     const fallbackLog = mostRecentLog ?? sessionLogs[0];
     if (selectedSessionRequestId) {
       return sessionLogs.find((row) => row.request_id === selectedSessionRequestId) || fallbackLog;

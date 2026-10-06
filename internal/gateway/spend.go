@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -135,14 +136,26 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		spend = 0
 		tokens = 0
 	}
+	note := s.takeNote(callID)
 	row := live.SpendLog{
 		RequestID: callID, CallType: callType, Model: alias, APIKey: hash,
 		KeyID:  p.KeyID,
 		Prompt: pt, Completion: ct, Spend: spend, SpendValid: true,
 		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
-		CacheHit: cacheHit, Status: rowStatus, OwnerType: ownerType,
+		CacheHit: cacheHit || note.CacheHit, Status: rowStatus, OwnerType: ownerType,
 		TeamID: teamID, UserID: userID, OrgID: orgID, ProjectID: projectID,
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
+		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
+		SessionID: note.SessionID, CachedTokens: cachedTokens(usage),
+	}
+	if p != nil && p.Key != nil {
+		row.KeyHash = p.Key.TokenHash
+		row.KeyAlias = p.Key.Name
+	}
+	if teamID != "" && s.IAM != nil {
+		if team, err := s.IAM.GetTeam(context.Background(), teamID); err == nil && team != nil {
+			row.TeamAlias = team.Name
+		}
 	}
 	if s.Live != nil && s.Live.EnqueueSpend(row) == nil {
 		return
@@ -157,14 +170,7 @@ func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchang
 	}
 	// The event, its stored bodies, the daily roll-up and all five billing scopes
 	// commit together and deduplicate by request_id.
-	rec := iam.UsageRecord{
-		RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
-		UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
-		Model: row.Model, CallType: row.CallType, Status: row.Status,
-		PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
-		DurationMS:  int(end.Sub(start).Milliseconds()),
-		RequestBody: ex.messages, ResponseBody: ex.response,
-	}
+	rec := usageFromSpend(row, spend, ex.messages, ex.response, ex.proxy, start, end)
 	if err := s.IAM.RecordUsage(context.Background(), []iam.UsageRecord{rec}); err != nil {
 		logx.Error("persist spend failed: %v", err)
 	}
@@ -203,6 +209,40 @@ func (s *Server) teamOrg(teamID string) string {
 }
 
 // deref reads an optional string. A nil pointer is the empty string.
+func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy string, start, end time.Time) iam.UsageRecord {
+	return iam.UsageRecord{
+		RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
+		UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
+		Model: row.Model, CallType: row.CallType, Status: row.Status,
+		PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
+		DurationMS:  int(end.Sub(start).Milliseconds()),
+		RequestBody: messages, ResponseBody: response, ProxyRequest: proxy,
+		EndedAt: end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
+		KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
+		Provider: row.Provider, CachedTokens: row.CachedTokens,
+		SessionID: row.SessionID, CacheKey: row.CacheKey,
+	}
+}
+
+func cachedTokens(usage map[string]any) *int {
+	if usage == nil {
+		return nil
+	}
+	details, _ := usage["prompt_tokens_details"].(map[string]any)
+	if details == nil {
+		details, _ = usage["input_tokens_details"].(map[string]any)
+	}
+	if details == nil {
+		return nil
+	}
+	raw, ok := details["cached_tokens"]
+	if !ok {
+		return nil
+	}
+	n := asInt(raw)
+	return &n
+}
+
 func deref(s *string) string {
 	if s == nil {
 		return ""
@@ -323,6 +363,8 @@ func assembleLoggedResponse(raw []byte, parsed any) any {
 	var completed map[string]any
 	var outputText strings.Builder
 	var chat strings.Builder
+	var reasoning strings.Builder
+	tools := map[int]*streamTool{}
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimPrefix(line, "data:")
@@ -350,6 +392,10 @@ func assembleLoggedResponse(raw []byte, parsed any) any {
 				if part, ok := delta["content"].(string); ok {
 					chat.WriteString(part)
 				}
+				if part, ok := delta["reasoning_content"].(string); ok {
+					reasoning.WriteString(part)
+				}
+				appendStreamTools(tools, delta["tool_calls"])
 			}
 			if msg, ok := choice["message"].(map[string]any); ok {
 				if part, ok := msg["content"].(string); ok && part != "" {
@@ -370,14 +416,76 @@ func assembleLoggedResponse(raw []byte, parsed any) any {
 			}},
 		}
 	}
-	if chat.Len() > 0 {
-		return map[string]any{
-			"choices": []any{map[string]any{
-				"message": map[string]any{"role": "assistant", "content": chat.String()},
-			}},
+	if chat.Len() > 0 || reasoning.Len() > 0 || len(tools) > 0 {
+		msg := map[string]any{"role": "assistant", "content": chat.String()}
+		if reasoning.Len() > 0 {
+			msg["reasoning_content"] = reasoning.String()
 		}
+		if calls := streamToolCalls(tools); len(calls) > 0 {
+			msg["tool_calls"] = calls
+		}
+		return map[string]any{"choices": []any{map[string]any{"message": msg}}}
 	}
 	return nil
+}
+
+type streamTool struct {
+	id   string
+	name string
+	args strings.Builder
+}
+
+func appendStreamTools(dst map[int]*streamTool, raw any) {
+	list, _ := raw.([]any)
+	for _, item := range list {
+		call, _ := item.(map[string]any)
+		idx := 0
+		switch n := call["index"].(type) {
+		case float64:
+			idx = int(n)
+		case int:
+			idx = n
+		}
+		tool := dst[idx]
+		if tool == nil {
+			tool = &streamTool{}
+			dst[idx] = tool
+		}
+		if id, ok := call["id"].(string); ok && id != "" {
+			tool.id = id
+		}
+		fn, _ := call["function"].(map[string]any)
+		if name, ok := fn["name"].(string); ok && name != "" {
+			tool.name = name
+		}
+		if args, ok := fn["arguments"].(string); ok {
+			tool.args.WriteString(args)
+		}
+	}
+}
+
+func streamToolCalls(tools map[int]*streamTool) []any {
+	if len(tools) == 0 {
+		return nil
+	}
+	indexes := make([]int, 0, len(tools))
+	for idx := range tools {
+		indexes = append(indexes, idx)
+	}
+	sort.Ints(indexes)
+	out := make([]any, 0, len(indexes))
+	for _, idx := range indexes {
+		tool := tools[idx]
+		out = append(out, map[string]any{
+			"id":   tool.id,
+			"type": "function",
+			"function": map[string]any{
+				"name":      tool.name,
+				"arguments": tool.args.String(),
+			},
+		})
+	}
+	return out
 }
 
 func looksLikeEventStream(raw []byte) bool {

@@ -191,6 +191,9 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
         return entityItem.label;
       }
     }
+    if (metadata?.organization_alias) {
+      return metadata.organization_alias;
+    }
     // Fallback to team_alias for backward compatibility
     if (metadata?.team_alias) {
       return metadata.team_alias;
