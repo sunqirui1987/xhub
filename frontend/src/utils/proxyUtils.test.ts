@@ -61,7 +61,10 @@ describe("fetchProxySettings", () => {
 
   it("returns null without logging when the account cannot read management settings", async () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(getProxyUISettings).mockRejectedValue(new Error("Not allowed to access management endpoints"));
+    vi.mocked(getProxyUISettings).mockRejectedValue({
+      message: "Not allowed to access management endpoints",
+      status: 403,
+    });
 
     expect(await fetchProxySettings("test-token")).toBeNull();
     expect(consoleSpy).not.toHaveBeenCalled();

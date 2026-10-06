@@ -22,12 +22,21 @@ func TestEveryServerFileUsesLeveledLogger(t *testing.T) {
 			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return err
 			}
+			rel, _ := filepath.Rel(root, path)
+			rel = filepath.ToSlash(rel)
+			// testSupportDir holds fixture plumbing that only _test.go files
+			// import. It is not a server file, so it has no process event to
+			// report, and a leveled call in it would be noise. The exemption is
+			// checked below rather than trusted: if a non-test file ever starts
+			// importing it, this test fails and the file has to log.
+			if strings.HasPrefix(rel, testSupportDir) {
+				return nil
+			}
 			body, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
-			rel, _ := filepath.Rel(root, path)
-			if filepath.ToSlash(rel) == "internal/logx/log.go" {
+			if rel == "internal/logx/log.go" {
 				if !definesLevels(string(body)) {
 					t.Fatalf("%s does not define trace, debug, info, and error", rel)
 				}
@@ -53,10 +62,53 @@ func TestEveryServerFileUsesLeveledLogger(t *testing.T) {
 	if len(missing) > 0 {
 		t.Fatalf("files with no leveled log call:\n%s", strings.Join(missing, "\n"))
 	}
+	assertTestSupportIsTestOnly(t, root)
 	for _, level := range []string{"trace", "debug", "info", "error"} {
 		if !used[level] {
 			t.Fatalf("level %s is unused", level)
 		}
+	}
+}
+
+// testSupportDir is the one package exempt from the leveled-log rule.
+const testSupportDir = "internal/testsupport/"
+
+// assertTestSupportIsTestOnly holds the exemption to its justification.
+//
+// The walk above skips internal/testsupport because only _test.go files import
+// it, which is what makes it not a server file. That is a claim about the
+// import graph rather than a property of the directory, so it is checked here:
+// the moment a production file imports the package, the exemption is wrong and
+// this fails rather than letting an unlogged server file through.
+func assertTestSupportIsTestOnly(t *testing.T, root string) {
+	t.Helper()
+	var importers []string
+	for _, dir := range []string{"cmd", "internal"} {
+		err := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(root, path)
+			rel = filepath.ToSlash(rel)
+			if strings.HasPrefix(rel, testSupportDir) {
+				return nil
+			}
+			if strings.Contains(string(body), "xhub/internal/testsupport") {
+				importers = append(importers, rel)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(importers) > 0 {
+		t.Fatalf("internal/testsupport is exempt from leveled logging because only tests import it, but these server files import it:\n%s",
+			strings.Join(importers, "\n"))
 	}
 }
 

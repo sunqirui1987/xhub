@@ -26,6 +26,7 @@ import { VectorStoreViewer } from "../VectorStoreViewer";
 import { TruncatedValue } from "./TruncatedValue";
 import { TokenFlow } from "./TokenFlow";
 import { JsonViewer } from "./JsonViewer";
+import { loggedResponse } from "./prettyMessagesUtils";
 import { RoutingDecisionCard, type RoutingDecision } from "./RoutingDecisionCard";
 import {
   formatData,
@@ -108,7 +109,7 @@ export function LogDetailContent({ logEntry, isLoadingDetails = false, accessTok
         },
       };
     }
-    return formatData(logEntry.response);
+    return loggedResponse(formatData(logEntry.response));
   };
 
   return (

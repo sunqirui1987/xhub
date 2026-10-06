@@ -1,5 +1,7 @@
 # 00 范围与现状
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：审查结论与待实施设计。审查对象是 2026-10-02 的当前工作区，包含已有未提交改动；没有以干净主分支替换用户代码。结论描述可观察的代码行为，未运行真实付费供应商调用。
 
 ## 范围与交付边界
@@ -13,10 +15,10 @@
 | 编号 / 优先级 | 代码证据 | 当前判断 | 目标 |
 | --- | --- | --- | --- |
 | F01 / P0 | internal/gateway/models/access.go：membershipScopes、entitiesForIDs、effectiveScope | 部分实体读取错误被忽略，限制可能缺失；无 DB 时返回不受限 | 带错误的统一权限决策，关键读失败拒绝 |
-| F02 / P0 | internal/gateway/session.go：lookupSession | 签名 JWT 验证成功即可形成会话，不强制检查服务端记录；内存会话也需撤销失效 | 服务端撤销记录与权限版本 |
+| F02 / P0 | internal/gateway/session.go：lookupSession、sessionRec | 已修复：会话记录保存签发时的 `session_version`，角色每次请求从用户行读取；禁用、删除、改密码都会递增版本，使该用户已开的会话全部失效 | 保持版本校验，勿把角色写回会话 |
 | F03 / P0 | internal/gateway/limits.go：enforceIdentityLimits、withCredential、enforceRedisRateLimits；internal/live/redis.go：HotSpend | 密钥刷新失败保留旧值，凭据读错不传播，限流失败放行，热支出错误趋向零 | 无法确认身份、预算、凭据或强制限流时拒绝 |
 | F04 / P0 | internal/gateway/spend.go：recordSpend、persistSpend | 多处写错被忽略，非 Redis 分别更新实体及日志；缺少统一事务 | 账本、终态、聚合一致提交 |
-| F05 / P0 | internal/store/spend_batch.go：ApplySpendBatch | seen 只包含入库前已有 ID，循环未标记本批新 ID；同批重复可能重复累计或导致整批失败 | 唯一约束和事务冲突处理，不依赖进程 mutex |
+| F05 / P0 | ~~internal/store/spend_batch.go：ApplySpendBatch~~ 该文件已在 9a82514 删除；现实现见 internal/iam/usage.go：RecordUsage / insertEvent | 已修复：`insertEvent` 用 `ON CONFLICT (request_id) DO NOTHING` 返回是否新事件，只有新事件才累加日汇总与作用域支出，且整批在同一事务内 | 保持该不变量，补并发重放测试 |
 | F06 / P0 | internal/gateway/spend.go：writeCacheHit | 原始 usage 再走普通 Cost 与 recordSpend，可重复收生成费 | 独立缓存命中用量及费用 |
 | F07 / P1 | internal/gateway/models/available.go：Available | 有权限过滤、阻断与非模型过滤，但未检查适配器/凭据/有效部署/健康 | 统一 AvailabilityService |
 | F08 / P1 | internal/gateway/spend.go：CallType 固定 chat；writeChatJSON 的 audio_speech 固定 8/2/10 | 操作类型与真实媒体用量不一致 | 按操作提取并标明未知或估算 |
@@ -34,7 +36,9 @@ P0 表示可能破坏权限或账务一致性，应阻断生产开放；P1 表�
 
 部分实现：当前账号模型过滤、session 到推理身份转换、预算/限流、多模型重试、流式响应记录、用量报表、历史日志归属。
 
-本方案提出、尚未实现：能力级授权、可撤销会话统一协议、不可变请求/尝试/结算事件、跨预算主体原子预占、统一多维 usage、通用传输、完整异步媒体状态机及 Seedance 2.0 验收。
+本方案提出、尚未实现：预算预占与结算账本（当前只有 `iam.RecordUsage` 写入用量与支出，没有 reservation/ledger 与跨主体原子预占）、不可变请求/尝试/结算事件、统一多维 usage（当前 `call_type` 仍以 chat 为主）、通用传输层、完整异步媒体状态机及 Seedance 2.0 验收。
+
+本方案提出、**已经实现**：能力级授权（`internal/authz/decide.go` 的 `Action` 集合与 `decide`）、可撤销会话（`session_version` 校验）、按作用域收窄的列表（`docs/current/16-permissions.md` 与 `internal/gateway/visibility_chain_test.go` 逐层验证）、用户创建的事务性多步写入。
 
 ## 可复现的诊断边界
 

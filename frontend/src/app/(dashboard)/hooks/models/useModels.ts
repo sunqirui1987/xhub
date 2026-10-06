@@ -2,6 +2,7 @@ import { useQuery, useInfiniteQuery, useQueryClient, UseQueryResult } from "@tan
 import { createQueryKeys } from "../common/queryKeysFactory";
 import { modelInfoCall, modelHubCall, modelAvailableCall } from "@/components/networking";
 import useAuthorized from "../useAuthorized";
+import { canAccessManagement } from "@/utils/roles";
 import { EndpointType, isModeCompatibleWithEndpoint } from "@/components/chat_ui/mode_endpoint_mapping";
 
 export interface ProxyModel {
@@ -81,7 +82,7 @@ export const useModelsInfo = (
         accessGroup,
         wildcardOnly,
       ),
-    enabled: Boolean(accessToken && userId && userRole),
+    enabled: Boolean(accessToken && userId && userRole) && canAccessManagement(userRole),
   });
 };
 
@@ -207,7 +208,7 @@ const useDeployments = <TSelected>(
   return useQuery<AutoRouterDeployment[], Error, TSelected>({
     queryKey: autoRouterListKey(userId, userRole),
     queryFn: async () => await fetchAllModelDeployments(accessToken!, userId!, userRole!),
-    enabled: Boolean(accessToken && userId && userRole),
+    enabled: Boolean(accessToken && userId && userRole) && canAccessManagement(userRole),
     select,
   });
 };
@@ -235,11 +236,11 @@ export const useInvalidateAutoRouters = (): (() => Promise<void>) => {
 };
 
 export const useModelHub = () => {
-  const { accessToken } = useAuthorized();
+  const { accessToken, userRole } = useAuthorized();
   return useQuery({
     queryKey: modelHubKeys.list({}),
     queryFn: async () => await modelHubCall(accessToken!),
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && canAccessManagement(userRole),
   });
 };
 
@@ -294,6 +295,6 @@ export const useInfiniteModelInfo = (size: number = 50, search?: string) => {
       }
       return undefined;
     },
-    enabled: Boolean(accessToken && userId && userRole),
+    enabled: Boolean(accessToken && userId && userRole) && canAccessManagement(userRole),
   });
 };

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // verifyChain signs in as each verification account and checks the listing
@@ -92,11 +94,17 @@ func verifyChain(base string) error {
 	for _, check := range checks {
 		got, err := check.who.names(check.path, check.wrap, check.field)
 		if err != nil {
+			// Only the check name is logged. The error can carry a response
+			// body, and a login body holds a session token, which logx does
+			// not recognise: it redacts bearer and sk- values, not sess-.
+			logx.Error("seed verify %s: read failed", check.name)
 			return fmt.Errorf("%s: %w", check.name, err)
 		}
 		if err := expectSet(check.name, got, check.present, check.absent); err != nil {
+			logx.Error("seed verify %s: scope wrong", check.name)
 			return err
 		}
+		logx.Debug("seed verify %s: ok", check.name)
 	}
 
 	orgs, err := orgA.names("/organization/list", "", "organization_alias")

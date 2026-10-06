@@ -28,6 +28,10 @@ function getSnapshot() {
   return getLocalStorageItem("disableBouncingIcon") === "true";
 }
 
+function getServerSnapshot() {
+  return false;
+}
+
 export function useDisableBouncingIcon() {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

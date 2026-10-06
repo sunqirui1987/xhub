@@ -94,7 +94,27 @@ export const extractProxyErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     return unwrapProxyErrorMessage(error.message);
   }
-  return unwrapProxyErrorMessage(String(error));
+  return unwrapProxyErrorMessage(readErrorMessage(error) || String(error));
+};
+
+// The gateway answers a non-administrator with one of these. They are a normal
+// result for that account, not a failed page.
+const QUIET_ACCESS_DENIALS = [
+  "Not allowed to access management endpoints",
+  "this credential cannot list deployments",
+];
+
+export const readErrorMessage = (error: unknown): string => {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  return "";
+};
+
+export const isQuietAccessDenial = (error: unknown): boolean => {
+  const message = readErrorMessage(error);
+  return QUIET_ACCESS_DENIALS.some((part) => message.includes(part));
 };
 
 export interface ApiClientConfig {
@@ -102,7 +122,7 @@ export interface ApiClientConfig {
   getBaseUrl: () => string;
   /** Resolves the auth header name at call time. Defaults to "Authorization". */
   getAuthHeaderName?: () => string;
-  /** Invoked with the derived message right before a non-2xx response throws. Fire-and-forget. */
+  /** Invoked with the derived message when a non-2xx response is rejected. Skipped for an expected access denial. Fire-and-forget. */
   onError?: (message: string) => void | Promise<void>;
   /** Injectable fetch implementation; defaults to the global. */
   fetchImpl?: typeof fetch;
@@ -173,8 +193,15 @@ export function createApiClient(config: ApiClientConfig): ApiClient {
       } catch {
         message = raw || `HTTP ${response.status}`;
       }
+      // A management 403 is the account's normal answer. Reject a plain result
+      // instead of throwing ApiError: Next.js draws console.error(Error) as a
+      // full-page overlay whose stack is this frame. Callers catch this and
+      // continue; this function does not log it.
+      if (isQuietAccessDenial(message)) {
+        return Promise.reject({ message, status: response.status, body: errorBody });
+      }
       onError?.(message);
-      throw new ApiError(message, response.status, errorBody);
+      return Promise.reject(new ApiError(message, response.status, errorBody));
     }
 
     const text = await response.text();

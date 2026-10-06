@@ -1,5 +1,7 @@
 # 11 可观测性与报表
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：已有支出日志及每日活动报表；internal/gateway/usage/activity.go 的 loadActivity 忽略 ListSpendLogs/ListKeys 错误，selectActivity 用当前 key 补历史归属、以当前 catalog.CostMap 推 provider，再把全部记录载入进程聚合。这会混淆历史身份、数据失败与真实零值，规模增大时也不能稳定分页。
 
 ## 事实与口径

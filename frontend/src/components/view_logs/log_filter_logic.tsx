@@ -166,6 +166,8 @@ export function useLogFilterLogic({
       const window = formatLogsWindow(startTime, endTime, isCustomDate);
 
       const userIdFilter = getFilterValue(columnFilters, LOG_FILTER_IDS.USER_ID);
+      const pickedModel = getFilterValue(columnFilters, LOG_FILTER_IDS.MODEL_ID);
+      const typedModel = getFilterValue(columnFilters, LOG_FILTER_IDS.PUBLIC_MODEL_OR_SEARCH_TOOL);
 
       return await uiSpendLogsCall({
         accessToken,
@@ -183,8 +185,8 @@ export function useLogFilterLogic({
           end_user: getFilterValue(columnFilters, LOG_FILTER_IDS.END_USER),
           status_filter: getFilterValue(columnFilters, LOG_FILTER_IDS.STATUS),
           cache_hit_filter: getFilterValue(columnFilters, LOG_FILTER_IDS.CACHE_STATUS),
-          model_id: getFilterValue(columnFilters, LOG_FILTER_IDS.MODEL_ID),
-          model: getFilterValue(columnFilters, LOG_FILTER_IDS.PUBLIC_MODEL_OR_SEARCH_TOOL),
+          model_id: pickedModel,
+          model: typedModel || pickedModel,
           key_alias: getFilterValue(columnFilters, LOG_FILTER_IDS.KEY_ALIAS),
           error_code: getFilterValue(columnFilters, LOG_FILTER_IDS.ERROR_CODE),
           error_message: getFilterValue(columnFilters, LOG_FILTER_IDS.ERROR_MESSAGE),

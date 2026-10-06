@@ -141,6 +141,34 @@ describe("modelInfoCall", () => {
     expect(parsed.searchParams.get("page")).toBe("2");
     expect(parsed.searchParams.get("exclude_auto_routers")).toBe("true");
   });
+
+  it("returns an empty page and does not toast when the account cannot list deployments", async () => {
+    const { toast } = await import("@/lib/toast");
+    const info = vi.spyOn(toast, "info").mockImplementation(() => undefined);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      text: async () =>
+        JSON.stringify({
+          error: {
+            code: "403",
+            message: "this credential cannot list deployments",
+            param: null,
+            type: "forbidden",
+          },
+        }),
+    }) as any;
+
+    await expect(Networking.modelInfoCall("token", "user", "Internal User")).resolves.toEqual({
+      data: [],
+      total_count: 0,
+      current_page: 1,
+      total_pages: 0,
+      size: 50,
+    });
+    expect(info).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
 });
 
 describe("daily activity helpers", () => {

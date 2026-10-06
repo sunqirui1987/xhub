@@ -141,8 +141,29 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 			"organization_id":     e.OrganizationID,
 			"messages":            []any{},
 			"response":            map[string]any{},
+			"metadata":            map[string]any{"cost_breakdown": costBreakdown(e.Model, e.PromptTokens, e.CompletionTokens, e.Cost)},
 		})
 	}
+	return out
+}
+
+// costBreakdown is the bill for one call: each side is tokens times the price
+// map's per-token rate, and the stored cost is what was actually charged.
+// A model that is not in the price map still reports the charged total, with
+// the two sides omitted rather than invented.
+func costBreakdown(model string, prompt, completion int, charged float64) map[string]any {
+	out := map[string]any{"total_cost": charged}
+	inRate, outRate, ok := catalog.TokenRates(model)
+	if !ok {
+		return out
+	}
+	input := float64(prompt) * inRate
+	output := float64(completion) * outRate
+	out["input_cost"] = input
+	out["output_cost"] = output
+	out["original_cost"] = input + output
+	out["input_cost_per_token"] = inRate
+	out["output_cost_per_token"] = outRate
 	return out
 }
 

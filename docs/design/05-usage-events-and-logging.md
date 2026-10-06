@@ -1,5 +1,7 @@
 # 05 用量事件与日志
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：已有 SpendLog 与可选 promptExchange；当前 recordSpend 主要按 prompt/completion token 记录成功调用，CallType 固定 chat，部分媒体响应填固定 8/2/10。证据：internal/gateway/spend.go、internal/gateway/family/handlers.go。待实施统一 RequestEvent、Attempt 和 Usage，不再把“无可计费用量”理解为“不需要日志”。
 
 ## 三种事实

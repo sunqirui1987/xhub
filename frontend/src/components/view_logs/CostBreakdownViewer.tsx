@@ -13,6 +13,8 @@ export interface CostBreakdown {
   tool_usage_cost?: number;
   additional_costs?: Record<string, number>;
   original_cost?: number;
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
   discount_percent?: number;
   discount_amount?: number;
   margin_percent?: number;
@@ -34,6 +36,11 @@ interface CostBreakdownViewerProps {
 const formatCost = (cost: number | undefined): string => {
   if (cost === undefined || cost === null) return "-";
   return `$${formatNumberWithCommas(cost, 8)}`;
+};
+
+const rateLine = (tokens: number | undefined, unit: string, rate: number | undefined): string | null => {
+  if (tokens === undefined || rate === undefined || rate === null) return null;
+  return `${tokens.toLocaleString("en-US")} ${unit} × ${formatCost(rate)}/token`;
 };
 
 const formatPercent = (percent: number | undefined): string => {
@@ -88,8 +95,16 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
   // When cached, show $0 (authoritative total) instead of pre-cache costs from cost_breakdown
   const inputCost = isCached ? 0 : costBreakdown?.input_cost;
   const outputCost = isCached ? 0 : costBreakdown?.output_cost;
-  const originalCost = isCached ? 0 : costBreakdown?.original_cost;
+  const pricedOriginal =
+    inputCost !== undefined || outputCost !== undefined ? (inputCost ?? 0) + (outputCost ?? 0) : undefined;
+  const originalCost = isCached ? 0 : costBreakdown?.original_cost ?? pricedOriginal;
   const totalCost = isCached ? 0 : costBreakdown?.total_cost ?? totalSpend;
+  const inputRateLine = isCached
+    ? null
+    : rateLine(promptTokens, "prompt tokens", costBreakdown?.input_cost_per_token);
+  const outputRateLine = isCached
+    ? null
+    : rateLine(completionTokens, "completion tokens", costBreakdown?.output_cost_per_token);
 
   return (
     <div className="bg-card rounded-lg shadow-sm w-full max-w-full overflow-hidden mb-6">
@@ -101,9 +116,9 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
             <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
           )}
           <div className="flex items-center justify-between w-full">
-            <h3 className="text-lg font-medium text-foreground">{t("Cost Breakdown")}</h3>
+            <h3 className="text-lg font-medium text-foreground">Cost Breakdown</h3>
             <div className="flex items-center space-x-2 mr-4">
-              <span className="text-sm text-muted-foreground">{t("Total:")}</span>
+              <span className="text-sm text-muted-foreground">Total:</span>
               <span className="text-sm font-semibold text-foreground">
                 {formatCost(totalSpend)}
                 {isCached && t("(Cached)")}
@@ -128,7 +143,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                   return (
                     <>
                       <div className="flex text-sm">
-                        <span className="text-muted-foreground font-medium w-1/3">{t("Input Cost:")}</span>
+                        <span className="text-muted-foreground font-medium w-1/3">Input Cost:</span>
                         <span className="text-foreground">
                           {formatCost(rawCost)}
                           {rawInputTokens !== undefined && rawInputTokens !== null && (
@@ -140,7 +155,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                       </div>
                       {(costBreakdown?.cache_read_cost ?? 0) > 0 && (
                         <div className="flex text-sm">
-                          <span className="text-muted-foreground font-medium w-1/3">{t("Prompt Cache Read Cost:")}</span>
+                          <span className="text-muted-foreground font-medium w-1/3">Prompt Cache Read Cost:</span>
                           <span className="text-foreground">
                             {formatCost(isCached ? 0 : costBreakdown?.cache_read_cost)}
                             {(cacheReadTokens ?? 0) > 0 && (
@@ -153,7 +168,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                       )}
                       {(costBreakdown?.cache_creation_cost ?? 0) > 0 && (
                         <div className="flex text-sm">
-                          <span className="text-muted-foreground font-medium w-1/3">{t("Prompt Cache Write Cost:")}</span>
+                          <span className="text-muted-foreground font-medium w-1/3">Prompt Cache Write Cost:</span>
                           <span className="text-foreground">
                             {formatCost(isCached ? 0 : costBreakdown?.cache_creation_cost)}
                             {(cacheCreationTokens ?? 0) > 0 && (
@@ -169,30 +184,32 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                 }
                 return (
                   <div className="flex text-sm">
-                    <span className="text-muted-foreground font-medium w-1/3">{t("Input Cost:")}</span>
+                    <span className="text-muted-foreground font-medium w-1/3">Input Cost:</span>
                     <span className="text-foreground">
                       {formatCost(inputCost)}
-                      {promptTokens !== undefined && (
+                      {(inputRateLine || promptTokens !== undefined) && (
                         <span className="text-muted-foreground font-normal ml-1">
-                          {t("({value0} prompt tokens)", { value0: (promptTokens.toLocaleString()) })}</span>
+                          ({inputRateLine ?? `${promptTokens!.toLocaleString("en-US")} prompt tokens`})
+                        </span>
                       )}
                     </span>
                   </div>
                 );
               })()}
               <div className="flex text-sm">
-                <span className="text-muted-foreground font-medium w-1/3">{t("Output Cost:")}</span>
+                <span className="text-muted-foreground font-medium w-1/3">Output Cost:</span>
                 <span className="text-foreground">
                   {formatCost(outputCost)}
-                  {completionTokens !== undefined && (
+                  {(outputRateLine || completionTokens !== undefined) && (
                     <span className="text-muted-foreground font-normal ml-1">
-                      {t("({value0} completion tokens)", { value0: (completionTokens.toLocaleString()) })}</span>
+                      ({outputRateLine ?? `${completionTokens!.toLocaleString("en-US")} completion tokens`})
+                    </span>
                   )}
                 </span>
               </div>
               {costBreakdown?.tool_usage_cost !== undefined && costBreakdown.tool_usage_cost > 0 && (
                 <div className="flex text-sm">
-                  <span className="text-muted-foreground font-medium w-1/3">{t("Tool Usage Cost:")}</span>
+                  <span className="text-muted-foreground font-medium w-1/3">Tool Usage Cost:</span>
                   <span className="text-foreground">{formatCost(costBreakdown.tool_usage_cost)}</span>
                 </div>
               )}
@@ -211,7 +228,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
             {!isCached && (
               <div className="pt-2 border-t border-border max-w-2xl">
                 <div className="flex text-sm font-semibold">
-                  <span className="text-foreground w-1/3">{t("Original LLM Cost:")}</span>
+                  <span className="text-foreground w-1/3">Original LLM Cost:</span>
                   <span className="text-foreground">{formatCost(originalCost)}</span>
                 </div>
               </div>
@@ -226,13 +243,13 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                     {costBreakdown.discount_percent !== undefined && costBreakdown.discount_percent !== 0 && (
                       <div className="flex text-sm text-muted-foreground">
                         <span className="font-medium w-1/3">
-                          {t("Discount ({value0}):", { value0: (formatPercent(costBreakdown.discount_percent)) })}</span>
+                          Discount ({formatPercent(costBreakdown.discount_percent)}):</span>
                         <span className="text-foreground">-{formatCost(costBreakdown.discount_amount)}</span>
                       </div>
                     )}
                     {costBreakdown.discount_amount !== undefined && costBreakdown.discount_percent === undefined && (
                       <div className="flex text-sm text-muted-foreground">
-                        <span className="font-medium w-1/3">{t("Discount Amount:")}</span>
+                        <span className="font-medium w-1/3">Discount Amount:</span>
                         <span className="text-foreground">-{formatCost(costBreakdown.discount_amount)}</span>
                       </div>
                     )}
@@ -245,7 +262,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                     {costBreakdown.margin_percent !== undefined && costBreakdown.margin_percent !== 0 && (
                       <div className="flex text-sm text-muted-foreground">
                         <span className="font-medium w-1/3">
-                          {t("Margin ({value0}):", { value0: (formatPercent(costBreakdown.margin_percent)) })}</span>
+                          Margin ({formatPercent(costBreakdown.margin_percent)}):</span>
                         <span className="text-foreground">
                           +
                           {formatCost(
@@ -256,7 +273,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                     )}
                     {costBreakdown.margin_fixed_amount !== undefined && costBreakdown.margin_fixed_amount !== 0 && (
                       <div className="flex text-sm text-muted-foreground">
-                        <span className="font-medium w-1/3">{t("Margin:")}</span>
+                        <span className="font-medium w-1/3">Margin:</span>
                         <span className="text-foreground">+{formatCost(costBreakdown.margin_fixed_amount)}</span>
                       </div>
                     )}
@@ -268,7 +285,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
             {/* Final Summary */}
             <div className="mt-4 pt-4 border-t border-border max-w-2xl">
               <div className="flex items-center">
-                <span className="font-bold text-sm text-foreground w-1/3">{t("Final Calculated Cost:")}</span>
+                <span className="font-bold text-sm text-foreground w-1/3">Final Calculated Cost:</span>
                 <span className="text-sm font-bold text-foreground">
                   {formatCost(totalCost)}
                   {isCached && t("(Cached)")}

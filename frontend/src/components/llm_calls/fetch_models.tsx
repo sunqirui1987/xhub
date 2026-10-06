@@ -67,8 +67,7 @@ export const fetchAvailableModels = async (accessToken: string): Promise<ModelGr
       .filter((model: ModelGroup) => model.model_group !== "")
       .sort((a: ModelGroup, b: ModelGroup) => a.model_group.localeCompare(b.model_group));
     return Array.from(new Map(models.map((model) => [model.model_group, model])).values());
-  } catch (error) {
-    console.error("Error fetching model info:", error);
+  } catch {
     return [];
   }
 };

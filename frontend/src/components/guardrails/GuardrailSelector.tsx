@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Guardrail } from "./types";
 import { getGuardrailsList } from "../networking";
 import { MultiSelect } from "@/components/shared/MultiSelect";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { canAccessManagement } from "@/utils/roles";
 import { t } from "@/i18n";
 
 interface GuardrailSelectorProps {
@@ -13,12 +15,13 @@ interface GuardrailSelectorProps {
 }
 
 const GuardrailSelector: React.FC<GuardrailSelectorProps> = ({ onChange, value, className, accessToken, disabled }) => {
+  const { userRole } = useAuthorized();
   const [guardrails, setGuardrails] = useState<Guardrail[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchGuardrails = async () => {
-      if (!accessToken) return;
+      if (!accessToken || !canAccessManagement(userRole)) return;
 
       setLoading(true);
       try {
@@ -35,7 +38,7 @@ const GuardrailSelector: React.FC<GuardrailSelectorProps> = ({ onChange, value, 
     };
 
     fetchGuardrails();
-  }, [accessToken]);
+  }, [accessToken, userRole]);
 
   const handleGuardrailChange = (selectedValues: string[]) => {
     onChange(selectedValues);

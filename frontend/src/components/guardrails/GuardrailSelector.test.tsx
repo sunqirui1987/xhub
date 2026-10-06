@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as networking from "../networking";
 import GuardrailSelector from "./GuardrailSelector";
 
+const authState = { userRole: "Admin" };
+
 vi.mock("../networking");
+vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
+  default: () => ({ userRole: authState.userRole }),
+}));
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,
@@ -24,6 +29,7 @@ describe("GuardrailSelector", () => {
   const mockOnChange = vi.fn();
 
   beforeEach(() => {
+    authState.userRole = "Admin";
     vi.clearAllMocks();
   });
 
@@ -53,5 +59,11 @@ describe("GuardrailSelector", () => {
     await waitFor(() => {
       expect(networking.getGuardrailsList).toHaveBeenCalledWith(mockAccessToken);
     });
+  });
+
+  it("does not request guardrails for an account that cannot manage them", () => {
+    authState.userRole = "Internal User";
+    render(<GuardrailSelector accessToken={mockAccessToken} onChange={mockOnChange} value={[]} />);
+    expect(networking.getGuardrailsList).not.toHaveBeenCalled();
   });
 });

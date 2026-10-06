@@ -112,6 +112,7 @@ import {
   createApiClient,
   deriveErrorMessage,
   extractProxyErrorMessage,
+  isQuietAccessDenial,
   unwrapProxyErrorMessage,
 } from "@/lib/http/client";
 import { resolveApiBase, resolveGatewayApiBase } from "@/lib/http/resolveApiBase";
@@ -1748,13 +1749,19 @@ export const modelInfoCall = async (
     });
 
     if (!response.ok) {
-      let errorData = await response.text();
-      errorData += `error shown=${ModelListerrorShown}`;
+      const errorData = await response.text();
+      // 403 is the account's answer, not a page error. The logs filter and the
+      // auto-router badge used to toast the raw JSON, including "error shown=false".
+      if (response.status === 403 || isQuietAccessDenial(errorData)) {
+        return { data: [], total_count: 0, current_page: page, total_pages: 0, size };
+      }
+      let shown = errorData;
+      shown += `error shown=${ModelListerrorShown}`;
       if (!ModelListerrorShown) {
-        if (errorData.includes("No model list passed")) {
-          errorData = "No Models Exist. Click Add Model to get started.";
+        if (shown.includes("No model list passed")) {
+          shown = "No Models Exist. Click Add Model to get started.";
         }
-        toast.info(errorData);
+        toast.info(shown);
         ModelListerrorShown = true;
 
         if (errorTimer) clearTimeout(errorTimer);
@@ -1768,9 +1775,7 @@ export const modelInfoCall = async (
 
     const data = await response.json();
     return data;
-    // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
-    console.error("Failed to create key:", error);
     throw error;
   }
 };
@@ -1866,14 +1871,15 @@ export const skillHubPublicCall = async () => {
 
 export const modelHubCall = async (accessToken: string) => {
   /**
-   * Get all models on proxy
+   * Get all models on proxy. Platform administrators only; anyone else gets an empty list.
    */
   try {
     const data = await apiClient.get(`/model_group/info`, { accessToken });
     return data;
-    // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
-    console.error("Failed to create key:", error);
+    if (isQuietAccessDenial(error)) {
+      return { data: [] };
+    }
     throw error;
   }
 };
@@ -1951,7 +1957,9 @@ export const modelAvailableCall = async (
       },
     });
   } catch (error) {
-    console.error("Failed to create key:", error);
+    if (isQuietAccessDenial(error)) {
+      return { data: [] };
+    }
     throw error;
   }
 };
@@ -3694,7 +3702,14 @@ export const latestHealthChecksCall = async (accessToken: string) => {
 };
 
 export const getProxyUISettings = async (accessToken: string) => {
-  return await apiClient.get(`/sso/get/ui_settings`, { accessToken });
+  try {
+    return await apiClient.get(`/sso/get/ui_settings`, { accessToken });
+  } catch (error) {
+    if (isQuietAccessDenial(error)) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const getUISettings = async (accessToken: string) => {
@@ -3857,8 +3872,11 @@ export const getGuardrailsList = async (accessToken: string) => {
       });
 
       if (!fallbackResponse.ok) {
-        const errorData = await fallbackResponse.json();
-        const errorMessage = deriveErrorMessage(errorData);
+        const errorData = await fallbackResponse.json().catch(() => null);
+        const errorMessage = errorData ? deriveErrorMessage(errorData) : "";
+        if (isQuietAccessDenial(errorMessage)) {
+          return { guardrails: [] };
+        }
         handleError(errorMessage);
         throw new Error(errorMessage);
       }
@@ -5497,6 +5515,9 @@ export const tagListCall = async (
 
     if (!response.ok) {
       const errorData = await response.text();
+      if (isQuietAccessDenial(errorData)) {
+        return {};
+      }
       await handleError(errorData);
       return {};
     }
@@ -5504,7 +5525,9 @@ export const tagListCall = async (
     const data = await response.json();
     return data as TagListResponse;
   } catch (error) {
-    console.error("Error listing tags:", error);
+    if (!isQuietAccessDenial(error)) {
+      console.error("Error listing tags:", error instanceof Error ? error.message : error);
+    }
     throw error;
   }
 };

@@ -30,6 +30,10 @@ function getSnapshot() {
   return getLocalStorageItem("disableShowNewBadge") === "true";
 }
 
+function getServerSnapshot() {
+  return false;
+}
+
 export function useDisableShowNewBadge() {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

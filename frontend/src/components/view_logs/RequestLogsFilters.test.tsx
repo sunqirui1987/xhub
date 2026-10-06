@@ -18,8 +18,12 @@ vi.mock("@/app/(dashboard)/hooks/keys/useKeyAliases", () => ({
   useInfiniteKeyAliases: vi.fn(),
 }));
 
-vi.mock("@/app/(dashboard)/hooks/models/useModels", () => ({
-  useInfiniteModelInfo: vi.fn(),
+vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
+  default: () => ({ accessToken: "sk-test", userId: "user-1", userRole: "Internal User" }),
+}));
+
+vi.mock("@/components/networking", () => ({
+  userAvailableModelsCall: vi.fn().mockResolvedValue({ data: [] }),
 }));
 
 vi.mock("@/app/(dashboard)/hooks/spendLogs/useSpendLogUsers", () => ({
@@ -33,7 +37,7 @@ vi.mock("@/app/(dashboard)/hooks/spendLogs/useSpendLogEndUsers", () => ({
 import { useInfiniteSpendLogEndUsers } from "@/app/(dashboard)/hooks/spendLogs/useSpendLogEndUsers";
 import { useInfiniteSpendLogUsers } from "@/app/(dashboard)/hooks/spendLogs/useSpendLogUsers";
 import { useInfiniteKeyAliases } from "@/app/(dashboard)/hooks/keys/useKeyAliases";
-import { useInfiniteModelInfo } from "@/app/(dashboard)/hooks/models/useModels";
+import { userAvailableModelsCall } from "@/components/networking";
 
 const emptyInfiniteQuery = {
   data: { pages: [], pageParams: [] },
@@ -74,9 +78,7 @@ describe("RequestLogsFilters", () => {
     vi.mocked(useInfiniteKeyAliases).mockReturnValue(
       emptyInfiniteQuery as unknown as ReturnType<typeof useInfiniteKeyAliases>,
     );
-    vi.mocked(useInfiniteModelInfo).mockReturnValue(
-      emptyInfiniteQuery as unknown as ReturnType<typeof useInfiniteModelInfo>,
-    );
+    vi.mocked(userAvailableModelsCall).mockResolvedValue({ data: [] });
     vi.mocked(useInfiniteSpendLogUsers).mockReturnValue(
       emptyInfiniteQuery as unknown as ReturnType<typeof useInfiniteSpendLogUsers>,
     );
@@ -191,11 +193,11 @@ describe("RequestLogsFilters", () => {
     expect(useInfiniteKeyAliases).toHaveBeenCalledWith(50, undefined, undefined);
   });
 
-  it("does not leak the team scope into the Model lookup", async () => {
+  it("loads the model list from the caller's own models, not the deployment catalog", async () => {
     renderFilters({ [LOG_FILTER_IDS.TEAM_ID]: "team-42" });
 
-    await waitFor(() => expect(useInfiniteModelInfo).toHaveBeenCalled());
-    expect(useInfiniteModelInfo).toHaveBeenCalledWith(50, undefined);
+    await waitFor(() => expect(userAvailableModelsCall).toHaveBeenCalledWith("sk-test"));
+    expect(userAvailableModelsCall).not.toHaveBeenCalledWith("sk-test", expect.anything());
   });
 
   it("asks the server for a bounded page of end users scoped to the visible time window", async () => {

@@ -1,5 +1,7 @@
 # 06 计费与结算
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：当前有 catalog.Cost、实体 spend、Redis 热支出及批量日志入库；尚无统一预占、价格版本和账本。证据：internal/gateway/spend.go 的 recordSpend / persistSpend 会忽略部分写错误且分次更新实体；internal/store/spend_batch.go 的 ApplySpendBatch 在同批内未把新 request_id 加入 seen，进程锁也不足以提供多副本幂等。
 
 ## 目标与账务边界

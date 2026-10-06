@@ -1,5 +1,7 @@
 # 09 异步媒体与 Seedance 2.0
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：目录中有 seedance2 系列价格条目（internal/catalog/publicdata/model_cost_map.json），这不证明已实现真实任务协议。本次没有查验具体供应商最新接口或进行付费调用；下文是待实施框架与接入门槛，不提供猜测的 Seedance URL、字段或认证方式。
 
 ## 对象和接口

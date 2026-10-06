@@ -65,6 +65,30 @@ describe("CostBreakdownViewer", () => {
     expect(screen.getByText(/200 completion tokens/)).toBeInTheDocument();
   });
 
+  it("shows the token times rate formula in English", async () => {
+    renderWithProviders(
+      <CostBreakdownViewer
+        costBreakdown={{
+          input_cost: 0.000384,
+          output_cost: 0,
+          original_cost: 0.000384,
+          total_cost: 0.000384,
+          input_cost_per_token: 0.000004,
+          output_cost_per_token: 0.000016,
+        }}
+        totalSpend={0.000384}
+        promptTokens={96}
+        completionTokens={0}
+      />,
+    );
+
+    await expandCostBreakdown();
+    expect(screen.getByText(/96 prompt tokens ×/)).toBeInTheDocument();
+    expect(screen.getByText(/0 completion tokens ×/)).toBeInTheDocument();
+    expect(screen.getByText("Original LLM Cost:")).toBeInTheDocument();
+    expect(screen.getByText("Final Calculated Cost:")).toBeInTheDocument();
+  });
+
   it("shows non-null, non-zero additional_costs", async () => {
     renderWithProviders(
       <CostBreakdownViewer

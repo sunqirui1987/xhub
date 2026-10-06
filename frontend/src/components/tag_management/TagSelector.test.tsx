@@ -1,10 +1,20 @@
 import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import TagSelector from "./TagSelector";
+import { tagListCall } from "../networking";
+
+vi.mock("../networking", () => ({
+  tagListCall: vi.fn().mockResolvedValue({}),
+}));
+
+vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
+  default: () => ({ userRole: "Internal User" }),
+}));
 
 describe("TagSelector", () => {
   it("should render the tag selector", () => {
     render(<TagSelector onChange={() => {}} accessToken="test-token" />);
+    expect(tagListCall).not.toHaveBeenCalled();
   });
 
   it("should allow creating new tags", () => {

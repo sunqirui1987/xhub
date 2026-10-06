@@ -1,8 +1,8 @@
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderWithProviders, screen, testQueryClient, waitFor } from "../../../tests/test-utils";
+import { renderWithProviders, screen, testQueryClient, waitFor } from "../../../tests/test-utils";
 import type { Team } from "../key_team_helpers/key_list";
-import { keyCreateCall, keyCreateServiceAccountCall, modelAvailableCall, userFilterUICall } from "../networking";
+import { keyCreateCall, keyCreateServiceAccountCall, modelAvailableCall } from "../networking";
 import { toast } from "@/lib/toast";
 import CreateKey from "./create_key_button";
 
@@ -33,6 +33,14 @@ vi.mock("@/lib/toast", () => ({
   },
 }));
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({ default: () => state.authorized }));
+vi.mock("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity", () => ({
+  useSessionIdentity: () => ({
+    data: {
+      teams: state.teams.map((team) => ({ team_id: team.team_id, role: "member" as const })),
+    },
+    isFetched: true,
+  }),
+}));
 vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
   default: (capability: string) => state.can[capability] ?? true,
 }));
@@ -82,7 +90,7 @@ vi.mock("../networking", async (importOriginal) => {
     getPoliciesList: vi.fn().mockResolvedValue({ policies: [] }),
     getPromptsList: vi.fn().mockResolvedValue({ prompts: [] }),
     getPossibleUserRoles: vi.fn().mockResolvedValue({}),
-    userFilterUICall: vi.fn().mockResolvedValue([]),
+
     getAgentsList: vi.fn().mockResolvedValue({ agents: [] }),
     getClaudeCodePluginsList: vi.fn().mockResolvedValue({
       plugins: [
@@ -125,7 +133,6 @@ const SECTIONS = {
 } as const;
 
 const ALL_CLOSED_PAYLOAD = {
-  organization_id: undefined,
   team_id: null,
   key_alias: "contract-key",
   models: [],
@@ -146,11 +153,8 @@ const OPTIONAL_OPEN_PAYLOAD = {
   throttle_on_budget_exceeded: undefined,
   enable_prompt_caching: undefined,
   guardrails: undefined,
-  policies: undefined,
-  prompts: undefined,
   access_group_ids: undefined,
   allowed_passthrough_routes: undefined,
-  allowed_vector_store_ids: undefined,
   tags: undefined,
 };
 
@@ -198,8 +202,6 @@ const openModal = async (props: Partial<React.ComponentProps<typeof CreateKey>> 
   return view;
 };
 
-const userSearchInput = (): Promise<HTMLElement> => screen.findByPlaceholderText("Type email to search for users");
-
 const openSection = async (name: RegExp) => {
   await userEvent.click(await screen.findByRole("button", { name }));
 };
@@ -234,7 +236,6 @@ describe("CreateKey", () => {
     vi.mocked(keyCreateServiceAccountCall)
       .mockClear()
       .mockResolvedValue({ key: "sk-service-account", soft_budget: null });
-    vi.mocked(userFilterUICall).mockClear().mockResolvedValue([]);
     vi.mocked(toast.fromError).mockClear();
     vi.mocked(modelAvailableCall)
       .mockClear()
@@ -530,13 +531,14 @@ describe("CreateKey", () => {
       expect(payload).toHaveProperty("guardrails");
     });
 
-    it("adds project_id only when the projects UI is enabled", async () => {
+    it("does not ask for a project when creating a key", async () => {
       state.uiSettings = { enable_projects_ui: true };
       await openModal();
       await nameTheKey();
       await submit();
 
-      expect(await createdPayload()).toStrictEqual({ ...ALL_CLOSED_PAYLOAD, project_id: undefined });
+      expect(await createdPayload()).not.toHaveProperty("project_id");
+      expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     });
 
     it("keeps disable_global_guardrails out of the payload while the switch is off", async () => {
@@ -569,12 +571,10 @@ describe("CreateKey", () => {
       expect((await createdPayload()).metadata).toBe('{"team":"research"}');
     });
 
-    it("carries the typed key alias and the chosen team onto the wire", async () => {
+    it("carries the typed key alias and the user's team onto the wire", async () => {
       state.teams = [{ team_id: "team-1", team_alias: "Team One", models: [] }];
       await openModal({ teams: state.teams as unknown as Team[] });
       await nameTheKey("wire-alias");
-      await userEvent.click(await screen.findByLabelText("Team"));
-      await userEvent.click(await screen.findByRole("option", { name: /Team One/ }));
       await submit();
 
       expect(await createdPayload()).toMatchObject({ key_alias: "wire-alias", team_id: "team-1" });
@@ -602,48 +602,18 @@ describe("CreateKey", () => {
   });
 
   describe("key ownership", () => {
-    it("stamps the signed-in user onto user_id when the key is owned by you", async () => {
+    it("stamps the signed-in user onto user_id and does not ask who owns the key", async () => {
       await openModal();
       await nameTheKey();
+
+      expect(screen.queryByText("Key Ownership")).not.toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: "You" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: "Service Account" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Organization")).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("Search or select a team")).not.toBeInTheDocument();
       await submit();
 
       expect((await createdPayload()).user_id).toBe("test-user-id");
-    });
-
-    it("mounts the user search control only once Another User is chosen", async () => {
-      await openModal();
-      expect(screen.queryByPlaceholderText("Type email to search for users")).not.toBeInTheDocument();
-
-      await userEvent.click(screen.getByRole("radio", { name: "Another User" }));
-
-      expect(await userSearchInput()).toBeInTheDocument();
-    });
-
-    it("hides the Another User option from a non-admin", async () => {
-      state.authorized = { ...state.authorized, userRole: "Internal User" };
-      await openModal();
-
-      expect(screen.queryByRole("radio", { name: "Another User" })).not.toBeInTheDocument();
-    });
-
-    it("routes a service account through the service account endpoint and stamps the alias into metadata", async () => {
-      state.teams = [{ team_id: "team-1", team_alias: "Team One", models: [] }];
-      await openModal({ teams: state.teams as unknown as Team[] });
-      await userEvent.click(screen.getByRole("radio", { name: "Service Account" }));
-      await userEvent.type(await screen.findByLabelText(/Service Account ID/), "svc-account-1");
-
-      await userEvent.click(await screen.findByLabelText("Team"));
-      await userEvent.click(await screen.findByRole("option", { name: /Team One/ }));
-
-      await submit();
-
-      await waitFor(() => {
-        expect(vi.mocked(keyCreateServiceAccountCall)).toHaveBeenCalled();
-      });
-      expect(vi.mocked(keyCreateCall)).not.toHaveBeenCalled();
-      const payload = vi.mocked(keyCreateServiceAccountCall).mock.calls[0][1] as Record<string, unknown>;
-      expect(JSON.parse(String(payload.metadata))).toStrictEqual({ service_account_id: "svc-account-1" });
-      expect(payload).not.toHaveProperty("user_id");
     });
   });
 
@@ -667,26 +637,6 @@ describe("CreateKey", () => {
       });
       expect(screen.queryByText("Please input a key name")).not.toBeInTheDocument();
       expect(screen.getByText("required")).toBeInTheDocument();
-    });
-
-    it("blocks a service account submit until a team is chosen, then lets it through", async () => {
-      state.teams = [{ team_id: "team-1", team_alias: "Team One", models: [] }];
-      await openModal({ teams: state.teams as unknown as Team[] });
-      await userEvent.click(screen.getByRole("radio", { name: "Service Account" }));
-      await userEvent.type(await screen.findByLabelText(/Service Account ID/), "svc-account-1");
-      await submit();
-
-      await waitFor(() => {
-        expect(vi.mocked(keyCreateServiceAccountCall)).not.toHaveBeenCalled();
-      });
-
-      await userEvent.click(await screen.findByLabelText("Team"));
-      await userEvent.click(await screen.findByRole("option", { name: /Team One/ }));
-      await submit();
-
-      await waitFor(() => {
-        expect(vi.mocked(keyCreateServiceAccountCall)).toHaveBeenCalledTimes(1);
-      });
     });
 
     it("blocks the submit when the budget exceeds the team ceiling", async () => {
@@ -716,9 +666,10 @@ describe("CreateKey", () => {
       expect(await screen.findByLabelText("gpt-4", {}, { timeout: 5000 })).toBeInTheDocument();
     });
 
-    it("ignores a team the user has no access to", async () => {
+    it("ignores a team the user has no access to and keeps their own team", async () => {
+      state.teams = [{ team_id: "team-1", team_alias: "Team One", models: [] }];
       renderCreateKey({
-        teams: [{ team_id: "team-1", models: [] } as unknown as Team],
+        teams: state.teams as unknown as Team[],
         autoOpenCreate: true,
         prefillData: { team_id: "team-404", key_alias: "example-key" },
       });
@@ -727,21 +678,8 @@ describe("CreateKey", () => {
       await submit();
 
       const payload = await createdPayload();
-      expect(payload.team_id).toBeNull();
+      expect(payload.team_id).toBe("team-1");
       expect(payload.key_alias).toBe("example-key-suffix");
-    });
-
-    it("falls back to you when another_user is requested by a non-admin", async () => {
-      state.authorized = { ...state.authorized, userRole: "Internal User" };
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user", key_alias: "example-key" } });
-
-      expect(await screen.findByRole("radio", { name: "You" })).toBeChecked();
-    });
-
-    it("applies another_user for an admin", async () => {
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-
-      expect(await screen.findByRole("radio", { name: "Another User" })).toBeChecked();
     });
 
     it("prefills the key type", async () => {
@@ -764,322 +702,14 @@ describe("CreateKey", () => {
       expect(screen.queryByRole("option", { name: "All Team Models" })).not.toBeInTheDocument();
     });
 
-    it("offers all-team-models but hides all-proxy-models once a team is selected", async () => {
+    it("offers all-team-models but hides all-proxy-models for the user's team", async () => {
       state.teams = [{ team_id: "team-1", team_alias: "Team One", models: ["team-model-1"] }];
       await openModal({ teams: state.teams as unknown as Team[] });
-
-      await userEvent.click(await screen.findByLabelText("Team"));
-      await userEvent.click(await screen.findByRole("option", { name: /Team One/ }));
 
       await userEvent.click(await screen.findByLabelText("Models"));
 
       expect(await screen.findByRole("option", { name: "All Team Models" })).toBeInTheDocument();
       expect(screen.queryByRole("option", { name: "All Proxy Models" })).not.toBeInTheDocument();
-    });
-  });
-
-  describe("organization dropdown", () => {
-    it("is editable for an admin", async () => {
-      state.organizations = [{ organization_id: "org-1", organization_alias: "Engineering" }];
-      await openModal();
-
-      expect(await screen.findByLabelText("Organization")).not.toHaveAttribute("data-disabled");
-    });
-
-    it("is read-only for a non-admin", async () => {
-      state.authorized = { ...state.authorized, userRole: "Internal User" };
-      state.organizations = [{ organization_id: "org-1", organization_alias: "Engineering" }];
-      await openModal();
-
-      expect(await screen.findByLabelText("Organization")).toHaveAttribute("data-disabled", "");
-    });
-
-    it("routes a chosen organization into organization_id", async () => {
-      state.organizations = [{ organization_id: "org-1", organization_alias: "Engineering" }];
-      await openModal();
-      await nameTheKey();
-
-      await userEvent.click(await screen.findByLabelText("Organization"));
-      await userEvent.click(await screen.findByRole("option", { name: /Engineering/ }));
-      await submit();
-
-      expect((await createdPayload()).organization_id).toBe("org-1");
-    });
-
-    it("discards the old project and team when the organization changes", async () => {
-      state.uiSettings = { enable_projects_ui: true };
-      state.organizations = [
-        { organization_id: "scope-silver", organization_alias: "Silver" },
-        { organization_id: "scope-copper", organization_alias: "Copper" },
-      ];
-      state.teams = [{ team_id: "group-maple", team_alias: "Maple", organization_id: "scope-silver", models: [] }];
-      state.projects = [{ project_id: "project-orbit", project_alias: "Orbit", team_id: "group-maple", models: [] }];
-      await openModal({ teams: state.teams as Team[] });
-      await nameTheKey();
-      await userEvent.click(await screen.findByLabelText("Organization"));
-      await userEvent.click(await screen.findByRole("option", { name: /Silver/ }));
-      await userEvent.click(await screen.findByLabelText("Project"));
-      await userEvent.click(await screen.findByRole("option", { name: /Orbit/ }));
-      await waitFor(() => expect(screen.getByLabelText("Team")).toHaveValue("Maple"));
-      expect(screen.getByLabelText("Team")).toBeDisabled();
-
-      await userEvent.click(screen.getByLabelText("Organization"));
-      await userEvent.click(await screen.findByRole("option", { name: /Copper/ }));
-      expect(screen.getByLabelText("Project")).toHaveValue("");
-      expect(screen.getByLabelText("Team")).toHaveValue("");
-      expect(screen.getByLabelText("Team")).toBeEnabled();
-      await submit();
-
-      const payload = JSON.parse(JSON.stringify(await createdPayload()));
-      expect(payload.organization_id).toBe("scope-copper");
-      expect(payload.team_id).toBeNull();
-      expect(payload).not.toHaveProperty("project_id");
-    });
-
-    it("drops organization_id when the chosen organization is cleared again", async () => {
-      state.organizations = [{ organization_id: "org-1", organization_alias: "Engineering" }];
-      await openModal();
-      await nameTheKey();
-
-      await userEvent.click(await screen.findByLabelText("Organization"));
-      await userEvent.click(await screen.findByRole("option", { name: /Engineering/ }));
-      await userEvent.click(await screen.findByRole("button", { name: "Clear" }));
-      await submit();
-
-      expect((await createdPayload()).organization_id).toBeUndefined();
-    });
-  });
-
-  describe("policy and prompt fields", () => {
-    it("loads and offers both selectors for a role that can see them", async () => {
-      await openModal();
-      await openSection(/Optional Settings/i);
-
-      expect(await screen.findByLabelText("Policies")).toBeInTheDocument();
-      expect(await screen.findByLabelText("Prompts")).toBeInTheDocument();
-    });
-
-    it("omits both selectors for a role that cannot see them", async () => {
-      state.can = { viewPolicies: false, viewPrompts: false };
-      await openModal();
-      await openSection(/Optional Settings/i);
-
-      await screen.findByLabelText("Guardrails");
-      expect(screen.queryByLabelText("Policies")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Prompts")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("tags dropdown", () => {
-    it("offers the tags returned by the tags hook", async () => {
-      state.tags = { production: { name: "production" }, staging: { name: "staging" } };
-      await openModal();
-      await openSection(/Optional Settings/i);
-
-      await userEvent.click(await screen.findByLabelText("Tags"));
-
-      expect(await screen.findByTitle("production")).toBeInTheDocument();
-      expect(await screen.findByTitle("staging")).toBeInTheDocument();
-    });
-  });
-
-  describe("user search debounce", () => {
-    it("fires exactly one search carrying the last typed value", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      try {
-        renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-        const search = await userSearchInput();
-
-        await user.type(search, "ali");
-        expect(vi.mocked(userFilterUICall)).not.toHaveBeenCalled();
-
-        await user.type(search, "ce");
-        await vi.advanceTimersByTimeAsync(400);
-
-        expect(vi.mocked(userFilterUICall)).toHaveBeenCalledTimes(1);
-        const params = vi.mocked(userFilterUICall).mock.calls[0][1] as URLSearchParams;
-        expect(params.get("user_email")).toBe("alice");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it("keeps the current search's users when an abandoned search answers last", async () => {
-      const answers = new Map<string, (users: { user_id: string; user_email: string }[]) => void>();
-      vi.mocked(userFilterUICall).mockImplementation(
-        (_accessToken, params) =>
-          new Promise((resolve) => {
-            answers.set(params.get("user_email") ?? "", resolve);
-          }) as never,
-      );
-
-      const user = userEvent.setup();
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-      const search = await userSearchInput();
-
-      await user.type(search, "ali");
-      await waitFor(() => expect(answers.has("ali")).toBe(true), { timeout: 3000 });
-
-      await user.type(search, "ce.smith@example.com");
-      await waitFor(() => expect(answers.has("alice.smith@example.com")).toBe(true), { timeout: 3000 });
-
-      await act(async () => {
-        answers.get("alice.smith@example.com")?.([{ user_id: "u-smith", user_email: "alice.smith@example.com" }]);
-      });
-      await screen.findByRole("option", { name: "alice.smith@example.com (u-smith)" });
-
-      await act(async () => {
-        answers.get("ali")?.([{ user_id: "u-jones", user_email: "alice.jones@example.com" }]);
-      });
-
-      expect(screen.queryByRole("option", { name: "alice.jones@example.com (u-jones)" })).not.toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "alice.smith@example.com (u-smith)" })).toBeInTheDocument();
-    });
-
-    it("stops searching once the box is cleared and the abandoned search answers", async () => {
-      const answers = new Map<string, (users: { user_id: string; user_email: string }[]) => void>();
-      vi.mocked(userFilterUICall).mockImplementation(
-        (_accessToken, params) =>
-          new Promise((resolve) => {
-            answers.set(params.get("user_email") ?? "", resolve);
-          }) as never,
-      );
-
-      const user = userEvent.setup();
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-      const search = await userSearchInput();
-
-      await user.type(search, "ali");
-      await waitFor(() => expect(answers.has("ali")).toBe(true), { timeout: 3000 });
-      await screen.findByText("Searching...");
-
-      await user.clear(search);
-      await screen.findByText("No users found");
-
-      await act(async () => {
-        answers.get("ali")?.([{ user_id: "u-jones", user_email: "alice.jones@example.com" }]);
-      });
-
-      expect(screen.queryByRole("option", { name: "alice.jones@example.com (u-jones)" })).not.toBeInTheDocument();
-      expect(screen.getByText("No users found")).toBeInTheDocument();
-    });
-
-    it("keeps searching while a newer search is still in flight", async () => {
-      const answers = new Map<string, (users: { user_id: string; user_email: string }[]) => void>();
-      vi.mocked(userFilterUICall).mockImplementation(
-        (_accessToken, params) =>
-          new Promise((resolve) => {
-            answers.set(params.get("user_email") ?? "", resolve);
-          }) as never,
-      );
-
-      const user = userEvent.setup();
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-      const search = await userSearchInput();
-
-      await user.type(search, "ali");
-      await waitFor(() => expect(answers.has("ali")).toBe(true), { timeout: 3000 });
-
-      await user.type(search, "ce.smith@example.com");
-      await waitFor(() => expect(answers.has("alice.smith@example.com")).toBe(true), { timeout: 3000 });
-
-      await act(async () => {
-        answers.get("ali")?.([]);
-      });
-
-      expect(screen.getByText("Searching...")).toBeInTheDocument();
-      expect(screen.queryByText("No users found")).not.toBeInTheDocument();
-
-      await act(async () => {
-        answers.get("alice.smith@example.com")?.([{ user_id: "u-smith", user_email: "alice.smith@example.com" }]);
-      });
-      await screen.findByRole("option", { name: "alice.smith@example.com (u-smith)" });
-    });
-
-    it("only warns about a failed search when it is the one the box is waiting on", async () => {
-      const answers = new Map<
-        string,
-        { resolve: (users: { user_id: string; user_email: string }[]) => void; reject: (error: Error) => void }
-      >();
-      vi.mocked(userFilterUICall).mockImplementation(
-        (_accessToken, params) =>
-          new Promise((resolve, reject) => {
-            answers.set(params.get("user_email") ?? "", { resolve, reject });
-          }) as never,
-      );
-
-      const user = userEvent.setup();
-      renderCreateKey({ autoOpenCreate: true, prefillData: { owned_by: "another_user" } });
-      const search = await userSearchInput();
-
-      await user.type(search, "ali");
-      await waitFor(() => expect(answers.has("ali")).toBe(true), { timeout: 3000 });
-
-      await user.type(search, "ce.smith@example.com");
-      await waitFor(() => expect(answers.has("alice.smith@example.com")).toBe(true), { timeout: 3000 });
-
-      await act(async () => {
-        answers
-          .get("alice.smith@example.com")
-          ?.resolve([{ user_id: "u-smith", user_email: "alice.smith@example.com" }]);
-      });
-      await screen.findByRole("option", { name: "alice.smith@example.com (u-smith)" });
-
-      await act(async () => {
-        answers.get("ali")?.reject(new Error("search failed"));
-      });
-
-      expect(toast.fromError).not.toHaveBeenCalled();
-      expect(screen.getByRole("option", { name: "alice.smith@example.com (u-smith)" })).toBeInTheDocument();
-
-      await user.type(search, "x");
-      await waitFor(() => expect(answers.has("alice.smith@example.comx")).toBe(true), { timeout: 3000 });
-
-      await act(async () => {
-        answers.get("alice.smith@example.comx")?.reject(new Error("search failed"));
-      });
-
-      expect(toast.fromError).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("user picker selection", () => {
-    it("keeps the picked user in the box instead of searching for its own label", async () => {
-      const directory = [
-        { user_id: "u-77", user_email: "alice@example.com" },
-        { user_id: "u-88", user_email: "bob@example.com" },
-      ];
-      vi.mocked(userFilterUICall).mockImplementation(
-        (_accessToken, params) =>
-          Promise.resolve(
-            directory.filter((entry) => entry.user_email.includes(params.get("user_email") ?? "")),
-          ) as never,
-      );
-
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      try {
-        renderCreateKey({
-          autoOpenCreate: true,
-          prefillData: { owned_by: "another_user", key_alias: "contract-key" },
-        });
-        const search = await userSearchInput();
-
-        await user.type(search, "alice");
-        await user.click(await screen.findByRole("option", { name: "alice@example.com (u-77)" }));
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(1000);
-        });
-
-        expect(search).toHaveValue("alice@example.com (u-77)");
-        expect(vi.mocked(userFilterUICall)).toHaveBeenCalledTimes(1);
-      } finally {
-        vi.useRealTimers();
-      }
-
-      await submit();
-      expect((await createdPayload()).user_id).toBe("u-77");
     });
   });
 
@@ -1171,35 +801,6 @@ describe("CreateKey", () => {
     });
   });
 
-  describe("writers outside the submit path", () => {
-    it("lets the selected user win over the search text typed into the same field", async () => {
-      vi.mocked(userFilterUICall).mockResolvedValue([
-        { user_id: "u-77", user_email: "alice@example.com" },
-      ] as unknown as Awaited<ReturnType<typeof userFilterUICall>>);
-
-      await openModal();
-      await userEvent.click(screen.getByRole("radio", { name: "Another User" }));
-      await nameTheKey();
-
-      await userEvent.type(await userSearchInput(), "alice");
-      await userEvent.click(await screen.findByRole("option", { name: "alice@example.com (u-77)" }));
-      await submit();
-
-      expect((await createdPayload()).user_id).toBe("u-77");
-    });
-
-    it("surfaces the required message on a field that carries no help text", async () => {
-      await openModal();
-      await userEvent.click(screen.getByRole("radio", { name: "Another User" }));
-      await nameTheKey();
-      await submit();
-
-      expect(
-        await screen.findByText("Please input the user ID of the user you are assigning the key to"),
-      ).toBeInTheDocument();
-      expect(vi.mocked(keyCreateCall)).not.toHaveBeenCalled();
-    });
-  });
 
   describe("validation follows the mounted set", () => {
     it("submits an over-ceiling budget typed into a section the user closed again, omitting the key", async () => {

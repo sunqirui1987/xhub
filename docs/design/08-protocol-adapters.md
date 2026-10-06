@@ -1,5 +1,7 @@
 # 08 协议适配器与传输
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：已有多供应商请求构造，通用协议生命周期尚未实现。internal/llm/build.go 的 Upstream 只有 URL、Header、Body；internal/dataplane/serve.go 使用固定 HTTP POST。internal/gateway/ingress.go 的 realtimeContract 升级后关闭连接，passthroughContract 只生成计划；internal/gateway/family/handlers.go 部分返回固定 usage。这些路径不能仅凭路由存在标记为生产支持。
 
 ## 目标与边界

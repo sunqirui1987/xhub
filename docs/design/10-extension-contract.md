@@ -1,5 +1,7 @@
 # 10 扩展契约
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：internal/plugin/registry.go 的 Extension 仅有 Name 和 BeforeUpstream(Call) Decision；没有 context、截止时间、响应/用量/结算阶段或版本。当前 Call 只含 Op、Model、Path。注册器可以作为原型，但不能承担完整权限或账务扩展。
 
 ## 生命周期与所有权

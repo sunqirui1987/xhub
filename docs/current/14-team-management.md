@@ -81,9 +81,9 @@
 | `GET` | `/user/filter/ui?user_email=` | 添加成员时的账号搜索。返回 `{ users: [...] }`，按邮箱或用户 ID 包含匹配。 |
 | `POST` | `/team/member_add` | 按邮箱加入。请求体可以是 `{ team_id, user_email, role }`，也可以是 `{ team_id, member: { user_email, role } }`。 |
 | `POST` | `/team/member_update` | 改角色。需要 `team_id` 和 `user_id`。 |
-| `POST` | `/team/member_delete` | 移除。`user_id` 或 `user_email` 都可以。最后一位团队管理员会得到 400，`message` 是 `team must keep at least one team_admin`。 |
+| `POST` | `/team/member_delete` | 移除。`user_id` 或 `user_email` 都可以。最后一位团队管理员会得到 400，报错在 `error.message` 里（不是顶层），正文是 `team must keep at least one team_admin`。 |
 
-`GET /team/info` 里每个成员的公开字段是 `user_id`、`user_email`、`user_alias`、`role`、`status`。没有预算、没有个人花费。
+`GET /team/info` 里每个成员的公开字段是 `user_id`、`user_email`、`user_alias`、`user_name`、`role`、`user_role`、`status`。`user_alias` 和 `user_name` 是同一个值，`role` 和 `user_role` 也是，留着是为了兼容控制台里两处不同的读法。没有预算、没有个人花费。
 
 ## 控制台不再展示的内容
 

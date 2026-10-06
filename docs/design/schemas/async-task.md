@@ -1,5 +1,7 @@
 # 异步媒体任务数据契约
 
+> **目标设计，不是当前行为。** 见 [docs/current/](../../current/)。
+
 状态：Proposed。schema_version=1。本契约描述网关任务，不假定 Seedance 或其他供应商采用同一字段、URL 或状态枚举。
 
 ## 字段

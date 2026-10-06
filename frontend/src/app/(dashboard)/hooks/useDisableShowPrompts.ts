@@ -30,6 +30,10 @@ function getSnapshot() {
   return getLocalStorageItem("disableShowPrompts") === "true";
 }
 
+function getServerSnapshot() {
+  return false;
+}
+
 export function useDisableShowPrompts() {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

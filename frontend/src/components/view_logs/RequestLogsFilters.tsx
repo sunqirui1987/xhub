@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useInfiniteSpendLogEndUsers } from "@/app/(dashboard)/hooks/spendLogs/useSpendLogEndUsers";
 import { useInfiniteSpendLogUsers } from "@/app/(dashboard)/hooks/spendLogs/useSpendLogUsers";
 import { useInfiniteKeyAliases } from "@/app/(dashboard)/hooks/keys/useKeyAliases";
-import { useInfiniteModelInfo } from "@/app/(dashboard)/hooks/models/useModels";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { userAvailableModelsCall } from "@/components/networking";
 import { DataTableFilterField } from "@/components/shared/DataTable";
 import { PaginatedSearchSelect } from "@/components/shared/PaginatedSearchSelect";
 import { SearchSelect, type SearchSelectOption } from "@/components/shared/SearchSelect";
@@ -125,36 +126,46 @@ function KeyAliasFilterField({
 }
 
 function ModelFilterField({ value, onChange }: { value: string; onChange: (value: string | undefined) => void }) {
-  const [search, setSearch] = useState("");
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteModelInfo(
-    PAGE_SIZE,
-    emptyToUndefined(search),
-  );
+  const { accessToken } = useAuthorized();
+  const [options, setOptions] = useState<SearchSelectOption[]>([]);
 
-  const options = useMemo<SearchSelectOption[]>(() => {
-    const seen = new Set<string>();
-    return (data?.pages ?? []).flatMap((page) =>
-      page.data.flatMap((model) => {
-        const modelId = model.model_info?.id ?? "";
-        const modelName = model.model_name ?? "";
-        if (!modelId || seen.has(modelId)) return [];
-        seen.add(modelId);
-        return [{ label: modelName || modelId, value: modelId, sublabel: `Model ID: ${modelId}` }];
-      }),
-    );
-  }, [data]);
+  // Deployment ids come from /v2/model/info, which only a platform administrator
+  // may call. The log row's model is the public model name, and /model/available
+  // already returns that name to every signed-in account.
+  useEffect(() => {
+    if (!accessToken) {
+      setOptions([]);
+      return;
+    }
+    let cancelled = false;
+    userAvailableModelsCall(accessToken)
+      .then((response) => {
+        if (cancelled) return;
+        const rows: Array<{ id?: string | null }> = Array.isArray(response?.data) ? response.data : [];
+        const seen = new Set<string>();
+        setOptions(
+          rows.flatMap((model) => {
+            const id = model?.id ?? "";
+            if (!id || seen.has(id)) return [];
+            seen.add(id);
+            return [{ label: id, value: id }];
+          }),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken]);
 
   return (
     <DataTableFilterField label={t("Model")}>
-      <PaginatedSearchSelect
+      <SearchSelect
         options={options}
         value={value}
         onValueChange={(next) => onChange(next ?? undefined)}
-        onSearchChange={setSearch}
-        onLoadMore={() => void fetchNextPage()}
-        hasNextPage={hasNextPage}
-        isLoading={isLoading}
-        isFetchingNextPage={isFetchingNextPage}
         placeholder={t("Search a model")}
         emptyText={t("No models found")}
       />

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Tag } from "./types";
 import { tagListCall } from "../networking";
 import { MultiSelect } from "@/components/shared/MultiSelect";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { canAccessManagement } from "@/utils/roles";
 import { t } from "@/i18n";
 
 interface TagSelectorProps {
@@ -12,25 +14,26 @@ interface TagSelectorProps {
 }
 
 const TagSelector: React.FC<TagSelectorProps> = ({ onChange, value, className, accessToken }) => {
+  const { userRole } = useAuthorized();
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchTags = async () => {
-      if (!accessToken) return;
+      if (!accessToken || !canAccessManagement(userRole)) return;
       setLoading(true);
       try {
         const response = await tagListCall(accessToken);
         setTags(Object.values(response));
-      } catch (error) {
-        console.error("Error fetching tags:", error);
+      } catch {
+        setTags([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchTags();
-  }, [accessToken]);
+  }, [accessToken, userRole]);
 
   return (
     <MultiSelect

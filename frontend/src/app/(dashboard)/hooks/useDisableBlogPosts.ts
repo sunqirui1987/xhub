@@ -28,6 +28,10 @@ function getSnapshot() {
   return getLocalStorageItem("disableBlogPosts") === "true";
 }
 
+function getServerSnapshot() {
+  return false;
+}
+
 export function useDisableBlogPosts() {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

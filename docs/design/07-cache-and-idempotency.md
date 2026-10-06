@@ -1,5 +1,7 @@
 # 07 缓存与幂等
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：已有响应缓存；internal/gateway/spend.go 的 writeCacheHit 会从旧响应抽出 usage 并调用普通 recordSpend，存在把缓存命中按生成 token 再收费的设计问题。跨请求的持久化业务幂等尚未形成统一契约。
 
 ## 缓存语义

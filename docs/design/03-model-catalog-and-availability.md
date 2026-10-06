@@ -1,5 +1,7 @@
 # 03 模型目录与可用模型
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：/model/available 已解析身份、检查 AllowLLM、过滤 nonModelEntry / blocked、调用 AllowsModel 并按别名去重；还未证明有效部署、协议、凭据和健康条件。证据：internal/gateway/models/available.go、access.go、builtin.go。当前 capabilities 部分来自静态价格资料，不能作为实际协议能力证明。
 
 ## 三类数据

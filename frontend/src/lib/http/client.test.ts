@@ -73,6 +73,24 @@ describe("createApiClient", () => {
     expect(onError).toHaveBeenCalledWith("no access");
   });
 
+  it("rejects a management denial without an Error and without onError", async () => {
+    const fetchImpl = vi.fn(async () =>
+      errorResponse(403, { error: { message: "Not allowed to access management endpoints" } }),
+    );
+    const onError = vi.fn();
+    const client = createApiClient({ getBaseUrl: () => "", onError, fetchImpl });
+
+    const promise = client.get("/sso/get/ui_settings", { accessToken: "sk" });
+
+    await expect(promise).rejects.not.toBeInstanceOf(Error);
+    await expect(promise).rejects.toEqual({
+      message: "Not allowed to access management endpoints",
+      status: 403,
+      body: { error: { message: "Not allowed to access management endpoints" } },
+    });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("unwraps an object-shaped detail ({detail:{error}}) rather than dumping the JSON envelope (FastAPI HTTPException shape)", async () => {
     const conflict = "A skill named 'gitlab' already exists. Update the existing skill instead of adding it again.";
     const fetchImpl = vi.fn(async () => errorResponse(409, { detail: { error: conflict } }));

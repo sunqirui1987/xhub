@@ -155,8 +155,8 @@ const UsagePage: React.FC<UsagePageProps> = ({ accessToken, token, userRole, use
       try {
         const proxy_settings: ProxySettings = await getProxyUISettings(accessToken);
         return proxy_settings;
-      } catch (error) {
-        console.error("Error fetching proxy settings:", error);
+      } catch {
+        return undefined;
       }
     }
   };

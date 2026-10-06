@@ -36,6 +36,8 @@ interface SchemaFormFieldsProps {
     [key: string]: (rule: unknown, value: unknown) => Promise<void>;
   };
   defaultValues?: { [key: string]: unknown };
+  /** Called once the document is read. False when this product has no such component. */
+  onAvailable?: (available: boolean) => void;
 }
 
 // Define which fields should be parsed as JSON
@@ -119,35 +121,49 @@ const SchemaFormFields: React.FC<SchemaFormFieldsProps> = ({
   overrideTooltips = {},
   customValidation = {},
   defaultValues = {},
+  onAvailable,
 }) => {
   const [schemaProperties, setSchemaProperties] = useState<OpenAPISchema | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const fetchOpenAPISchema = async () => {
       try {
         const schema = await getOpenAPISchema();
-        const componentSchema = schema.components.schemas[schemaComponent];
+        const componentSchema = schema?.components?.schemas?.[schemaComponent] as OpenAPISchema | undefined;
 
-        if (!componentSchema) {
-          throw new Error(t("Schema component \"{schemaComponent}\" not found", { schemaComponent }));
+        if (cancelled) return;
+        if (!componentSchema?.properties) {
+          setSchemaProperties(null);
+          onAvailable?.(false);
+          return;
         }
 
         setSchemaProperties(componentSchema);
+        onAvailable?.(true);
 
         Object.keys(componentSchema.properties)
           .filter((key) => !excludedFields.includes(key) && defaultValues[key] !== undefined)
           .forEach((key) => {
             setValue(key, defaultValues[key]);
           });
-      } catch (error) {
-        console.error("Schema fetch error:", error);
-        setError(error instanceof Error ? error.message : t("Failed to fetch schema"));
+      } catch (caught) {
+        if (cancelled) return;
+        setSchemaProperties(null);
+        onAvailable?.(false);
+        setError(caught instanceof Error ? caught.message : t("Failed to fetch schema"));
       }
     };
 
     fetchOpenAPISchema();
-  }, [schemaComponent, setValue, excludedFields]);
+    return () => {
+      cancelled = true;
+    };
+    // excludedFields and defaultValues are read once per schema name. The parent
+    // passes a fresh array each render, so they stay out of the dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schemaComponent, setValue]);
 
   const getPropertyType = (property: SchemaProperty): string => {
     if (property.type) {

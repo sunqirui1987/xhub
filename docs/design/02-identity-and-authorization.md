@@ -1,5 +1,7 @@
 # 02 身份与权限
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：已有身份实体、API key、会话及模型名单过滤；能力级授权、统一撤销和权限错误传播待实施。证据：internal/gateway/session.go 的 lookupSession、internal/gateway/models/access.go 的 effectiveScope / membershipScopes / entitiesForIDs，以及 internal/gateway/limits.go。
 
 ## 目标与边界

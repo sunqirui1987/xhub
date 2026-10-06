@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/iam"
@@ -103,6 +104,15 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 			if p.Key.UserID != nil {
 				userID = *p.Key.UserID
 			}
+		} else if p.Kind == authz.KindSession && userID != "" && s.IAM != nil {
+			// A console session has no key. Leaving the owner blank makes the
+			// store call it a service log with no team, which neither the caller
+			// nor their organization administrator is allowed to read.
+			memberships, err := s.IAM.MemberTeams(context.Background(), userID)
+			if err != nil {
+				logx.Error("usage team lookup failed user=%s err=%v", userID, err)
+			}
+			ownerType, teamID, orgID = sessionLogBinding(ownerType, teamID, orgID, memberships)
 		}
 	}
 	end := time.Now()
@@ -152,12 +162,29 @@ func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchang
 		UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
 		Model: row.Model, CallType: row.CallType, Status: row.Status,
 		PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
-		DurationMS: int(end.Sub(start).Milliseconds()),
+		DurationMS:  int(end.Sub(start).Milliseconds()),
 		RequestBody: ex.messages, ResponseBody: ex.response,
 	}
 	if err := s.IAM.RecordUsage(context.Background(), []iam.UsageRecord{rec}); err != nil {
 		logx.Error("persist spend failed: %v", err)
 	}
+}
+
+// sessionLogBinding marks a console call as that person's own log. When they
+// belong to one team, the row is filed there so the team and its organization
+// administrator can read it. More than one membership leaves the team blank:
+// the caller still sees the row, and a guess would file it under the wrong team.
+func sessionLogBinding(ownerType, teamID, orgID string, memberships []iam.Membership) (string, string, string) {
+	if ownerType == "" {
+		ownerType = iam.OwnerPersonal
+	}
+	if teamID == "" && len(memberships) == 1 {
+		teamID = memberships[0].TeamID
+		if orgID == "" {
+			orgID = memberships[0].OrganizationID
+		}
+	}
+	return ownerType, teamID, orgID
 }
 
 // teamOrg returns the organization that owns a team, for the ownership snapshot
@@ -248,6 +275,9 @@ func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, 
 	if respDoc == nil && len(respBody) > 0 {
 		respDoc = map[string]any{"body": string(respBody)}
 	}
+	if assembled := assembleLoggedResponse(respBody, respDoc); assembled != nil {
+		respDoc = assembled
+	}
 	messagesDoc := reqDoc
 	if m, ok := reqDoc.(map[string]any); ok {
 		if msgs, exists := m["messages"]; exists {
@@ -271,6 +301,88 @@ func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, 
 		"body":    reqDoc,
 	}
 	return mustJSON(messagesDoc), mustJSON(respDoc), mustJSON(proxyDoc)
+}
+
+// assembleLoggedResponse turns a stored event stream into the final response
+// document the log drawer can read. A chat or Responses stream is not one JSON
+// value, so it used to be kept as a raw body and the output panel stayed empty.
+func assembleLoggedResponse(raw []byte, parsed any) any {
+	text := ""
+	switch doc := parsed.(type) {
+	case map[string]any:
+		if body, ok := doc["body"].(string); ok {
+			text = body
+		}
+	}
+	if text == "" && looksLikeEventStream(raw) {
+		text = string(raw)
+	}
+	if text == "" {
+		return nil
+	}
+	var completed map[string]any
+	var outputText strings.Builder
+	var chat strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "data:")
+		line = strings.TrimSpace(line)
+		if line == "" || line == "[DONE]" {
+			continue
+		}
+		var doc map[string]any
+		if json.Unmarshal([]byte(line), &doc) != nil {
+			continue
+		}
+		if doc["type"] == "response.completed" {
+			if resp, ok := doc["response"].(map[string]any); ok {
+				completed = resp
+			}
+		}
+		if doc["type"] == "response.output_text.delta" {
+			if delta, ok := doc["delta"].(string); ok {
+				outputText.WriteString(delta)
+			}
+		}
+		if choices, ok := doc["choices"].([]any); ok && len(choices) > 0 {
+			choice, _ := choices[0].(map[string]any)
+			if delta, ok := choice["delta"].(map[string]any); ok {
+				if part, ok := delta["content"].(string); ok {
+					chat.WriteString(part)
+				}
+			}
+			if msg, ok := choice["message"].(map[string]any); ok {
+				if part, ok := msg["content"].(string); ok && part != "" {
+					chat.Reset()
+					chat.WriteString(part)
+				}
+			}
+		}
+	}
+	if completed != nil {
+		return completed
+	}
+	if outputText.Len() > 0 {
+		return map[string]any{
+			"output": []any{map[string]any{
+				"type": "message", "role": "assistant",
+				"content": []any{map[string]any{"type": "output_text", "text": outputText.String()}},
+			}},
+		}
+	}
+	if chat.Len() > 0 {
+		return map[string]any{
+			"choices": []any{map[string]any{
+				"message": map[string]any{"role": "assistant", "content": chat.String()},
+			}},
+		}
+	}
+	return nil
+}
+
+func looksLikeEventStream(raw []byte) bool {
+	s := string(raw)
+	return strings.Contains(s, "data:") && (strings.Contains(s, "event:") || strings.Contains(s, "\"choices\""))
 }
 
 func jsonDocument(raw []byte) any {

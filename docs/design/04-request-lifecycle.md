@@ -1,5 +1,7 @@
 # 04 请求生命周期
 
+> **目标设计，不是当前行为。** 本文描述的是计划要实现的架构。现在实际运行的行为见 [docs/current/](../current/)。两份冲突时，以 `current/` 和代码为准。
+
 状态：数据面有认证、重试、缓存和成功响应记录；尚无覆盖全部失败路径的持久化状态机。证据：internal/dataplane/serve.go、internal/gateway/limits.go、spend.go 和 ingress.go。目标是给每次入口请求和每次外部尝试建立可恢复关联，不把成功支出日志当成请求全集。
 
 ## 状态与对象

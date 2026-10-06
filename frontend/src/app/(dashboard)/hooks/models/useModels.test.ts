@@ -236,6 +236,25 @@ describe("useModelsInfo", () => {
     expect(modelInfoCall).not.toHaveBeenCalled();
   });
 
+  it("does not list deployments for an account that cannot manage them", () => {
+    mockUseAuthorized.mockReturnValue({
+      accessToken: "test-access-token",
+      userId: "test-user-id",
+      userRole: "Internal User",
+      token: "test-token",
+      userEmail: "test@example.com",
+      premiumUser: false,
+      disabledPersonalKeyCreation: null,
+      showSSOBanner: false,
+    });
+
+    const { result } = renderHook(() => useModelsInfo(), { wrapper });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isFetched).toBe(false);
+    expect(modelInfoCall).not.toHaveBeenCalled();
+  });
+
   it("should not execute query when all required auth values are missing", () => {
     mockUseAuthorized.mockReturnValue({
       accessToken: null,
@@ -350,6 +369,24 @@ describe("useModelHub", () => {
 
     expect(result.current.isLoading).toBe(false);
     expect(result.current.data).toBeUndefined();
+    expect(result.current.isFetched).toBe(false);
+    expect(modelHubCall).not.toHaveBeenCalled();
+  });
+
+  it("does not read the model hub for an account that cannot manage it", () => {
+    mockUseAuthorized.mockReturnValue({
+      accessToken: "test-access-token",
+      userId: "test-user-id",
+      userRole: "Internal User",
+      token: "test-token",
+      userEmail: "test@example.com",
+      premiumUser: false,
+      disabledPersonalKeyCreation: null,
+      showSSOBanner: false,
+    });
+
+    const { result } = renderHook(() => useModelHub(), { wrapper });
+
     expect(result.current.isFetched).toBe(false);
     expect(modelHubCall).not.toHaveBeenCalled();
   });
@@ -876,6 +913,24 @@ describe("useInfiniteModelInfo", () => {
     expect(result.current.error).toEqual(testError);
     expect(result.current.data).toBeUndefined();
     expect(modelInfoCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not list deployments for an account that cannot manage them", () => {
+    mockUseAuthorized.mockReturnValue({
+      accessToken: "test-access-token",
+      userId: "test-user-id",
+      userRole: "Internal User",
+      token: "test-token",
+      userEmail: "test@example.com",
+      premiumUser: false,
+      disabledPersonalKeyCreation: null,
+      showSSOBanner: false,
+    });
+
+    const { result } = renderHook(() => useInfiniteModelInfo(), { wrapper });
+
+    expect(result.current.isFetched).toBe(false);
+    expect(modelInfoCall).not.toHaveBeenCalled();
   });
 
   it("should not execute query when accessToken is missing", () => {

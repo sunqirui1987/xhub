@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PlaygroundPage from "./page";
+import { fetchProxySettings } from "@/utils/proxyUtils";
 
 const authState = { userRole: "Admin" };
 
@@ -30,6 +31,7 @@ vi.mock("@/app/(dashboard)/playground/components/compareUI/CompareUI", () => ({
 describe("PlaygroundPage role guard", () => {
   beforeEach(() => {
     authState.userRole = "Admin";
+    vi.mocked(fetchProxySettings).mockClear();
   });
 
   it.each(["Internal Viewer", "Admin Viewer"])("blocks the entire playground for %s", (role) => {
@@ -52,5 +54,16 @@ describe("PlaygroundPage role guard", () => {
     expect(screen.queryByRole("tab", { name: "Compliance" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Agent Builder (Experimental)" })).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-ui")).toBeInTheDocument();
+  });
+
+  it("loads deployment settings only for a platform administrator", async () => {
+    render(<PlaygroundPage />);
+    await waitFor(() => expect(fetchProxySettings).toHaveBeenCalledWith("sk-test"));
+  });
+
+  it.each(["Internal User", "Org Admin"])("does not request management settings for %s", (role) => {
+    authState.userRole = role;
+    render(<PlaygroundPage />);
+    expect(fetchProxySettings).not.toHaveBeenCalled();
   });
 });

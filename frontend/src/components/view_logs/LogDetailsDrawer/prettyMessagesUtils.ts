@@ -81,8 +81,73 @@ const classifyResponse = (response: unknown): ResponsePayload => {
  */
 export const parseMessages = (request: unknown, response: unknown): ParsedMessages => ({
   requestMessages: parseRequestMessages(classifyRequest(request)),
-  responseMessage: parseResponseMessage(classifyResponse(response)),
+  responseMessage: parseResponseMessage(classifyResponse(loggedResponse(response))),
 });
+
+// loggedResponse reads a stored event stream back into the final response.
+// Console calls are often streamed, and the log keeps that stream under body
+// when it is not one JSON document. The output panel only understands a
+// completed response.
+export const loggedResponse = (response: unknown): unknown => {
+  const sse = eventStreamText(response);
+  if (!sse) return response;
+  const events = sseData(sse);
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const doc = events[i];
+    if (doc.type === "response.completed" && isRecord(doc.response)) return doc.response;
+  }
+  const deltas = events
+    .filter((doc) => doc.type === "response.output_text.delta")
+    .map((doc) => asString(doc.delta))
+    .join("");
+  if (deltas.length > 0) {
+    return {
+      output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: deltas }] }],
+    };
+  }
+  let content = "";
+  for (const doc of events) {
+    const choices = doc.choices;
+    if (!Array.isArray(choices) || !isRecord(choices[0])) continue;
+    const choice = choices[0];
+    const delta = isRecord(choice.delta) ? choice.delta : undefined;
+    if (typeof delta?.content === "string") content += delta.content;
+    const message = isRecord(choice.message) ? choice.message : undefined;
+    if (typeof message?.content === "string" && message.content.length > 0) content = message.content;
+  }
+  if (content.length > 0) {
+    return { choices: [{ message: { role: "assistant", content } }] };
+  }
+  return response;
+};
+
+const eventStreamText = (response: unknown): string | null => {
+  if (typeof response === "string" && looksLikeEventStream(response)) return response;
+  if (isRecord(response) && typeof response.body === "string" && looksLikeEventStream(response.body)) {
+    return response.body;
+  }
+  return null;
+};
+
+const looksLikeEventStream = (value: string): boolean =>
+  value.includes("data:") && (value.includes("event:") || value.includes('"choices"'));
+
+const sseData = (text: string): UnknownRecord[] => {
+  const docs: UnknownRecord[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) continue;
+    const payload = trimmed.slice("data:".length).trim();
+    if (payload.length === 0 || payload === "[DONE]") continue;
+    try {
+      const parsed: unknown = JSON.parse(payload);
+      if (isRecord(parsed)) docs.push(parsed);
+    } catch {
+      // A non-JSON event line is not a response document.
+    }
+  }
+  return docs;
+};
 
 const parseRequestMessages = (payload: RequestPayload): ParsedMessage[] => {
   switch (payload.kind) {
