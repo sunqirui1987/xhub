@@ -91,7 +91,6 @@ import { clearTokenCookies, getCookie, storeLoginToken } from "@/utils/cookieUti
 import { decodeToken } from "@/utils/jwtUtils";
 import { TagNewRequest, TagUpdateRequest, TagListResponse, TagInfoResponse } from "./tag_management/types";
 import { Team } from "./key_team_helpers/key_list";
-import { EmailEventSettingsResponse, EmailEventSettingsUpdateRequest } from "./email_events/types";
 import type { SkillRegisterRequest } from "./claude_code_plugins/types";
 import type { ModelBudgetUsage, ModelMaxBudget } from "./key_team_helpers/ModelMaxBudgetEditor";
 import type { ObjectPermission } from "./object_permission_types";
@@ -5895,85 +5894,6 @@ export const ragIngestCall = async (
     return await response.json();
   } catch (error) {
     console.error("Error ingesting document:", error);
-    throw error;
-  }
-};
-
-export const getEmailEventSettings = async (accessToken: string): Promise<EmailEventSettingsResponse> => {
-  try {
-    const url = proxyBaseUrl ? `${proxyBaseUrl}/email/event_settings` : `/email/event_settings`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      handleError(errorData);
-      throw new Error(t("Failed to get email event settings"));
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Failed to get email event settings:", error);
-    throw error;
-  }
-};
-
-export const updateEmailEventSettings = async (accessToken: string, settings: EmailEventSettingsUpdateRequest) => {
-  try {
-    const url = proxyBaseUrl ? `${proxyBaseUrl}/email/event_settings` : `/email/event_settings`;
-
-    const response = await fetch(url, {
-      method: "PATCH",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(settings),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      handleError(errorData);
-      throw new Error(t("Failed to update email event settings"));
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Failed to update email event settings:", error);
-    throw error;
-  }
-};
-
-export const resetEmailEventSettings = async (accessToken: string) => {
-  try {
-    const url = proxyBaseUrl ? `${proxyBaseUrl}/email/event_settings/reset` : `/email/event_settings/reset`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      handleError(errorData);
-      throw new Error(t("Failed to reset email event settings"));
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Failed to reset email event settings:", error);
     throw error;
   }
 };

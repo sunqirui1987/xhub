@@ -1,7 +1,10 @@
 // Package volcengine registers Ark's Seedance API as a bypass endpoint type.
 package volcengine
 
-import "github.com/sunqirui1987/xhub/internal/provider"
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/provider"
+)
 
 // 进程启动时登记这个目录的供应商、端点类型和模型价格。添加模型时就能选到它们。
 // 参数：无。
@@ -9,6 +12,7 @@ import "github.com/sunqirui1987/xhub/internal/provider"
 // 调用：Go 在载入这个包时自动执行。
 // 测试：无直接单测
 func init() {
+	logx.Debug("provider volcengine loading its registered transport and models")
 	provider.RegisterSupplier(provider.Supplier{
 		Name: "VolcEngine", Slug: "volcengine", Display: "VolcEngine",
 		APIBase: "https://ark.cn-beijing.volces.com",

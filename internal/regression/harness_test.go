@@ -101,6 +101,13 @@ func TestMain(m *testing.M) {
 // 返回 *harness（*harness）：已经可以发请求和查结果的网关句柄。
 func newHarness(t *testing.T, models ...config.ModelEntry) *harness {
 	t.Helper()
+	return openHarness(t, true, models...)
+}
+
+// openHarness 和 newHarness 一样，只是可以关掉花费日志里的请求正文。
+// 产品默认不存正文，管理员开关能把它打开；套件里大多数用例要核对日志，所以 newHarness 仍然打开。
+func openHarness(t *testing.T, storePrompts bool, models ...config.ModelEntry) *harness {
+	t.Helper()
 	h := &harness{t: t, master: "sk-regression-" + strconv.FormatInt(time.Now().UnixNano(), 36)}
 
 	h.prices = httptest.NewServer(http.HandlerFunc(h.serveUpstream))
@@ -152,7 +159,7 @@ func newHarness(t *testing.T, models ...config.ModelEntry) *harness {
 			MasterKey:               h.master,
 			DatabaseURL:             dsn,
 			RedisURL:                os.Getenv("XHUB_REGRESSION_REDIS_URL"),
-			StorePromptsInSpendLogs: true,
+			StorePromptsInSpendLogs: storePrompts,
 		},
 	}
 	h.gw = gateway.New(cfg, st, db)

@@ -1046,7 +1046,7 @@ func Freeze(kind string, obj map[string]any) {
 		setDefault(obj, "callbacks", []any{})
 		setDefault(obj, "success_callback", []any{})
 		setDefault(obj, "failure_callback", []any{})
-	case "compliance", "cloudzero", "vantage":
+	case "compliance", "vantage":
 		setDefault(obj, "status", "ok")
 		setDefault(obj, "exported_count", 0)
 	case "onboarding", "onboard":

@@ -3,7 +3,7 @@
 import { useLogin } from "@/app/(dashboard)/hooks/login/useLogin";
 import { useUIConfig } from "@/app/(dashboard)/hooks/uiConfig/useUIConfig";
 import LoadingScreen from "@/components/common_components/LoadingScreen";
-import { exchangeLoginCode, getProxyBaseUrl, switchToWorkerUrl } from "@/components/networking";
+import { exchangeLoginCode, switchToWorkerUrl } from "@/components/networking";
 import { Alert, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import { PasswordInput } from "@/components/shared/PasswordInput";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -16,7 +16,7 @@ import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { clearTokenCookies, getCookieFromDocument } from "@/utils/cookieUtils";
 import { isJwtExpired } from "@/utils/jwtUtils";
-import { consumeReturnUrl, getLoginUrl, getReturnUrl, isValidReturnUrl } from "@/utils/returnUrlUtils";
+import { consumeReturnUrl } from "@/utils/returnUrlUtils";
 import { Activity, Boxes, CircleAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
@@ -166,17 +166,6 @@ function LoginPageContent() {
       } else {
         router.replace("/ui");
       }
-      return;
-    }
-
-    if (uiConfig && uiConfig.auto_redirect_to_sso) {
-      // For SSO, pass the return URL to the SSO endpoint
-      const returnUrl = getReturnUrl();
-      let ssoUrl = `${getProxyBaseUrl()}/sso/key/generate`;
-      if (returnUrl && isValidReturnUrl(returnUrl)) {
-        ssoUrl += `?redirect_to=${encodeURIComponent(returnUrl)}`;
-      }
-      router.push(ssoUrl);
       return;
     }
 
@@ -334,39 +323,6 @@ function LoginPageContent() {
                 {isLoginLoading ? t("login.submitting") : t("login.submit")}
               </Button>
 
-              {!uiConfig?.sso_configured ? (
-                <Tooltip>
-                  <TooltipTrigger render={<span className="block w-full" />}>
-                    <Button type="button" variant="outline" size="lg" disabled className="w-full">
-                      {t("login.sso")}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("login.ssoDisabled")}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  disabled={isLoginLoading || (!!selectedWorkerId && workers.length === 0)}
-                  onClick={() => {
-                    const selectedWorker = workers.find((w) => w.worker_id === selectedWorkerId);
-                    if (selectedWorker) {
-                      // Store worker selection so useWorker hook restores it after redirect
-                      localStorage.setItem("litellm_selected_worker_id", selectedWorkerId!);
-                      switchToWorkerUrl(selectedWorker.url);
-                    }
-                    // SSO on the worker (or this instance if no worker), always
-                    // include return_to so the callback redirects back here
-                    const ssoBase = selectedWorker?.url ?? getProxyBaseUrl();
-                    const returnTo = encodeURIComponent(getLoginUrl(window.location.origin));
-                    router.push(`${ssoBase}/sso/key/generate?return_to=${returnTo}`);
-                  }}
-                  className="w-full"
-                >
-                  {t("login.sso")}
-                </Button>
-              )}
             </FieldGroup>
           </form>
         </div>

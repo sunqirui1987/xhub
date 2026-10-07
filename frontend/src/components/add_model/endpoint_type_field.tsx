@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useFormContext, useWatch } from "react-hook-form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MountedFormField, type MountedFormValues } from "../common_components/MountedFormField";
@@ -7,16 +7,21 @@ import { provider_map } from "../provider_info_helpers";
 import { t } from "@/i18n";
 
 /**
- * 这条模型应答哪些入口（能力），以及网关怎么把请求送到上游（转发方式）。
+ * 这条模型怎么被调用。一个下拉，单选。
  *
- * 这两件事原来压在一个下拉里，值写进 `model_info.mode`。压在一起的结果是
- * 「配置里没有这个选项」——一条只答对话的模型和一个原样转发的端点是两个独立的
- * 事实，用一格表达不了。
+ * 选项分两档，但在界面上是同一件事——"这条模型用什么形状被调用"：
  *
- * 现在的写入：
- *   - `model_info.endpoint_types`：能力 id 列表。
- *   - `model_info.transport`：`adapted` 或一个已登记的内置转发 id。
- *   - `model_info.mode`：第一条能力，留着给还在读这个字符串的旧界面用。
+ *   - 协议适配（chat、completion、embedding、image、video、…）：上游路径由
+ *     网关按 (操作, 供应商) 编译。
+ *   - 直通（内置的那些）：上游路径和字段在网关里登记好了，请求原样转发。
+ *
+ * 直通不出现在这里作为"可以自己填的东西"：一份手填的路径表拿不到上游的结构化
+ * 返回值，预选、日志、用量都无从谈起。所以它只能来自后台登记。
+ *
+ * 写入：
+ *   - `model_info.endpoint_types`：选中能力时是它的 id；直通时为空。
+ *   - `model_info.transport`：`adapted` 或一个登记过的直通 id。
+ *   - `model_info.mode`：选中项的 id。旧的模型列表和 Playground 还在读这个字符串。
  */
 interface EndpointCapability {
   id: string;
@@ -51,7 +56,7 @@ interface EndpointPayload {
   models?: Record<string, string>;
 }
 
-/** 协议适配这一档的 id。它不在 transports 列表里，由前端补上作为选项之一。 */
+/** 协议适配这一档的 id。它不在 transports 列表里，由前端补上作为默认选项。 */
 const ADAPTED = "adapted";
 
 function providerSlug(selected: string | null): string {
@@ -84,100 +89,111 @@ const EndpointTypeField: React.FC<{
   }, []);
 
   const capabilities = useMemo(() => payload.capabilities ?? [], [payload.capabilities]);
+  const transports = useMemo(() => payload.transports ?? [], [payload.transports]);
 
-  // 内置转发方式按供应商过滤：方舟内容生成只对火山显示，七牛只对七牛显示。
-  // 供应商不是列表里的任何一家时，这一档就没有可选项，只剩协议适配。
-  const bypasses = useMemo(
-    () =>
-      (payload.transports ?? []).filter(
-        (item) => !item.providers || item.providers.length === 0 || item.providers.includes(slug),
-      ),
-    [payload.transports, slug],
+  /**
+   * 下拉里的每一项：一个 id、一个显示名、一段说明，以及它是不是直通。
+   *
+   * 直通按供应商过滤：方舟内容生成的根地址是方舟的，七牛的是七牛的，拿另一家去
+   * 接只会打错地址。供应商还没选时全都显示，免得看起来像"这家没有直通"。
+   */
+  const options = useMemo(() => {
+    const items = capabilities.map((item) => ({
+      value: item.id,
+      label: t(item.label),
+      detail: (item.paths ?? []).join(" · "),
+      bypass: false,
+    }));
+    for (const item of transports) {
+      const declared = item.providers ?? [];
+      if (declared.length > 0 && slug !== "" && !declared.includes(slug)) continue;
+      items.push({
+        value: item.id,
+        label: item.label,
+        detail: item.api_base ?? "",
+        bypass: true,
+      });
+    }
+    return items;
+  }, [capabilities, transports, slug]);
+
+  const selected = options.find((item) => item.value === mode) ?? null;
+
+  /**
+   * 写入一个选项。
+   *
+   * 直通只写 transport 和 endpoint 对象，不写能力：它的入口是供应商自己的路径，
+   * 不适配路径。协议适配相反，写能力，并清掉上一次留下的 endpoint 对象——
+   * 否则换回 chat 之后那份旧路径表还挂在部署上，后端会当它不存在，但库里留着垃圾。
+   */
+  const writeValue = useMemo(
+    () => (value: string) => {
+      const item = options.find((option) => option.value === value);
+      form.setValue("mode", value);
+      if (!item?.bypass) {
+        form.setValue("transport", ADAPTED);
+        form.setValue("endpoint_types", value === "" ? [] : [value]);
+        form.setValue("endpoint", undefined);
+        return;
+      }
+      const transport = transports.find((entry) => entry.id === value);
+      form.setValue("transport", value);
+      form.setValue("endpoint_types", []);
+      form.setValue("endpoint", {
+        kind: "bypass",
+        api_base: transport?.api_base ?? "",
+        model_field: transport?.model_field ?? "model",
+        task_id: transport?.task_id ?? "",
+        strip_prefix: transport?.strip_prefix ?? "",
+        actions: transport?.actions ?? [],
+      });
+      if (transport?.api_base) form.setValue("api_base", transport.api_base);
+    },
+    [form, options, transports],
   );
 
-  // 转发方式：协议适配永远可选，内置的那些按供应商来。
-  const transportValue = mode && (mode === ADAPTED || bypasses.some((item) => item.id === mode)) ? mode : ADAPTED;
-  const selectedBypass = bypasses.find((item) => item.id === transportValue) ?? null;
-
-  // 能力：多选。mode 在这一栏不再表示转发方式，而表示第一条能力，
-  // 所以旧行只写了 "chat" 时，这一栏预选 chat。
-  const selectedCapabilities = useMemo(() => {
-    const fromTypes = form.getValues("endpoint_types") as string[] | undefined;
-    if (Array.isArray(fromTypes) && fromTypes.length > 0) return fromTypes;
-    if (mode && capabilities.some((item) => item.id === mode)) return [mode];
-    if (mode === ADAPTED || !mode) return ["chat"];
-    return [];
-    // mode 参与判定，但用一个稳定的字符串避免每次渲染都重算。
-  }, [capabilities, mode, form]);
-
-  // 能力这一栏默认预选 chat，并把它写进表单：一个新模型什么都不答是没意义的，
-  // 而留空会让提交体里根本没有这个字段，后端只好自己猜。
+  // 目录到了之后做一次预选，只做一次。
+  //
+  // 顺序是"价目表里声明的那个"优先，没有才用 chat。放在一个 effect 里并且用
+  // 一个 ref 标记做过，是因为目录是异步来的：早于目录的那次渲染里 options
+  // 是空的，那时写值只会写下一个目录里不存在的 id。
+  const seeded = useRef(false);
   useEffect(() => {
-    if (form.getValues("endpoint_types") !== undefined) return;
-    if (form.getValues("mode")) return;
-    if (capabilities.length === 0) return;
-    writeCapabilities(["chat"]);
-  }, [capabilities, form]);
-
-  // 选中价目表的模型时预选：值是转发方式就选转发，否则选能力。
-  useEffect(() => {
+    if (seeded.current || options.length === 0) return;
+    seeded.current = true;
     const picked = Array.isArray(modelValue) ? modelValue[0] : modelValue;
-    if (typeof picked !== "string" || picked === "") return;
-    const declared = modelCostMap?.[picked]?.endpoint_type || payload.models?.[picked];
-    if (!declared) return;
-    const current = form.getValues("mode");
-    if (current) return;
-    if (declared === ADAPTED || (payload.transports ?? []).some((item) => item.id === declared)) {
-      form.setValue("mode", declared);
+    const declared =
+      typeof picked === "string" && picked !== ""
+        ? modelCostMap?.[picked]?.endpoint_type || payload.models?.[picked]
+        : undefined;
+    if (declared && options.some((item) => item.value === declared) && !form.getValues("mode")) {
+      writeValue(declared);
       return;
     }
-    if (capabilities.some((item) => item.id === declared)) {
-      form.setValue("endpoint_types", [declared]);
-      form.setValue("mode", declared);
-    }
-  }, [modelValue, modelCostMap, payload.models, payload.transports, capabilities, form]);
-
-  /** 写能力：多选值进 endpoint_types，第一条也写进 mode 给旧界面读。 */
-  const writeCapabilities = (next: string[]) => {
-    form.setValue("endpoint_types", next);
-    form.setValue("mode", next[0] ?? "");
-  };
-
-  /** 写转发：协议适配不写 endpoint 对象，内置的写上它的字段。 */
-  const writeTransport = (id: string) => {
-    form.setValue("mode", id);
-    form.setValue("transport", id);
-    const bypass = bypasses.find((item) => item.id === id);
-    if (!bypass) {
-      // 协议适配：上游由 (op, 供应商) 决定，这里没有要存的东西。
-      form.setValue("endpoint", undefined);
-      return;
-    }
-    form.setValue("endpoint", {
-      kind: "bypass",
-      api_base: bypass.api_base ?? "",
-      model_field: bypass.model_field ?? "model",
-      task_id: bypass.task_id ?? "",
-      strip_prefix: bypass.strip_prefix ?? "",
-      actions: bypass.actions ?? [],
-    });
-    if (bypass.api_base) form.setValue("api_base", bypass.api_base);
-  };
-
-  const adapted = transportValue === ADAPTED;
+    // 一个新模型什么都不答没有意义，所以默认 chat。留空会让提交体里根本没有
+    // 这个字段，后端只好替它猜一个。
+    if (!form.getValues("mode")) writeValue("chat");
+  }, [options, modelValue, modelCostMap, payload.models, writeValue, form]);
 
   return (
     <>
-      <MountedFormField label={t("Transport")} name="transport" className="mb-1">
-        {() => (
-          <Select items={[]} value={transportValue} onValueChange={(value: string | null) => writeTransport(value ?? ADAPTED)}>
-            <SelectTrigger id="model-transport" className="w-full" aria-label={t("Transport")}>
+      <MountedFormField label={t("Call type")} name="mode" className="mb-1">
+        {(control) => (
+          <Select
+            items={options.map((item) => ({ value: item.value, label: item.label }))}
+            value={(control.value as string | undefined) ?? ""}
+            onValueChange={(value: string | null) => {
+              const next = value ?? "";
+              control.onChange(next);
+              writeValue(next);
+            }}
+          >
+            <SelectTrigger id={control.id} className="w-full" aria-label={t("Call type")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ADAPTED}>{t("Protocol adaptation")}</SelectItem>
-              {bypasses.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
+              {options.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
                   {item.label}
                 </SelectItem>
               ))}
@@ -187,60 +203,11 @@ const EndpointTypeField: React.FC<{
       </MountedFormField>
       <p className="text-sm text-muted-foreground mb-5 mt-1">
         {t(
-          "Protocol adaptation lets the gateway compile the request from the provider and the endpoint. A registered pass-through forwards the provider's own API unchanged.",
+          "How this model is called. A registered pass-through forwards the provider's own API unchanged; everything else is compiled by the gateway from the provider and the call type.",
         )}
       </p>
-
-      {adapted && (
-        <>
-          <fieldset className="mb-5 space-y-3 rounded-md border border-border p-3">
-            <legend className="px-1 text-sm font-medium">{t("Capabilities")}</legend>
-            <div className="flex flex-wrap gap-3" role="group" aria-label={t("Capabilities")}>
-              {capabilities.map((item) => (
-                <label key={item.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedCapabilities.includes(item.id)}
-                    onChange={(event) => {
-                      const next = event.target.checked
-                        ? [...selectedCapabilities, item.id]
-                        : selectedCapabilities.filter((id) => id !== item.id);
-                      writeCapabilities(next);
-                    }}
-                  />
-                  <span>{t(item.label)}</span>
-                </label>
-              ))}
-            </div>
-            {selectedCapabilities.length === 0 && (
-              <p className="text-xs text-destructive">
-                {t("Pick at least one capability, or this model cannot be called.")}
-              </p>
-            )}
-          </fieldset>
-          {selectedCapabilities.length > 0 && (
-            <p className="mb-5 -mt-3 text-xs text-muted-foreground">
-              {selectedCapabilities
-                .flatMap((id) => capabilities.find((item) => item.id === id)?.paths ?? [])
-                .join(" · ")}
-            </p>
-          )}
-        </>
-      )}
-
-      {!adapted && selectedBypass && (
-        <div className="mb-5 space-y-2 rounded-md border border-border p-3 text-sm">
-          {selectedBypass.api_base && (
-            <p className="text-muted-foreground">
-              {t("API Base")}: <span className="font-mono">{selectedBypass.api_base}</span>
-            </p>
-          )}
-          <p className="text-muted-foreground">
-            {t(
-              "The paths and fields of this pass-through are registered with the gateway. Nothing to fill in here.",
-            )}
-          </p>
-        </div>
+      {selected?.detail && (
+        <p className="mb-5 -mt-3 break-all font-mono text-xs text-muted-foreground">{selected.detail}</p>
       )}
     </>
   );

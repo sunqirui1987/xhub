@@ -165,6 +165,7 @@ router-settings 里的 `fallbacks`、`context_window_fallbacks`、`content_polic
 | `TestTenantSeesOnlyItsOwnLogs` | 租户看不见别的租户的日志 |
 | `TestDailyActivityCountsTheCalls` | 按天聚合把当天的调用算进去 |
 | `TestSpendCalculateUsesThePriceCatalog` | `/spend/calculate` 用价格目录。目录里没有的模型不能被编一个费率 |
+| `TestPromptStorageFollowsTheSwitch` | 花费日志默认不留请求和回答正文。管理员打开开关后新日志留下正文，关掉后下一笔又不再留 |
 
 ### `budget_test.go`
 

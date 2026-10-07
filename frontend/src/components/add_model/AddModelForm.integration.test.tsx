@@ -178,35 +178,29 @@ const createTestProps = (userRole = "proxy_admin", userId = "user-1", isTeamAdmi
 };
 
 describe("AddModelForm", () => {
-  // 这一条钉住这次拆分：转发方式和能力是两个独立的控件，而不是一个下拉。
-  //
-  // 旧的写法是一个 "Endpoint type" 下拉，值写进 model_info.mode，把「这条模型
-  // 应答什么」和「网关怎么把请求送到上游」压成了一格。压在一起的结果是一条只答
-  // 对话的模型和一个原样转发的端点无法同时表达。
-  it("writes capabilities and the transport as two separate fields", async () => {
+  // 这一条钉住这次拆分：调用方式是一个单选下拉，选项里既有网关自己编译的
+  // 那些（chat、embedding、image…），也有后台登记的直通。它们同级，因为对
+  // 运维来说回答的是同一个问题——这条模型怎么被调用。
+  it("writes the call type into model_info, not into litellm_params", async () => {
     const auth = vi.mocked(await import("@/app/(dashboard)/hooks/useAuthorized"));
     auth.default.mockReturnValue(mockAuthorizedUser("proxy_admin", "user-1", true));
     const props = createTestProps();
     const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
     renderWithProviders(<AddModelForm {...props} />);
 
-    // 转发方式默认是协议适配。
-    const transport = await screen.findByRole("combobox", { name: /Transport|转发方式/ });
-    await user.click(transport);
-    await user.click(await screen.findByRole("option", { name: /Protocol adaptation|协议适配/ }));
+    // 目录是异步来的，预选发生在它到了之后，所以要等这一步落地。
+    const picker = await screen.findByRole("combobox", { name: /Call type|调用方式/ });
+    await waitFor(() => expect(props.form.getValues("mode")).toBe("chat"));
     expect(props.form.getValues("transport")).toBe("adapted");
-    // 协议适配不写 endpoint 对象：上游地址由 (op, 供应商) 决定，这里没有要存的东西。
-    expect(props.form.getValues("endpoint")).toBeUndefined();
-
-    // 能力是多选。默认预选 chat，取消之后再把 chat 和 embedding 都选上。
-    const chat = await screen.findByRole("checkbox", { name: /Chat/ });
-    expect(chat).toBeChecked();
     expect(props.form.getValues("endpoint_types")).toEqual(["chat"]);
-    const embedding = await screen.findByRole("checkbox", { name: /Embedding/ });
-    await user.click(embedding);
-    expect(props.form.getValues("endpoint_types")).toEqual(["chat", "embedding"]);
-    // 第一条能力也写进 mode，给还在读这个字符串的旧界面用。
-    expect(props.form.getValues("mode")).toBe("chat");
+
+    // 换成 embedding：能力跟着换，而且不会留下直通的 endpoint 对象。
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: /Embedding|向量/ }));
+    expect(props.form.getValues("mode")).toBe("embedding");
+    expect(props.form.getValues("endpoint_types")).toEqual(["embedding"]);
+    expect(props.form.getValues("transport")).toBe("adapted");
+    expect(props.form.getValues("endpoint")).toBeUndefined();
 
     // 提交体放在 model_info 上，不是 litellm_params。
     const deployments = await prepareModelAddRequest(
@@ -220,9 +214,9 @@ describe("AddModelForm", () => {
       null,
     );
     expect(deployments?.[0].modelInfoObj).toMatchObject({
-      endpoint_types: ["chat", "embedding"],
+      endpoint_types: ["embedding"],
       transport: "adapted",
-      mode: "chat",
+      mode: "embedding",
     });
     expect(deployments?.[0].litellmParamsObj).not.toHaveProperty("endpoint_types");
     expect(deployments?.[0].litellmParamsObj).not.toHaveProperty("transport");

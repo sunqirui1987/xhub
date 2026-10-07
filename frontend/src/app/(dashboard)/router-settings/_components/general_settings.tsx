@@ -41,7 +41,6 @@ const NUMERIC_INPUT_WIDTH = "w-36";
 
 const GENERAL_FIELD_LABELS: Record<string, string> = {
   mcp_internal_ip_ranges: "MCP internal IP ranges",
-  alert_to_webhook_url: "Alert webhook URL",
   allow_requests_on_db_unavailable: "Allow requests when the database is unavailable",
   enable_anthropic_prompt_caching: "Automatic Anthropic prompt caching",
   anthropic_prompt_caching_ttl: "Cache lifetime (TTL)",

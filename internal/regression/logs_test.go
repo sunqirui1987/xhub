@@ -2,6 +2,7 @@ package regression
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -196,6 +197,62 @@ func TestDailyActivityCountsTheCalls(t *testing.T) {
 	if total != calls {
 		t.Fatalf("the daily view counts %d requests, want %d", total, calls)
 	}
+}
+
+// TestPromptStorageFollowsTheSwitch 证明花费日志默认不留请求正文，管理员打开开关之后才留。
+// 关掉之后下一笔又不再留。开关只影响新日志，已经写下的正文还在。
+func TestPromptStorageFollowsTheSwitch(t *testing.T) {
+	h := openHarness(t, false, chatDeployment("regression-prompts"))
+	admin := h.adminSession()
+	tn := h.provision(t, admin, "prompts")
+
+	off := h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
+		"model":    "regression-prompts",
+		"messages": []any{map[string]any{"role": "user", "content": "secret-while-off"}},
+	})
+	h.flushSpend()
+	if body := string(mustJSON(logDetail(t, h, admin, off.header("x-litellm-call-id"))["messages"])); strings.Contains(body, "secret-while-off") {
+		t.Fatalf("the prompt was stored while the switch was off: %s", body)
+	}
+
+	turnedOn := h.do(http.MethodPost, "/config/update", admin, map[string]any{
+		"general_settings": map[string]any{"store_prompts_in_spend_logs": true},
+	})
+	if turnedOn.status != http.StatusOK {
+		t.Fatalf("turn prompt storage on: %d %s", turnedOn.status, turnedOn.text())
+	}
+	on := h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
+		"model":    "regression-prompts",
+		"messages": []any{map[string]any{"role": "user", "content": "secret-while-on"}},
+	})
+	h.flushSpend()
+	stored := string(mustJSON(logDetail(t, h, admin, on.header("x-litellm-call-id"))))
+	if !strings.Contains(stored, "secret-while-on") || !strings.Contains(stored, "regression-ok") {
+		t.Fatalf("the open switch did not keep the prompt and the answer: %s", stored)
+	}
+
+	turnedOff := h.do(http.MethodPost, "/config/update", admin, map[string]any{
+		"general_settings": map[string]any{"store_prompts_in_spend_logs": false},
+	})
+	if turnedOff.status != http.StatusOK {
+		t.Fatalf("turn prompt storage off: %d %s", turnedOff.status, turnedOff.text())
+	}
+	again := h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
+		"model":    "regression-prompts",
+		"messages": []any{map[string]any{"role": "user", "content": "secret-while-off-again"}},
+	})
+	h.flushSpend()
+	if body := string(mustJSON(logDetail(t, h, admin, again.header("x-litellm-call-id"))["messages"])); strings.Contains(body, "secret-while-off-again") {
+		t.Fatalf("the prompt was stored after the switch was turned off: %s", body)
+	}
+}
+
+func logDetail(t *testing.T, h *harness, admin, callID string) map[string]any {
+	t.Helper()
+	if callID == "" {
+		t.Fatal("the response carried no call id")
+	}
+	return h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil).json()
 }
 
 // TestSpendCalculateUsesThePriceCatalog 钉住估算接口的定价来源。

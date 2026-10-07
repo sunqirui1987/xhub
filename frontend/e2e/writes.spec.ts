@@ -126,18 +126,6 @@ test("team member add is listed", async ({ page }) => {
   guard.assertOk();
 });
 
-test("logging alert toggle shows a result", async ({ page }) => {
-  const guard = watchGateway(page);
-  await loginAdmin(page);
-  await page.goto(uiPath("/logging-and-alerts"));
-  await page.getByRole("tab", { name: t("pages.loggingAndAlerts.alertingTypes") }).click();
-  const alerts = page.getByRole("tabpanel", { name: t("pages.loggingAndAlerts.alertingTypes") });
-  await alerts.getByRole("switch").first().click();
-  await alerts.getByRole("button", { name: t("Save Changes") }).click();
-  await expect(page.getByText(t("Alerts updated successfully"))).toBeVisible({ timeout: 15_000 });
-  guard.assertOk();
-});
-
 test("router fallback update lists the mapping", async ({ page }) => {
   test.setTimeout(90_000);
   const guard = watchGateway(page);
@@ -176,49 +164,21 @@ test("router fallback update lists the mapping", async ({ page }) => {
   guard.assertOk();
 });
 
-test("cost calculator export is available after a result", async ({ page }) => {
-  const guard = watchGateway(page);
-  await loginAdmin(page);
-  await page.goto(uiPath("/cost-tracking"));
-  await expect(page.getByText(t("pages.costTracking.calculator")).first()).toBeVisible({ timeout: 15_000 });
-  const modelBox = page.getByRole("combobox").first();
-  await modelBox.click();
-  await pickOption(page, /gpt-4o-mini/);
-  await expect(page.getByRole("button", { name: t("Export") })).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: t("Export") }).click();
-  await expect(page.getByRole("menuitem", { name: t("Export as CSV") })).toBeVisible();
-  await page.getByRole("menuitem", { name: t("Export as CSV") }).click();
-  await expect(page.getByText(t("Exported CSV")).or(page.getByText(t("Failed to export CSV: "))).first()).toBeVisible({
-    timeout: 15_000,
-  });
-  guard.assertOk();
-});
-
-test("admin sso save shows a result", async ({ page }) => {
+test("admin panel saves prompt storage and hides the unused settings", async ({ page }) => {
   const guard = watchGateway(page);
   await loginAdmin(page);
   await page.goto(uiPath("/admin-panel"));
-  await page.getByRole("tab", { name: t("Security Settings") }).click();
-  await page.getByRole("button", { name: t("Add SSO") }).click();
-  await expect(page.getByRole("heading", { name: t("Add SSO") })).toBeVisible();
-  const sso = page.getByRole("dialog");
-  await sso.getByRole("combobox", { name: t("SSO Provider") }).click();
-  await page.getByRole("option").first().click();
-  await sso.getByRole("textbox", { name: "Google 客户端 ID" }).fill("e2e-client");
-  await sso.getByRole("textbox", { name: "谷歌客户端秘密" }).fill("e2e-secret");
-  await sso.getByRole("textbox", { name: "代理管理员邮箱" }).fill("admin@example.com");
-  await sso.getByRole("textbox", { name: "代理基础 URL" }).fill("http://127.0.0.1:4000");
-  await sso.getByRole("button", { name: t("Save") }).click();
-  await expect(
-    page.getByRole("heading", { name: t("SSO Setup Instructions") }).or(page.getByText(t("Failed to save SSO settings: "))),
-  ).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: t("Save UI Settings") }).click();
-  await expect(page.getByText(t("UI settings saved"))).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("tab", { name: t("Hashicorp Vault") }).click();
-  await expect(page.getByText(t("No Hashicorp Vault Configuration Found")).or(page.getByTestId("secret-backend-values-hashicorp_vault"))).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("tab", { name: t("CyberArk Conjur") }).click();
-  await expect(page.getByText(t("No CyberArk Configuration Found")).or(page.getByTestId("secret-backend-values-cyberark"))).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(t("Logging Settings"))).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("tab", { name: t("SSO Settings") })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: t("Security Settings") })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "SCIM" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: t("Hashicorp Vault") })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: t("CyberArk Conjur") })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: t("Plugins") })).toHaveCount(0);
+  const promptSwitch = page.getByRole("switch");
+  await promptSwitch.click();
+  await page.getByRole("button", { name: t("Save Settings") }).click();
+  await expect(page.getByText(t("Spend logs settings updated successfully"))).toBeVisible({ timeout: 15_000 });
   guard.assertOk();
 });
 

@@ -154,14 +154,6 @@ func sessionModule(s *Server) httpx.Module {
 		reg.Handle("GET /model_hub", s.publicModelHub)
 		reg.Handle("GET /model_hub/{facet}", s.publicModelHubFacet)
 		reg.Handle("POST /model_hub/update_useful_links", s.updateUsefulLinks)
-		reg.Handle("GET /config_overrides/cyberark", s.configOverride)
-		reg.Handle("POST /config_overrides/cyberark", s.configOverride)
-		reg.Handle("DELETE /config_overrides/cyberark", s.configOverride)
-		reg.Handle("POST /config_overrides/cyberark/test_connection", s.configOverride)
-		reg.Handle("GET /config_overrides/hashicorp_vault", s.configOverride)
-		reg.Handle("POST /config_overrides/hashicorp_vault", s.configOverride)
-		reg.Handle("DELETE /config_overrides/hashicorp_vault", s.configOverride)
-		reg.Handle("POST /config_overrides/hashicorp_vault/test_connection", s.configOverride)
 		reg.Handle("GET /auto_router/shadow_eval", s.shadowEvalList)
 	})
 }
@@ -198,22 +190,16 @@ func ingressModule(s *Server) httpx.Module {
 	})
 }
 
-// accessModule serves SSO, email events, cache probes, customers, and SCIM.
+// accessModule serves cache probes and customers. Email events, IP allow-lists, and SCIM are gone.
 // 参数 s（*Server）：accessModule使用的网关进程。
 // 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
 // 调用：仅在 routes.go 内使用
 // 测试：无直接单测
 func accessModule(s *Server) httpx.Module {
 	return httpx.Bind("access", func(reg httpx.Registrar) {
-		reg.Handle("GET /email/event_settings", s.emailEventSettings)
-		reg.Handle("PATCH /email/event_settings", s.emailEventSettings)
-		reg.Handle("POST /email/event_settings/reset", s.emailEventSettingsReset)
 		reg.Handle("POST /flushall", s.flushCache)
 		reg.Handle("GET /cache/settings", s.cacheSettings)
 		reg.Handle("POST /cache/settings", s.cacheSettings)
-		reg.Handle("GET /get/allowed_ips", s.allowedIPRoute)
-		reg.Handle("POST /add/allowed_ip", s.allowedIPRoute)
-		reg.Handle("POST /delete/allowed_ip", s.allowedIPRoute)
 		reg.Handle("GET /get/ui_theme_settings", s.uiTheme)
 		reg.Handle("PATCH /update/ui_theme_settings", s.uiTheme)
 		reg.Handle("POST /upload/logo", s.uiTheme)
@@ -221,10 +207,7 @@ func accessModule(s *Server) httpx.Module {
 		reg.Handle("POST /search_tools/test_connection", s.searchToolTest)
 		reg.Handle("GET /cache/ping", s.cachePing)
 		reg.Handle("GET /ping", s.cachePing)
-		reg.Handle("POST /config/callback/delete", s.callbackDelete)
 		reg.Handle("GET /customer/list", s.customerList)
 		reg.Handle("GET /end_user/list", s.customerList)
-		reg.Handle("GET /Users", s.scimUsers)
-		reg.Handle("GET /Groups", s.scimGroups)
 	})
 }

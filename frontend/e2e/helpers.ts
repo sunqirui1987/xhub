@@ -120,6 +120,4 @@ export const DASHBOARD_PAGES = [
   "/users",
   "/organizations",
   "/router-settings",
-  "/logging-and-alerts",
-  "/cost-tracking",
 ];

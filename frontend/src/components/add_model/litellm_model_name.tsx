@@ -12,12 +12,19 @@ import { withPublicName, type NameMapping } from "./public_model_name";
 interface LiteLLMModelNameFieldProps {
   selectedProvider: string | null;
   providerModels: string[];
+  modelCostMap?: Record<string, { display_name?: string }> | null;
   getPlaceholder: (provider: string) => string;
 }
+
+const modelOptionLabel = (model: string, modelCostMap?: Record<string, { display_name?: string }> | null): string => {
+  const display = modelCostMap?.[model]?.display_name;
+  return display && display !== model ? display : model;
+};
 
 const LiteLLMModelNameField: React.FC<LiteLLMModelNameFieldProps> = ({
   selectedProvider,
   providerModels,
+  modelCostMap,
   getPlaceholder,
 }) => {
   const form = useFormContext<MountedFormValues>();
@@ -127,6 +134,7 @@ const LiteLLMModelNameField: React.FC<LiteLLMModelNameFieldProps> = ({
             />
           ) : providerModels.length > 0 ? (
             <MultiSelect
+              key={selectedProvider ?? "none"}
               id={control.id}
               placeholder={t("Select models")}
               emptyText={t("No models found")}
@@ -145,7 +153,7 @@ const LiteLLMModelNameField: React.FC<LiteLLMModelNameFieldProps> = ({
                   value: "all-wildcard",
                 },
                 ...providerModels.map((model) => ({
-                  label: model,
+                  label: modelOptionLabel(model, modelCostMap),
                   value: model,
                 })),
               ]}

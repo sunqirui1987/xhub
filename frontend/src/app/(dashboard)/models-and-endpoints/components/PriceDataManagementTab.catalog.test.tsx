@@ -113,6 +113,7 @@ describe("PriceCatalog filtering", () => {
     maxOutput: null,
     capabilities: [],
     extraPrices: [],
+    priceUnits: [],
     baseline: true,
     overridden: false,
     removed: false,

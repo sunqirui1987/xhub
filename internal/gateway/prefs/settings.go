@@ -131,11 +131,33 @@ func ApplyTyped(s Host, m map[string]any) {
 	}
 }
 
+// enablesDroppedAlert reports whether a general-settings value turns alerts back on.
+// 参数 v（any）：alerting 字段的值。字符串或字符串列表里出现 email、ms_teams、slack 时为真。
+// 返回 bool（bool）：这次写入会打开已经删除的告警时返回真。
+// 调用：gateway/prefs/settings.go
+// 测试：gateway/dropped_alerts_test.go
+func enablesDroppedAlert(v any) bool {
+	switch item := v.(type) {
+	case string:
+		switch item {
+		case "email", "ms_teams", "msteams", "slack":
+			return true
+		}
+	case []any:
+		for _, one := range item {
+			if enablesDroppedAlert(one) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Update accepts a partial update of router, general, or LiteLLM settings. It requires a management identity.
 // 参数 s（Host）：更新使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/admin.go、gateway/models/mount.go
-// 测试：无直接单测
+// 测试：gateway/dropped_alerts_test.go
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -145,6 +167,10 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		patch, ok := body[ns].(map[string]any)
 		if !ok || patch == nil {
 			continue
+		}
+		if ns == "general_settings" && enablesDroppedAlert(patch["alerting"]) {
+			httpx.WriteError(w, 400, "invalid_request", "alerts are not supported")
+			return
 		}
 		if err := saveNamespacePatch(s, ns, patch); err != nil {
 			httpx.WriteError(w, 500, "internal", err.Error())
@@ -174,7 +200,6 @@ func generalFieldCatalog() []generalField {
 		{"enable_anthropic_prompt_caching", "Boolean", "Automatically add Anthropic prompt-cache breakpoints", false, nil, "prompt_caching"},
 		{"anthropic_prompt_caching_ttl", "Select", "How long Anthropic keeps the prompt cache", nil, []string{"5m", "1h"}, "prompt_caching"},
 		{"mcp_internal_ip_ranges", "List", "Internal IP ranges treated as private for MCP", []any{}, nil, ""},
-		{"alert_to_webhook_url", "Dictionary", "Alert type to webhook URL", map[string]any{}, nil, ""},
 		{"allow_requests_on_db_unavailable", "Boolean", "Allow requests when the database is unavailable", false, nil, ""},
 		{"budget_exceeded_throttle_percentage", "Float", "Fraction of traffic to throttle after a budget is exceeded", nil, nil, ""},
 		{"max_ui_session_budget", "Dollar", "Maximum spend for a dashboard session", nil, nil, ""},
@@ -237,6 +262,10 @@ func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	name := str(body["field_name"])
 	if name == "" {
 		httpx.WriteError(w, 400, "invalid_request", "field_name required")
+		return
+	}
+	if name == "alerting" && enablesDroppedAlert(body["field_value"]) {
+		httpx.WriteError(w, 400, "invalid_request", "alerts are not supported")
 		return
 	}
 	ns := str(body["config_type"])

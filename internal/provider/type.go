@@ -136,4 +136,10 @@ func Expand(pattern string, names map[string]string) string {
 
 // init 记一次类型定义文件的载入。这个文件只有类型和几个纯函数，
 // 载入本身没有别的可记的事。
+// init 记一次类型定义文件的载入。这个文件只有类型和几个纯函数，
+// 载入本身没有别的可记的事。
+// 参数：无。
+// 返回：无。只写一行进程日志。
+// 调用：Go 在载入这个包时自动执行。
+// 测试：无直接单测
 func init() { logx.Trace("enter provider types") }

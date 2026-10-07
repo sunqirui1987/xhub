@@ -136,10 +136,153 @@ var nonTokenRateFields = map[string]string{
 
 // imageRateKeys and videoSecondKeys are the feed keys that price a picture and a
 // second of video. A model that carries one is priced per output, not per token.
+//
+// They are the *unqualified* spellings. Most video and image models in the feed
+// do not use them: they quote one price per variant instead, keyed by resolution
+// and by whether the input carries a video (480p_v_duration, 4k_av_duration,
+// wiv_v_output). Twenty-some keys for one model is normal.
+//
+// That is why variantRates exists. Before it, a model whose price was quoted only
+// in variants ended up with no billable rate at all: the console showed "price not
+// provided" for a model the feed had priced, and a call to it was recorded at zero
+// cost. Thirty-four models were in that state.
 var (
 	imageRateKeys   = []string{"ti_quantity", "ii_quantity", "mi2i_quantity", "omi_quantity"}
 	videoSecondKeys = []string{"av_duration", "v_duration"}
 )
+
+// variantUnitSuffix falls back to the unit the feed declares when a variant key
+// does not carry a recognizable one.
+// variantUnitOf 把市场声明的单位名收成展示用的单位词。
+// 参数 unit（feedUnit）：一段计价单位。空单位名或认不出的名字一律算 unit。
+// 返回 string（string）：second、picture、token 或 unit。
+// 调用：convertFeedModel 在写 price_units 时。
+// 测试：无直接单测
+func variantUnitOf(unit feedUnit) string {
+	switch strings.ToLower(strings.TrimSpace(unit.UnitName)) {
+	case "second", "time":
+		return "second"
+	case "pic":
+		return "picture"
+	case "token":
+		return "token"
+	default:
+		return "unit"
+	}
+}
+
+// tokenKeys keeps the variant keys whose feed unit is a token. A picture or a
+// second that happens to have "input" in its key is not a per-token rate.
+// tokenKeys 只留下单位是 token 的键。
+//
+// 键名里带 input 的不一定是按 token 计费：i_input_quantity 是按张的输入图价。
+// 少了这一层过滤，一个出图模型的"每张"价会被写进"每 token"字段，差六个数量级。
+//
+// 参数 details（map[string]feedUnit）：计价块；keys（[]string）：候选键。
+// 返回 []string（[]string）：单位是 token 的那些键。
+// 调用：convertFeedModel 在给按 token 的兜底价时。
+// 测试：feed_test.go
+func tokenKeys(details map[string]feedUnit, keys []string) []string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		unit, ok := details[key]
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(unit.UnitName), "token") {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// cheapestUnit returns the lowest-priced variant of one base unit, which is the
+// rate a variant-only model is billed at.
+//
+// It is the cheapest rather than the dearest on purpose: over-charging a customer
+// for a resolution they did not ask for is worse than under-charging for one they
+// did, and the console shows every variant so the operator can price them
+// individually.
+// cheapestUnit 取一组变体里最便宜的那一档，作为这条模型的兜底费率。
+//
+// 取最便宜而不是最贵是有意的：按运维没要的分辨率多收钱，比少收钱更糟。
+// 每一档都还留在 price_units 里，控制台会把它们都显示出来，运维可以逐个定价。
+//
+// 参数 details（map[string]feedUnit）：计价块；keys（...string）：候选键。
+// 返回 float64（float64）：最便宜那一档的单价；bool（bool）：有可用的一档时为真。
+// 调用：convertFeedModel 在给出兜底价时。
+// 测试：feed_test.go
+func cheapestUnit(details map[string]feedUnit, keys ...string) (float64, bool) {
+	best := 0.0
+	found := false
+	for _, key := range keys {
+		unit, ok := details[key]
+		if !ok {
+			continue
+		}
+		rate, ok := perUnit(unit)
+		if !ok || rate <= 0 {
+			continue
+		}
+		if !found || rate < best {
+			best = rate
+			found = true
+		}
+	}
+	return best, found
+}
+
+// keysContaining returns the variant keys whose name contains any of the given
+// fragments. Substring rather than suffix, because the feed puts the qualifier on
+// either side: 480p_v_duration, ncache_offpeak, nth_input all describe the same
+// kind of thing and only a substring match finds all three.
+// keysContaining 返回名字里含任一给定片段的变体键。
+//
+// 用子串而不是后缀，因为市场把限定词放在词的两侧：480p_v_duration 在后面，
+// nth_input 在前面，output_peak 直接连在后面。只认后缀会漏掉后两种。
+//
+// 参数 details（map[string]feedUnit）：计价块；fragments（...string）：要匹配的片段。
+// 返回 []string（[]string）：名字含任一片段、并且排好序的键。
+// 调用：convertFeedModel 在挑候选变体时。
+// 测试：feed_test.go
+func keysContaining(details map[string]feedUnit, fragments ...string) []string {
+	var out []string
+	for key := range details {
+		for _, fragment := range fragments {
+			if strings.Contains(key, fragment) {
+				out = append(out, key)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// pictureOutputKeys returns the per-picture variant keys that price an output.
+//
+// A picture model quotes both sides: i_input_quantity is what an input picture
+// costs, i_output_quantity what a generated one costs. Only the output side may
+// become output_cost_per_image.
+//
+// 参数 details（map[string]feedUnit）：这条模型的计价块。
+// 返回 []string（[]string）：单位是张、并且描述输出那一侧的键。
+// 调用：convertFeedModel 在给出图模型兜底价时。
+// 测试：feed_test.go
+func pictureOutputKeys(details map[string]feedUnit) []string {
+	var out []string
+	for _, key := range keysContaining(details, "_quantity") {
+		if strings.Contains(key, "input") && !strings.Contains(key, "output") {
+			continue
+		}
+		unit, ok := details[key]
+		if !ok || !strings.EqualFold(strings.TrimSpace(unit.UnitName), "pic") {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
 
 // customProvider is the generic supplier that keeps "Custom Bypass" usable: an
 // operator points api_base at any documented endpoint without registering a Go
@@ -335,6 +478,73 @@ func convertFeedModel(model feedModel) map[string]any {
 				row["output_cost_per_second"] = rate
 				break
 			}
+		}
+	}
+
+	// Variant pricing: the feed quotes one price per resolution or per input mode
+	// instead of a single unqualified rate. Without this fallback such a model has
+	// no billable rate, so it shows no price and bills at zero.
+	//
+	// The cheapest variant becomes the model's rate. Which variant was picked is
+	// not recorded here; every one of them is still listed under price_units, so
+	// the console shows the operator what the choice was.
+	if _, ok := row["output_cost_per_second"]; !ok {
+		if rate, found := cheapestUnit(details, keysContaining(details, "_v_duration", "_av_duration", "_v_input_duration")...); found {
+			row["output_cost_per_second"] = rate
+		}
+	}
+	if _, ok := row["output_cost_per_image"]; !ok {
+		// Only output keys. A picture model quotes both sides (i_input_quantity is
+		// what an input picture costs), and taking the cheapest of the two put the
+		// *input* price on the output rate.
+		if rate, found := cheapestUnit(details, pictureOutputKeys(details)...); found {
+			row["output_cost_per_image"] = rate
+		}
+	}
+	// A video model that quotes only per-token variants (wiv_v_output) is billed
+	// per output token.
+	if _, ok := row["output_cost_per_token"]; !ok {
+		if rate, found := cheapestUnit(details, tokenKeys(details, keysContaining(details, "_v_output"))...); found {
+			row["output_cost_per_token"] = rate
+		}
+	}
+
+	// The remaining families quote variants that are not about resolution but
+	// about *when* or *how* the call runs. Each still has one ordinary input and
+	// one ordinary output side, and the qualified keys are variants of those two.
+	// Picking the cheapest of each side gives the model a rate; price_units keeps
+	// every variant visible.
+	//
+	//   非思考 / 思考               qwen: nth_input, th_output
+	//   空闲 / 高峰                 deepseek: ncache_offpeak, output_peak
+	//   文本输入 / 图片输入 / 图片输出  gpt-image: t_input, i_output
+	//   文生 / 图生 / 参考主体生      vidu: 1080p_t2v_duration, 540p_i2v_duration
+	//
+	// Matching is by substring rather than by suffix, because the qualifier sits
+	// on either side of the word: ncache_offpeak has it after, nth_input has it
+	// before, and output_peak has it after with no separator. A suffix-only match
+	// found the cache rate but missed both the input and output sides, which left
+	// a deepseek model billable on cache reads alone.
+	if _, ok := row["input_cost_per_token"]; !ok {
+		if rate, found := cheapestUnit(details, tokenKeys(details, keysContaining(details, "input", "ncache"))...); found {
+			row["input_cost_per_token"] = rate
+		}
+	}
+	if _, ok := row["output_cost_per_token"]; !ok {
+		if rate, found := cheapestUnit(details, tokenKeys(details, keysContaining(details, "output", "oth_output"))...); found {
+			row["output_cost_per_token"] = rate
+		}
+	}
+	if _, ok := row["cache_read_input_token_cost"]; !ok {
+		if rate, found := cheapestUnit(details, tokenKeys(details, keysContaining(details, "cache"))...); found {
+			row["cache_read_input_token_cost"] = rate
+		}
+	}
+	// vidu quotes only per-second variants named after resolution and how the
+	// video is made (t2v = text to video, i2v = image to video, r2v = reference).
+	if _, ok := row["output_cost_per_second"]; !ok {
+		if rate, found := cheapestUnit(details, keysContaining(details, "_duration")...); found {
+			row["output_cost_per_second"] = rate
 		}
 	}
 

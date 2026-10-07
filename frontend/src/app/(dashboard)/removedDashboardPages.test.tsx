@@ -62,7 +62,7 @@ const retiredPageDirs = ["agents", "memory", "workflows", "tool-policies"];
  * must not come back on their own: a page that calls a route nobody serves
  * renders an empty list and looks like a working feature.
  */
-const removedFeatureDirs = ["access-groups", "mcp-servers", "skills"];
+const removedFeatureDirs = ["access-groups", "mcp-servers", "skills", "cost-tracking", "logging-and-alerts"];
 
 const dashboardDir = join(__dirname);
 

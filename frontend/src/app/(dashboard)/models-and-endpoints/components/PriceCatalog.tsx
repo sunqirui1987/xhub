@@ -130,6 +130,29 @@ function ModelCard({
           </div>
         ))}
       </dl>
+      {/* 变体费率。视频和图像模型按分辨率和输入方式分别定价，这一块是它们
+          唯一的价——上面那两格通用输入输出对这类模型是空的，只显示它就等于
+          说"价格未提供"，而价目表里其实有。 */}
+      {row.priceUnits.length > 0 && (
+        <details className="mt-4 border-t border-border pt-3 text-sm" open={row.input == null && row.output == null}>
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            {t("priceCatalog.variantPrices", { count: row.priceUnits.length })}
+          </summary>
+          <dl className="mt-3 space-y-2">
+            {row.priceUnits.map((price) => (
+              <div key={price.key} className="flex flex-wrap justify-between gap-2 text-xs">
+                <dt className="min-w-0 break-words">{price.label}</dt>
+                <dd className="font-medium">
+                  {priceText(price.usd)}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    / {price.unit === "token" ? "1K tokens" : price.unit}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
       {row.extraPrices.length > 0 && (
         <details className="mt-4 border-t border-border pt-3 text-sm">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">

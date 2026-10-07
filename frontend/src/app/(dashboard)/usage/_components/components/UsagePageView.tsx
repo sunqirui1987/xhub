@@ -29,7 +29,6 @@ import { all_admin_roles, internalUserRoles } from "@/utils/roles";
 import { t } from "@/i18n";
 import { formatClosedRangeLabel } from "@/components/shared/advanced_date_picker";
 import { ActivityMetrics, processActivityData } from "@/components/activity_metrics";
-import CloudZeroExportModal from "@/components/cloudzero_export_modal";
 import UserDropdown from "@/components/common_components/UserDropdown";
 import EntityUsageExportModal from "@/components/EntityUsageExport";
 import KeyActivityPanel from "@/components/UsagePage/components/KeyActivityPanel";
@@ -115,7 +114,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   // For non-admins: always set to their own user ID
   const [selectedUserId, setSelectedUserId] = useState<string | null>(isAdmin ? null : userID || null);
   const [modelViewType, setModelViewType] = useState<ModelViewType>("groups");
-  const [isCloudZeroModalOpen, setIsCloudZeroModalOpen] = useState(false);
   const [isGlobalExportModalOpen, setIsGlobalExportModalOpen] = useState(false);
   const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [selectedUsageView, setUsageView] = useState<UsageOption>("global");
@@ -967,13 +965,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
           {/* User Agent Activity Panel */}
 
       <UsageAIChatPanel open={isAiChatOpen} onClose={() => setIsAiChatOpen(false)} accessToken={accessToken} />
-
-      {/* CloudZero Export Modal */}
-      <CloudZeroExportModal
-        isOpen={isCloudZeroModalOpen}
-        onClose={() => setIsCloudZeroModalOpen(false)}
-        accessToken={accessToken}
-      />
 
       {/* Global Usage Export Modal */}
       <EntityUsageExportModal

@@ -62,13 +62,10 @@ type Server struct {
 	tpmHits map[string][]tokHit
 	// catalog is the routes.json table mounted after the modules.
 	catalog []catRoute
-	// sessions and ssoCodes are the console login state. emailEvents is the
-	// notification settings page. idem is the Idempotency-Key replay buffer.
-	sessions    map[string]sessionRec
-	ssoCodes    map[string]bool
-	emailEvents []emailEventSetting
-	idem        map[string]idemRec
-	mu          sync.Mutex
+	// sessions is the console login state. idem is the Idempotency-Key replay buffer.
+	sessions map[string]sessionRec
+	idem     map[string]idemRec
+	mu       sync.Mutex
 	// yamlStoreModelInDB is the startup flag. A database override can change
 	// the same behavior later through prefs.
 	yamlStoreModelInDB bool
@@ -129,7 +126,6 @@ func New(cfg *config.Config, st *store.Store, db *iam.DB) *Server {
 		tpmHits:            map[string][]tokHit{},
 		catalog:            loadCatalog(),
 		sessions:           map[string]sessionRec{},
-		ssoCodes:           map[string]bool{},
 		idem:               map[string]idemRec{},
 		yamlStoreModelInDB: cfg.GeneralSettings.StoreModelInDB,
 	}

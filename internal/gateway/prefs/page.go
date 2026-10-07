@@ -118,7 +118,6 @@ func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
 	}
-	emptyVars := map[string]any{}
 	cbs := []any{}
 	for _, kind := range []string{"callback", "callbacks"} {
 		list, _ := s.RecordStore().ListKV(kind)
@@ -138,16 +137,12 @@ func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
-		"status":              "success",
-		"callbacks":           cbs,
-		"success_callbacks":   cbs,
-		"failure_callbacks":   []any{},
-		"available_callbacks": map[string]any{},
-		"alerts": []any{
-			map[string]any{"name": "slack", "variables": emptyVars, "active_alerts": []any{}, "alerts_to_webhook": map[string]any{}},
-			map[string]any{"name": "email", "variables": emptyVars},
-			map[string]any{"name": "ms_teams", "variables": emptyVars},
-		},
+		"status":                       "success",
+		"callbacks":                    cbs,
+		"success_callbacks":            cbs,
+		"failure_callbacks":            []any{},
+		"available_callbacks":          map[string]any{},
+		"alerts":                       []any{},
 		"active_alerting_destinations": []any{},
 		"router_settings":              MergedRouter(s),
 	})
@@ -171,11 +166,6 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 			"field_name": "mcp_internal_ip_ranges", "field_type": "List", "field_value": []any{},
 			"field_description": "Internal IP ranges treated as private for MCP", "stored_in_db": false,
 			"field_default_value": []any{},
-		},
-		{
-			"field_name": "alert_to_webhook_url", "field_type": "Dictionary", "field_value": map[string]any{},
-			"field_description": "Alert type to webhook URL", "stored_in_db": false,
-			"field_default_value": map[string]any{},
 		},
 		{
 			"field_name": "allow_requests_on_db_unavailable", "field_type": "Boolean", "field_value": false,

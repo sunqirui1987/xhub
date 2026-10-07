@@ -1,6 +1,10 @@
 package provider
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
+)
 
 // 这个文件是这次拆分的事实来源：能力表、存量 id 的映射，以及"一条部署到底
 // 应答什么、怎么转发"的判定。读路径全部集中在这里，调用方只拿能力列表和
@@ -174,3 +178,13 @@ func isKnownCapability(id string) bool {
 	}
 	return false
 }
+
+// init 记一次能力表的载入，并把条数写下来。能力表是这次拆分的事实来源，
+// 条数变了通常意味着有人加了一条能力而没想清楚它的 op 覆盖。
+// init 记一次能力表的载入，并把条数写下来。能力表是这次拆分的事实来源，
+// 条数变了通常意味着有人加了一条能力而没想清楚它的 op 覆盖。
+// 参数：无。
+// 返回：无。只写一行进程日志，含能力条数。
+// 调用：Go 在载入这个包时自动执行。
+// 测试：无直接单测
+func init() { logx.Debug("provider capabilities loaded count=%d", len(capabilities)) }

@@ -21,6 +21,7 @@ export const zhCN = {
     loadError: "无法加载当前账号可用的模型，请重试。",
     retry: "重试",
     loading: "正在加载你的模型…",
+    variantPrices: "{count} 档变体价",
     noMatches: "没有符合条件的模型",
     empty: "当前账号暂无可用模型",
     tryFilters: "试试其他关键词，或清除筛选条件。",
@@ -68,13 +69,18 @@ export const zhCN = {
     tryReload: "请打开价格数据管理，重新加载价格目录。",
   },
   endpoints: {
-    transport: "转发方式",
-    adapted: "协议适配",
-    capabilities: "能力",
-    pickAtLeastOne: "至少选一种能力，否则这条模型调不动。",
-    transportHint:
-      "协议适配由网关按供应商和端点自行编译请求；已登记的直通把供应商自己的接口原样转发。",
-    bypassHint: "这条直通的路径和字段已经在网关里登记好了，这里不需要填。",
+    callType: "调用方式",
+    callTypeHint:
+      "这条模型怎么被调用。已登记的直通把供应商自己的接口原样转发；其余由网关按供应商和调用方式编译请求。",
+    chat: "对话",
+    completion: "补全",
+    embedding: "向量",
+    image: "图像",
+    video: "视频",
+    audioSpeech: "语音合成",
+    audioTranscription: "语音转写",
+    rerank: "重排序",
+    moderation: "审核",
   },
   priceData: {
     eyebrow: "模型与价格",
@@ -587,11 +593,8 @@ export const zhCN = {
     loggingAndAlerts: {
       title: "日志与告警",
       loggingCallbacks: "日志回调",
-      cloudzero: "CloudZero 成本追踪",
       alertingTypes: "告警类型",
       alertingSettings: "告警设置",
-      emailAlerts: "邮件告警",
-      msTeamsAlerts: "MS Teams 告警",
     },
     chat: {
       newChat: "新对话",

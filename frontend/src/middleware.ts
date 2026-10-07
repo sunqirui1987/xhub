@@ -23,8 +23,6 @@ const APP_PAGES = new Set([
   "/users",
   "/organizations",
   "/router-settings",
-  "/logging-and-alerts",
-  "/cost-tracking",
   "/admin-panel",
   "/chat",
   "/chat/api-keys",

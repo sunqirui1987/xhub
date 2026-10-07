@@ -121,10 +121,6 @@ vi.mock("@/components/user_agent_activity", () => ({
   default: () => <div>User Agent Activity</div>,
 }));
 
-vi.mock("@/components/cloudzero_export_modal", () => ({
-  default: () => <div>CloudZero Export Modal</div>,
-}));
-
 vi.mock("@/components/EntityUsageExport", () => ({
   default: () => <div>Entity Usage Export Modal</div>,
 }));

@@ -34,6 +34,8 @@ describe("legacyPageRedirectHref", () => {
       "claude-code-plugins",
       "budgets",
       "ui-theme",
+      "cost-tracking",
+      "logging-and-alerts",
     ]) {
       expect(redirect(`page=${page}`), page).toBeNull();
     }

@@ -194,7 +194,7 @@ describe("LoginPage", () => {
     });
   });
 
-  it("should call router.push to SSO when jwt is invalid and auto_redirect_to_sso is true", async () => {
+  it("stays on the password form when the old SSO redirect flag is set", async () => {
     const invalidToken = "invalid-token";
     (useUIConfig as ReturnType<typeof vi.fn>).mockReturnValue({
       data: {
@@ -216,8 +216,10 @@ describe("LoginPage", () => {
     );
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("http://localhost:4000/sso/key/generate");
+      expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument();
     });
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Login with SSO" })).not.toBeInTheDocument();
   });
 
   it("should not call router when jwt is invalid and auto_redirect_to_sso is false", async () => {
@@ -305,7 +307,7 @@ describe("LoginPage", () => {
     expect(mockReplace).not.toHaveBeenCalled();
   });
 
-  it("should show Login with SSO button when sso_configured is true", async () => {
+  it("does not offer SSO login", async () => {
     (useUIConfig as ReturnType<typeof vi.fn>).mockReturnValue({
       data: {
         auto_redirect_to_sso: false,
@@ -328,37 +330,7 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument();
     });
-
-    expect(screen.getByRole("button", { name: "Login with SSO" })).toBeInTheDocument();
-  });
-
-  it("should show disabled Login with SSO button with popover when sso_configured is false", async () => {
-    (useUIConfig as ReturnType<typeof vi.fn>).mockReturnValue({
-      data: {
-        auto_redirect_to_sso: false,
-        server_root_path: "/",
-        proxy_base_url: null,
-        sso_configured: false,
-      },
-      isLoading: false,
-    });
-    (getCookieFromDocument as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    (isJwtExpired as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-    const queryClient = createQueryClient();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <LoginPage />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Login" })).toBeInTheDocument();
-    });
-
-    const ssoButton = screen.getByRole("button", { name: "Login with SSO" });
-    expect(ssoButton).toBeInTheDocument();
-    expect(ssoButton).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Login with SSO" })).not.toBeInTheDocument();
   });
 
   describe("URL ?token= legacy path is rejected (security regression test)", () => {

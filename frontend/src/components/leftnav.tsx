@@ -22,7 +22,6 @@ import {
 import {
   Activity,
   BarChart3,
-  Bell,
   Boxes,
   Building2,
   ChevronRight,
@@ -176,13 +175,6 @@ const menuGroups: MenuGroup[] = [
     requiresPlatformAdmin: true,
     items: [
       { key: "router-settings", page: "router-settings", label: "nav.routerSettings", icon: <Route {...ICON} /> },
-      {
-        key: "logging-and-alerts",
-        page: "logging-and-alerts",
-        label: "nav.loggingAndAlerts",
-        icon: <Bell {...ICON} />,
-      },
-      { key: "cost-tracking", page: "cost-tracking", label: "nav.costTracking", icon: <BarChart3 {...ICON} /> },
       { key: "admin-panel", page: "admin-panel", label: "nav.adminPanel", icon: <Lock {...ICON} /> },
     ],
   },

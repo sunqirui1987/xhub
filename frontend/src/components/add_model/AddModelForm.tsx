@@ -32,8 +32,10 @@ import LiteLLMModelNameField from "./litellm_model_name";
 import ConnectionErrorDisplay from "./model_connection_test";
 import ProviderSpecificFields from "./provider_specific_fields";
 import EndpointTypeField from "./endpoint_type_field";
+import ModelPriceFields from "./model_price_fields";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { providerModelSlug } from "../provider_info_helpers";
 import { t } from "@/i18n";
 
 interface AddModelFormProps {
@@ -141,11 +143,22 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
     [credentials],
   );
 
+  const formProvider = useWatch({ control: form.control, name: "custom_llm_provider" });
+  const selectedProviderName = typeof formProvider === "string" && formProvider !== "" ? formProvider : null;
+
+  // The price map can arrive after the provider is chosen. Re-filter whenever
+  // either side changes, and match on litellm_provider so Aliyun lists Qwen.
+  useEffect(() => {
+    setSelectedProvider(selectedProviderName);
+    setProviderModelsFn(providerModelSlug(selectedProviderName, providerMetadata));
+  }, [selectedProviderName, providerMetadata, modelCostMap, setSelectedProvider, setProviderModelsFn]);
+
   const applyProviderSelection = (provider: string | null) => {
     setSelectedProvider(provider);
-    setProviderModelsFn(provider);
+    setProviderModelsFn(providerModelSlug(provider, providerMetadata));
     form.setValue("model", []);
     form.setValue("model_name", undefined);
+    form.setValue("model_mappings", []);
   };
 
   const providerMetadataErrorText = providerMetadataError
@@ -239,6 +252,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                       <LiteLLMModelNameField
                         selectedProvider={selectedProvider}
                         providerModels={providerModels}
+                        modelCostMap={modelCostMap}
                         getPlaceholder={getPlaceholder}
                       />
 
@@ -247,134 +261,12 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
 
                       <EndpointTypeField selectedProvider={selectedProvider} modelCostMap={modelCostMap} />
 
-                      {/* Credentials */}
-                      <div className="mb-4">
-                        <span className="text-sm text-muted-foreground">{t("pages.models.savedProviderHelp")}</span>
-                      </div>
-
-                      <MountedFormField
-                        label={t("pages.models.savedProvider")}
-                        name="litellm_credential_name"
-                        defaultValue={null}
-                        className="mb-4"
-                      >
-                        {(control) => (
-                          <SearchSelect
-                            inputId={control.id}
-                            aria-label={t("pages.models.savedProvider")}
-                            placeholder={t("pages.models.savedProviderPlaceholder")}
-                            options={credentialOptions}
-                            value={(control.value as string | null | undefined) ?? ""}
-                            onValueChange={(value) => control.onChange(value === "" ? null : value)}
-                          />
-                        )}
-                      </MountedFormField>
-
-                      {/* Only show provider specific fields if no credentials selected */}
-                      {!selectedCredentialName && (
-                        <>
-                          <div className="flex items-center my-4">
-                            <div className="grow border-t border-border"></div>
-                            <span className="px-4 text-muted-foreground text-sm">{t("OR")}</span>
-                            <div className="grow border-t border-border"></div>
-                          </div>
-                          <ProviderSpecificFields selectedProvider={selectedProvider} />
-                        </>
-                      )}
-                      <div className="flex items-center my-4">
-                        <div className="grow border-t border-border"></div>
-                        <span className="px-4 text-muted-foreground text-sm">{t("Additional Model Info Settings")}</span>
-                        <div className="grow border-t border-border"></div>
-                      </div>
-                      {/* Team-only Model Switch - Only show for proxy admins, not team admins */}
-                      {(isAdmin || !isTeamAdmin) && (
-                        <Field className="mb-4">
-                          <FieldLabel>
-                            {labelWithHint(
-                              t("Team-BYOK Model"),
-                              t("Only use this model + credential combination for this team. Useful when teams want to onboard their own OpenAI keys."),
-                            )}
-                          </FieldLabel>
-                          <SimpleTooltip
-                            content={
-                              !premiumUser
-                                ? t("This is an enterprise-only feature. Upgrade to premium to restrict model+credential combinations to a specific team.")
-                                : ""
-                            }
-                            side="top"
-                          >
-                            <span className="inline-flex">
-                              <Switch
-                                checked={isTeamOnly}
-                                onCheckedChange={(checked) => {
-                                  setIsTeamOnly(checked);
-                                  if (!checked) {
-                                    form.setValue("team_id", undefined);
-                                  }
-                                }}
-                                disabled={!premiumUser}
-                                aria-label={t("Team-BYOK Model")}
-                              />
-                            </span>
-                          </SimpleTooltip>
-                        </Field>
-                      )}
-
-                      {/* Conditional Team Selection */}
-                      {isTeamOnly && !requiresTeamScope && (
-                        <MountedFormField
-                          label={labelWithHint(
-                            t("Select Team"),
-                            t("Only keys for this team will be able to call this model."),
-                          )}
-                          name="team_id"
-                          className="mb-4"
-                          required={isTeamOnly && !isAdmin}
-                          rules={
-                            isTeamOnly && !isAdmin
-                              ? { validate: { required: requiredRule(t("Please select a team.")) } }
-                              : undefined
-                          }
-                        >
-                          {(control) => (
-                            <TeamDropdown
-                              value={control.value as string | undefined}
-                              onChange={control.onChange}
-                              disabled={!premiumUser}
-                            />
-                          )}
-                        </MountedFormField>
-                      )}
-                      {isAdmin && (
-                        <>
-                          <MountedFormField
-                            label={labelWithHint(
-                              t("Model Access Group"),
-                              t("Use model access groups to give users access to select models, and add new ones to the group over time."),
-                            )}
-                            name="model_access_group"
-                            className="mb-4"
-                          >
-                            {(control) => (
-                              <AccessGroupTagsCombobox
-                                id={control.id}
-                                value={control.value as string[] | undefined}
-                                onChange={control.onChange}
-                                options={modelAccessGroups}
-                                ariaInvalid={control["aria-invalid"] ? true : undefined}
-                                ariaDescribedBy={control["aria-describedby"]}
-                              />
-                            )}
-                          </MountedFormField>
-                        </>
-                      )}
-                      <AdvancedSettings
-                        showAdvancedSettings={showAdvancedSettings}
-                        setShowAdvancedSettings={setShowAdvancedSettings}
-                        teams={teams}
-                        guardrailsList={guardrailsList || []}
-                        tagsList={tagsList || {}}
-                        accessToken={accessToken || ""}
+                      {/* 单价：由上面选中的模型从价目表带出，可改。
+                          它是必答的——网关按模型名取价，名字对不上价目表时这次调用
+                          记一行零费用，不报错也不告警。所以不能静默留空。 */}
+                      <ModelPriceFields
+                        selectedProvider={selectedProvider}
+                        modelCostMap={modelCostMap}
                       />
                     </>
                   )}

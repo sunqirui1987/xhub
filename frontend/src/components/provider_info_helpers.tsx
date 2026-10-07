@@ -453,10 +453,32 @@ export const getPlaceholder = (selectedProvider: string): string => {
   return providerPlaceholderMap[resolvedProvider] ?? "gpt-3.5-turbo";
 };
 
+// providerModelSlug is the litellm_provider used to filter the price map.
+// The add-model dropdown stores the catalog display name ("Aliyun"), while each
+// model row is tagged with the slug ("dashscope"). Matching on the display name
+// leaves the model list empty.
+export const providerModelSlug = (
+  provider: string | null | undefined,
+  providers?: Array<{ provider?: string; provider_display_name?: string; litellm_provider?: string }>,
+): string | null => {
+  if (!provider) {
+    return null;
+  }
+  const info = providers?.find(
+    (item) =>
+      item.provider === provider || item.provider_display_name === provider || item.litellm_provider === provider,
+  );
+  if (info?.litellm_provider) {
+    return info.litellm_provider;
+  }
+  return provider_map[provider] ?? provider.toLowerCase();
+};
+
 export const getProviderModels = (provider: string, modelMap: any): Array<string> => {
   let providerKey = provider;
   // A provider added only on the gateway still lists its models. The embedded
-  // dropdown name lowercases to the litellm_provider slug.
+  // dropdown name lowercases to the litellm_provider slug. Callers that already
+  // know the catalog slug (dashscope for Aliyun) pass that slug through.
   let custom_llm_provider = provider_map[providerKey] ?? (providerKey ? providerKey.toLowerCase() : providerKey);
 
   let providerModels: Array<string> = [];
@@ -508,5 +530,6 @@ export const getProviderModels = (provider: string, modelMap: any): Array<string
     }
   }
 
+  providerModels.sort((a, b) => a.localeCompare(b));
   return providerModels;
 };

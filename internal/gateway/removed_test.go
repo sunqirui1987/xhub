@@ -3,13 +3,13 @@ package gateway
 import "testing"
 
 func TestRemovedColumnsStayUnregistered(t *testing.T) {
-	removed := []string{"/v1/mcp", "/v1/mcp/oauth/token", "/tools", "/public/agent_hub"}
+	removed := []string{"/v1/mcp", "/v1/mcp/oauth/token", "/tools", "/public/agent_hub", "/cloudzero/settings", "/cloudzero/export", "/email/event_settings", "/email/event_settings/reset", "/config/cost_discount_config", "/config/cost_margin_config", "/config/block_requests_for_models_without_pricing", "/cost/estimate", "/cost/predict-cache", "/config_overrides/hashicorp_vault", "/config_overrides/cyberark", "/get/sso_settings", "/update/sso_settings", "/sso/key/generate", "/get/allowed_ips", "/add/allowed_ip", "/Users", "/Groups", "/alerting/settings", "/callbacks/list", "/config/callback/delete", "/team/t1/callback"}
 	for _, path := range removed {
 		if !IsRemovedColumn(path) {
 			t.Errorf("%s is still registered", path)
 		}
 	}
-	kept := []string{"/get/ui_settings", "/sso/get/ui_settings", "/spend/tags", "/v1/chat/completions", "/budget/list", "/budget/new", "/tag/list", "/get/ui_theme_settings", "/update/ui_theme_settings", "/config_overrides/hashicorp_vault", "/config_overrides/cyberark", "/model_hub", "/prompts", "/budgets", "/v1/mcp/server/oauth/e2e-mcp/token"}
+	kept := []string{"/get/ui_settings", "/sso/get/ui_settings", "/spend/tags", "/v1/chat/completions", "/budget/list", "/budget/new", "/tag/list", "/get/ui_theme_settings", "/update/ui_theme_settings", "/model_hub", "/prompts", "/budgets", "/v1/mcp/server/oauth/e2e-mcp/token", "/vantage/settings", "/get/config/callbacks", "/config/update", "/config/list"}
 	for _, path := range kept {
 		if IsRemovedColumn(path) {
 			t.Errorf("%s was removed", path)

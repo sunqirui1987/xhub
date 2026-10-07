@@ -800,11 +800,10 @@
     },
     {
       "id": "mgmt.cost_export",
-      "title": "CloudZero and Vantage export",
+      "title": "Vantage export",
       "kind": "management",
       "enterprise": false,
       "http_paths": [
-        "/cloudzero/export",
         "/vantage/export"
       ],
       "aliases": []
@@ -873,16 +872,6 @@
       "aliases": [
         "/api/v1/audit"
       ]
-    },
-    {
-      "id": "mgmt.email",
-      "title": "Email event settings",
-      "kind": "management",
-      "enterprise": true,
-      "http_paths": [
-        "/email/event_settings"
-      ],
-      "aliases": []
     },
     {
       "id": "mgmt.enterprise_misc",

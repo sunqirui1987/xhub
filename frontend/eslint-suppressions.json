@@ -122,69 +122,6 @@
       "count": 1
     }
   },
-  "src/app/(dashboard)/cost-tracking/_components/add_margin_form.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/add_provider_form.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/cost_tracking_settings.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "no-nested-ternary": {
-      "count": 2
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/how_it_works.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/pricing_calculator/index.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/pricing_calculator/multi_cost_results.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/pricing_calculator/multi_export_dropdown.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/pricing_calculator/use_multi_cost_estimate.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/provider_discount_table.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/provider_margin_table.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/use_discount_config.ts": {
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
-  "src/app/(dashboard)/cost-tracking/_components/use_margin_config.ts": {
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
   "src/app/(dashboard)/guardrails-monitor/_components/EvaluationSettingsModal.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -365,26 +302,6 @@
   "src/app/(dashboard)/hooks/accessGroups/useEditAccessGroup.ts": {
     "no-restricted-syntax": {
       "count": 1
-    }
-  },
-  "src/app/(dashboard)/hooks/cloudzero/useCloudZeroCreate.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/hooks/cloudzero/useCloudZeroDryRun.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/hooks/cloudzero/useCloudZeroExport.ts": {
-    "no-restricted-syntax": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/hooks/cloudzero/useCloudZeroSettings.ts": {
-    "no-restricted-syntax": {
-      "count": 3
     }
   },
   "src/app/(dashboard)/hooks/guardrails/useRegisterGuardrail.ts": {
@@ -1301,26 +1218,11 @@
       "count": 1
     }
   },
-  "src/components/SCIM.tsx": {
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
   "src/components/Settings/AdminSettings/MCPSemanticFilterSettings/MCPSemanticFilterSettings.tsx": {
     "no-nested-ternary": {
       "count": 1
     },
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/components/Settings/AdminSettings/SSOSettings/Modals/EditSSOSettingsModal.test.tsx": {
-    "max-nested-callbacks": {
-      "count": 1
-    }
-  },
-  "src/components/Settings/AdminSettings/SSOSettings/RedactableField.tsx": {
-    "no-nested-ternary": {
       "count": 1
     }
   },
@@ -1468,22 +1370,6 @@
       "count": 1
     }
   },
-  "src/components/alerting/alerting_settings.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "prefer-const": {
-      "count": 1
-    }
-  },
-  "src/components/alerting/dynamic_form.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
   "src/components/bulk_create_users_button.tsx": {
     "local/filename-pascal-case": {
       "count": 1
@@ -1537,17 +1423,6 @@
   },
   "src/components/claude_code_plugins/skill_detail.tsx": {
     "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
-  "src/components/cloudzero_export_modal.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 3
-    },
-    "react-hooks/immutability": {
       "count": 1
     }
   },
@@ -1617,22 +1492,6 @@
       "count": 1
     },
     "react-hooks/immutability": {
-      "count": 1
-    }
-  },
-  "src/components/email_events/email_event_settings.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "react-hooks/immutability": {
-      "count": 1
-    }
-  },
-  "src/components/email_settings.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "prefer-const": {
       "count": 1
     }
   },
@@ -1892,17 +1751,6 @@
   "src/components/search_tools/SearchToolSelector.tsx": {
     "no-nested-ternary": {
       "count": 1
-    }
-  },
-  "src/components/settings.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    },
-    "no-nested-ternary": {
-      "count": 2
-    },
-    "prefer-const": {
-      "count": 4
     }
   },
   "src/components/shared/advanced_date_picker.tsx": {

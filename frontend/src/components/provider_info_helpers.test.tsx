@@ -4,6 +4,7 @@ import {
   getPlaceholder,
   getProviderLogoAndName,
   getProviderModels,
+  providerModelSlug,
   providerLogoMap,
   provider_map,
 } from "./provider_info_helpers";
@@ -316,6 +317,20 @@ describe("provider_info_helpers", () => {
       const modelMap = {};
       const result = getProviderModels(Providers.OpenAI, modelMap);
       expect(result).toEqual([]);
+    });
+
+    it("should list Qwen models when the catalog slug for Aliyun is dashscope", () => {
+      const providers = [{ provider: "Aliyun", provider_display_name: "Aliyun", litellm_provider: "dashscope" }];
+      const modelMap = {
+        "qwen-turbo": { litellm_provider: "dashscope", display_name: "Qwen-Turbo" },
+        "qwen-max-2025-01-25": { litellm_provider: "dashscope", display_name: "Qwen2.5-Max" },
+        "gpt-4": { litellm_provider: "openai" },
+      };
+      expect(providerModelSlug("Aliyun", providers)).toBe("dashscope");
+      expect(getProviderModels(providerModelSlug("Aliyun", providers) as string, modelMap)).toEqual([
+        "qwen-max-2025-01-25",
+        "qwen-turbo",
+      ]);
     });
 
     it("should list models for a provider that exists only as a price-map slug", () => {

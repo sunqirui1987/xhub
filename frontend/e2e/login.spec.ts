@@ -42,8 +42,9 @@ test.describe("login", () => {
     await expect(page.getByRole("heading", { name: t("login.title") })).toBeVisible();
   });
 
-  test("SSO button is present", async ({ page }) => {
+  test("password login does not offer SSO", async ({ page }) => {
     await gotoLogin(page);
-    await expect(page.getByRole("button", { name: t("login.sso") })).toBeVisible();
+    await expect(page.getByRole("button", { name: t("login.submit") })).toBeVisible();
+    await expect(page.getByRole("button", { name: t("login.sso") })).toHaveCount(0);
   });
 });

@@ -787,9 +787,14 @@ func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 // 参数 s（Host）：HealthServices使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/usage/mount.go
-// 测试：无直接单测
+// 测试：gateway/dropped_alerts_test.go
 func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("service"))) {
+	case "email", "ms_teams", "msteams", "slack":
+		httpx.WriteError(w, 400, "invalid_request", "alerts are not supported")
 		return
 	}
 	httpx.WriteJSON(w, 200, map[string]any{

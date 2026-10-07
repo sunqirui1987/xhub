@@ -33,13 +33,11 @@ export const pageDescriptions: Record<string, string> = {
   "learning-resources": "查看教程与文档",
   caching: "配置响应缓存与协调 Redis",
   "transform-request": "配置请求转换规则",
-  "cost-tracking": "跟踪并分析 API 成本",
   "tag-management": "用标签组织资源",
   prompts: "管理并版本化提示词模板",
   skills: "浏览并管理 Claude Code 技能",
   usage: "查看旧版用量控制台",
   "router-settings": "配置路由与负载均衡",
-  "logging-and-alerts": "配置日志与告警",
   "admin-panel": "打开管理员面板与设置",
 };
 

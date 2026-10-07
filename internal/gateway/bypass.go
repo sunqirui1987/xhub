@@ -1,7 +1,11 @@
-// bypass.go matches official provider paths before Gin sees the request.
-// Adapted endpoint types (chat, embedding, images) return false here and
-// stay on the catalog handlers. A match calls dataplane.ServeBypass, which
-// records spend through the same RecordSpend path as chat.
+// bypass.go matches registered pass-through paths before Gin sees the request.
+// Adapted endpoints (chat, embedding, images) return false here and stay on the
+// catalog handlers. A match calls dataplane.ServeBypass, which records spend
+// through the same RecordSpend path as chat.
+//
+// The only source of a pass-through is the registry. A deployment cannot carry
+// its own path table: a hand-filled table has no structured upstream response,
+// so preselect, logging and usage would have nothing to read.
 
 package gateway
 
@@ -10,6 +14,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/provider"
 )
 
@@ -35,6 +40,9 @@ func (s *Server) serveBypass(w http.ResponseWriter, r *http.Request) bool {
 	if !ok || hit.Transport.Kind != provider.KindBypass {
 		return false
 	}
+	// A pass-through is a real call with a real bill, so which one matched is
+	// worth a line. The adapted loop logs its own choice separately.
+	logx.Debug("process %s %s step=bypass transport=%s action=%s", r.Method, r.URL.Path, hit.Transport.ID, hit.Action.Name)
 	dataplane.ServeBypass(s, w, r, hit)
 	return true
 }

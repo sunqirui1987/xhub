@@ -84,7 +84,7 @@ func (s *Server) uiConfig(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{
 		"admin_ui_disabled":             false,
 		"auto_redirect_to_sso":          false,
-		"sso_configured":                true,
+		"sso_configured":                false,
 		"hide_default_credentials_hint": false,
 		"is_control_plane":              false,
 		"proxy_base_url":                PublicOrigin(),

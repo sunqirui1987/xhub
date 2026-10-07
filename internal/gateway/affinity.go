@@ -17,6 +17,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // legacyClaudeUserID is Claude Code's older metadata.user_id:
@@ -308,7 +309,13 @@ func (s *Server) PinOfficial(taskID, deploymentID string) {
 // 调用：dataplane/host.go、dataplane/official.go
 // 测试：affinity_pin_test.go、bypass_logic_test.go、failure_log_test.go
 func (s *Server) OfficialDeployment(taskID string) string {
-	return s.affinityGet("official_task:v1:" + taskID)
+	dep := s.affinityGet("official_task:v1:" + taskID)
+	if dep == "" && taskID != "" {
+		// A poll for a task nobody pinned is worth a line: it is either a task
+		// that expired after seven days, or an id that never came from here.
+		logx.Debug("official task has no pinned deployment task=%s", taskID)
+	}
+	return dep
 }
 
 // 判断这个官方任务是否已经记过用量。

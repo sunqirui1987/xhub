@@ -22,6 +22,7 @@ export const en = {
     loadError: "Unable to load the models available to your account. Please try again.",
     retry: "Retry",
     loading: "Loading your models…",
+    variantPrices: "{count} variant prices",
     noMatches: "No matching models",
     empty: "No models are available to this account",
     tryFilters: "Try another search or clear your filters.",
@@ -71,14 +72,18 @@ export const en = {
     tryReload: "Open Price Data Management to reload the catalog.",
   },
   endpoints: {
-    transport: "Transport",
-    adapted: "Protocol adaptation",
-    capabilities: "Capabilities",
-    pickAtLeastOne: "Pick at least one capability, or this model cannot be called.",
-    transportHint:
-      "Protocol adaptation lets the gateway compile the request from the provider and the endpoint. A registered pass-through forwards the provider's own API unchanged.",
-    bypassHint:
-      "The paths and fields of this pass-through are registered with the gateway. Nothing to fill in here.",
+    callType: "Call type",
+    callTypeHint:
+      "How this model is called. A registered pass-through forwards the provider's own API unchanged; everything else is compiled by the gateway from the provider and the call type.",
+    chat: "Chat",
+    completion: "Completion",
+    embedding: "Embedding",
+    image: "Image",
+    video: "Video",
+    audioSpeech: "Audio Speech",
+    audioTranscription: "Audio Transcription",
+    rerank: "Rerank",
+    moderation: "Moderation",
   },
   priceData: {
     eyebrow: "MODELS AND PRICES",
@@ -645,11 +650,8 @@ export const en = {
     loggingAndAlerts: {
       title: "Logging & Alerts",
       loggingCallbacks: "Logging Callbacks",
-      cloudzero: "CloudZero Cost Tracking",
       alertingTypes: "Alerting Types",
       alertingSettings: "Alerting Settings",
-      emailAlerts: "Email Alerts",
-      msTeamsAlerts: "MS Teams Alerts",
     },
     chat: {
       newChat: "New Chat",

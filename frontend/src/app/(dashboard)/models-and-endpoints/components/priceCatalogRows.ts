@@ -21,6 +21,14 @@ export type PriceCatalogRow = {
   maxOutput: number | null;
   capabilities: string[];
   extraPrices: { key: string; value: number; unit: string }[];
+  /**
+   * 变体费率：价目表里那些不属于通用输入/输出的价。
+   *
+   * 视频和图像模型按分辨率和输入方式分别定价（480p/720p/1080p、有无视频输入），
+   * 一条模型能带十几档。它们不是"额外信息"，是这类模型**唯一**的价——只显示
+   * 通用输入输出的话，这类模型的卡片上会写着"价格未提供"，而价目表里其实是有的。
+   */
+  priceUnits: { key: string; label: string; usd: number; unit: string; size: number }[];
   /** True when the row comes from the generated catalog rather than a console entry. */
   baseline: boolean;
   /** True when this id is stored in the database as an override of the baseline. */
@@ -114,6 +122,7 @@ export function priceCatalogRows(doc: PriceCatalogDocument | null | undefined): 
         const value = unit === "tokens" ? perMillion(entry[field]) : nonnegativeNumber(entry[field]);
         return value == null ? [] : [{ key, value, unit }];
       }),
+      priceUnits: priceUnitsOf(entry.price_units),
       baseline: entry.baseline === true,
       overridden: entry.overridden === true,
       removed: entry.removed === true,
@@ -201,6 +210,30 @@ export function rateToInputValue(value: unknown): string {
 export function unitRateToInputValue(value: unknown): string {
   const rate = nonnegativeNumber(value);
   return rate == null ? "" : String(Number(rate.toPrecision(12)));
+}
+
+/**
+ * 读出变体费率。每一项是价目表里的一个键，带它自己的单位和说明。
+ * 参数 raw（unknown）：price_units 的原始值。
+ * 返回（{key,label,usd,unit,size}[]）：按美元价从低到高排好的变体。
+ */
+function priceUnitsOf(raw: unknown): { key: string; label: string; usd: number; unit: string; size: number }[] {
+  if (!isObject(raw)) return [];
+  const out: { key: string; label: string; usd: number; unit: string; size: number }[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isObject(value)) continue;
+    const usd = nonnegativeNumber(value.usd);
+    if (usd === null) continue;
+    out.push({
+      key,
+      label: stringValue(value.label) ?? key,
+      usd,
+      unit: stringValue(value.unit) ?? "",
+      size: nonnegativeNumber(value.size) ?? 1,
+    });
+  }
+  out.sort((a, b) => a.usd - b.usd || a.key.localeCompare(b.key));
+  return out;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

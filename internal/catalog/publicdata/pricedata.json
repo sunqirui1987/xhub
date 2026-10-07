@@ -1,7 +1,7 @@
 {
   "version": 1,
   "source": "https://api.modelink.ai/v1/market/models",
-  "generated_at": "2026-10-07T03:22:05Z",
+  "generated_at": "2026-10-07T12:34:25Z",
   "providers": [
     {
       "credential_fields": [
@@ -989,6 +989,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://seed.bytedance.com/en/seedance2_0",
+      "output_cost_per_token": 0.00000231884,
       "price_units": {
         "1080p_wiv_v_output": {
           "cny": 0.031,
@@ -1048,6 +1049,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://seed.bytedance.com/en/seedance2_0",
+      "output_cost_per_token": 0.00000318841,
       "price_units": {
         "wiv_v_output": {
           "cny": 0.022,
@@ -1079,6 +1081,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://seed.bytedance.com/en/seedance2_0",
+      "output_cost_per_token": 0.00000202899,
       "price_units": {
         "wiv_v_output": {
           "cny": 0.014,
@@ -1110,6 +1113,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://seed.bytedance.com/en/seedance2_5",
+      "output_cost_per_token": 0.00000608696,
       "price_units": {
         "1080p_wiv_v_output": {
           "cny": 0.046,
@@ -1163,6 +1167,7 @@
         "doubao-seedream-5.0-pro"
       ],
       "model_doc_url": "https://seed.bytedance.com/en/seedream5_0_pro",
+      "output_cost_per_image": 0.02173913,
       "price_units": {
         "1_5k_i_output_quantity": {
           "cny": 0.6,
@@ -1214,6 +1219,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://docs.byteplus.com/en/docs/ModelArk/2291680",
+      "output_cost_per_token": 0.0000024,
       "price_units": {
         "1080p_wiv_v_output": {
           "cny": 0.03243,
@@ -1273,6 +1279,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://docs.byteplus.com/en/docs/ModelArk/2291680",
+      "output_cost_per_token": 0.0000033,
       "price_units": {
         "wiv_v_output": {
           "cny": 0.02277,
@@ -1304,6 +1311,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://docs.byteplus.com/en/docs/ModelArk/2291680",
+      "output_cost_per_token": 0.0000021,
       "price_units": {
         "wiv_v_output": {
           "cny": 0.01449,
@@ -1335,6 +1343,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://docs.byteplus.com/en/docs/ModelArk/2607688",
+      "output_cost_per_token": 0.0000064,
       "price_units": {
         "1080p_wiv_v_output": {
           "cny": 0.08073,
@@ -1964,6 +1973,7 @@
     },
     "deepseek/deepseek-v4-flash-20260731": {
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/deepseek.png",
+      "cache_read_input_token_cost": 2.9e-9,
       "description": "大幅提升了其 Agent 功能，基准测试得分已远超 V4-Pro-Preview。性能飞跃！原生支持 Responses API 格式，并已完全适配 Codex！",
       "display_name": "DeepSeek-V4-Flash-20260731",
       "features": [
@@ -1972,6 +1982,7 @@
         "结构化输出",
         "AI 编程"
       ],
+      "input_cost_per_token": 1.4493e-7,
       "litellm_provider": "deepseek",
       "max_input_tokens": 1000000,
       "max_output_tokens": null,
@@ -1980,6 +1991,7 @@
         "deepseek-v4-flash-20260731",
         "deepseek-v4-flash-0731"
       ],
+      "output_cost_per_token": 5.7971e-7,
       "price_units": {
         "cache_offpeak": {
           "cny": 0.00002,
@@ -2037,12 +2049,15 @@
     },
     "deepseek/deepseek-v4-flash-vision-exp": {
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/deepseek.png",
+      "cache_read_input_token_cost": 7.25e-9,
       "description": "DeepSeek V4 Flash Vision Exp 是 DeepSeek 于 2026 年 8 月 21 日发布的实验性（Experimental）多模态视觉理解模型，可通过 `deepseek-v4-flash-vision-exp` 模型名在 DeepSeek API 平台调用。它在 DeepSeek V4 Flash 基础上额外接受图像输入，可用于图像描述、截图文字识别、图表分析等图文混合任务。",
       "display_name": "DeepSeek-V4-Flash-Vision-Exp",
+      "input_cost_per_token": 2.1739e-7,
       "litellm_provider": "deepseek",
       "max_input_tokens": 1000000,
       "max_output_tokens": 384000,
       "mode": "chat",
+      "output_cost_per_token": 6.5217e-7,
       "price_units": {
         "cache_offpeak": {
           "cny": 0.00005,
@@ -2133,6 +2148,7 @@
     },
     "deepseek/deepseek-v4-pro-0813": {
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/deepseek.png",
+      "cache_read_input_token_cost": 2.174e-8,
       "description": "DeepSeek-V4-Pro-0813 是DeepSeek最新一代旗舰级MoE大模型，拥有1M超长上下文和顶尖的智能体与编程能力，适合处理高复杂度任务。",
       "display_name": "DeepSeek-V4-Pro-0813",
       "features": [
@@ -2140,6 +2156,7 @@
         "深度思考",
         "AI 编程"
       ],
+      "input_cost_per_token": 6.5217e-7,
       "litellm_provider": "deepseek",
       "max_input_tokens": 1000000,
       "max_output_tokens": 384000,
@@ -2149,6 +2166,7 @@
         "deepseek-v4-pro-20260813",
         "deepseek/deepseek-v4-pro-20260813"
       ],
+      "output_cost_per_token": 0.00000195652,
       "price_units": {
         "cache_offpeak": {
           "cny": 0.00015,
@@ -2238,6 +2256,7 @@
     },
     "deepseek/deepseek-v4.1-flash": {
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/deepseek.png",
+      "cache_read_input_token_cost": 2.9e-9,
       "description": "DeepSeek-V4.1-Flash 是 DeepSeek 当前主力模型，官方 API 模型名为 deepseek-flash。支持 1M 上下文与最大 384K 输出，默认可切换思考/非思考模式，具备图像理解、工具调用、JSON Output，并兼容 OpenAI 与 Anthropic API。",
       "display_name": "DeepSeek-V4.1-Flash",
       "features": [
@@ -2246,6 +2265,7 @@
         "图像理解",
         "结构化输出"
       ],
+      "input_cost_per_token": 1.4493e-7,
       "litellm_provider": "deepseek",
       "max_input_tokens": 1000000,
       "max_output_tokens": 384000,
@@ -2253,6 +2273,7 @@
       "model_alias": [
         "deepseek-v4.1-flash"
       ],
+      "output_cost_per_token": 5.7971e-7,
       "price_units": {
         "cache_offpeak": {
           "cny": 0.00002,
@@ -2727,6 +2748,7 @@
         "AI 编程",
         "联网搜索"
       ],
+      "input_cost_per_token": 5e-7,
       "litellm_provider": "gemini",
       "max_input_tokens": 1000000,
       "max_output_tokens": 64000,
@@ -2781,6 +2803,7 @@
       "model_alias": [
         "gemini-3-pro-image-preview"
       ],
+      "output_cost_per_token": 0.000012,
       "price_units": {
         "i_output": {
           "cny": 0.828,
@@ -2825,6 +2848,7 @@
       "max_input_tokens": 131072,
       "max_output_tokens": 32768,
       "mode": "image_generation",
+      "output_cost_per_token": 0.000003,
       "price_units": {
         "i_output": {
           "cny": 0.414,
@@ -2865,6 +2889,7 @@
         "视频理解",
         "联网搜索"
       ],
+      "input_cost_per_token": 2.5e-7,
       "litellm_provider": "gemini",
       "max_input_tokens": 1000000,
       "max_output_tokens": 64000,
@@ -2974,6 +2999,7 @@
         "gemini-3.0-pro-image",
         "gemini-3-pro-image"
       ],
+      "output_cost_per_token": 0.000012,
       "price_units": {
         "i_output": {
           "cny": 0.828,
@@ -3016,6 +3042,7 @@
       "model_alias": [
         "gemini-3.1-flash-image"
       ],
+      "output_cost_per_token": 0.000003,
       "price_units": {
         "i_output": {
           "cny": 0.414,
@@ -3051,6 +3078,7 @@
         "视频理解",
         "联网搜索"
       ],
+      "input_cost_per_token": 2.5e-7,
       "litellm_provider": "gemini",
       "max_input_tokens": 1000000,
       "max_output_tokens": 64000,
@@ -3100,6 +3128,7 @@
       "max_input_tokens": 66000,
       "max_output_tokens": 32768,
       "mode": "image_generation",
+      "output_cost_per_token": 0.0000015,
       "price_units": {
         "i_output": {
           "cny": 0.207,
@@ -3453,6 +3482,7 @@
       "max_output_tokens": 1000,
       "mode": "video_generation",
       "output_cost_per_image": 0.01449275,
+      "output_cost_per_second": 0.05797101,
       "price_units": {
         "pro_norefv_v_duration": {
           "cny": 0.7,
@@ -3484,6 +3514,7 @@
       "max_input_tokens": 9999999,
       "max_output_tokens": 9999999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.04347826,
       "price_units": {
         "pro_norefv_v_duration": {
           "cny": 0.5,
@@ -3514,6 +3545,7 @@
       "max_input_tokens": 99999999,
       "max_output_tokens": 99999999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.07246377,
       "price_units": {
         "mc_pro_v_duration": {
           "cny": 0.8,
@@ -3605,6 +3637,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "output_cost_per_image": 0.02898551,
+      "output_cost_per_second": 0.08695652,
       "price_units": {
         "4k_norefv_v_duration": {
           "cny": 3,
@@ -3677,6 +3710,7 @@
       "max_input_tokens": null,
       "max_output_tokens": null,
       "mode": "video_generation",
+      "output_cost_per_second": 0.08695652,
       "price_units": {
         "4k_norefv_v_duration": {
           "cny": 3,
@@ -3750,6 +3784,7 @@
       "max_input_tokens": 9999,
       "max_output_tokens": 9999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.08695652,
       "price_units": {
         "pro_norefv_v_duration": {
           "cny": 0.8,
@@ -3793,6 +3828,7 @@
       "max_input_tokens": null,
       "max_output_tokens": null,
       "mode": "video_generation",
+      "output_cost_per_second": 0.11594203,
       "price_units": {
         "1080p_av_duration": {
           "cny": 1,
@@ -3849,6 +3885,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://www.minimax.io/blog/minimax-h3",
+      "output_cost_per_second": 0.07246377,
       "price_units": {
         "2k_v_duration": {
           "cny": 0.8,
@@ -3905,6 +3942,7 @@
       "max_output_tokens": null,
       "mode": "video_generation",
       "model_doc_url": "https://fal.ai/minimax-h3-max",
+      "output_cost_per_second": 0.04782609,
       "price_units": {
         "480p_v_duration": {
           "cny": 0.33,
@@ -4876,6 +4914,7 @@
       "features": [
         "生图"
       ],
+      "input_cost_per_token": 0.000005,
       "litellm_provider": "openai",
       "max_input_tokens": 1000000000,
       "max_output_tokens": 1000000000,
@@ -4883,6 +4922,7 @@
       "model_alias": [
         "gpt-image-2"
       ],
+      "output_cost_per_token": 0.00003,
       "price_units": {
         "i_input": {
           "cny": 0.0552,
@@ -4917,12 +4957,14 @@
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/openai.png",
       "description": "GPT-Image-2.5-Flare 是 OpenAI GPT-Image-2.5 系列中面向速度的图像生成与编辑模型，适合高并发日常生图、创作者内容和快速原型，通过 Images API 调用。",
       "display_name": "GPT-Image-2.5-Flare",
+      "input_cost_per_token": 0.000005,
       "integration_doc_url": "https://developers.openai.com/api/docs/guides/image-generation",
       "litellm_provider": "openai",
       "max_input_tokens": 400000,
       "max_output_tokens": null,
       "mode": "image_generation",
       "model_doc_url": "https://developers.openai.com/api/docs/models/gpt-image-2.5-flare",
+      "output_cost_per_token": 0.00003,
       "price_units": {
         "i_input": {
           "cny": 0.0552,
@@ -4958,12 +5000,14 @@
       "avatar": "https://static.qiniu.com/ai-inference/model-icons/openai.png",
       "description": "GPT-Image-2.5-Sunburst 是 OpenAI GPT-Image-2.5 系列中面向精度的图像生成与编辑模型，适合编辑准确性优先于生成速度的精细创作，通过 Images API 调用。",
       "display_name": "GPT-Image-2.5-Sunburst",
+      "input_cost_per_token": 0.000005,
       "integration_doc_url": "https://developers.openai.com/api/docs/guides/image-generation",
       "litellm_provider": "openai",
       "max_input_tokens": 400000,
       "max_output_tokens": null,
       "mode": "image_generation",
       "model_doc_url": "https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst",
+      "output_cost_per_token": 0.00003,
       "price_units": {
         "i_input": {
           "cny": 0.0552,
@@ -5026,6 +5070,7 @@
         "工具调用",
         "深度思考"
       ],
+      "input_cost_per_token": 4.348e-8,
       "litellm_provider": "dashscope",
       "max_input_tokens": 1000000,
       "max_output_tokens": null,
@@ -5033,6 +5078,7 @@
       "model_alias": [
         "aliyun/qwen-turbo"
       ],
+      "output_cost_per_token": 8.696e-8,
       "price_units": {
         "nth_input": {
           "cny": 0.0003,
@@ -5424,10 +5470,12 @@
       "features": [
         "工具调用"
       ],
+      "input_cost_per_token": 2.8986e-7,
       "litellm_provider": "dashscope",
       "max_input_tokens": 128000,
       "max_output_tokens": 32000,
       "mode": "chat",
+      "output_cost_per_token": 0.00000115942,
       "price_units": {
         "nth_input": {
           "cny": 0.002,
@@ -5525,10 +5573,12 @@
         "工具调用",
         "深度思考"
       ],
+      "input_cost_per_token": 1.087e-7,
       "litellm_provider": "dashscope",
       "max_input_tokens": 40000,
       "max_output_tokens": null,
       "mode": "chat",
+      "output_cost_per_token": 4.3478e-7,
       "price_units": {
         "nth_input": {
           "cny": 0.00075,
@@ -5625,6 +5675,7 @@
         "工具调用",
         "深度思考"
       ],
+      "input_cost_per_token": 2.8986e-7,
       "litellm_provider": "dashscope",
       "max_input_tokens": 40000,
       "max_output_tokens": null,
@@ -5632,6 +5683,7 @@
       "model_alias": [
         "aliyun/qwen3-32b"
       ],
+      "output_cost_per_token": 0.00000115942,
       "price_units": {
         "nth_input": {
           "cny": 0.002,
@@ -6221,6 +6273,7 @@
       "max_input_tokens": null,
       "max_output_tokens": null,
       "mode": "video_generation",
+      "output_cost_per_second": 0.0317029,
       "price_units": {
         "1080p_r2v_duration": {
           "cny": 0.46875,
@@ -6259,6 +6312,7 @@
       "max_input_tokens": 99999,
       "max_output_tokens": 9999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.07246377,
       "price_units": {
         "1080p_i2v_duration": {
           "cny": 0.5,
@@ -6296,6 +6350,7 @@
       "max_input_tokens": 9999,
       "max_output_tokens": 9999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.04528986,
       "price_units": {
         "1080p_r2v_duration": {
           "cny": 2.34375,
@@ -6354,6 +6409,7 @@
       "max_input_tokens": 9999,
       "max_output_tokens": 9999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.03623188,
       "price_units": {
         "1080p_i2v_duration": {
           "cny": 1.71875,
@@ -6412,6 +6468,7 @@
       "max_input_tokens": 9999,
       "max_output_tokens": 9999,
       "mode": "video_generation",
+      "output_cost_per_second": 0.02717391,
       "price_units": {
         "1080p_i2v_duration": {
           "cny": 1.09375,
@@ -6449,6 +6506,7 @@
       "max_input_tokens": null,
       "max_output_tokens": null,
       "mode": "video_generation",
+      "output_cost_per_second": 0.0634058,
       "price_units": {
         "1080p_i2v_duration": {
           "cny": 1,
@@ -6507,6 +6565,7 @@
       "max_input_tokens": null,
       "max_output_tokens": null,
       "mode": "video_generation",
+      "output_cost_per_second": 0.01811594,
       "price_units": {
         "1080p_i2v_duration": {
           "cny": 0.5,
