@@ -8,8 +8,8 @@ import (
 )
 
 func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
-	typ := provider.Type{}
-	for _, item := range provider.Types() {
+	typ := provider.Transport{}
+	for _, item := range provider.Transports() {
 		if item.ID == "qiniu_contents_generation" {
 			typ = item
 		}
@@ -21,8 +21,8 @@ func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
 		t.Fatalf("providers %v", typ.Providers)
 	}
 	create, ok := provider.Match("POST", "/v3/contents/generations/tasks", nil)
-	if !ok || create.Type.ID != "qiniu_contents_generation" || create.Action.Name != "create" {
-		t.Fatalf("create %+v %v", create.Type.ID, ok)
+	if !ok || create.Transport.ID != "qiniu_contents_generation" || create.Action.Name != "create" {
+		t.Fatalf("create %+v %v", create.Transport.ID, ok)
 	}
 	if _, ok := provider.Match("POST", "/api/v3/contents/generations/tasks", nil); ok {
 		t.Fatal("qiniu registration matched the volcengine path")

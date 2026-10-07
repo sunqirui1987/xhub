@@ -12,7 +12,24 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/llm"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
+
+// captureLimit 是一次流式响应最多保留给用量日志的字节数。超过这个量的正文
+// 不再留档，但要记一行：截断之后按正文估算的 token 会偏低。
+const captureLimit = 2 << 20
+
+// noteCaptureTruncated 在保留的正文达到上限时记一行。静默截断会让用量偏低，
+// 而偏低的原因在日志里看不出来。
+// 参数 kept（int）：已经保留的字节数。
+// 返回：无。只写进程日志。
+// 调用：pipeStream、pipeResponsesAsChat 在拼接捕获正文时。
+// 测试：无直接单测
+func noteCaptureTruncated(kept int) {
+	if kept >= captureLimit {
+		logx.Debug("stream capture reached its limit kept=%d; token estimates from the body may run low", kept)
+	}
+}
 
 // responseID 从上游 JSON 或 SSE 里取出第一个响应 id，用来把后续对话钉回同一部署。
 // 参数 raw：上游响应或捕获的 SSE。
@@ -77,6 +94,7 @@ func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.
 				take = (2 << 20) - len(captured)
 			}
 			captured = append(captured, chunk[:take]...)
+			noteCaptureTruncated(len(captured))
 		}
 		usage = streamUsage(chunk, usage)
 	}
@@ -129,6 +147,7 @@ func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bo
 					take = (2 << 20) - len(captured)
 				}
 				captured = append(captured, buf[:take]...)
+				noteCaptureTruncated(len(captured))
 			}
 			pending = append(pending, buf[:n]...)
 			usage = streamUsage(pending, usage)

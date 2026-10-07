@@ -121,6 +121,14 @@ export const prepareModelAddRequest = async (formValues: Record<string, any>, ac
 
           // remove "mode" from litellmParams
           delete litellmParamsObj["mode"];
+        } else if (key === "endpoint_types") {
+          // 能力列表。它和 transport 都是 model_info 上的字段，不属于
+          // litellm_params；漏到那边会被当成供应商参数原样发给上游。
+          // 空数组也要写：那是一条"一种能力都不答"的模型，后端会据此拒绝它，
+          // 而不是替它补一个默认的 chat。
+          modelInfoObj["endpoint_types"] = value;
+        } else if (key === "transport") {
+          modelInfoObj["transport"] = value;
         } else if (key === "custom_model_name") {
           litellmParamsObj["model"] = value;
         } else if (key == "litellm_extra_params") {

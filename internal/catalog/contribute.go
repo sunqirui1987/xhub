@@ -1,6 +1,10 @@
 package catalog
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
+)
 
 // Row is one model a provider package adds to the price map the console already
 // serves. An ID that the embedded map already has is left unchanged.
@@ -49,6 +53,7 @@ func Contribute(row Row) {
 	row.ID = strings.TrimSpace(row.ID)
 	row.Provider = strings.TrimSpace(row.Provider)
 	if row.ID == "" || row.Provider == "" {
+		logx.Debug("catalog contribution skipped reason=missing id or provider")
 		return
 	}
 	modelCostMu.Lock()

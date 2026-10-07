@@ -6,11 +6,11 @@
 
 ## 功能
 
-- `Load` 读 YAML，并把主密钥、数据库地址、Redis 地址、以及配置里的管理员凭据中的 `os.environ/NAME` 换成环境变量。
+- `Load` 读 YAML，去掉两端空白后，把 `master_key`、`database_url`、`redis_url`、`admin_email`、`admin_password`、`admin_name` 里的 `os.environ/NAME` 换成环境变量。
 - `RouterSettings` 和 `GeneralSettings` 覆盖进程直接读取的字段。
 - `RouterRaw` 和 `GeneralRaw` 保留其余 YAML 键，数据库覆盖某一键时不会丢掉其它键。
 - `ModelEntry.ParamString` 读取一个上游参数，没有时用你给的默认值。
-- `SplitProviderModel` 拆开 `provider/model`。
+- `SplitProviderModel` 在第一个 `/` 处拆开。左边是供应商，右边是模型。没有斜杠时供应商是 `openai`，模型是整段字符串。它不返回空供应商。
 
 ## 配置里的默认管理员
 
@@ -24,15 +24,15 @@
 
 两个值都支持 `os.environ/NAME`，部署时用它把密码留在文件之外。变量没设时解析成空串，而 `admin_email` 或 `admin_password` 为空就完全不执行创建。`disable_env_credential_login: true` 则彻底拒绝配置提供的账号。
 
-```yaml
-general_settings:
-  master_key: sk-local-master
-  database_url: postgres://xhub:xhub@127.0.0.1:5433/xhub?sslmode=disable
-  admin_email: admin@example.com
-  admin_password: os.environ/XHUB_ADMIN_PASSWORD
-  admin_name: Platform Admin
-  disable_env_credential_login: false
-```
+树里的三份文件不是同一个地址：
+
+| 文件 | 谁读 | `database_url` |
+| --- | --- | --- |
+| `configs/config.yaml` | `make run` | `postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable` |
+| `configs/config.example.yaml` | 没人读，它是模板 | `postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable` |
+| `configs/config.docker.yaml` | 网关容器 | `postgres://xhub:xhub_dev_password@postgres:5432/xhub?sslmode=disable` |
+
+Compose 把容器端口 `5432` 映到本机 `5433`。示例文件里的端口 `5432` 和密码 `xhub` 打不开这个库。
 
 ## 其它包怎么用
 

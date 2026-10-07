@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Runs the end-to-end regression suite against a real gateway.
+#
+#   ./scripts/regression.sh              # deterministic, uses the fake provider
+#   ./scripts/regression.sh --live        # also calls the real vendors (costs money)
+#
+# The suite needs PostgreSQL on 5433 (docker compose up -d postgres). It creates
+# a throwaway schema per test and drops it afterwards, so it is safe to run
+# against a database a gateway is also using.
+#
+# Every test runs against its own gateway on a random port with a fake provider
+# behind it. Nothing is faked at the gateway boundary: HTTP routes, the identity
+# store, spend recording, budgets and guardrails are all the real ones.
+#
+# Live mode also needs the vendor keys, which are never stored in the repository:
+#
+#   XHUB_REGRESSION_FENNO_KEY, XHUB_REGRESSION_QINIU_KEY
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+LIVE=0
+VERBOSE=0
+PATTERN=""
+for arg in "$@"; do
+  case "$arg" in
+    --live) LIVE=1 ;;
+    -v|--verbose) VERBOSE=1 ;;
+    --help|-h)
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) PATTERN="$arg" ;;
+  esac
+done
+
+# The suite skips instead of failing when the database is unreachable, which is
+# right for `go test ./...` and wrong here: a run that silently skipped every
+# database test would report success while proving nothing.
+if ! command -v psql >/dev/null 2>&1; then
+  if ! docker exec xhub-postgres psql -U xhub -d xhub -c 'select 1' >/dev/null 2>&1; then
+    echo "no PostgreSQL reachable." >&2
+    echo "start it with: docker compose up -d postgres" >&2
+    exit 1
+  fi
+fi
+
+ARGS=(-count=1 -timeout=600s)
+if [[ "$VERBOSE" == 1 ]]; then
+  ARGS+=(-v)
+fi
+if [[ -n "$PATTERN" ]]; then
+  ARGS+=(-run "$PATTERN")
+fi
+
+if [[ "$LIVE" == 1 ]]; then
+  : "${XHUB_REGRESSION_FENNO_KEY:?--live needs XHUB_REGRESSION_FENNO_KEY}"
+  : "${XHUB_REGRESSION_QINIU_KEY:?--live needs XHUB_REGRESSION_QINIU_KEY}"
+  export XHUB_REGRESSION_LIVE=1
+  echo "running with live vendor calls: this spends real money"
+else
+  unset XHUB_REGRESSION_LIVE
+  echo "running the deterministic suite (fake provider); --live to call real vendors"
+fi
+
+go test ./internal/regression/ "${ARGS[@]}"

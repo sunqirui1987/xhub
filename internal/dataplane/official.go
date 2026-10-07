@@ -46,7 +46,7 @@ func ServeBypass(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.
 			return
 		}
 	}
-	if hit.Action.Name == "create" || hit.Type.ModelField != "" && hit.Action.Name == "" {
+	if hit.Action.Name == "create" || hit.Transport.ModelField != "" && hit.Action.Name == "" {
 		serveBypassCreate(h, w, r, hit, p, body, raw, callID, start)
 		return
 	}
@@ -69,7 +69,7 @@ func ServeBypass(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.
 // 返回：无。
 // 调用：ServeBypass 在动作名是 create 时。测试：逻辑测试里的火山、七牛和 Suno 创建。
 func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.Hit, principal *auth.Principal, body map[string]any, raw []byte, callID string, start time.Time) {
-	field := hit.Type.ModelField
+	field := hit.Transport.ModelField
 	if field == "" {
 		field = "model"
 	}
@@ -98,7 +98,7 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 401, "upstream_auth", "This model has no upstream API key configured.")
 		return
 	}
-	body[field] = provider.OfficialID(hit.Type.StripPrefix, dep.ParamString("model", alias))
+	body[field] = provider.OfficialID(hit.Transport.StripPrefix, dep.ParamString("model", alias))
 	payload, err := json.Marshal(body)
 	if err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid json")
@@ -114,13 +114,13 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
 	depID := router.DeploymentID(dep)
-	if taskID := provider.ReadTaskID(doc, hit.Type.TaskID); taskID != "" {
+	if taskID := provider.ReadTaskID(doc, hit.Transport.TaskID); taskID != "" {
 		h.PinOfficial(taskID, depID)
 	}
 	plan := h.PlanRoute(r, alias, body, principal)
 	h.RememberExchange(callID, r, raw, respBody)
 	h.AnnotateCall(callID, dataplaneNote(hit, dep, plan.SessionID, depID, time.Since(start)))
-	h.RecordSpend(w, principal, callID, alias, hit.Type.ID+":"+hit.Action.Name, nil, start, false, status, depID)
+	h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, status, depID)
 	writeThrough(w, status, respBody)
 }
 
@@ -184,7 +184,7 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	plan := h.PlanRoute(r, dep.ModelName, nil, principal)
 	h.RememberExchange(callID, r, nil, respBody)
 	h.AnnotateCall(callID, dataplaneNote(hit, dep, plan.SessionID, depID, time.Since(start)))
-	h.RecordSpend(w, principal, callID, dep.ModelName, hit.Type.ID+":"+hit.Action.Name, usage, start, false, status, depID)
+	h.RecordSpend(w, principal, callID, dep.ModelName, hit.Transport.ID+":"+hit.Action.Name, usage, start, false, status, depID)
 	writeThrough(w, status, respBody)
 }
 
@@ -202,10 +202,10 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 func dataplaneNote(hit provider.Hit, dep config.ModelEntry, sessionID, depID string, elapsed time.Duration) CallNote {
 	name := dep.ParamString("custom_llm_provider", "")
 	if name == "" {
-		name = hit.Type.StripPrefix
+		name = hit.Transport.StripPrefix
 	}
 	if name == "" {
-		name = hit.Type.ID
+		name = hit.Transport.ID
 	}
 	return CallNote{
 		TTFTMs:       ttftMillis(elapsed),
@@ -223,7 +223,7 @@ func sameEndpoint(dep config.ModelEntry, hit provider.Hit) bool {
 	if hit.DeploymentName != "" {
 		return dep.ModelName == hit.DeploymentName
 	}
-	return provider.Includes(dep, hit.Type.ID)
+	return provider.Includes(dep, hit.Transport.ID)
 }
 
 // pickDeployment 在匹配当前端点类型的部署里按路由策略选出一条。没有可选部署时返回假。
@@ -254,7 +254,7 @@ func eligible(h Bypass, hit provider.Hit) []config.ModelEntry {
 			}
 			continue
 		}
-		if provider.Includes(m, hit.Type.ID) {
+		if provider.Includes(m, hit.Transport.ID) {
 			out = append(out, m)
 		}
 	}
@@ -297,10 +297,10 @@ func oneUpstream(h Bypass, hit provider.Hit) (config.ModelEntry, []string, bool)
 func bypassAuth(hit provider.Hit, dep config.ModelEntry) (string, string) {
 	base := trimBase(dep.ParamString("api_base", ""))
 	if base == "" {
-		base = trimBase(hit.Type.APIBase)
+		base = trimBase(hit.Transport.APIBase)
 	}
 	if base == "" {
-		base = provider.APIBase(hit.Type.StripPrefix, "")
+		base = provider.APIBase(hit.Transport.StripPrefix, "")
 	}
 	return base, dep.ParamString("api_key", "")
 }

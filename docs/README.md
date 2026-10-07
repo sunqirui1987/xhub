@@ -2,6 +2,8 @@
 
 先把两个进程跑起来，再决定读哪一层。控制台是 http://localhost:3000 （`make ui` 或 `frontend` 里的 `npm run dev`）。网关 API 是 http://localhost:4000 （`make run`）。登录 http://localhost:3000/login ，示例账号 `admin@xhub.local` / `admin-pass-1234`。客户端 `base_url` 用 `:4000`。完整安装步骤在仓库根 [README](../README.md)。控制台不是网关，网关也不提供 `:3000` 的页面。
 
+`make run` 读 `configs/config.yaml`，库地址是 `postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable`。`configs/config.example.yaml` 写的是 `127.0.0.1:5432`、密码 `xhub`，进程不读这个模板，它也连不上 Compose 映射出来的库。容器内的 `configs/config.docker.yaml` 用主机名 `postgres`、端口 `5432`、密码 `xhub_dev_password`；Compose 把该端口映到本机 `5433`。
+
 `docs/` 分三层。看文档前先确认自己在哪一层——这三层回答的是不同问题，混着读会得到互相矛盾的结论。
 
 | 目录 | 回答什么 | 可信度 |

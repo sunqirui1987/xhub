@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // MarketURL is the Modelink market feed the price catalog is generated from.
@@ -165,6 +167,7 @@ func BuildPriceDocument(raw []byte) (PriceDocument, error) {
 		return PriceDocument{}, fmt.Errorf("market feed is not readable: %w", err)
 	}
 	if len(feed.Data) == 0 {
+		logx.Error("market feed carried no models; refusing to build an empty catalog")
 		return PriceDocument{}, fmt.Errorf("market feed returned no models")
 	}
 
@@ -601,9 +604,16 @@ func FetchMarket(ctx context.Context, url string) (PriceDocument, error) {
 func ReloadFromMarket(ctx context.Context, url string) (int, error) {
 	doc, err := FetchMarket(ctx, url)
 	if err != nil {
+		logx.Error("price catalog fetch failed url=%s err=%v", url, err)
 		return 0, err
 	}
-	return ApplyDocument(doc)
+	n, err := ApplyDocument(doc)
+	if err != nil {
+		logx.Error("price catalog apply failed err=%v", err)
+		return 0, err
+	}
+	logx.Info("price catalog reloaded models=%d source=%s", n, doc.Source)
+	return n, nil
 }
 
 // marketClient is the HTTP client the reload uses. A reload that hangs must not

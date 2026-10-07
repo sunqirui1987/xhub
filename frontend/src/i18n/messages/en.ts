@@ -70,6 +70,16 @@ export const en = {
     tryFilters: "Try another search or clear your filters.",
     tryReload: "Open Price Data Management to reload the catalog.",
   },
+  endpoints: {
+    transport: "Transport",
+    adapted: "Protocol adaptation",
+    capabilities: "Capabilities",
+    pickAtLeastOne: "Pick at least one capability, or this model cannot be called.",
+    transportHint:
+      "Protocol adaptation lets the gateway compile the request from the provider and the endpoint. A registered pass-through forwards the provider's own API unchanged.",
+    bypassHint:
+      "The paths and fields of this pass-through are registered with the gateway. Nothing to fill in here.",
+  },
   priceData: {
     eyebrow: "MODELS AND PRICES",
     description:

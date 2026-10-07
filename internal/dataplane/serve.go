@@ -28,6 +28,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
 
@@ -151,6 +152,10 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
 	pool = preferDeployment(pool, plan.Pinned)
 	pool, paused := dropPaused(pool)
+	// 能力门。适配路径原来完全不过滤端点类型，一条标成 embedding 的部署
+	// 仍能被 /v1/chat/completions 打到。Bypass 部署在这里被丢掉：它们的入口是
+	// 供应商自己的路径，由 gateway 的 serveBypass 先一步接走，落到这里只会打错地址。
+	pool = provider.AdaptedPool(pool, op)
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
 		if paused > 0 {
@@ -172,6 +177,12 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	var lastProvider string
 	triedHTTP := false
 	missingCredential := false
+	// unimplementedProvider records that a deployment was skipped because the
+	// gateway has no protocol implementation for its provider name. It is
+	// tracked separately from lastProvider, which is set before the provider is
+	// checked and therefore cannot tell the two failures apart: an operator who
+	// misspelled a provider name used to be told their API key was missing.
+	unimplementedProvider := false
 
 	for di, rawDep := range pool {
 		if di > 0 {
@@ -202,6 +213,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		provider = strings.ToLower(strings.TrimSpace(provider))
 		lastProvider = provider
 		if _, ok := llm.ProtocolGroup(provider); !ok || provider == "" {
+			unimplementedProvider = true
 			logx.Debug("process path=%s step=skip provider=%s model=%s reason=unimplemented", r.URL.Path, provider, realModel)
 			continue
 		}
@@ -322,27 +334,62 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		}
 	}
 
+	// Every terminal failure below is still a request the caller made. It is
+	// recorded the way a 400 already is: a row with the status, no tokens and no
+	// charge. Without this the failure is visible only in the process log, so a
+	// customer reporting "my calls fail" leaves nothing to look at in the console.
+	//
+	// The three cases are told apart on purpose. Two of them used to share the
+	// 401 "no upstream API key configured" message, which sent an operator who had
+	// misspelled a provider name, or who had picked one the gateway cannot encode
+	// a request for, looking for a credential that was never the problem.
 	if !triedHTTP {
-		if lastProvider != "" || missingCredential {
+		switch {
+		case missingCredential:
 			logx.Error("dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusUnauthorized, "")
 			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "This model has no upstream API key configured.")
-			return
+		case unimplementedProvider:
+			logx.Error("dataplane path=%s status=400 code=provider_not_implemented provider=%s", r.URL.Path, lastProvider)
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
+			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented",
+				"This model's provider is not supported: "+lastProvider)
+		case lastErr != nil:
+			// The provider name is known but the request could not be encoded for
+			// it. Reporting this as a missing credential would be a lie, and the
+			// encode error is the only thing that says what to fix.
+			logx.Error("dataplane path=%s status=400 code=provider_not_implemented provider=%s err=%s",
+				r.URL.Path, lastProvider, safeErr(lastErr))
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
+			detail := safeErr(lastErr)
+			if errors.Is(lastErr, llm.ErrUnknownProvider()) {
+				// The sentinel's own text is just the code, which would read as
+				// "The request could not be encoded for base_llm: provider_not_implemented".
+				detail = "the gateway has no encoder for this provider"
+			}
+			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented",
+				"The request could not be encoded for "+lastProvider+": "+detail)
+		default:
+			logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
+			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
 		}
-		logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
-		httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
 		return
 	}
 	if lastStatus > 0 {
 		logx.Error("dataplane path=%s status=502 code=upstream_error detail=upstream %d", r.URL.Path, lastStatus)
+		h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream "+strconv.Itoa(lastStatus))
 		return
 	}
 	if lastErr != nil {
 		logx.Error("dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, safeErr(lastErr))
+		h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", safeErr(lastErr))
 		return
 	}
 	logx.Error("dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
+	h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
 }
 

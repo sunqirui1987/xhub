@@ -24,7 +24,7 @@ import (
 
 // TestEndpointAndModelLogic walks one request from the selected endpoint type
 // to the upstream call. Chat, Volcengine Seedance, Qiniu Seedance, and a custom
-// Suno bypass are the four deployments.
+// The two registered bypasses are among the deployments.
 func TestEndpointAndModelLogic(t *testing.T) {
 	var mu sync.Mutex
 	var seen []captured
@@ -54,15 +54,6 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	ark := deployment("volcengine/doubao-seedance-2-0-260128", "volcengine/doubao-seedance-2-0-260128", "ark-key", upstream.URL, "ark_contents_generation", nil)
 	arkFast := deployment("volcengine/doubao-seedance-2-0-fast-260128", "volcengine/doubao-seedance-2-0-fast-260128", "ark-key-2", upstream.URL, "ark_contents_generation", nil)
 	qiniu := deployment("qiniu/bytedance/doubao-seedance-2-0-260128", "qiniu/bytedance/doubao-seedance-2-0-260128", "qiniu-key", upstream.URL, "qiniu_contents_generation", nil)
-	suno := deployment("V6", "V6", "suno-key", upstream.URL, "custom", map[string]any{
-		"endpoint": map[string]any{
-			"kind": "bypass", "api_base": upstream.URL, "model_field": "model", "task_id": "data.taskId",
-			"actions": []any{
-				map[string]any{"name": "create", "method": "POST", "public_path": "/api/v1/generate", "upstream_path": "/api/v1/generate"},
-				map[string]any{"name": "get", "method": "GET", "public_path": "/api/v1/generate/record-info", "upstream_path": "/api/v1/generate/record-info", "task_query": "taskId"},
-			},
-		},
-	})
 	gpt := config.ModelEntry{
 		ModelName: "gpt-4o",
 		ModelInfo: map[string]any{"endpoint_types": []any{"chat", "completion"}},
@@ -70,16 +61,20 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	host := &logicHost{
 		cfg:    &config.Config{RouterSettings: config.RouterSettings{RoutingStrategy: "simple-shuffle"}},
 		client: upstream.Client(),
-		models: []config.ModelEntry{gpt, ark, arkFast, qiniu, suno},
+		models: []config.ModelEntry{gpt, ark, arkFast, qiniu},
 		pins:   map[string]string{},
 		billed: map[string]bool{},
 	}
 
-	gptBound := provider.BoundTypes(gpt)
-	if len(gptBound) != 2 || gptBound[0].Actions[0].PublicPath != "/v1/chat/completions" || gptBound[1].Actions[0].PublicPath != "/v1/completions" {
-		t.Fatalf("gpt endpoints %+v", gptBound)
+	// 适配的入口不再登记成端点类型：它们由能力表描述，上游路径由
+	// llm.Endpoint 决定。所以这里核对的是能力，不是一组动作。
+	if !provider.IncludesCapability(gpt, "chat") {
+		t.Fatalf("the chat deployment does not answer chat: %+v", gpt)
 	}
-	arkBound := provider.BoundTypes(ark)
+	if provider.IncludesCapability(gpt, "embedding") {
+		t.Fatalf("the chat deployment answered a capability it never declared")
+	}
+	arkBound := provider.BoundTransports(ark)
 	if len(arkBound) != 1 || arkBound[0].ID != "ark_contents_generation" || len(arkBound[0].Actions) != 3 {
 		t.Fatalf("ark endpoints %+v", arkBound)
 	}
@@ -142,7 +137,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	if lastCall(t, &mu, seen).query != "page_size=2" {
 		t.Fatalf("query dropped %+v", lastCall(t, &mu, seen))
 	}
-	host.models = []config.ModelEntry{gpt, ark, arkFast, qiniu, suno}
+	host.models = []config.ModelEntry{gpt, ark, arkFast, qiniu}
 
 	rec = host.call(t, http.MethodPost, "/v3/contents/generations/tasks", `{"model":"qiniu/bytedance/doubao-seedance-2-0-260128"}`)
 	if rec.Code != http.StatusOK {
@@ -153,17 +148,19 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		t.Fatalf("qiniu upstream %+v", got)
 	}
 
-	rec = host.call(t, http.MethodPost, "/api/v1/generate", `{"model":"V6","prompt":"folk"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("suno create %d %s", rec.Code, rec.Body.String())
-	}
-	rec = host.call(t, http.MethodGet, "/api/v1/generate/record-info?taskId=suno-1", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("suno get %d %s", rec.Code, rec.Body.String())
-	}
-	got = lastCall(t, &mu, seen)
-	if got.auth != "Bearer suno-key" || got.query != "taskId=suno-1" || host.spend[len(host.spend)-1].op != "custom:get" {
-		t.Fatalf("suno follow %+v spend %+v", got, host.spend[len(host.spend)-1])
+	// 部署上自带路径表不再是 bypass 来源：这两个路径不再被任何转发方式认领，
+	// 所以它们根本进不了 bypass 这一层，也就不会被送错地方。
+	//
+	// 这里刻意不通过 host.call 去发请求：那个辅助函数在没有命中时会直接 Fatal，
+	// 而"没有命中"正是这一条要断言的事实。
+	for _, target := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/generate"},
+		{http.MethodGet, "/api/v1/generate/record-info"},
+	} {
+		if hit, ok := provider.Match(target.method, target.path, host.models); ok {
+			t.Fatalf("%s %s was claimed by %s; bypass must come only from the registry",
+				target.method, target.path, hit.Transport.ID)
+		}
 	}
 }
 

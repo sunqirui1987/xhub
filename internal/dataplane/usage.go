@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // ttftMillis 把一段耗时收成日志用的毫秒指针。d 小于等于 0 时返回 nil，表示没量到。
@@ -94,15 +96,23 @@ func completeUsage(usage map[string]any, body map[string]any, streamed []byte) m
 		usage = map[string]any{}
 	}
 	pt, ct := usageCounts(usage)
+	// A count that had to be estimated is worth a line: it means this call was
+	// billed from an approximation rather than from what the upstream reported.
+	estimated := false
 	if pt == 0 {
 		if n := EstimateTokens(body); n > 0 {
 			usage["prompt_tokens"] = n
+			estimated = true
 		}
 	}
 	if ct == 0 {
 		if n := outputTokens(streamed); n > 0 {
 			usage["completion_tokens"] = n
+			estimated = true
 		}
+	}
+	if estimated {
+		logx.Debug("usage completed by estimate prompt=%v completion=%v", usage["prompt_tokens"], usage["completion_tokens"])
 	}
 	return usage
 }

@@ -104,15 +104,15 @@ docker compose up -d
 | PostgreSQL | 16 即可 | 必填且必须全新。`general_settings.database_url` 必须是 `postgres://`，不支持 SQLite |
 | Redis | 7 即可 | 可选。配置了 `redis_url` 才连接 |
 
-本机装好 PostgreSQL 后建库，并把 `configs/config.yaml` 指到它。示例配置默认是本机 `5432`：
+本机装好 PostgreSQL 后建库。三份配置里的 `database_url` 不是同一个地址：
 
-```yaml
-general_settings:
-  database_url: postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable
-  admin_email: admin@xhub.local
-  admin_password: admin-pass-1234
-  admin_name: Admin
-```
+| 文件 | 谁读 | `database_url` |
+| --- | --- | --- |
+| `configs/config.yaml` | 源代码模式的 `make run` | `postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable` |
+| `configs/config.example.yaml` | 只是模板，进程不读它 | `postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable` |
+| `configs/config.docker.yaml` | 容器里的网关 | `postgres://xhub:xhub_dev_password@postgres:5432/xhub?sslmode=disable` |
+
+Compose 把容器端口 `5432` 映射到本机 `5433`，用户 `xhub`，密码 `xhub_dev_password`，库名 `xhub`。示例文件里的 `5432` 和密码 `xhub` 连不上这个库。`config.yaml` 和示例文件里的初始管理员都是 `admin@xhub.local` / `admin-pass-1234`，显示名 `Admin`。
 
 ```bash
 make test

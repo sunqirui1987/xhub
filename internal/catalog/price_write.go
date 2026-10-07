@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // The embedded catalog is the baseline. An operator's hand-entered rows are
@@ -155,6 +157,7 @@ func RemoveModel(id string) bool {
 // 测试：pricedata_test.go
 func ApplyDocument(doc PriceDocument) (int, error) {
 	if len(doc.Models) == 0 {
+		logx.Error("refusing to apply an empty price catalog")
 		return 0, fmt.Errorf("refusing to apply an empty price catalog")
 	}
 	rows := make(map[string]any, len(doc.Models))

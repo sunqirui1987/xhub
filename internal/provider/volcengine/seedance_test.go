@@ -53,13 +53,13 @@ func TestSeedanceModelsAndPaths(t *testing.T) {
 	}
 }
 
-func find(t *testing.T, id string) provider.Type {
+func find(t *testing.T, id string) provider.Transport {
 	t.Helper()
-	for _, typ := range provider.Types() {
+	for _, typ := range provider.Transports() {
 		if typ.ID == id {
 			return typ
 		}
 	}
 	t.Fatalf("missing type %s", id)
-	return provider.Type{}
+	return provider.Transport{}
 }

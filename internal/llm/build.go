@@ -106,6 +106,16 @@ var (
 	errDeprecatedProvider = errString("deprecated_provider")
 )
 
+// ErrUnknownProvider is errUnknownProvider exported, so a caller can tell "the
+// gateway cannot encode for this provider at all" apart from a specific encoding
+// failure. The two need different messages: the first is a wrong provider name,
+// the second is a request the chosen provider cannot express.
+// 参数：无。
+// 返回 error（error）：供应商无法编码时 Build 返回的那个哨兵值，用 errors.Is 比较。
+// 调用：dataplane/serve.go 在终局失败时决定报哪一条消息。
+// 测试：无直接单测
+func ErrUnknownProvider() error { return errUnknownProvider }
+
 type errString string
 
 // Error returns the text for an encoding failure. An unknown or retired provider uses a fixed sentence.

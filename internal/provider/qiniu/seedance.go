@@ -17,7 +17,7 @@ func init() {
 			{Key: "api_key", Label: "API Key", Type: "password", Required: true},
 		},
 	})
-	provider.RegisterType(provider.Type{
+	provider.RegisterTransport(provider.Transport{
 		ID: "qiniu_contents_generation", Kind: provider.KindBypass,
 		Label:     "Bypass - 七牛内容生成 /v3/contents/generations/tasks",
 		Providers: []string{"qiniu"}, APIBase: "https://api.qnaigc.com",

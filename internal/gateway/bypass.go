@@ -32,7 +32,7 @@ func (s *Server) serveBypass(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	hit, ok := provider.Match(r.Method, r.URL.Path, s.Models())
-	if !ok || hit.Type.Kind != provider.KindBypass {
+	if !ok || hit.Transport.Kind != provider.KindBypass {
 		return false
 	}
 	dataplane.ServeBypass(s, w, r, hit)

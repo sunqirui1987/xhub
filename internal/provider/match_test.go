@@ -12,12 +12,12 @@ import (
 
 func TestBypassPathsStayOnTheirProviders(t *testing.T) {
 	qiniu, ok := provider.Match("POST", "/v3/contents/generations/tasks", nil)
-	if !ok || qiniu.Type.ID != "qiniu_contents_generation" || qiniu.Type.ModelField != "model" {
-		t.Fatalf("qiniu create %+v %v", qiniu.Type.ID, ok)
+	if !ok || qiniu.Transport.ID != "qiniu_contents_generation" || qiniu.Transport.ModelField != "model" {
+		t.Fatalf("qiniu create %+v %v", qiniu.Transport.ID, ok)
 	}
 	ark, ok := provider.Match("POST", "/api/v3/contents/generations/tasks", nil)
-	if !ok || ark.Type.ID != "ark_contents_generation" || ark.Type.TaskID != "id" {
-		t.Fatalf("ark create %+v", ark.Type.ID)
+	if !ok || ark.Transport.ID != "ark_contents_generation" || ark.Transport.TaskID != "id" {
+		t.Fatalf("ark create %+v", ark.Transport.ID)
 	}
 	got, ok := provider.Match("GET", "/api/v3/contents/generations/tasks/cgt-1", nil)
 	if !ok || got.Names["id"] != "cgt-1" || got.Action.Name != "get" {
@@ -28,7 +28,14 @@ func TestBypassPathsStayOnTheirProviders(t *testing.T) {
 	}
 }
 
-func TestCustomEndpointMatchesOnlyItsDeployment(t *testing.T) {
+// TestRegisteredTransportsAreTheOnlyBypassSource 钉住 bypass 的来源只有一处：
+// 后台登记的转发方式。
+//
+// 部署上自带的路径表不再参与匹配。这段代码原来覆盖的是一条部署自带文档的自定义
+// bypass，现在那条路关掉了，所以要断言它匹配不上。
+// 参数 t（*testing.T）：当前测试。
+// 返回：无。
+func TestRegisteredTransportsAreTheOnlyBypassSource(t *testing.T) {
 	dep := config.ModelEntry{
 		ModelName: "tripo-text",
 		LiteLLMParams: map[string]any{
@@ -43,10 +50,13 @@ func TestCustomEndpointMatchesOnlyItsDeployment(t *testing.T) {
 			},
 		},
 	}
-	hit, ok := provider.Match("GET", "/api/v1/generate/record-info", []config.ModelEntry{dep})
-	if !ok || hit.DeploymentName != "tripo-text" || hit.Action.TaskQuery != "taskId" {
-		t.Fatalf("custom get %+v %v", hit, ok)
+	if _, ok := provider.Match("GET", "/api/v1/generate/record-info", []config.ModelEntry{dep}); ok {
+		t.Fatal("a deployment document was accepted as a bypass source")
 	}
+	if _, ok := provider.Match("POST", "/v2/openapi/task", []config.ModelEntry{dep}); ok {
+		t.Fatal("a deployment document was accepted as a bypass source")
+	}
+
 	if got := provider.OfficialID("qiniu", "qiniu/bytedance/doubao-seedance-2-0-260128"); got != "bytedance/doubao-seedance-2-0-260128" {
 		t.Fatalf("official id %s", got)
 	}

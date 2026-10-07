@@ -16,3 +16,10 @@
 // Host.RecordSpend so the usage row is written by the process, not here.
 // live.go is the Redis side of routing state and the spend flush.
 package dataplane
+
+import (
+	"github.com/sunqirui1987/xhub/internal/logx"
+)
+
+// init 记一次包载入。这个文件只放包文档，没有别的可记的事。
+func init() { logx.Trace("enter dataplane") }

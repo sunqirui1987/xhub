@@ -1,7 +1,17 @@
-.PHONY: test run ui tidy e2e
+.PHONY: test run ui tidy e2e regression regression-live
 
 test:
 	go test ./...
+
+# End-to-end regression suite: real gateway, real PostgreSQL, real budgets,
+# guardrails and bypass. Uses a fake provider, so it is free to run repeatedly.
+regression:
+	./scripts/regression.sh -v
+
+# The same suite with the live vendor calls enabled. Spends real money and needs
+# XHUB_REGRESSION_FENNO_KEY and XHUB_REGRESSION_QINIU_KEY in the environment.
+regression-live:
+	./scripts/regression.sh -v --live
 
 run:
 	go run ./cmd/gateway -config configs/config.yaml -addr :4000

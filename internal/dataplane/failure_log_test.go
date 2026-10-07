@@ -148,7 +148,11 @@ func TestServeLogsBuildSkipAndTerminalAuth(t *testing.T) {
 	}), nil)
 	rec := httptest.NewRecorder()
 	Serve(h, rec, chatRequest(t, "broken", false), "chat")
-	if rec.Code != http.StatusUnauthorized {
+	// base_llm passes the provider check and then has no encoder, so this is a
+	// request the gateway cannot express -- not a missing credential. It used to
+	// answer 401 "no upstream API key configured" with the key set, which sent an
+	// operator looking for a credential that was never the problem.
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 	line := buf.String()
@@ -156,11 +160,19 @@ func TestServeLogsBuildSkipAndTerminalAuth(t *testing.T) {
 	for _, want := range []string{
 		"trace dataplane hop path=/v1/chat/completions",
 		"error upstream encode path=/v1/chat/completions provider=base_llm model=some-model err=provider_not_implemented",
-		"error dataplane path=/v1/chat/completions status=401 code=authentication_error provider=base_llm",
+		"error dataplane path=/v1/chat/completions status=400 code=provider_not_implemented provider=base_llm",
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("log missing %q\n%s", want, line)
 		}
+	}
+	// The body has to say what is wrong, not blame a credential that was set.
+	body := rec.Body.String()
+	if !strings.Contains(body, "encoded for base_llm") {
+		t.Fatalf("the refusal does not name the encoding problem: %s", body)
+	}
+	if strings.Contains(body, "API key") {
+		t.Fatalf("the refusal blames a credential that was configured: %s", body)
 	}
 	assertNoSecrets(t, line)
 }

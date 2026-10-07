@@ -67,6 +67,15 @@ export const zhCN = {
     tryFilters: "试试其他关键词，或清除筛选条件。",
     tryReload: "请打开价格数据管理，重新加载价格目录。",
   },
+  endpoints: {
+    transport: "转发方式",
+    adapted: "协议适配",
+    capabilities: "能力",
+    pickAtLeastOne: "至少选一种能力，否则这条模型调不动。",
+    transportHint:
+      "协议适配由网关按供应商和端点自行编译请求；已登记的直通把供应商自己的接口原样转发。",
+    bypassHint: "这条直通的路径和字段已经在网关里登记好了，这里不需要填。",
+  },
   priceData: {
     eyebrow: "模型与价格",
     description:

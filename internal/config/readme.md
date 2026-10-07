@@ -6,11 +6,11 @@
 
 ## Features
 
-- `Load` reads YAML and resolves `os.environ/NAME` placeholders in the master key, database URL, Redis URL, and the configured administrator credentials.
+- `Load` reads YAML and resolves `os.environ/NAME` placeholders, after trimming space, in `master_key`, `database_url`, `redis_url`, `admin_email`, `admin_password`, and `admin_name`.
 - Typed `RouterSettings` and `GeneralSettings` cover the fields the process reads directly.
 - `RouterRaw` and `GeneralRaw` keep every other YAML key so a database overlay can replace one key without dropping the rest.
 - `ModelEntry.ParamString` reads one upstream parameter with a fallback.
-- `SplitProviderModel` splits a `provider/model` string.
+- `SplitProviderModel` splits on the first `/`. The left side is the provider and the right side is the model. A string with no slash returns provider `openai` and the whole string as the model. It does not return an empty provider.
 
 ## The configured administrator
 
@@ -24,15 +24,15 @@ The password is an **initial** password, not a managed one:
 
 Both values accept `os.environ/NAME`, which is how a deployment keeps the password out of a file. An unset variable resolves to the empty string, and an empty `admin_email` or `admin_password` means seeding does not run at all. `disable_env_credential_login: true` refuses the config-supplied account entirely.
 
-```yaml
-general_settings:
-  master_key: sk-local-master
-  database_url: postgres://xhub:xhub@127.0.0.1:5433/xhub?sslmode=disable
-  admin_email: admin@example.com
-  admin_password: os.environ/XHUB_ADMIN_PASSWORD
-  admin_name: Platform Admin
-  disable_env_credential_login: false
-```
+The three files in the tree are not the same URL:
+
+| File | Who reads it | `database_url` |
+| --- | --- | --- |
+| `configs/config.yaml` | `make run` | `postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable` |
+| `configs/config.example.yaml` | nobody; it is a template | `postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable` |
+| `configs/config.docker.yaml` | the gateway container | `postgres://xhub:xhub_dev_password@postgres:5432/xhub?sslmode=disable` |
+
+Compose publishes container port `5432` as host port `5433`. The example file's port `5432` and password `xhub` do not open that database.
 
 ## How another package uses it
 

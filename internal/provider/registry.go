@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"strings"
 	"sync"
 
@@ -10,16 +11,16 @@ import (
 
 var (
 	mu             sync.Mutex
-	types          []Type
+	transports     []Transport
 	modelEndpoints = map[string]string{}
 )
 
-// RegisterType adds an endpoint type. A provider file calls it from init.
-// 参数 t（Type）：登记类型使用的Type。
-// 返回：无。这种端点类型已登记。id 为空或没有动作时不登记。
-// 调用：provider/openai/chat.go、provider/qiniu/seedance.go、provider/volcengine/seedance.go
-// 测试：无直接单测
-func RegisterType(t Type) {
+// RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
+// 参数 t（Transport）：要登记的内置转发方式。
+// 返回：无。id 为空或没有动作时不登记——一个没有动作的转发方式无处可转。
+// 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
+// 测试：seedance_test.go
+func RegisterTransport(t Transport) {
 	t.ID = strings.TrimSpace(t.ID)
 	t.Kind = Kind(strings.TrimSpace(string(t.Kind)))
 	if t.ID == "" || len(t.Actions) == 0 {
@@ -29,11 +30,11 @@ func RegisterType(t Type) {
 		t.Actions[i].Method = strings.ToUpper(strings.TrimSpace(t.Actions[i].Method))
 	}
 	mu.Lock()
-	types = append(types, t)
+	transports = append(transports, t)
 	mu.Unlock()
 }
 
-// Model is a price-map row shown in the add-model picker.
+// Model 是价目表里显示在添加模型选择器上的一行。
 type Model struct {
 	ID           string
 	Provider     string
@@ -46,9 +47,9 @@ type Model struct {
 	Priced       bool
 }
 
-// RegisterModel adds a picker row. EndpointType is the type the form selects when this model id is chosen.
-// 参数 m（Model）：正在累加或展示的Model。
-// 返回：无。这条可选模型已登记。选中这个模型 id 时，表单会带上它的端点类型。id 为空时不登记。
+// RegisterModel 登记一条可选模型。选中这个模型 id 时，表单会带上它的端点类型。
+// 参数 m（Model）：正在累加或展示的模型。
+// 返回：无。id 为空时不登记。
 // 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
 // 测试：无直接单测
 func RegisterModel(m Model) {
@@ -78,8 +79,7 @@ func RegisterModel(m Model) {
 	})
 }
 
-// ProviderField is one credential input for a supplier the dropdown does not
-// already list.
+// ProviderField 是下拉里还没有的供应商要用的一项凭据输入。
 type ProviderField struct {
 	Key      string
 	Label    string
@@ -88,7 +88,7 @@ type ProviderField struct {
 	Default  string
 }
 
-// Supplier is a dropdown entry. An existing name is left as it is.
+// Supplier 是一条下拉项。已有的名字保持原样。
 type Supplier struct {
 	Name        string
 	Slug        string
@@ -98,9 +98,9 @@ type Supplier struct {
 	Fields      []ProviderField
 }
 
-// RegisterSupplier stores a default API root and, when the name is new, the add-model credential fields.
-// 参数 s（Supplier）：登记Supplier使用的Supplier。
-// 返回：无。默认 API 根已记下。名字是新的时，添加模型用的凭据字段也记下。slug 为空时不登记。
+// RegisterSupplier 记下默认 API 根；名字是新的时，连添加模型的凭据字段一起记下。
+// 参数 s（Supplier）：要登记的供应商。
+// 返回：无。slug 为空时不登记。
 // 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
 // 测试：无直接单测
 func RegisterSupplier(s Supplier) {
@@ -129,9 +129,9 @@ func RegisterSupplier(s Supplier) {
 
 var bases = map[string]string{}
 
-// APIBase returns the deployment base, or the supplier default when that is empty.
-// 参数 slug（string）：供应商 slug，例如 openai、volcengine、qiniu；configured（string）：APIBase使用的configured。空串表示调用方没有提供这项。
-// 返回 string（string）：部署上的 api_base。部署没填时用供应商登记的默认根。
+// APIBase 返回部署上的根地址；部署没填时用供应商登记的默认根。
+// 参数 slug（string）：供应商 slug，例如 openai、volcengine、qiniu；configured（string）：部署上写的 api_base。
+// 返回 string（string）：要用的根地址。两处都没有时为空串。
 // 调用：dataplane/official.go
 // 测试：无直接单测
 func APIBase(slug, configured string) string {
@@ -144,23 +144,23 @@ func APIBase(slug, configured string) string {
 	return bases[strings.TrimSpace(slug)]
 }
 
-// Types returns the registered endpoint types.
+// Transports 返回已登记的内置转发方式。
 // 参数：无。
-// 调用：仅在 registry.go 内使用
-// 测试：chat_test.go、registry_test.go、seedance_test.go
-// 返回 []Type（[]Type）：已登记的端点类型。
-func Types() []Type {
+// 返回 []Transport（[]Transport）：已登记的转发方式。
+// 调用：PublicBody。
+// 测试：seedance_test.go
+func Transports() []Transport {
 	mu.Lock()
 	defer mu.Unlock()
-	out := make([]Type, len(types))
-	copy(out, types)
+	out := make([]Transport, len(transports))
+	copy(out, transports)
 	return out
 }
 
-// ModelEndpoints maps a price-map model id to the endpoint type the form preselects.
+// ModelEndpoints 把价目表模型 id 映射到表单要预选的端点类型。
 // 参数：无。
-// 返回 map[string]string（map[string]string）：模型Endpoints的字符串表。没有该键表示这项没有填。
-// 调用：仅在 registry.go 内使用
+// 返回 map[string]string（map[string]string）：模型 id 到端点类型。
+// 调用：PublicBody。
 // 测试：match_test.go、seedance_test.go
 func ModelEndpoints() map[string]string {
 	mu.Lock()
@@ -172,40 +172,37 @@ func ModelEndpoints() map[string]string {
 	return out
 }
 
-// PublicBody is the add-model payload: the type list and the model defaults.
+// PublicBody 是添加模型的载荷：能力表、转发方式表和模型默认值。
+//
+// 形状从 {types, models} 改成了 {capabilities, transports, models}，
+// 因为原来的 types 正是这次要拆掉的那件东西。调用方只有添加模型表单。
 // 参数：无。
-// 返回 map[string]any（map[string]any）：价目表模型 id 到默认端点类型。没有该键表示选中模型时不预选端点。
+// 返回 map[string]any（map[string]any）：能力、转发方式和模型默认端点。
 // 调用：catalog/classify.go、gateway/bypass.go、gateway/catalog.go
 // 测试：无直接单测
 func PublicBody() map[string]any {
-	return map[string]any{"types": Types(), "models": ModelEndpoints()}
+	return map[string]any{
+		"capabilities": Capabilities(),
+		"transports":   Transports(),
+		"models":       ModelEndpoints(),
+	}
 }
 
-// Match finds the bypass action for this method and path. A custom endpoint stored on a deployment is visible only for that deployment. Adapted types are not matched here; those paths stay on the existing handlers.
-// 参数 method（string）：HTTP 方法，例如 GET 或 POST；path（string）：URL 路径，用来匹配路由；models（[]config.ModelEntry）：候选部署列表，后面按策略挑一条。
-// 返回 Hit（Hit）：匹配到的 bypass 动作和路径参数。没有命中时是零值；bool（bool）：这个方法和路径匹配到一条 bypass 动作时返回真。适配类型不在这里匹配。
+// Match 找出这个方法和路径命中的 bypass 动作，只在已登记的转发方式里找。
+//
+// 它刻意不读部署上的自定义文档：bypass 是后台登记的形状，不是运维在界面上
+// 随手填的一份路径表。一份填错的路径表发不出请求，也就拿不到上游的返回值，
+// 预选、日志和用量都无从谈起。
+//
+// 参数 method（string）：HTTP 方法，例如 GET 或 POST；path（string）：URL 路径；
+// models（[]config.ModelEntry）：候选部署列表，当前不参与匹配，保留给调用方复用签名。
+// 返回 Hit（Hit）：命中的转发方式和动作；bool（bool）：命中时为真。
 // 调用：gateway/bypass.go
-// 测试：bypass_logic_test.go、chat_test.go、match_test.go
+// 测试：bypass_logic_test.go、match_test.go
 func Match(method, path string, models []config.ModelEntry) (Hit, bool) {
 	method = strings.ToUpper(method)
 	path = strings.TrimSuffix(path, "/")
-	var custom Hit
-	customOK := false
-	for _, m := range models {
-		customType, ok := overrideType(m)
-		if !ok {
-			continue
-		}
-		for _, action := range customType.Actions {
-			names, ok := matchPath(action.PublicPath, path)
-			if !ok || action.Method != method {
-				continue
-			}
-			custom = Hit{Type: customType, Action: action, Names: names, DeploymentName: m.ModelName}
-			customOK = true
-		}
-	}
-	for _, t := range Types() {
+	for _, t := range Transports() {
 		if t.Kind != KindBypass {
 			continue
 		}
@@ -217,18 +214,15 @@ func Match(method, path string, models []config.ModelEntry) (Hit, bool) {
 			if !ok {
 				continue
 			}
-			return Hit{Type: t, Action: action, Names: names}, true
+			return Hit{Transport: t, Action: action, Names: names}, true
 		}
-	}
-	if customOK {
-		return custom, true
 	}
 	return Hit{}, false
 }
 
 // 把路径模板和真实路径逐段比较，抽出花括号里的参数。
-// 参数 pattern（string）：要匹配的路径模板或正则；path（string）：URL 路径，用来匹配路由。
-// 返回 map[string]string（map[string]string）：路径模板里抽出的参数，例如任务 id。不匹配时为 nil，同时布尔值为假；bool（bool）：路径和模板逐段对上、并抽出花括号参数时返回真。
+// 参数 pattern（string）：路径模板；path（string）：真实路径。
+// 返回 map[string]string（map[string]string）：抽出的参数；bool（bool）：逐段对上时为真。
 // 调用：仅在 registry.go 内使用
 // 测试：无直接单测
 func matchPath(pattern, path string) (map[string]string, bool) {
@@ -258,106 +252,206 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 	return names, true
 }
 
-// overrideType 读取部署上自定义的 bypass 端点。endpoint 不是带 action 的 bypass 映射时，返回假。
-// 参数 m：一条部署。endpoint 必须是 map，且 kind 为 bypass，并至少有一个 action。
-// 返回：解析出的自定义端点类型，以及是否真有这份覆盖。
-// 调用：仅 registry.go 内的 Match、ApplyOverride、BoundTypes。测试：registry_test.go TestCustomBypassReadsTheDocumentFields。
-func overrideType(m config.ModelEntry) (Type, bool) {
-	if m.LiteLLMParams == nil {
-		return Type{}, false
-	}
-	raw, ok := m.LiteLLMParams["endpoint"]
-	if !ok || raw == nil {
-		return Type{}, false
-	}
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return Type{}, false
-	}
-	t := Type{
-		ID:          "custom",
-		Kind:        KindBypass,
-		APIBase:     str(obj["api_base"]),
-		ModelField:  str(obj["model_field"]),
-		TaskID:      str(obj["task_id"]),
-		StripPrefix: str(obj["strip_prefix"]),
-	}
-	if kind := str(obj["kind"]); kind != "" {
-		t.Kind = Kind(kind)
-	}
-	if t.Kind != KindBypass {
-		return Type{}, false
-	}
-	actions, _ := obj["actions"].([]any)
-	for _, item := range actions {
-		row, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		t.Actions = append(t.Actions, Action{
-			Name:         str(row["name"]),
-			Method:       strings.ToUpper(str(row["method"])),
-			PublicPath:   str(row["public_path"]),
-			UpstreamPath: str(row["upstream_path"]),
-			TaskQuery:    str(row["task_query"]),
-		})
-	}
-	if len(t.Actions) == 0 {
-		return Type{}, false
-	}
-	return t, true
-}
+// ApplyOverride 当前是恒等函数。部署上不再支持自带 bypass 文档，
+// 保留这个签名让 dataplane 的调用点不必改。
+// 参数 m（config.ModelEntry）：一条部署，当前不读；hit（Hit）：这次命中的转发方式。
+// 返回 Hit（Hit）：原样返回。
+// 调用：dataplane/official.go
+// 测试：无直接单测
+func ApplyOverride(m config.ModelEntry, hit Hit) Hit { return hit }
 
 // 把动态值收成去掉空白的字符串。不是字符串时为空串。
-// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
-// 返回 string（string）：按字符串读出的值。不是字符串或没有该键时为空串，不 panic。
-// 调用：仅在 registry.go 内使用。
+// 参数 v（any）：JSON 里读出的动态值。
+// 返回 string（string）：按字符串读出的值。
+// 调用：仅在 registry.go 内使用
 // 测试：无直接单测
 func str(v any) string {
 	s, _ := v.(string)
 	return strings.TrimSpace(s)
 }
 
-// ApplyOverride copies a deployment's saved endpoint onto the matched type. Public paths stay on the type. Edited fields and upstream paths come from the deployment.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖；hit（Hit）：这次路由命中的端点类型。Type 决定上游动作，路径参数在 Params 里。
-// 返回 Hit（Hit）：路径匹配到的端点类型和动作。
-// 调用：dataplane/official.go
-// 测试：无直接单测
-func ApplyOverride(m config.ModelEntry, hit Hit) Hit {
-	custom, ok := overrideType(m)
-	if !ok {
-		return hit
+// SelectedCapabilities 返回一条部署应答的能力 id 列表。
+//
+// 读顺序：
+//  1. model_info.endpoint_types：新写入是这个字段，里面是能力 id。
+//  2. model_info.mode：旧行只有这个字符串，按存量 id 映射成能力。
+//  3. 都没有：chat。老的部署和不带端点信息的部署都是这个意思。
+//
+// 认不出的 id（realtime、batch、ocr）被忽略，不放进任何能力。一项都认不出时
+// 返回空切片，调用方据此拒绝这条部署——不在这里补默认 chat，那会让一条只写了
+// realtime 的部署意外应答所有对话请求。
+//
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 []string（[]string）：能力 id 列表，可能为空。
+// 调用：AdaptedPool 过滤适配池。
+// 测试：registry_test.go
+func SelectedCapabilities(m config.ModelEntry) []string {
+	if m.ModelInfo == nil {
+		return []string{"chat"}
 	}
-	if custom.ModelField != "" {
-		hit.Type.ModelField = custom.ModelField
+	if list := stringList(m.ModelInfo["endpoint_types"]); len(list) > 0 {
+		return normalizeCapabilities(list)
 	}
-	if custom.TaskID != "" {
-		hit.Type.TaskID = custom.TaskID
+	if mode := str(m.ModelInfo["mode"]); mode != "" {
+		return normalizeCapabilities([]string{mode})
 	}
-	if custom.StripPrefix != "" {
-		hit.Type.StripPrefix = custom.StripPrefix
-	}
-	if custom.APIBase != "" {
-		hit.Type.APIBase = custom.APIBase
-	}
-	for _, action := range custom.Actions {
-		if action.Name != hit.Action.Name {
-			continue
-		}
-		if action.UpstreamPath != "" {
-			hit.Action.UpstreamPath = action.UpstreamPath
-		}
-		if action.TaskQuery != "" {
-			hit.Action.TaskQuery = action.TaskQuery
-		}
-	}
-	return hit
+	return []string{"chat"}
 }
 
-// SelectedTypes is the endpoint types a deployment answers. endpoint_types wins when it is set, so one model can answer more than one type. An empty model info means chat.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖。
-// 返回 []string（[]string）：SelectedTypes。没有匹配时为空切片。
-// 调用：仅在 registry.go 内使用
+// normalizeCapabilities 把一批 id 收成能力 id，去重并保持顺序。
+// 每个 id 先按能力 id 认，认不出再按存量 id 认，都不认就丢掉。
+// 参数 list（[]string）：要收的 id。
+// 返回 []string（[]string）：能力 id 列表。
+// 调用：SelectedCapabilities。
+// 测试：registry_test.go
+func normalizeCapabilities(list []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range list {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		capability := id
+		if !isKnownCapability(capability) {
+			mapped, ok := capabilityByLegacyID(id)
+			if !ok {
+				continue
+			}
+			capability = mapped
+		}
+		if seen[capability] {
+			continue
+		}
+		seen[capability] = true
+		out = append(out, capability)
+	}
+	return out
+}
+
+// SelectedTransport 返回一条部署的转发方式 id。
+//
+// 判定顺序：
+//  1. model_info.transport 是登记过的内置 id → 那个 id。
+//  2. endpoint_types 或 mode 里出现内置 Bypass id → 那个 id。旧行只写了这个。
+//  3. 其余 → adapted。
+//
+// 内置 Bypass 之外的 bypass 形状不存在：后台没登记过的转发方式，运维在界面上
+// 也选不到、存不进。
+//
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 string（string）：转发方式 id，always 有值。
+// 调用：AdaptedPool 过滤适配池；dataplane/official.go 选部署。
+// 测试：registry_test.go
+func SelectedTransport(m config.ModelEntry) string {
+	if m.ModelInfo == nil {
+		return AdaptedTransportID
+	}
+	if id := str(m.ModelInfo["transport"]); id != "" {
+		if _, ok := transportByLegacyID(id); ok {
+			return id
+		}
+		if id == AdaptedTransportID {
+			return AdaptedTransportID
+		}
+	}
+	for _, id := range append(appendedIDs(m), str(m.ModelInfo["mode"])) {
+		if transport, ok := transportByLegacyID(id); ok {
+			return transport
+		}
+	}
+	return AdaptedTransportID
+}
+
+// appendedIDs 返回 model_info.endpoint_types 里的值。
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 []string（[]string）：endpoint_types 的值，没有时为空切片。
+// 调用：SelectedTransport、Includes。
+// 测试：无直接单测
+func appendedIDs(m config.ModelEntry) []string {
+	if m.ModelInfo == nil {
+		return nil
+	}
+	return stringList(m.ModelInfo["endpoint_types"])
+}
+
+// IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径：
+// 方舟内容生成的入口是 /api/v3/contents/generations/tasks，不是 /v1/videos，
+// 把它放进适配池会让 /v1/videos 选中它然后打错地址。
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 bool（bool）：走协议适配时为真。
+// 调用：AdaptedPool。
+// 测试：registry_test.go
+func IsAdapted(m config.ModelEntry) bool {
+	return SelectedTransport(m) == AdaptedTransportID
+}
+
+// AdaptedPool 把适配路径的候选收敛到能应答这个 op 的部署。
+//
+// 两件事都做：丢掉不是协议适配的，丢掉能力不含这个 op 的。这是新行为，
+// 不是把现有比较换个写法——原来适配路径完全不过滤端点类型，一条标成
+// embedding 的部署现在仍能被 /v1/chat/completions 打到。
+//
+// 参数 models（[]config.ModelEntry）：router.Order 之后的候选；op（string）：数据面操作名。
+// 返回 []config.ModelEntry（[]config.ModelEntry）：留下来的部署，可能为空。
+// 调用：dataplane/serve.go
+// 测试：capability_test.go
+func AdaptedPool(models []config.ModelEntry, op string) []config.ModelEntry {
+	capability, known := CapabilityForOp(op)
+	out := make([]config.ModelEntry, 0, len(models))
+	for _, m := range models {
+		if !IsAdapted(m) {
+			continue
+		}
+		if !known {
+			// 认不出的 op 交给原来那条路去处理，不在这里下结论。
+			out = append(out, m)
+			continue
+		}
+		if IncludesCapability(m, capability) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// IncludesCapability 报告这条部署是否应答这个能力。
+// 参数 m（config.ModelEntry）：一条部署；capability（string）：能力 id。
+// 返回 bool（bool）：应答这个能力时为真。
+// 调用：AdaptedPool。
+// 测试：registry_test.go
+func IncludesCapability(m config.ModelEntry, capability string) bool {
+	for _, id := range SelectedCapabilities(m) {
+		if id == capability {
+			return true
+		}
+	}
+	return false
+}
+
+// Includes 报告这条部署是否选中了这个转发方式 id。Bypass 选部署用它：
+// 路径先命中转发方式，再按转发方式 id 挑部署，能力不参与。
+// 参数 m（config.ModelEntry）：一条部署；typeID（string）：转发方式 id。
+// 返回 bool（bool）：选中时为真。
+// 调用：dataplane/official.go
+// 测试：registry_test.go
+func Includes(m config.ModelEntry, typeID string) bool {
+	if SelectedTransport(m) == typeID {
+		return true
+	}
+	for _, id := range appendedIDs(m) {
+		if id == typeID {
+			return true
+		}
+	}
+	return false
+}
+
+// SelectedTypes 返回一条部署声明的原始端点 id 列表。它只服务 Bypass 选部署：
+// 能力那一路走 SelectedCapabilities。endpoint_types 优先，其次 mode，都没有则 chat。
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 []string（[]string）：原始 id 列表。
+// 调用：BoundTransports。
 // 测试：registry_test.go
 func SelectedTypes(m config.ModelEntry) []string {
 	if m.ModelInfo != nil {
@@ -371,35 +465,15 @@ func SelectedTypes(m config.ModelEntry) []string {
 	return []string{"chat"}
 }
 
-// Includes reports that this deployment selected typeID.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖；typeID（string）：Includes使用的类型标识。空串表示调用方没有提供这项。
-// 返回 bool（bool）：这条部署选中了这个端点类型时返回真。
-// 调用：dataplane/official.go
+// BoundTransports 把这条部署声明的转发方式解析成登记好的条目。
+// 参数 m（config.ModelEntry）：一条部署。
+// 返回 []Transport（[]Transport）：这条部署应答的内置转发方式。
+// 调用：测试。
 // 测试：registry_test.go
-func Includes(m config.ModelEntry, typeID string) bool {
+func BoundTransports(m config.ModelEntry) []Transport {
+	var out []Transport
 	for _, id := range SelectedTypes(m) {
-		if id == typeID {
-			return true
-		}
-	}
-	return false
-}
-
-// BoundTypes resolves the selected ids to their registered actions. A custom bypass stored on the deployment is included when "custom" is selected.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖。
-// 返回 []Type（[]Type）：已登记的端点类型。
-// 调用：仅在 registry.go 内使用
-// 测试：bypass_logic_test.go、registry_test.go
-func BoundTypes(m config.ModelEntry) []Type {
-	var out []Type
-	for _, id := range SelectedTypes(m) {
-		if id == "custom" {
-			if custom, ok := overrideType(m); ok {
-				out = append(out, custom)
-			}
-			continue
-		}
-		for _, t := range Types() {
+		for _, t := range Transports() {
 			if t.ID == id {
 				out = append(out, t)
 				break
@@ -409,19 +483,10 @@ func BoundTypes(m config.ModelEntry) []Type {
 	return out
 }
 
-// ModeOf is the first selected endpoint type. An empty mode is chat.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖。
-// 返回 string（string）：模型选中的第一个端点类型。没有选择时按 chat。
-// 调用：仅在 registry.go 内使用
-// 测试：无直接单测
-func ModeOf(m config.ModelEntry) string {
-	return SelectedTypes(m)[0]
-}
-
 // 把配置里的字符串或数组收成 []string。
-// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
-// 返回 []string（[]string）：字符串列表。没有匹配时为 nil 或空切片，调用方按长度判断。
-// 调用：SelectedTypes 在读取 endpoint_types 时。
+// 参数 v（any）：JSON 里读出的动态值。
+// 返回 []string（[]string）：字符串列表。
+// 调用：SelectedCapabilities、SelectedTransport、SelectedTypes。
 // 测试：无直接单测
 func stringList(v any) []string {
 	switch list := v.(type) {
@@ -439,3 +504,7 @@ func stringList(v any) []string {
 		return nil
 	}
 }
+
+// init 记一次目录载入，并把已登记的转发方式数写下来。目录是进程启动时
+// 由各供应商包的 init 填好的，这一行是"目录确实装上了"的唯一凭证。
+func init() { logx.Debug("provider registry loaded") }

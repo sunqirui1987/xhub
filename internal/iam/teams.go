@@ -1043,7 +1043,9 @@ func (db *DB) UpdateProject(ctx context.Context, by Actor, id string, in Project
 		if err := lockTeam(ctx, s, cur.TeamID); err != nil {
 			return err
 		}
-		if err := checkWithinTeam(s, cur.TeamID, id, in.Models, in.MaxBudget); err != nil {
+		// 项目自己的上限不是它的父级。把项目 id 传进去会让当前上限变成天花板，
+		// 于是额度一旦写上就再也抬不高。这里只拿团队那一层做上限。
+		if err := checkWithinTeam(s, cur.TeamID, "", in.Models, in.MaxBudget); err != nil {
 			return err
 		}
 		if in.Status == "" {
@@ -1072,15 +1074,13 @@ func (db *DB) UpdateProject(ctx context.Context, by Actor, id string, in Project
 // 测试：无直接单测
 func (db *DB) DeleteProject(ctx context.Context, by Actor, id string) error {
 	return db.tx(ctx, func(s *xorm.Session) error {
-		var row struct {
-			TeamID string `xorm:"'team_id'"`
+		// xorm 的 ForUpdate 只认 MySQL。Postgres 用和 lockTeam 一样的 SQL 锁行。
+		var row Project
+		if err := get(s.SQL("SELECT * FROM projects WHERE id = ? FOR UPDATE", id), &row); err != nil {
+			return err
 		}
-		ok, err := s.Table("projects").Cols("team_id").Where("id = ?", id).ForUpdate().Get(&row)
-		if err != nil {
-			return mapErr(err)
-		}
-		if !ok {
-			return ErrNotFound
+		if err := lockTeam(ctx, s, row.TeamID); err != nil {
+			return err
 		}
 		if err := affected(s.ID(id).Delete(&Project{})); err != nil {
 			return err

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 func main() {
@@ -50,5 +51,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "pricedata: %v\n", err)
 		os.Exit(1)
 	}
+	logx.Info("pricedata wrote %s models=%d providers=%d", *out, len(doc.Models), len(doc.Providers))
 	fmt.Printf("%s: %d models, %d providers\n", *out, len(doc.Models), len(doc.Providers))
 }

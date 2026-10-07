@@ -13,7 +13,7 @@ func init() {
 		Name: "VolcEngine", Slug: "volcengine", Display: "VolcEngine",
 		APIBase: "https://ark.cn-beijing.volces.com",
 	})
-	provider.RegisterType(provider.Type{
+	provider.RegisterTransport(provider.Transport{
 		ID: "ark_contents_generation", Kind: provider.KindBypass,
 		Label:     "Bypass - 方舟内容生成 /api/v3/contents/generations/tasks",
 		Providers: []string{"volcengine"}, APIBase: "https://ark.cn-beijing.volces.com",
