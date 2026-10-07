@@ -1014,7 +1014,11 @@ func (db *DB) CreateProject(ctx context.Context, by Actor, in ProjectInput) (*Pr
 		if err := checkWithinTeam(s, in.TeamID, "", in.Models, in.MaxBudget); err != nil {
 			return err
 		}
-		p := Project{ID: newID(), TeamID: in.TeamID, Name: in.Name, Status: StatusActive,
+		status := in.Status
+		if status == "" {
+			status = StatusActive
+		}
+		p := Project{ID: newID(), TeamID: in.TeamID, Name: in.Name, Status: status,
 			Models: nonNil(in.Models), MaxBudget: in.MaxBudget}
 		if _, err := s.Insert(&p); err != nil {
 			return err

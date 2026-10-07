@@ -19,28 +19,46 @@ import { t } from "@/i18n";
 
 const INITIAL_VALUES: MountedFormValues = { litellm_credential_name: null };
 
+/** 表单上凡是能作为计费依据的字段。按 token、按张、按秒、按次各算一类。 */
+const PRICE_FIELDS = [
+  "input_cost_per_token",
+  "output_cost_per_token",
+  "input_cost_per_token_peak",
+  "output_cost_per_token_peak",
+  "cache_read_input_token_cost",
+  "cache_creation_input_token_cost",
+  "input_cost_per_image",
+  "output_cost_per_image",
+  "input_cost_per_second",
+  "output_cost_per_second",
+  "search_context_cost_per_query",
+] as const;
+
 /**
  * 这条模型会被按什么价计费。
  *
- * 价目表里有它，或者表单上填了至少一侧的单价，就算定价了。两者都没有时返回假：
- * 网关取不到价，这次调用会记成零费用。
+ * 价目表里有它（有扁平费率字段，或者有 rates 数组），或者表单上填了至少一个
+ * 单价，就算定价了。两者都没有时返回假：网关取不到价，这次调用会记成零费用。
  *
  * 参数 values（MountedFormValues）：表单当前值；costMap（Record<string, ...> | undefined）：价目表。
  * 返回 bool（bool）：这次调用会被计费时为真。
  */
 function modelPriced(
   values: MountedFormValues,
-  costMap: Record<string, { input_cost_per_token?: number; output_cost_per_token?: number }> | undefined,
+  costMap: Record<string, Record<string, unknown>> | undefined,
 ): boolean {
   const picked = Array.isArray(values.model) ? values.model[0] : values.model;
   if (typeof picked === "string" && picked !== "") {
     const row = costMap?.[picked];
-    if (row && (typeof row.input_cost_per_token === "number" || typeof row.output_cost_per_token === "number")) {
-      return true;
+    if (row) {
+      if (Array.isArray(row.rates) && row.rates.length > 0) return true;
+      for (const key of Object.keys(row)) {
+        if (key.includes("cost") && typeof row[key] === "number") return true;
+      }
     }
   }
   const filled = (value: unknown) => value !== undefined && value !== null && value !== "";
-  return filled(values.input_cost_per_token) || filled(values.output_cost_per_token);
+  return PRICE_FIELDS.some((field) => filled(values[field]));
 }
 
 export default function AddModelPanel() {

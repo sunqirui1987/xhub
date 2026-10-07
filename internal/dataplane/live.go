@@ -25,7 +25,7 @@ var logTraceOnceLive sync.Once
 func State(h Runtime) router.State {
 	logTraceOnceLive.Do(func() { logx.Trace("enter dataplane.State") })
 
-	st := router.State{Busy: h.BusyMap()}
+	st := router.State{Busy: h.BusyMap(), Splits: router.SharedSplit()}
 	redis := h.Redis()
 	if redis == nil {
 		return st
@@ -158,6 +158,7 @@ func Flush(h Runtime) {
 			KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
 			Provider: row.Provider, CachedTokens: row.CachedTokens,
 			SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
+			PriceSnapshot: row.PriceSnapshot,
 		}
 		records = append(records, rec)
 	}

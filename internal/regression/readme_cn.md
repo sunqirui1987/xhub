@@ -223,6 +223,35 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 | `TestExactNameBeatsWildcard` | 精确名和 `openai/*` 同时存在 | 精确名打到精确部署。没有精确名的 `openai/wild-1` 被通配改写成 `wild-1`。通配改写后的 id 不在测试价目上，这条只核对上游模型名 |
 | `TestSessionPinOverridesStrategy` | 会话钉 | 第一次按权重打到 A。改成会选 B 的最低成本之后，带同一个 `X-Session-Id` 的下一轮仍打 A。换一个会话才打 B |
 
+### `pricing_test.go`
+
+计费怎么算出来的。前面的用例核对"一次成功调用扣了多少钱"，这里核对**那个数怎么来的**：时段、缓存、按秒按张，以及事后能不能解释那一笔。每条都对应一个具体的漏钱方式，所以断言的是金额。
+
+费率表是 `litellm_params` 上的一个键（`rates`），带四个维度：计费维度（token/张/秒/次）、侧（输入/输出/缓存读/缓存写）、变体、时段（高峰/空闲/不分）。它比扁平的每 token 两个字段表达力强，分时价和缓存价都在里面。
+
+| 测试 | 证明 |
+| --- | --- |
+| `TestAWindowPricedModelIsChargedTheWindowItLandedIn` | 按高峰/空闲两档报价的模型，收的钱落在两档之一，账单上写的时段和实际收的那一档一致。绝对时段取决于用例跑在哪一分钟，所以这里钉的是"计费路径和时段判定是同一个答案"；日历本身由 `internal/catalog` 的单测覆盖 |
+| `TestAPerSecondModelIsNotRecordedAsFree` | 价目表里没有每 token 的价、只有每秒的价的部署，按秒收。改动前这类调用取不到价，记一行零费用而且不报错 |
+| `TestLogDetailExplainsTheChargeWithoutRecomputing` | 日志详情读调用当时存下来的费率（`source=snapshot`、`applied` 带单位数量单价），不是按今天的价目表重算 |
+| `TestTheBreakdownSurvivesAPriceChange` | 同一次调用读两遍，中间把价改成十倍，数字不动。反面：改价之后新发生的调用按新价收，否则"没动"可能是因为计费根本没读价 |
+| `TestAnUnpricedCallIsNotRecordedAsFree` | 目录里没有的模型不发计费头（发了等于说这次零元，而实际是不知道），日志行仍然在，金额是零，但不编造任何一侧的明细 |
+| `TestACachedCallIsNotBilledAtTheInputRate` | 缓存读按缓存价收，不是输入价。日志里提示侧整体不小于缓存那一行，否则控制台减完会显示负数 |
+
+### `split_test.go`
+
+一个对外名挂两条不同供应商的部署，按比例分流量。`proxy_models` 的 `model_name` 上没有唯一约束，所以这种部署本来就能建出来；缺的是"按比例选出第一条"。
+
+改动前 `simple-shuffle` 不是随机的，是取权重最大的那条，而权重默认 1，于是永远命中第一条——配了比例也不生效。新的 `weighted-split` 是它自己的策略，`simple-shuffle` 的语义不变（另外六个别名共用它）。
+
+| 测试 | 证明 |
+| --- | --- |
+| `TestWeightedSplitSendsTrafficToBothDeployments` | 7:3 的两条部署跑十次，正好 7 和 3，两条都收到流量 |
+| `TestWeightedSplitDoesNotChangeSimpleShuffle` | 权重高的那条排在后面时，`simple-shuffle` 仍然选它 |
+| `TestSplitStillBillsAndLogsEveryCall` | 分流的每一次调用都留下日志行、都有金额。按比例分流最容易出的错是某一条的用量没记上，那会安静地漏掉一半收入 |
+| `TestSplitIsEvenWhenNoWeightsAreSet` | 谁都没配权重时五五开。两条同名部署并排放着、没写权重，意思是"两边都用" |
+
+
 ### `router_settings_test.go`
 
 `TestRouterSettingsChain`。live 跳过，因为中间要把一条部署改成 500。

@@ -1040,14 +1040,6 @@
       "count": 2
     }
   },
-  "src/app/(dashboard)/usage/_components/components/UsageAIChatPanel.tsx": {
-    "no-nested-ternary": {
-      "count": 1
-    },
-    "react-hooks/immutability": {
-      "count": 1
-    }
-  },
   "src/app/(dashboard)/usage/_components/components/UsagePageView.tsx": {
     "local/no-complex-jsx-arrow": {
       "count": 2

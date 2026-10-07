@@ -27,6 +27,7 @@ func TestRemovedSurfacesStayGone(t *testing.T) {
 		{http.MethodGet, "/email/event_settings"},
 		{http.MethodGet, "/alerting/settings"},
 		{http.MethodPost, "/config/callback/delete"},
+		{http.MethodPost, "/usage/ai/chat"},
 	}
 	for _, item := range gone {
 		got := h.do(item.method, item.path, admin, map[string]any{})

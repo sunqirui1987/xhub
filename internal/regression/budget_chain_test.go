@@ -70,9 +70,9 @@ func projectBudgetChain(t *testing.T, live bool) {
 		h.setProjectBudget(t, admin, c.projectID, ceiling)
 	})
 
-	h.ok(http.MethodPost, "/project/update", admin, map[string]any{"project_id": c.projectID, "status": "blocked"})
+	h.ok(http.MethodPost, "/project/update", admin, map[string]any{"project_id": c.projectID, "blocked": true})
 	h.assertStopped(t, c, model, "project blocked")
-	h.ok(http.MethodPost, "/project/update", admin, map[string]any{"project_id": c.projectID, "status": "active"})
+	h.ok(http.MethodPost, "/project/update", admin, map[string]any{"project_id": c.projectID, "blocked": false})
 	h.assertBilled(t, c, admin, model, "project unblocked", []string{model})
 
 	// 项目上限不能宽过团队。写失败之后，推理仍按刚才抬高的项目上限放行。

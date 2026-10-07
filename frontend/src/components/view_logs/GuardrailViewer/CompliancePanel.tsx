@@ -44,6 +44,20 @@ const SpinnerIcon = () => (
 
 // -- Sub-components --
 
+// The catalog stub for these routes is a JSON object with no checks array.
+// Mapping that value crashes the whole logs page, so a response that is not
+// the compliance shape is an error instead of a result.
+const asComplianceResponse = (value: unknown): ComplianceResponse => {
+  if (!value || typeof value !== "object") {
+    throw new Error("Compliance check returned an unexpected response");
+  }
+  const data = value as Partial<ComplianceResponse>;
+  if (!Array.isArray(data.checks) || typeof data.compliant !== "boolean") {
+    throw new Error("Compliance check returned an unexpected response");
+  }
+  return data as ComplianceResponse;
+};
+
 const ComplianceCard = ({
   title,
   data,
@@ -115,7 +129,7 @@ const ComplianceCard = ({
           {error && <p className="text-sm text-destructive">{error}</p>}
           {data && (
             <div className="space-y-2">
-              {data.checks.map((check, idx) => (
+              {(data.checks ?? []).map((check, idx) => (
                 <div key={idx} className="flex items-start gap-2">
                   <div className="shrink-0 mt-0.5">{check.passed ? <CheckIcon /> : <CrossIcon />}</div>
                   <div className="min-w-0">
@@ -159,14 +173,14 @@ const CompliancePanel: React.FC<CompliancePanelProps> = ({ accessToken, logEntry
     setEuAiActLoading(true);
     setEuAiActError(null);
     checkEuAiActCompliance(accessToken, payload)
-      .then(setEuAiActData)
+      .then((res) => setEuAiActData(asComplianceResponse(res)))
       .catch((err) => setEuAiActError(err.message || "Failed to check EU AI Act compliance"))
       .finally(() => setEuAiActLoading(false));
 
     setGdprLoading(true);
     setGdprError(null);
     checkGdprCompliance(accessToken, payload)
-      .then(setGdprData)
+      .then((res) => setGdprData(asComplianceResponse(res)))
       .catch((err) => setGdprError(err.message || "Failed to check GDPR compliance"))
       .finally(() => setGdprLoading(false));
   }, [accessToken, logEntry]);

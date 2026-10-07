@@ -1,5 +1,5 @@
 // routes.go mounts the built-in modules in this order: health, session, keys,
-// models, tokens, ingress, access, identity, usage, prefs, guard, family.
+// models, tokens, ingress, access, identity, usage, prefs, guard, compliance, family.
 // Use rejects a second module with the same name. During New the modules are
 // stored and mounted together. A Use call after New mounts that module immediately.
 
@@ -85,6 +85,7 @@ func (s *Server) installModules() {
 		usage.Module(s),
 		prefs.Module(s),
 		guard.Module(s),
+		complianceModule(s),
 		family.Module(s),
 	}
 	for _, m := range builtins {

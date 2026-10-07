@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALLBACK_CATEGORY, type PriceCatalogRow } from "./priceCatalogRows";
+import { measureLabel, rateLabel, rateText, windowLabel } from "@/lib/rateDisplay";
 
 type SortOrder = "name" | "input" | "output";
 
@@ -118,7 +119,14 @@ function ModelCard({
           { label: t("Output"), value: row.output },
         ].map(({ label, value }) => (
           <div key={label}>
-            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dt className="text-xs text-muted-foreground">
+              {label}
+              {/* 分时模型的通用两格取的是最便宜那一档，也就是空闲价。
+                  不标出来的话，上面的数字和下面表里的高峰价对不上。 */}
+              {row.windowed && value != null && (
+                <span className="ml-1 text-muted-foreground">({t("Off-peak")})</span>
+              )}
+            </dt>
             <dd className="mt-1 flex flex-wrap items-baseline gap-1.5">
               <span
                 className={value == null ? "text-sm text-muted-foreground" : "text-2xl font-semibold tracking-tight"}
@@ -130,30 +138,71 @@ function ModelCard({
           </div>
         ))}
       </dl>
-      {/* 变体费率。视频和图像模型按分辨率和输入方式分别定价，这一块是它们
-          唯一的价——上面那两格通用输入输出对这类模型是空的，只显示它就等于
-          说"价格未提供"，而价目表里其实有。 */}
-      {row.priceUnits.length > 0 && (
-        <details className="mt-4 border-t border-border pt-3 text-sm" open={row.input == null && row.output == null}>
-          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-            {t("priceCatalog.variantPrices", { count: row.priceUnits.length })}
-          </summary>
-          <dl className="mt-3 space-y-2">
-            {row.priceUnits.map((price) => (
-              <div key={price.key} className="flex flex-wrap justify-between gap-2 text-xs">
-                <dt className="min-w-0 break-words">{price.label}</dt>
-                <dd className="font-medium">
-                  {priceText(price.usd)}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    / {price.unit === "token" ? "1K tokens" : price.unit}
+      {/* 费率表。按计费维度分组：一个维度一行标题，组内按时段并排列出。
+          视频和图像模型在通用输入输出那两格上是空的，价全在这里，所以这一块
+          对它们是唯一的价格展示，不是"更多信息"。 */}
+      {row.rateGroups.length > 0 && (
+        <div className="mt-4 space-y-4 border-t border-border pt-3">
+          {row.rateGroups.map((group) => (
+            <div key={group.measure}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {t("priceCatalog.byMeasure", { measure: measureLabel(group.measure) })}
+                </span>
+                {group.unitSize > 1 && (
+                  <span className="text-xs text-muted-foreground">
+                    {t("priceCatalog.perUnits", { count: group.unitSize })}
                   </span>
-                </dd>
+                )}
               </div>
-            ))}
-          </dl>
-        </details>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="py-1 text-left font-normal">{t("priceCatalog.rateSide")}</th>
+                    {group.windows.map((window) => (
+                      <th key={window} className="py-1 text-right font-normal">
+                        {windowLabel(window)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.rates.map((rate) => (
+                    <tr key={rate.sourceKey || `${rate.side}-${rate.variant}-${rate.window}`}>
+                      <td className="py-1">
+                        {rateLabel(rate.side, rate.variant)}
+                        {/* 市场的中文说明（"含视频输入（1080p）"）和上面那一段
+                            说的是同一件事，重复显示只会让人以为有两档价。
+                            只在它带来新信息时才附上，而且用 hover 收起来。 */}
+                        {rate.label && rate.label !== rateLabel(rate.side, rate.variant) && (
+                          <span className="ml-1 text-muted-foreground" title={rate.label}>
+                            · {rate.label}
+                          </span>
+                        )}
+                      </td>
+                      {group.windows.map((window) => {
+                        const cell = group.rates.find(
+                          (candidate) =>
+                            candidate.side === rate.side && candidate.variant === rate.variant && candidate.window === window,
+                        );
+                        return (
+                          <td key={window} className="py-1 text-right font-medium tabular-nums">
+                            {cell ? rateText(cell.usd, group.measure) : "—"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
       )}
-      {row.extraPrices.length > 0 && (
+      {/* 费率表已经按维度把每一条都列出来了。这里只补它没有的东西：
+          缓存读写这类不在"输入/输出"两格里的价，以及**没有费率表**的旧行
+          （扁平字段时代的条目）才需要兜底展示。两者都显示会让同一条价出现两次。 */}
+      {row.extraPrices.length > 0 && row.rateGroups.length === 0 && (
         <details className="mt-4 border-t border-border pt-3 text-sm">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
             {t("priceCatalog.morePrices", { count: row.extraPrices.length })}

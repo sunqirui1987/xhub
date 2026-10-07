@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { CreateProjectModal } from "./ProjectModals/CreateProjectModal";
 import { ProjectDetail } from "./ProjectDetailsPage";
+import { ProjectGuide } from "./ProjectGuide";
 import { ProjectsTable } from "./ProjectsTable";
 import { t } from "@/i18n";
 
@@ -67,6 +68,8 @@ export function ProjectsPage() {
           </Button>
         }
       />
+
+      <ProjectGuide />
 
       <div className="mt-6 mb-3 flex items-center">
         <InputGroup className="max-w-[400px]">

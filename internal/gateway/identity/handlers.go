@@ -1082,6 +1082,7 @@ func ProjectNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	in := iam.ProjectInput{
 		TeamID:    teamID,
 		Name:      projectName(body),
+		Status:    projectStatus(body),
 		Models:    stringList(body["models"]),
 		MaxBudget: floatPtr(body["max_budget"]),
 	}
@@ -1107,6 +1108,18 @@ func projectName(body map[string]any) string {
 		return v
 	}
 	return str(body["project_name"])
+}
+
+// projectStatus reads the console block switch. blocked true is blocked, false is active.
+// A body that only sends status keeps that value. Neither field means leave the current status.
+func projectStatus(body map[string]any) string {
+	if v, ok := body["blocked"].(bool); ok {
+		if v {
+			return iam.StatusBlocked
+		}
+		return iam.StatusActive
+	}
+	return str(body["status"])
 }
 
 // ProjectList lists projects. A platform administrator sees every project; a member sees the projects of the teams they belong to; nobody sees a project of a team they are not in. The narrowing happensin SQL.
@@ -1231,7 +1244,7 @@ func ProjectUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	in := iam.ProjectInput{
 		TeamID:    cur.TeamID,
 		Name:      projectName(body),
-		Status:    str(body["status"]),
+		Status:    projectStatus(body),
 		Models:    cur.Models,
 		MaxBudget: cur.MaxBudget,
 	}

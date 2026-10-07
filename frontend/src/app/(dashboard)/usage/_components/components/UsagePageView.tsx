@@ -6,7 +6,7 @@
  * Works at 1m+ spend logs, by querying an aggregate table instead.
  */
 
-import { ChevronDown, ChevronRight, Download, Info, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Info, X } from "lucide-react";
 import type { DateRangePickerValue } from "@/components/shared/date_picker_types";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -64,7 +64,6 @@ import SpendByProvider from "./EntityUsage/SpendByProvider";
 import { TOP_MODEL_LIMITS } from "./EntityUsage/TopModelView";
 import TopKeyView from "@/components/UsagePage/components/EntityUsage/TopKeyView";
 import { UsageOption, UsageViewSelect } from "./UsageViewSelect/UsageViewSelect";
-import UsageAIChatPanel from "./UsageAIChatPanel";
 
 interface UsagePageProps {
   teams: Team[];
@@ -115,7 +114,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(isAdmin ? null : userID || null);
   const [modelViewType, setModelViewType] = useState<ModelViewType>("groups");
   const [isGlobalExportModalOpen, setIsGlobalExportModalOpen] = useState(false);
-  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
   const [selectedUsageView, setUsageView] = useState<UsageOption>("global");
   // Org-admin membership is read from the server, so unlike the other usage
   // views this one can be revoked while the page is open. Derive the view in
@@ -518,10 +516,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                     </TabsTrigger>
                   </TabsList>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => setIsAiChatOpen(true)}>
-                      <Sparkles />
-                      {t("Ask AI")}
-                    </Button>
                     <Button variant="outline" onClick={() => setIsGlobalExportModalOpen(true)}>
                       <Download />
                       {t("pages.usage.exportData")}
@@ -963,8 +957,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
             />
           )}
           {/* User Agent Activity Panel */}
-
-      <UsageAIChatPanel open={isAiChatOpen} onClose={() => setIsAiChatOpen(false)} accessToken={accessToken} />
 
       {/* Global Usage Export Modal */}
       <EntityUsageExportModal

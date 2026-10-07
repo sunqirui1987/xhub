@@ -10,6 +10,42 @@
 
 export const FALLBACK_CATEGORY = "other";
 
+/** 一条费率，来自价目表的 rates[]。四个维度加单价，和 Go 侧的 catalog.Rate 同形。 */
+export type CatalogRate = {
+  /** token、second、picture、query。 */
+  measure: string;
+  /** 一个计价单位包多少个基础单位。token 类通常是 1000，其余是 1。 */
+  unitSize: number;
+  /** input、output、cache_read、cache_write、batch_input、batch_output。 */
+  side: string;
+  /** 同一侧内部的限定词，例如 uncached、cached、thinking、480p。空串表示无限定词。 */
+  variant: string;
+  /** peak、offpeak 或 all。 */
+  window: string;
+  /** 市场里原来的键名，例如 ncache_peak。运维排查时对得上市场。 */
+  sourceKey: string;
+  /** 市场给的中文说明。 */
+  label: string;
+  /** 每一个基础单位的美元价。 */
+  usd: number;
+};
+
+/**
+ * 一条模型的费率表，按计费维度分好组。
+ *
+ * 分组是渲染需要的形状：一个维度一行标题（"按 token（每 1000）"），组内按
+ * 侧和变体成行、按时段成列。分时价并排显示——它们是一件事的两面，折起来
+ * 看不出差一倍。
+ */
+export type RateGroup = {
+  measure: string;
+  /** 这个维度下一个计价单位包多少个基础单位。 */
+  unitSize: number;
+  rates: CatalogRate[];
+  /** 这个维度里出现过的时段，用来决定表头有几列。 */
+  windows: string[];
+};
+
 export type PriceCatalogRow = {
   id: string;
   category: string;
@@ -22,13 +58,15 @@ export type PriceCatalogRow = {
   capabilities: string[];
   extraPrices: { key: string; value: number; unit: string }[];
   /**
-   * 变体费率：价目表里那些不属于通用输入/输出的价。
+   * 费率表，按计费维度分组。
    *
-   * 视频和图像模型按分辨率和输入方式分别定价（480p/720p/1080p、有无视频输入），
-   * 一条模型能带十几档。它们不是"额外信息"，是这类模型**唯一**的价——只显示
-   * 通用输入输出的话，这类模型的卡片上会写着"价格未提供"，而价目表里其实是有的。
+   * 这是这条模型**能不能被计费**的完整答案：哪些维度、哪一侧、哪个时段、
+   * 什么价。通用的输入/输出两格只是其中最常见的两行，视频和图像模型在
+   * 那两格上是空的，价却在下面。
    */
-  priceUnits: { key: string; label: string; usd: number; unit: string; size: number }[];
+  rateGroups: RateGroup[];
+  /** 这条模型是不是分时计价。分时的话高峰价通常是空闲价的两倍。 */
+  windowed: boolean;
   /** True when the row comes from the generated catalog rather than a console entry. */
   baseline: boolean;
   /** True when this id is stored in the database as an override of the baseline. */
@@ -108,6 +146,7 @@ export function priceCatalogRows(doc: PriceCatalogDocument | null | undefined): 
     const id = typeof entry.id === "string" ? entry.id.trim() : "";
     if (!id) continue;
     const mode = typeof entry.mode === "string" ? entry.mode.trim() : "";
+    const rates = rateGroupsOf(entry.rates);
     const row: PriceCatalogRow = {
       id,
       category: mode || FALLBACK_CATEGORY,
@@ -122,7 +161,8 @@ export function priceCatalogRows(doc: PriceCatalogDocument | null | undefined): 
         const value = unit === "tokens" ? perMillion(entry[field]) : nonnegativeNumber(entry[field]);
         return value == null ? [] : [{ key, value, unit }];
       }),
-      priceUnits: priceUnitsOf(entry.price_units),
+      rateGroups: rates,
+      windowed: rates.some((group) => group.rates.some((rate) => rate.window === "peak" || rate.window === "offpeak")),
       baseline: entry.baseline === true,
       overridden: entry.overridden === true,
       removed: entry.removed === true,
@@ -213,27 +253,68 @@ export function unitRateToInputValue(value: unknown): string {
 }
 
 /**
- * 读出变体费率。每一项是价目表里的一个键，带它自己的单位和说明。
- * 参数 raw（unknown）：price_units 的原始值。
- * 返回（{key,label,usd,unit,size}[]）：按美元价从低到高排好的变体。
+ * 把价目表的 rates[] 读成按计费维度分好组的费率表。
+ *
+ * 参数 raw（unknown）：这一行价格里的 rates 字段。
+ * 返回 RateGroup[]（RateGroup[]）：按维度分组的费率，组内和组间都有稳定的顺序。
  */
-function priceUnitsOf(raw: unknown): { key: string; label: string; usd: number; unit: string; size: number }[] {
-  if (!isObject(raw)) return [];
-  const out: { key: string; label: string; usd: number; unit: string; size: number }[] = [];
-  for (const [key, value] of Object.entries(raw)) {
-    if (!isObject(value)) continue;
-    const usd = nonnegativeNumber(value.usd);
-    if (usd === null) continue;
-    out.push({
-      key,
-      label: stringValue(value.label) ?? key,
+export function rateGroupsOf(raw: unknown): RateGroup[] {
+  if (!Array.isArray(raw)) return [];
+  const byMeasure = new Map<string, CatalogRate[]>();
+  for (const item of raw) {
+    if (!isObject(item)) continue;
+    const measure = stringValue(item.measure);
+    const usd = nonnegativeNumber(item.usd);
+    if (!measure || usd === null) continue;
+    const rate: CatalogRate = {
+      measure,
+      unitSize: positiveNumber(item.unit_size) ?? 1,
+      side: stringValue(item.side) ?? "",
+      variant: stringValue(item.variant) ?? "",
+      window: stringValue(item.window) ?? "all",
+      sourceKey: stringValue(item.source_key) ?? "",
+      label: stringValue(item.label) ?? "",
       usd,
-      unit: stringValue(value.unit) ?? "",
-      size: nonnegativeNumber(value.size) ?? 1,
+    };
+    const bucket = byMeasure.get(measure);
+    if (bucket) bucket.push(rate);
+    else byMeasure.set(measure, [rate]);
+  }
+
+  // 维度的顺序是固定的：先 token（绝大多数模型），再按张、按秒，最后按次。
+  // 用固定顺序而不是输入的先后，是因为两个模型对比时顺序应当一致。
+  //
+  // 认不出的维度接在最后，不丢掉：市场加一个新的计价维度时，运维要能看见它，
+  // 而不是等到对账时才发现账单里有一档价格从来没显示过。
+  const order = ["token", "picture", "second", "query"];
+  const known = new Set(order);
+  const remaining = [...byMeasure.keys()].filter((measure) => !known.has(measure)).sort();
+  const groups: RateGroup[] = [];
+  for (const measure of [...order, ...remaining]) {
+    const rates = byMeasure.get(measure);
+    if (!rates || rates.length === 0) continue;
+    // 组内先按时段（空闲在前，高峰在后，和界面上并排的顺序一致），
+    // 再按侧，最后按变体，这样同一个侧的两个时段总是相邻两行。
+    const windowRank = (w: string) => {
+      if (w === "offpeak") return 0;
+      if (w === "peak") return 1;
+      return 2;
+    };
+    rates.sort(
+      (a, b) =>
+        windowRank(a.window) - windowRank(b.window) ||
+        a.side.localeCompare(b.side) ||
+        a.variant.localeCompare(b.variant) ||
+        a.sourceKey.localeCompare(b.sourceKey),
+    );
+    groups.push({
+      measure,
+      unitSize: rates[0].unitSize,
+      rates,
+      windows: [...new Set(rates.map((rate) => rate.window))],
     });
   }
-  out.sort((a, b) => a.usd - b.usd || a.key.localeCompare(b.key));
-  return out;
+  return groups;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

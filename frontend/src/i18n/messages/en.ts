@@ -22,7 +22,6 @@ export const en = {
     loadError: "Unable to load the models available to your account. Please try again.",
     retry: "Retry",
     loading: "Loading your models…",
-    variantPrices: "{count} variant prices",
     noMatches: "No matching models",
     empty: "No models are available to this account",
     tryFilters: "Try another search or clear your filters.",
@@ -36,6 +35,19 @@ export const en = {
     maxInput: "Max input",
     maxOutput: "Max output",
     morePrices: "More pricing ({count})",
+    byMeasure: "Priced by {measure}",
+    perUnits: "per {count}",
+    rateSide: "Rate",
+    rateAllHours: "Any hour",
+    windowed: "Time-of-day pricing",
+    batchInput: "Batch input",
+    batchOutput: "Batch output",
+    measure: {
+      token: "token",
+      picture: "picture",
+      second: "second",
+      query: "query",
+    },
     cacheRead: "Cache read",
     cacheWrite: "Cache write",
     imageInput: "Image input",
@@ -377,6 +389,19 @@ export const en = {
       subtitle: "Manage projects within your teams",
       create: "Create Project",
       searchPlaceholder: "Search projects by name, ID, description, or team...",
+      guideTitle: "What projects are for",
+      guideWhat:
+        "A project sits under a team. A key can be attached to one project. One call's spend is recorded on that key, its user, the project, the team, and the organization.",
+      guideWho:
+        "A platform administrator sees every project. An organization administrator sees the projects of teams in that organization. A team member sees only their own team's projects. Another organization does not.",
+      guideModels:
+        "An empty model list inherits the models the team already allows. A list you write must stay inside the team's list. The two lists intersect.",
+      guideBudget:
+        "The project budget is that scope's ceiling, and it cannot exceed the team's ceiling. Once spend reaches it, keys on this project are refused before the upstream is called, and nothing is charged. Raising the ceiling again, still within the team ceiling, lets the same keys through.",
+      guideBlock:
+        "Block Project is the switch under Advanced Settings when you create or edit a project. Turning it on stops every key on this project immediately. The keys stay; they are not deleted. Turning it off lets those keys call again. The list shows this state as Blocked.",
+      guideDelete:
+        "After the project is deleted, keys that were attached to it no longer pass authentication. The request is refused before it reaches the upstream.",
     },
     accessGroups: {
       title: "Access Groups",

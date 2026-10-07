@@ -548,6 +548,12 @@ func convertFeedModel(model feedModel) map[string]any {
 		}
 	}
 
+	// Build the structured rate table. It sits beside the flat fields so that
+	// old readers keep working while the billing path is migrated to use it.
+	if rates := buildRates(details); len(rates) > 0 {
+		row["rates"] = rates
+	}
+
 	putTrue(row, "supports_function_calling", model.Architecture.FunctionCalling.Supported)
 	putTrue(row, "supports_response_schema", model.Architecture.SchemaOutput.Supported)
 	putTrue(row, "supports_reasoning", model.Architecture.Reasoning.Supported)

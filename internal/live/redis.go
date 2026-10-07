@@ -419,6 +419,12 @@ type SpendLog struct {
 	SessionID    string  `json:"session_id,omitempty"`
 	CacheKey     string  `json:"cache_key,omitempty"`
 	Guardrail    string  `json:"guardrail,omitempty"`
+	// PriceSnapshot is the JSON of the rates this call was actually billed at,
+	// with the quantities they applied to. Without it a log row can only be
+	// explained by recomputing from the price table of the day it is read, so
+	// the same row shows a different "original cost" after every price change.
+	// Empty means the call was never priced - not that it was free.
+	PriceSnapshot string `json:"price_snapshot,omitempty"`
 }
 
 // EnqueueLog pushes a log onto the Redis list. The request path does only this step. EnqueueSpend publishes the log and its hot budget deltas in one Redis operation. A flusher cannot acknowledge a log before its matching deltas exist.

@@ -201,7 +201,7 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 			cacheHit = "true"
 		}
 		meta := map[string]any{
-			"cost_breakdown":          costBreakdown(e.Model, e.PromptTokens, e.CompletionTokens, e.Cost),
+			"cost_breakdown":          costBreakdown(e),
 			"user_api_key_team_alias": e.TeamAlias,
 			"user_api_key":            e.KeyHash,
 			"user_api_key_alias":      e.KeyAlias,
@@ -268,20 +268,183 @@ func guardrailInformation(raw string) any {
 // 返回 map[string]any（map[string]any）：费用Breakdown的字段表。缺键表示上游或库里没有这个字段。
 // 调用：仅在 reports.go 内使用
 // 测试：cost_breakdown_test.go
-func costBreakdown(model string, prompt, completion int, charged float64) map[string]any {
-	out := map[string]any{"total_cost": charged}
-	inRate, outRate, ok := catalog.TokenRates(model)
+// costBreakdown explains what one call was charged, in the shape the log detail
+// drawer reads.
+//
+// It reads the rates stored on the row rather than today's price table. That is
+// the point of storing them: the flat fields in the price table carry only one
+// variant per side - for a window-priced model that is the off-peak one - so
+// recomputing a peak call from them reports roughly half what was charged. Any
+// price edit or catalog reload moves the number again, which makes a bill that
+// cannot be checked against itself.
+//
+// Rows written before price_snapshot existed have nothing to read, so they fall
+// back to recomputing at the instant the call started. That instant is the row's
+// own start, so the window is stable across reads; what moves is the price
+// table. The response says which happened: "source" is "snapshot" or
+// "recomputed", so the console can label a re-derived figure instead of
+// presenting it as the original record.
+//
+// 参数 e（iam.UsageEvent）：一条用量行，含存下来的费率快照、开始时刻和金额。
+// 返回 map[string]any（map[string]any）：日志详情读的费用明细。未定价的行只有 total_cost。
+// 调用：eventRows。
+// 测试：cost_breakdown_test.go
+func costBreakdown(e iam.UsageEvent) map[string]any {
+	out := map[string]any{"total_cost": e.Cost}
+
+	if snap := parsePriceSnapshot(e.PriceSnapshot); snap != nil {
+		out["window"] = snap.Window
+		out["applied"] = appliedRateRows(snap.Applied)
+		out["source"] = "snapshot"
+		for _, rate := range snap.Applied {
+			amount := rate.Quantity * rate.USD
+			switch rate.Side {
+			case "input":
+				out["input_cost"] = valueOrZero(out["input_cost"]) + amount
+			case "cache_read":
+				out["cache_read_cost"] = valueOrZero(out["cache_read_cost"]) + amount
+			case "cache_write":
+				out["cache_creation_cost"] = valueOrZero(out["cache_creation_cost"]) + amount
+			default:
+				out["output_cost"] = valueOrZero(out["output_cost"]) + amount
+			}
+			// The per-token rates exist for the console's "N tokens × $X/1M"
+			// line, so they are set only for a rate that really is per token.
+			// A picture or a query rate on the same side would otherwise be
+			// shown as a per-token price, which is a unit the model never quoted.
+			if rate.Measure != "token" {
+				continue
+			}
+			switch rate.Side {
+			case "input":
+				if _, seen := out["input_cost_per_token"]; !seen {
+					out["input_cost_per_token"] = rate.USD
+				}
+			case "output":
+				if _, seen := out["output_cost_per_token"]; !seen {
+					out["output_cost_per_token"] = rate.USD
+				}
+			}
+		}
+		// The prompt side is reported whole, with the cached part broken out
+		// again beside it. That is the shape the log drawer expects: it renders
+		// "Input Cost" net of the cache rows it also shows, so a prompt side that
+		// excluded the cached tokens would render negative.
+		cacheTotal := valueOrZero(out["cache_read_cost"]) + valueOrZero(out["cache_creation_cost"])
+		if cacheTotal > 0 {
+			out["input_cost"] = valueOrZero(out["input_cost"]) + cacheTotal
+		}
+		// A charged side that came out at exactly zero is still a side that was
+		// priced. Reporting it keeps the console from falling through to a
+		// token-proportional estimate, which would invent a number.
+		for _, key := range []string{"input_cost", "output_cost"} {
+			if _, present := out[key]; !present {
+				out[key] = 0.0
+			}
+		}
+		// The sum of the sides is what the rates add up to. It can differ from
+		// total_cost above if a model was repriced mid-flight; keeping both lets
+		// the console show the discrepancy instead of hiding it.
+		out["original_cost"] = valueOrZero(out["input_cost"]) + valueOrZero(out["output_cost"])
+		return out
+	}
+
+	// No snapshot: this row predates it, or the call was never priced.
+	charge, ok := catalog.CostAt(e.Model, catalog.Usage{
+		PromptTokens:     e.PromptTokens,
+		CompletionTokens: e.CompletionTokens,
+		CachedTokens:     intOrZero(e.CachedTokens),
+	}, e.TS)
 	if !ok {
 		return out
 	}
-	input := float64(prompt) * inRate
-	output := float64(completion) * outRate
-	out["input_cost"] = input
-	out["output_cost"] = output
-	out["original_cost"] = input + output
-	out["input_cost_per_token"] = inRate
-	out["output_cost_per_token"] = outRate
+	// A recomputed row reports the cache sides the way costBreakdown has always
+	// shaped them for the console - folded into input_cost, with the cached part
+	// broken out separately - so the drawer does not have to know which of the
+	// two shapes it is reading.
+	out["input_cost"] = charge.Input + charge.Cache
+	out["output_cost"] = charge.Output
+	if charge.Cache > 0 {
+		out["cache_read_cost"] = charge.Cache
+	}
+	out["original_cost"] = charge.Total
+	out["window"] = charge.Window
+	out["applied"] = appliedRateRows(charge.Applied)
+	out["source"] = "recomputed"
 	return out
+}
+
+// parsePriceSnapshot decodes a stored snapshot. A row that was never priced has
+// an empty column, and a payload that does not decode is treated the same way
+// rather than failing the whole log page.
+// 参数 raw（string）：usage_events.price_snapshot 里的 JSON。
+// 返回 *catalog.PriceSnapshot（*catalog.PriceSnapshot）：解出来的快照。为空或解不出时为 nil。
+// 调用：costBreakdown。
+// 测试：cost_breakdown_test.go
+func parsePriceSnapshot(raw string) *catalog.PriceSnapshot {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	var snap catalog.PriceSnapshot
+	if err := json.Unmarshal([]byte(trimmed), &snap); err != nil {
+		logx.Error("price snapshot on a usage row is not readable err=%v", err)
+		return nil
+	}
+	if len(snap.Applied) == 0 {
+		return nil
+	}
+	return &snap
+}
+
+// appliedRateRows renders the rates a call used for the log detail drawer. Each
+// row carries its own unit so the console does not have to assume every model is
+// billed per token, and the key it came from so an operator can match the row
+// back to the market listing that priced it.
+// 参数 applied（[]catalog.AppliedRate）：这次调用实际用到的费率。
+// 返回 []map[string]any（[]map[string]any）：可以直接写进响应的费率行。
+// 调用：costBreakdown。
+// 测试：cost_breakdown_test.go
+func appliedRateRows(applied []catalog.AppliedRate) []map[string]any {
+	out := make([]map[string]any, 0, len(applied))
+	for _, rate := range applied {
+		out = append(out, map[string]any{
+			"measure":    rate.Measure,
+			"side":       rate.Side,
+			"variant":    rate.Variant,
+			"unit_size":  rate.UnitSize,
+			"usd":        rate.USD,
+			"quantity":   rate.Quantity,
+			"cost":       rate.Quantity * rate.USD,
+			"source_key": rate.SourceKey,
+		})
+	}
+	return out
+}
+
+// valueOrZero reads a number already placed in the response map, treating a
+// missing side as zero so the sides can be summed.
+// 参数 v（any）：已经放进响应里的一个金额。
+// 返回 float64（float64）：读到的小数。还不是数字时为 0。
+// 调用：costBreakdown。
+// 测试：cost_breakdown_test.go
+func valueOrZero(v any) float64 {
+	f, _ := v.(float64)
+	return f
+}
+
+// intOrZero dereferences an optional count. A call that never reported cached
+// tokens has no value, which is the same as none being cached for the purpose
+// of pricing.
+// 参数 v（*int）：一个可选的计数，来自用量行。
+// 返回 int（int）：指针里的数。指针为空时为 0。
+// 调用：costBreakdown。
+// 测试：cost_breakdown_test.go
+func intOrZero(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // logPageResponse wraps rows in the paging envelope. total_pages is at least 1 for an empty result, matching the audit table the console renders beside this.
@@ -747,9 +910,17 @@ func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 			completion = asInt(u["completion_tokens"])
 		}
 	}
-	total, _, _, ok := catalog.Cost(model, prompt, completion)
-	if !ok {
-		total = 0
+	// An estimate is priced at the instant it is asked for, because that is the
+	// best guess available: the caller has not made the call yet. A window-priced
+	// model therefore quotes its peak rate during peak hours, which is what the
+	// call would actually cost if made then.
+	charge, ok := catalog.CostAt(model, catalog.Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+	}, time.Now())
+	total := 0.0
+	if ok {
+		total = charge.Total
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"cost": total})
 }

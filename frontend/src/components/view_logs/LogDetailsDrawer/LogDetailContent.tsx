@@ -618,11 +618,20 @@ function RequestResponseSection({
   const completionTokens = logEntry.completion_tokens || 0;
   const totalTokens = promptTokens + completionTokens;
   const costBreakdown = logEntry.metadata?.cost_breakdown;
-  const useCostBreakdown = costBreakdown?.input_cost !== undefined && costBreakdown?.output_cost !== undefined;
+  // 有明细就用明细，只在**真的没有**的时候才按 token 比例估。
+  //
+  // 用 && 要求两侧都在是错的：按秒、按张的模型只有输出侧，缓存全命中的调用
+  // 只有缓存侧，这些都会被判成"没有明细"，然后显示一个按 token 摊出来的数字——
+  // 编出来的数，但看起来和真的一模一样。
+  const hasStoredBreakdown =
+    costBreakdown?.input_cost !== undefined ||
+    costBreakdown?.output_cost !== undefined ||
+    costBreakdown?.cache_read_cost !== undefined ||
+    costBreakdown?.cache_creation_cost !== undefined;
   const estimatedInputCost = totalTokens > 0 ? (totalSpend * promptTokens) / totalTokens : 0;
   const estimatedOutputCost = totalTokens > 0 ? (totalSpend * completionTokens) / totalTokens : 0;
-  const inputCost = useCostBreakdown ? costBreakdown!.input_cost ?? 0 : estimatedInputCost;
-  const outputCost = useCostBreakdown ? costBreakdown!.output_cost ?? 0 : estimatedOutputCost;
+  const inputCost = hasStoredBreakdown ? costBreakdown!.input_cost ?? 0 : estimatedInputCost;
+  const outputCost = hasStoredBreakdown ? costBreakdown!.output_cost ?? 0 : estimatedOutputCost;
 
   return (
     <div className="bg-card rounded-lg shadow-sm w-full max-w-full overflow-hidden mb-6">

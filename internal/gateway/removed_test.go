@@ -3,7 +3,7 @@ package gateway
 import "testing"
 
 func TestRemovedColumnsStayUnregistered(t *testing.T) {
-	removed := []string{"/v1/mcp", "/v1/mcp/oauth/token", "/tools", "/public/agent_hub", "/cloudzero/settings", "/cloudzero/export", "/email/event_settings", "/email/event_settings/reset", "/config/cost_discount_config", "/config/cost_margin_config", "/config/block_requests_for_models_without_pricing", "/cost/estimate", "/cost/predict-cache", "/config_overrides/hashicorp_vault", "/config_overrides/cyberark", "/get/sso_settings", "/update/sso_settings", "/sso/key/generate", "/get/allowed_ips", "/add/allowed_ip", "/Users", "/Groups", "/alerting/settings", "/callbacks/list", "/config/callback/delete", "/team/t1/callback"}
+	removed := []string{"/v1/mcp", "/v1/mcp/oauth/token", "/tools", "/public/agent_hub", "/cloudzero/settings", "/cloudzero/export", "/email/event_settings", "/email/event_settings/reset", "/config/cost_discount_config", "/config/cost_margin_config", "/config/block_requests_for_models_without_pricing", "/cost/estimate", "/cost/predict-cache", "/config_overrides/hashicorp_vault", "/config_overrides/cyberark", "/get/sso_settings", "/update/sso_settings", "/sso/key/generate", "/get/allowed_ips", "/add/allowed_ip", "/Users", "/Groups", "/alerting/settings", "/callbacks/list", "/config/callback/delete", "/team/t1/callback", "/usage/ai/chat"}
 	for _, path := range removed {
 		if !IsRemovedColumn(path) {
 			t.Errorf("%s is still registered", path)

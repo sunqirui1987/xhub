@@ -52,7 +52,7 @@ func removedColumnRoute(path string) bool {
 	if strings.HasPrefix(p, "/alerting") || strings.HasPrefix(p, "/callbacks") || strings.HasPrefix(p, "/active/callbacks") || strings.HasPrefix(p, "/config/callback") || strings.Contains(p, "/callback/") || strings.HasSuffix(p, "/callback") {
 		return true
 	}
-	prefixes := []string{"/tools", "/test/tools", "/.well-known/agent-skills", "/.well-known/skills", "/.well-known/oauth-authorization-server/{root_path}/v1/mcp", "/a2a", "/agent/", "/v1/a2a", "/v1/mcp", "/mcp", "/v1/search/", "/search/", "/public/agent_hub", "/public/agents", "/public/mcp_hub", "/public/skill_hub", "/get/mcp_", "/update/mcp_", "/utils/dotprompt", "/cloudzero", "/email", "/config_overrides", "/config/cost_discount_config", "/config/cost_margin_config", "/config/block_requests_for_models_without_pricing", "/cost/", "/get/sso_settings", "/update/sso_settings", "/get/allowed_ips", "/add/allowed_ip", "/delete/allowed_ip", "/users", "/groups"}
+	prefixes := []string{"/tools", "/test/tools", "/.well-known/agent-skills", "/.well-known/skills", "/.well-known/oauth-authorization-server/{root_path}/v1/mcp", "/a2a", "/agent/", "/v1/a2a", "/v1/mcp", "/mcp", "/v1/search/", "/search/", "/public/agent_hub", "/public/agents", "/public/mcp_hub", "/public/skill_hub", "/get/mcp_", "/update/mcp_", "/utils/dotprompt", "/cloudzero", "/email", "/config_overrides", "/config/cost_discount_config", "/config/cost_margin_config", "/config/block_requests_for_models_without_pricing", "/cost/", "/get/sso_settings", "/update/sso_settings", "/get/allowed_ips", "/add/allowed_ip", "/delete/allowed_ip", "/users", "/groups", "/usage/ai"}
 	for _, prefix := range prefixes {
 		if p == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(p, prefix) {
 			return true

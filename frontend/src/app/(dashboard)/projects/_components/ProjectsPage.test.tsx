@@ -81,7 +81,7 @@ describe("ProjectsPage", () => {
   it("should render the Projects heading", () => {
     mockUseProjects.mockReturnValue({ data: [], isLoading: false });
     renderWithProviders(<ProjectsPage />);
-    expect(screen.getByRole("heading", { name: /projects/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Projects" })).toBeInTheDocument();
     expect(screen.getByText("Manage projects within your teams")).toBeInTheDocument();
     expect(document.querySelector(".lucide-folder")).not.toBeNull();
   });
@@ -117,6 +117,14 @@ describe("ProjectsPage", () => {
     mockUseProjects.mockReturnValue({ data: [mockProjects[1]], isLoading: false });
     renderWithProviders(<ProjectsPage />);
     expect(screen.getByText("Blocked")).toBeInTheDocument();
+  });
+
+  it("explains what a project is and what blocking it does", () => {
+    mockUseProjects.mockReturnValue({ data: [], isLoading: false });
+    renderWithProviders(<ProjectsPage />);
+    expect(screen.getByRole("heading", { name: "What projects are for" })).toBeInTheDocument();
+    expect(screen.getByText(/Block Project is the switch under Advanced Settings/)).toBeInTheDocument();
+    expect(screen.getByText(/keys on this project are refused before the upstream/)).toBeInTheDocument();
   });
 
   it("should open the create modal when 'Create Project' is clicked", async () => {

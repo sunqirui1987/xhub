@@ -24,6 +24,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/catalog"
+	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
@@ -81,27 +82,104 @@ func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 	}
 }
 
-// callCost prices one call. A price typed on the deployment wins. Otherwise the price map is read by the upstream model id, then by the public name.
-// 参数 alias（string）：对外模型名；depID（string）：部署 id。空串表示当前没有钉住的部署；prompt（int）：提示 token 数，用来估价；completion（int）：完成 token 数，用来估价。
-// 返回 total（float64）：这一次的总费用；input（float64）：输入侧费用；output（float64）：输出侧费用；ok（bool）：真表示找到了可用结果。
-// 调用：仅在 spend.go 内使用
-// 测试：无直接单测
-func (s *Server) callCost(alias, depID string, prompt, completion int) (total, input, output float64, ok bool) {
+// callCost prices one call at the instant it started.
+//
+// A rate typed on the deployment wins. Otherwise the price map is read by the
+// upstream model id, then by the public name.
+//
+// The instant matters: a window-priced model costs twice as much inside its
+// peak hours, so pricing a call without its start time undercharges every peak
+// request by half. start is the request's own start, which is also what the
+// usage row records, so a log row can be re-checked later.
+//
+// 参数 alias（string）：对外模型名；depID（string）：部署 id。空串表示当前没有钉住的部署；usage（catalog.Usage）：这一次调用报出来的用量，含缓存命中和按秒按张的数量；start（time.Time）：调用开始的时刻，时段由它决定。
+// 返回 total（float64）：这一次的总费用；input（float64）：输入侧费用；output（float64）：输出侧费用；ok（bool）：真表示找到了可用结果；charge（catalog.Charge）：这次实际用到的费率，用来落 price_snapshot。
+// 调用：recordSpend。
+// 测试：call_cost_test.go
+func (s *Server) callCost(alias, depID string, usage catalog.Usage, start time.Time) (total, input, output float64, ok bool, charge catalog.Charge) {
 	if dep, found := s.FindDeployment(depID); found {
-		inRate, inOK := floatParam(dep.LiteLLMParams, "input_cost_per_token")
-		outRate, outOK := floatParam(dep.LiteLLMParams, "output_cost_per_token")
-		if inOK || outOK {
-			input = float64(prompt) * inRate
-			output = float64(completion) * outRate
-			return input + output, input, output, true
+		if c, ok := deploymentCost(dep, usage, start); ok {
+			return c.Total, c.Input, c.Output, true, c
 		}
 		if id := dep.ParamString("model", ""); id != "" && id != alias {
-			if total, input, output, ok = catalog.Cost(id, prompt, completion); ok {
-				return total, input, output, true
+			if c, ok := catalog.CostAt(id, usage, start); ok {
+				return c.Total, c.Input, c.Output, true, c
 			}
 		}
 	}
-	return catalog.Cost(alias, prompt, completion)
+	c, ok := catalog.CostAt(alias, usage, start)
+	if !ok {
+		return 0, 0, 0, false, catalog.Charge{}
+	}
+	return c.Total, c.Input, c.Output, true, c
+}
+
+// deploymentCost prices a call from the rates typed on the deployment itself.
+//
+// A deployment may carry its own rate table, and it has the same shape as the
+// catalog's, so a deployment can express an off-peak price and a peak price
+// separately. It is tried before the catalog because an operator who typed a
+// price meant it.
+//
+// The flat fields are still accepted for rows written before the rate table
+// existed. They carry no window, so they are billed at every hour; that is a
+// deliberate degradation for old data rather than a silent one, because a flat
+// override is an explicit statement of one price.
+//
+// 参数 dep（config.ModelEntry）：这条部署；usage（catalog.Usage）：这一次调用报出来的用量；start（time.Time）：调用开始的时刻。
+// 返回 catalog.Charge（catalog.Charge）：按部署自己的费率算出的账单；bool（bool）：部署上写了价时为真。
+// 调用：callCost。
+// 测试：call_cost_test.go
+func deploymentCost(dep config.ModelEntry, usage catalog.Usage, start time.Time) (catalog.Charge, bool) {
+	params := dep.LiteLLMParams
+	if params == nil {
+		return catalog.Charge{}, false
+	}
+	// A rate table on the deployment is the full form and can carry windows.
+	if rates, ok := deploymentRates(params); ok {
+		if charge, ok := catalog.CostFromRates(rates, usage, start); ok {
+			return charge, true
+		}
+	}
+	inRate, inOK := floatParam(params, "input_cost_per_token")
+	outRate, outOK := floatParam(params, "output_cost_per_token")
+	if !inOK && !outOK {
+		return catalog.Charge{}, false
+	}
+	charge := catalog.Charge{Window: catalog.WindowAt(start)}
+	charge.Input = float64(usage.PromptTokens) * inRate
+	charge.Output = float64(usage.CompletionTokens) * outRate
+	// A deployment that typed its own flat token price gets the same cache
+	// treatment the catalog gives: a cached prompt is not billed at the input
+	// rate when the deployment priced the cache separately.
+	if cacheRate, cacheOK := floatParam(params, "cache_read_input_token_cost"); cacheOK {
+		cached := usage.CachedTokens
+		if cached > usage.PromptTokens {
+			cached = usage.PromptTokens
+		}
+		if cached > 0 {
+			uncachedRate := inRate
+			charge.Input = float64(usage.PromptTokens-cached)*uncachedRate + float64(cached)*cacheRate
+			charge.Cache = float64(cached) * cacheRate
+		}
+	}
+	charge.Total = charge.Input + charge.Output + charge.Cache
+	return charge, true
+}
+
+// deploymentRates reads a rate table typed on a deployment. The shape is the
+// same as the catalog's rates array, so one renderer and one billing path
+// handle both.
+// 参数 params（map[string]any）：部署上的 litellm_params。
+// 返回 []catalog.Rate（[]catalog.Rate）：部署自己写的费率表；bool（bool）：写了解析得出来时为真。
+// 调用：deploymentCost。
+// 测试：call_cost_test.go
+func deploymentRates(params map[string]any) ([]catalog.Rate, bool) {
+	raw, ok := params["rates"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	return catalog.DecodeRates(raw)
 }
 
 // 从 litellm_params 读取一个小数。缺键或类型不符时 ok 为假。
@@ -148,13 +226,18 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	}
 	pt := asInt(usage["prompt_tokens"])
 	ct := asInt(usage["completion_tokens"])
-	total, in, out, okc := s.callCost(alias, depID, pt, ct)
+	billed := usageOf(pt, ct, usage, alias)
+	// The start instant decides the billing window. A window-priced model costs
+	// twice as much inside its peak hours, so this is the difference between
+	// charging the published rate and charging half of it.
+	total, in, out, okc, charge := s.callCost(alias, depID, billed, start)
 	// A cache hit is a request fact, but it is not a second upstream generation.
 	// Keep the token metadata for observability while making the billable delta
 	// explicitly zero. This must happen before both the Redis and PostgreSQL
 	// persistence paths so the two paths cannot disagree.
 	if cacheHit {
 		total, in, out = 0, 0, 0
+		charge = catalog.Charge{}
 	}
 	// LiteLLM stores response_cost or 0.0. Unknown models still get a row, with spend 0.
 	spend := 0.0
@@ -229,7 +312,8 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
 		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
 		SessionID: note.SessionID, CachedTokens: cachedTokens(usage),
-		Guardrail: s.takeGuardrail(callID),
+		Guardrail:     s.takeGuardrail(callID),
+		PriceSnapshot: catalog.Snapshot(charge),
 	}
 	if p != nil && p.Key != nil {
 		row.KeyHash = p.Key.TokenHash
@@ -244,6 +328,69 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		return
 	}
 	s.persistSpend(row, spend, ex, start, end)
+}
+
+// usageOf builds the billable quantities for one call from the upstream usage
+// object.
+//
+// The token counts are passed in because recordSpend already read them and the
+// row stores the same numbers; reading them twice is how the row and the charge
+// drift apart. The remaining measures are read here:
+//
+//   - cached_tokens is the prompt side that hit the cache. It is a subset of
+//     prompt_tokens, not an addition, and it selects a different input rate.
+//   - images, seconds and searches are the quantities a per-picture, per-second
+//     and per-query model bills on. A chat call reports none of them, and a
+//     video call reports no tokens. Zero means "not reported by this call",
+//     which is why CostAt skips a zero measure instead of billing it at zero.
+//
+// 参数 pt（int）：提示 token 数，已经从同一份用量里读出；ct（int）：完成 token 数，同上；
+// usage（map[string]any）：上游报出来的用量对象；alias（string）：对外模型名，用来在用量里找供应商特有的计数。
+//
+// 返回 catalog.Usage（catalog.Usage）：可以交给 catalog.CostAt 的用量。
+// 调用：recordSpend。
+// 测试：call_cost_test.go
+func usageOf(pt, ct int, usage map[string]any, alias string) catalog.Usage {
+	out := catalog.Usage{PromptTokens: pt, CompletionTokens: ct}
+	out.CachedTokens = cachedTokensOf(usage)
+	out.CacheWriteTokens = asInt(firstPresent(usage, "cache_creation_input_tokens", "cache_write_tokens"))
+	out.Images = asInt(firstPresent(usage, "images", "image_count", "num_images", "output_images"))
+	out.Seconds = asFloat(firstPresent(usage, "seconds", "duration_seconds", "video_seconds", "audio_seconds"))
+	out.Searches = asInt(firstPresent(usage, "searches", "search_count", "web_search_requests"))
+	return out
+}
+
+// firstPresent returns the first of the given keys the usage object carries with
+// a non-nil value. Providers spell the same quantity differently, and an absent
+// key must stay absent rather than being read as zero.
+// 参数 usage（map[string]any）：上游报出来的用量对象；keys（...string）：按优先顺序给出的键名。
+// 返回 any（any）：第一个有值的键对应的值。一个都没有时为 nil。
+// 调用：usageOf。
+// 测试：call_cost_test.go
+func firstPresent(usage map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if v, ok := usage[key]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+// cachedTokensOf reads the number of prompt tokens that hit the cache. The
+// provider-specific nestings are checked because several adapters keep the
+// count under prompt_tokens_details rather than at the top level.
+// 参数 usage（map[string]any）：上游报出来的用量对象。
+// 返回 int（int）：命中缓存的提示 token 数。没有报这个数时为 0。
+// 调用：usageOf 和 cachedTokens。
+// 测试：call_cost_test.go
+func cachedTokensOf(usage map[string]any) int {
+	if n := asInt(firstPresent(usage, "cached_tokens", "cache_read_input_tokens")); n != 0 {
+		return n
+	}
+	if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
+		return asInt(details["cached_tokens"])
+	}
+	return 0
 }
 
 // persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
@@ -318,6 +465,7 @@ func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy 
 		KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
 		Provider: row.Provider, CachedTokens: row.CachedTokens,
 		SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
+		PriceSnapshot: row.PriceSnapshot,
 	}
 }
 

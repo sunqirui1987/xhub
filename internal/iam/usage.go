@@ -45,6 +45,11 @@ type UsageEvent struct {
 	// Guardrail is the JSON array the logs drawer reads as guardrail monitoring.
 	// Empty means this call was not checked.
 	Guardrail string `xorm:"'guardrail'" json:"-"`
+	// PriceSnapshot is the rates this call was billed at, as catalog.Snapshot
+	// wrote them. The log detail reads it instead of recomputing from the
+	// current price table, so a price change cannot rewrite history. Empty means
+	// the call was never priced, which is not the same as costing nothing.
+	PriceSnapshot string `xorm:"'price_snapshot'" json:"price_snapshot,omitempty"`
 }
 
 // 告诉 xorm 这个结构体对应数据库表 usage_events。
@@ -132,6 +137,10 @@ type UsageRecord struct {
 	SessionID        string
 	CacheKey         string
 	Guardrail        string
+	// PriceSnapshot is the JSON of the rates this call was billed at. It is what
+	// makes a historical log row explainable without recomputing from the price
+	// table of the day it is read.
+	PriceSnapshot string
 }
 
 // RecordUsage writes the event, its stored request/response, the daily roll-up and the live spend counters in one transaction. The batch is idempotent on request_id. A retried flush, or a second gateway
@@ -189,14 +198,14 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
         (request_id, ts, key_id, owner_type, user_id, team_id, project_id, organization_id,
          model, call_type, status, prompt_tokens, completion_tokens, cost, duration_ms,
          ended_at, ttft_ms, cache_hit, key_hash, key_alias, team_alias, provider,
-         cached_tokens, session_id, cache_key, guardrail)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         cached_tokens, session_id, cache_key, guardrail, price_snapshot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (request_id) DO NOTHING`,
 		r.RequestID, stamp(r.TS), r.KeyID, ownerType(r), r.UserID, r.TeamID, r.ProjectID,
 		r.OrganizationID, r.Model, r.CallType, status(r),
 		r.PromptTokens, r.CompletionTokens, r.Cost, r.DurationMS,
 		ended, r.TTFTMs, r.CacheHit, r.KeyHash, r.KeyAlias, r.TeamAlias, r.Provider,
-		r.CachedTokens, r.SessionID, r.CacheKey, r.Guardrail)
+		r.CachedTokens, r.SessionID, r.CacheKey, r.Guardrail, r.PriceSnapshot)
 	if err != nil {
 		return false, mapErr(err)
 	}

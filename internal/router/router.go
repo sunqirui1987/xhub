@@ -2,10 +2,13 @@
 package router
 
 import (
+	"math"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -33,6 +36,92 @@ type State struct {
 	Cooldown map[string]bool
 	Latency  map[string]float64
 	Usage    map[string]float64
+	// Now is the instant a time-aware strategy should price at. A window-priced
+	// deployment costs twice as much during its peak hours, so the cost strategy
+	// needs to know which hour it is choosing for. Zero means time.Now(), which
+	// is right for a live request and wrong for a test.
+	Now time.Time
+	// Splits holds the weighted-split cursors, keyed by deployment id. It is the
+	// router's only mutable state: every other strategy is a pure function of the
+	// pool, while an even split has to remember how far it got last time.
+	Splits *SplitState
+}
+
+// instant returns the time this routing decision is being made for.
+// 参数 st（State）：此刻的冷却、延迟、用量和并发，用来排序。
+// 返回 time.Time（time.Time）：要用来判断时段和比价的时刻。
+// 调用：comparableRate。
+// 测试：无直接单测
+func (st State) instant() time.Time {
+	if st.Now.IsZero() {
+		return time.Now()
+	}
+	return st.Now
+}
+
+// comparableRate is the per-token price the cost strategy compares deployments
+// on. A deployment with no stated rate comes back as +Inf so it sorts last
+// instead of winning by declaration order.
+//
+// It reads the flat input cost first because that is what the strategy has always
+// compared, and a deployment that typed only a rate table falls back to the rate
+// table's input side for the window in effect.
+//
+// 参数 e（config.ModelEntry）：一条部署；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
+// 返回 float64（float64）：可比价的每 token 输入价。没有写价时是正无穷。
+// 调用：Pick 的 cost 分支。
+// 测试：无直接单测
+func comparableRate(e config.ModelEntry, st State) float64 {
+	if rate, ok := costParamFloat(e, "input_cost_per_token"); ok {
+		return rate
+	}
+	charge, ok := catalog.CostFromRates(deploymentRates(e), catalog.Usage{PromptTokens: 1}, st.instant())
+	if !ok || charge.Input <= 0 {
+		return math.Inf(1)
+	}
+	return charge.Input
+}
+
+// costParamFloat reads a deployment's flat price. It differs from paramFloat in
+// reporting whether the key was there at all, because the cost strategy has to
+// tell "priced at zero" apart from "not priced".
+// 参数 e（config.ModelEntry）：一条部署；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
+// 返回 float64（float64）：读到的小数。缺失时为 0；bool（bool）：部署上写了这个价时为真。
+// 调用：comparableRate。
+// 测试：无直接单测
+func costParamFloat(e config.ModelEntry, key string) (float64, bool) {
+	if e.LiteLLMParams == nil {
+		return 0, false
+	}
+	v, ok := e.LiteLLMParams[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	default:
+		return 0, false
+	}
+}
+
+// deploymentRates reads a rate table typed on a deployment's litellm_params.
+// 参数 e（config.ModelEntry）：一条部署。
+// 返回 []catalog.Rate（[]catalog.Rate）：部署自己写的费率表。没写时为空。
+// 调用：comparableRate。
+// 测试：无直接单测
+func deploymentRates(e config.ModelEntry) []catalog.Rate {
+	if e.LiteLLMParams == nil {
+		return nil
+	}
+	raw, ok := e.LiteLLMParams["rates"]
+	if !ok || raw == nil {
+		return nil
+	}
+	rates, _ := catalog.DecodeRates(raw)
+	return rates
 }
 
 // Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
@@ -94,10 +183,19 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		}
 		return &pool[best]
 	case "cost":
+		// Cheapest first. A deployment that typed its own rate table is compared
+		// by the rate it would charge right now, which is why the price is read
+		// through the same resolver billing uses: a deployment whose peak rate is
+		// high should stop looking cheap during peak hours.
+		//
+		// A deployment with no stated price is treated as the dearest rather than
+		// falling back to its index. The old fallback was the index, which made an
+		// unpriced deployment win a cost comparison by accident of declaration
+		// order - a silent tie-break, not a stated one.
 		best := 0
-		bestC := 1e99
+		bestC := math.Inf(1)
 		for i, e := range pool {
-			c := paramFloat(e, "input_cost_per_token", float64(i))
+			c := comparableRate(e, st)
 			if c < bestC {
 				bestC = c
 				best = i
@@ -150,6 +248,8 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 			}
 		}
 		return &pool[best]
+	case "split":
+		return pickSplit(pool, st)
 	default:
 		// simple_shuffle and the other weight strategies pick the highest weight. Callers rely on this stable result.
 		best := 0
@@ -163,6 +263,63 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		}
 		return &pool[best]
 	}
+}
+
+// pickSplit chooses the first deployment by configured traffic share.
+//
+// A weight is a share, so 3 and 7 mean the same as 30 and 70 - the numbers do
+// not have to total 100. Every deployment defaults to 1, so a pool where nobody
+// set a weight splits evenly instead of always landing on the first one.
+//
+// A deployment in cooldown is offered no traffic and its cursor is dropped, so
+// its share goes to the others for as long as it is out and it comes back at
+// zero rather than immediately claiming everything it accrued while down.
+//
+// A session pinned to one deployment is applied by the caller before this runs,
+// so a pinned request deliberately ignores the split. That is what pinning is
+// for, and it means a workload with many pinned sessions will not show exactly
+// the configured ratio.
+//
+// 参数 pool（[]config.ModelEntry）：候选部署列表，后面按策略挑一条；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
+// 返回 *config.ModelEntry（*config.ModelEntry）：选中的部署。没有可接流量的部署时为 nil，调用方退回原顺序。
+// 调用：Pick 的 split 分支。
+// 测试：split_test.go
+func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
+	if len(pool) == 0 {
+		return nil
+	}
+	if len(pool) == 1 {
+		return &pool[0]
+	}
+	ids := make([]string, len(pool))
+	weights := make([]float64, len(pool))
+	available := make([]bool, len(pool))
+	for i, e := range pool {
+		ids[i] = DeploymentID(e)
+		weights[i] = paramFloat(e, "weight", 1)
+		available[i] = !st.Cooldown[ids[i]]
+	}
+	// st.Splits is nil when the gateway never installed one. Falling back to the
+	// highest weight keeps that case working rather than failing every request.
+	if st.Splits == nil {
+		best := 0
+		bestW := -1.0
+		for i, w := range weights {
+			if !available[i] {
+				continue
+			}
+			if w > bestW {
+				bestW = w
+				best = i
+			}
+		}
+		return &pool[best]
+	}
+	picked := st.Splits.PickWeighted(ids, weights, available)
+	if picked < 0 {
+		return nil
+	}
+	return &pool[picked]
 }
 
 // matchDeployments finds deployments whose public model name matches, including wildcards. It does not sort them. matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
@@ -363,6 +520,11 @@ func strategyKind(strategy string) (string, bool) {
 		return "cost", true
 	case "tag_based_routing":
 		return "tag", true
+	case "weighted_split", "weighted_round_robin", "traffic_split":
+		// Its own kind rather than a change to "weight". simple_shuffle already
+		// routes here, and six other aliases share it; making "weight" mean a
+		// ratio would change all of them and break a pinned regression case.
+		return "split", true
 	default:
 		return "", false
 	}

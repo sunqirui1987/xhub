@@ -73,6 +73,9 @@ type upstreamRule struct {
 	status int
 	hold   <-chan struct{}
 	before func()
+	// usage 非空时替换这一次回答里的 usage，用来制造缓存命中、秒数、图片数
+	// 这些默认形状没有的计量。计费认的就是这些量。
+	usage map[string]any
 }
 
 // upstreamCall 是假供应商收到的一次请求。测试拿它来证明两件事：
@@ -235,11 +238,7 @@ func (h *harness) serveUpstream(w http.ResponseWriter, r *http.Request) {
 				"index": 0, "finish_reason": "stop",
 				"message": map[string]any{"role": "assistant", "content": defaultReply.Content},
 			}},
-			"usage": map[string]any{
-				"prompt_tokens":     defaultReply.PromptTokens,
-				"completion_tokens": defaultReply.CompletionTokens,
-				"total_tokens":      defaultReply.PromptTokens + defaultReply.CompletionTokens,
-			},
+			"usage": answerUsage(rule.usage),
 		})
 	}
 }
@@ -357,6 +356,116 @@ func (h *harness) holdUpstream(model string) (release func()) {
 			h.mu.Unlock()
 			close(ch)
 		})
+	}
+}
+
+// usageOverride 让某个上游模型回一段指定的 usage，用来测缓存命中和按秒按张的计量。
+//
+// 假供应商默认回固定的 token 数，那是绝大多数用例需要的形状。计费还认别的量：
+// 缓存命中数、秒数、图片数、搜索次数。这些量只有上游会报，所以要让上游改口。
+// model 是上游看见的那段名字，不含 openai/ 前缀。
+// 参数 model（string）：上游模型名；usage（map[string]any）：要回的 usage 对象；
+// 返回：无。nil 表示恢复默认。
+func (h *harness) usageOverride(model string, usage map[string]any) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.rules == nil {
+		h.rules = map[string]upstreamRule{}
+	}
+	rule := h.rules[model]
+	rule.usage = usage
+	h.rules[model] = rule
+}
+
+// patchRates 改一条已登记部署的费率表，走控制台的模型更新接口。
+//
+// 用它而不是直接改内存里的配置，是因为价格在部署上是 litellm_params 的一个键，
+// 控制台写进去和配置文件写进去必须被同一段代码读到。直接改内存会绕过这条路径，
+// 用例就证明不了"运维在界面上改价会生效"。
+//
+// 更新接口按部署 id 认行，同名多部署时 id 是唯一的区分方式，所以先把 id 查出来。
+// 参数 t（*testing.T）：当前测试；admin（string）：管理员的会话令牌；
+// public（string）：公开模型名；rates（[]any）：新的费率表；extra（map[string]any）：要一起写回的其它参数。
+// 返回：无。
+func (h *harness) patchRates(t *testing.T, admin, public string, rates []any, extra map[string]any) {
+	t.Helper()
+	id := h.deploymentID(t, admin, public)
+	params := map[string]any{
+		"model": public, "api_key": "sk-fake", "custom_llm_provider": "openai",
+		"rates": rates,
+	}
+	for k, v := range extra {
+		params[k] = v
+	}
+	h.ok(http.MethodPost, "/model/update", admin, map[string]any{
+		"model_name":     public,
+		"litellm_params": params,
+		"model_info":     map[string]any{"id": id, "mode": "chat"},
+	})
+}
+
+// deploymentID 查一条部署的 id。控制台的更新和删除都按这个 id 认行。
+// 参数 t（*testing.T）：当前测试；admin（string）：管理员的会话令牌；public（string）：公开模型名。
+// 返回 string（string）：这一行的部署 id。
+func (h *harness) deploymentID(t *testing.T, admin, public string) string {
+	t.Helper()
+	body := h.ok(http.MethodGet, "/v2/model/info?page=1&size=200", admin, nil).json()
+	for _, row := range listField(body, "data") {
+		if strField(row, "model_name") != public {
+			continue
+		}
+		info, _ := row["model_info"].(map[string]any)
+		if id := strField(info, "id"); id != "" {
+			return id
+		}
+		// YAML 里声明、没落库的部署没有 id。这种行不能用控制台改，调用方
+		// 需要知道这一点，否则会拿到一个看不懂的 400。
+		t.Fatalf("deployment %s is declared in config and cannot be edited from the console", public)
+	}
+	t.Fatalf("no deployment named %s", public)
+	return ""
+}
+
+// strField 读一个字符串字段。参数 m（map[string]any）：要读的对象；key（string）：字段名。
+// 返回 string（string）：去掉空白的文本。缺失或不是字符串时为空串。
+func strField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+// answerUsage 是这一次补全回答里的 usage。没有覆盖时用固定的默认值：
+// 提示 11、完成 5，整个套件的费用断言都按这两个数算。
+// 参数 override（map[string]any）：这一次要替换成的 usage。为空时用默认值。
+// 返回 map[string]any（map[string]any）：写进回答的 usage 对象。
+func answerUsage(override map[string]any) map[string]any {
+	if override != nil {
+		out := map[string]any{}
+		for k, v := range override {
+			out[k] = v
+		}
+		if _, set := out["total_tokens"]; !set {
+			out["total_tokens"] = asIntAny(out["prompt_tokens"]) + asIntAny(out["completion_tokens"])
+		}
+		return out
+	}
+	return map[string]any{
+		"prompt_tokens":     defaultReply.PromptTokens,
+		"completion_tokens": defaultReply.CompletionTokens,
+		"total_tokens":      defaultReply.PromptTokens + defaultReply.CompletionTokens,
+	}
+}
+
+// asIntAny 从 usage 里读一个整数，读到别的类型时算 0。
+// 参数 v（any）：usage 里的一个值。
+// 返回 int（int）：读到的整数。不是数字时为 0。
+func asIntAny(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		return 0
 	}
 }
 

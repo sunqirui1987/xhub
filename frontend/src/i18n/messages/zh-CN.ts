@@ -21,7 +21,6 @@ export const zhCN = {
     loadError: "无法加载当前账号可用的模型，请重试。",
     retry: "重试",
     loading: "正在加载你的模型…",
-    variantPrices: "{count} 档变体价",
     noMatches: "没有符合条件的模型",
     empty: "当前账号暂无可用模型",
     tryFilters: "试试其他关键词，或清除筛选条件。",
@@ -34,6 +33,19 @@ export const zhCN = {
     maxInput: "最大输入",
     maxOutput: "最大输出",
     morePrices: "更多计费项（{count}）",
+    byMeasure: "按 {measure} 计费",
+    perUnits: "每 {count} 个",
+    rateSide: "费率",
+    rateAllHours: "不分时段",
+    windowed: "分时段计价",
+    batchInput: "批量输入",
+    batchOutput: "批量输出",
+    measure: {
+      token: "token",
+      picture: "张",
+      second: "秒",
+      query: "次",
+    },
     cacheRead: "缓存读取",
     cacheWrite: "缓存写入",
     imageInput: "图片输入",
@@ -322,6 +334,18 @@ export const zhCN = {
       subtitle: "管理团队内的项目。",
       create: "创建项目",
       searchPlaceholder: "按名称、ID、描述或团队搜索项目…",
+      guideTitle: "项目是做什么的",
+      guideWhat:
+        "项目挂在团队下面。密钥可以挂到某个项目上。一次调用的花费会同时记到这把密钥、它的用户、这个项目、所属团队和所属组织。",
+      guideWho:
+        "平台管理员能看到全部项目。组织管理员能看到本组织里各团队的项目。团队成员只能看到自己团队的项目，别的组织看不到。",
+      guideModels:
+        "模型名单留空，表示沿用团队已经允许的模型。写了名单，就只能是团队名单里的模型，两边取交集。",
+      guideBudget:
+        "项目预算是这一层的花费上限，不能高于所属团队的上限。花到上限之后，挂在这个项目上的密钥会被拒绝，拒绝发生在访问上游之前，也不会扣费。把上限再抬高，并且仍不超过团队之后，同一把密钥又能调用。",
+      guideBlock:
+        "「拦截项目」在创建或编辑时的高级设置里。打开后，这个项目下的密钥立刻不能调用，密钥还在，不会被删掉。关掉之后，这些密钥恢复可用。列表里「已拦截」就是这个状态。",
+      guideDelete: "删除项目之后，原来挂在它上面的密钥不能再通过鉴权，请求在访问上游之前被拒绝。",
     },
     accessGroups: {
       title: "访问组",

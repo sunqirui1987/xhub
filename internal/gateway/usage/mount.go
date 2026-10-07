@@ -52,7 +52,6 @@ func Module(h mountHost) httpx.Module {
 		reg.Handle("GET /team/spend/by_user", func(w http.ResponseWriter, r *http.Request) { TeamSpendByUser(h, w, r) })
 		reg.Handle("GET /organization/daily/activity", func(w http.ResponseWriter, r *http.Request) { OrganizationDailyActivity(h, w, r) })
 		reg.Handle("GET /gateway/daily/activity", func(w http.ResponseWriter, r *http.Request) { GatewayDailyActivity(h, w, r) })
-		reg.Handle("POST /usage/ai/chat", func(w http.ResponseWriter, r *http.Request) { UsageAIChat(h, w, r) })
 		reg.Handle("GET /global/activity", func(w http.ResponseWriter, r *http.Request) { Activity(h, w, r) })
 		reg.Handle("GET /global/activity/model", func(w http.ResponseWriter, r *http.Request) { ActivityModel(h, w, r) })
 		reg.Handle("GET /global/activity/cache_hits", func(w http.ResponseWriter, r *http.Request) { ActivityCacheHits(h, w, r) })

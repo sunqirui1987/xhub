@@ -166,9 +166,15 @@ export const prepareModelAddRequest = async (formValues: Record<string, any>, ac
         else if (
           key === "input_cost_per_token" ||
           key === "output_cost_per_token" ||
+          key === "input_cost_per_token_peak" ||
+          key === "output_cost_per_token_peak" ||
           key === "input_cost_per_second" ||
+          key === "output_cost_per_second" ||
+          key === "input_cost_per_image" ||
+          key === "output_cost_per_image" ||
           key === "cache_read_input_token_cost" ||
-          key === "cache_creation_input_token_cost"
+          key === "cache_creation_input_token_cost" ||
+          key === "search_context_cost_per_query"
         ) {
           if (value !== undefined && value !== null && value !== "") {
             litellmParamsObj[key] = Number(value);

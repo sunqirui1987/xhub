@@ -595,8 +595,7 @@
       "http_paths": [
         "/spend/logs",
         "/global/spend",
-        "/global/activity",
-        "/usage/ai/chat"
+        "/global/activity"
       ],
       "aliases": [
         "/api/v1/logs/requests",

@@ -252,6 +252,57 @@ func TestGenuineZeroIsKept(t *testing.T) {
 	}
 }
 
+// TestPeakOffPeakRatesHaveWindowDimension 确认 peak/offpeak 的键各自带上了 window 维度，
+// 而不是被合并成一个扁平字段。
+// 参数 t（*testing.T）：当前测试。
+// 返回：无。
+func TestPeakOffPeakRatesHaveWindowDimension(t *testing.T) {
+	doc := feedOf(t, feedModelWith("peak-offpeak2", []string{"text"}, map[string]any{
+		"ncache_offpeak": unit(0.00000065, 1, "token"),
+		"ncache_peak":    unit(0.0000013, 1, "token"),
+		"output_offpeak": unit(0.00000195, 1, "token"),
+		"output_peak":    unit(0.0000039, 1, "token"),
+	}))
+	row := doc.Models["peak-offpeak2"]
+	rates, ok := row["rates"].([]Rate)
+	if !ok {
+		t.Fatal("rates field is missing or wrong type")
+	}
+	windows := map[string]map[string]bool{} // side → window → found
+	for _, r := range rates {
+		if windows[r.Side] == nil {
+			windows[r.Side] = map[string]bool{}
+		}
+		windows[r.Side][r.Window] = true
+	}
+	if !windows["input"]["peak"] || !windows["input"]["offpeak"] {
+		t.Fatalf("input side should have both peak and offpeak windows; got %v", windows["input"])
+	}
+	if !windows["output"]["peak"] || !windows["output"]["offpeak"] {
+		t.Fatalf("output side should have both peak and offpeak windows; got %v", windows["output"])
+	}
+}
+
+// TestPlainModelRatesAllWindow 非分时模型的每条 rate 的 window 都应该是 all。
+// 参数 t（*testing.T）：当前测试。
+// 返回：无。
+func TestPlainModelRatesAllWindow(t *testing.T) {
+	doc := feedOf(t, feedModelWith("plain-window", []string{"text"}, map[string]any{
+		"input":  unit(0.000003, 1, "token"),
+		"output": unit(0.000015, 1, "token"),
+	}))
+	row := doc.Models["plain-window"]
+	rates, ok := row["rates"].([]Rate)
+	if !ok {
+		t.Fatal("rates field is missing or wrong type")
+	}
+	for _, r := range rates {
+		if r.Window != "all" {
+			t.Fatalf("non-windowed model rate %q has window=%q, want all", r.SourceKey, r.Window)
+		}
+	}
+}
+
 // TestEmptyFeedIsRefused 证明空的市场响应会被拒绝，而不是生成一份空目录。
 //
 // 一次失败的抓取如果能把在用的价格清空，账单就会在那段时间里全按零算。

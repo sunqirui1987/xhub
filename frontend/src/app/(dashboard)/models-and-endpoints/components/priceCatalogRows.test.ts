@@ -4,6 +4,7 @@ import {
   priceCatalogProviders,
   priceCatalogRows,
   priceModelPayload,
+  rateGroupsOf,
   rateToInputValue,
   unitRateToInputValue,
 } from "./priceCatalogRows";
@@ -218,5 +219,86 @@ describe("rate formatting for the edit form", () => {
     expect(unitRateToInputValue(0.04)).toBe("0.04");
     expect(unitRateToInputValue(0)).toBe("0");
     expect(unitRateToInputValue(null)).toBe("");
+  });
+});
+
+describe("rateGroupsOf", () => {
+  it("groups rates by the measure they are counted in", () => {
+    const groups = rateGroupsOf([
+      { measure: "token", unit_size: 1, side: "input", window: "all", source_key: "input", usd: 0.000003 },
+      { measure: "picture", unit_size: 1, side: "output", window: "all", source_key: "ti_quantity", usd: 0.04 },
+    ]);
+    expect(groups.map((group) => group.measure)).toEqual(["token", "picture"]);
+  });
+
+  it("keeps both the off-peak and peak rate of one side, off-peak first", () => {
+    const groups = rateGroupsOf([
+      { measure: "token", unit_size: 1, side: "output", window: "peak", source_key: "output_peak", usd: 0.0000039 },
+      { measure: "token", unit_size: 1, side: "output", window: "offpeak", source_key: "output_offpeak", usd: 0.00000195 },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rates.map((rate) => rate.window)).toEqual(["offpeak", "peak"]);
+    expect(groups[0].windows).toEqual(["offpeak", "peak"]);
+  });
+
+  it("does not merge the two sides of one measure into a single rate", () => {
+    const groups = rateGroupsOf([
+      { measure: "token", unit_size: 1, side: "input", window: "all", source_key: "input", usd: 0.000003 },
+      { measure: "token", unit_size: 1, side: "output", window: "all", source_key: "output", usd: 0.000015 },
+    ]);
+    expect(new Set(groups[0].rates.map((rate) => rate.side)).size).toBe(2);
+  });
+
+  it("keeps the unit size, which is not 1 for token rates", () => {
+    const groups = rateGroupsOf([
+      { measure: "token", unit_size: 1000, side: "input", window: "all", source_key: "wiv_v_output", usd: 0.0000033 },
+    ]);
+    expect(groups[0].unitSize).toBe(1000);
+  });
+
+  it("drops malformed entries without losing the rest of the model's rates", () => {
+    const groups = rateGroupsOf([
+      { measure: "token", side: "input", window: "all", source_key: "input", usd: 0.000003 },
+      { side: "output", window: "all", usd: 0.000015 },
+      { measure: "token", side: "output", window: "all", usd: null },
+      "not an object",
+      null,
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rates).toHaveLength(1);
+    // A missing unit size must not become 0, which would divide the price away.
+    expect(groups[0].unitSize).toBe(1);
+  });
+
+  it("returns nothing for a value that is not a list rather than throwing", () => {
+    expect(rateGroupsOf(undefined)).toEqual([]);
+    expect(rateGroupsOf(null)).toEqual([]);
+    expect(rateGroupsOf({ key: "value" })).toEqual([]);
+  });
+
+  it("still shows a measure it does not recognize", () => {
+    const groups = rateGroupsOf([
+      { measure: "megabyte", unit_size: 1, side: "output", window: "all", source_key: "mb_out", usd: 0.01 },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].measure).toBe("megabyte");
+  });
+
+  it("marks a model as time-of-day priced when any rate carries a window", () => {
+    const windowed = priceCatalogRows(
+      doc({ "ds/v4": { rates: [{ measure: "token", side: "input", window: "peak", usd: 0.0000013 }] } }),
+    );
+    expect(windowed[0].windowed).toBe(true);
+
+    const flat = priceCatalogRows(
+      doc({ "plain": { rates: [{ measure: "token", side: "input", window: "all", usd: 0.000003 }] } }),
+    );
+    expect(flat[0].windowed).toBe(false);
+  });
+
+  it("reports no rate groups for a row whose rates are missing", () => {
+    const rows = priceCatalogRows(doc({ "no-rates": { input_cost_per_token: 0.000003 } }));
+    expect(rows[0].rateGroups).toEqual([]);
+    expect(rows[0].windowed).toBe(false);
   });
 });
