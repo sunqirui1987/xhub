@@ -28,8 +28,11 @@ type Builtin struct {
 	KeyEnv string
 }
 
-// Builtins are the two providers a new install can add models from.
-// Fenno calls https://api.fenno.ai. Qiniu calls the OpenAI bypass root. Catalogs stay on /v1/models.
+// Builtins are the two providers a new install can add models from. Fenno calls https://api.fenno.ai. Qiniu calls the OpenAI bypass root. Catalogs stay on /v1/models.
+// 参数：无。
+// 返回 []Builtin（[]Builtin）：新安装可以添加模型的两个供应商。Fenno 走 https://api.fenno.ai，七牛走 OpenAI 兼容根。
+// 调用：gateway/limits.go
+// 测试：无直接单测
 func Builtins() []Builtin {
 	return []Builtin{
 		{ID: BuiltinFenno, Base: "https://api.fenno.ai", KeyEnv: "FENNOAI_API_KEY"},
@@ -37,8 +40,11 @@ func Builtins() []Builtin {
 	}
 }
 
-// BuiltinsEnabled reports whether first install should add fennoai and qiniu.
-// XHUB_BUILTIN_PROVIDERS defaults to on. 0, false, off, no, or disabled turns it off.
+// BuiltinsEnabled reports whether first install should add fennoai and qiniu. XHUB_BUILTIN_PROVIDERS defaults to on. 0, false, off, no, or disabled turns it off.
+// 参数：无。
+// 返回 bool（bool）：首次安装应加入 fennoai 和 qiniu 时返回真。XHUB_BUILTIN_PROVIDERS 设为 0、false、off、no 或 disabled 时返回假。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_test.go
 func BuiltinsEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("XHUB_BUILTIN_PROVIDERS"))) {
 	case "0", "false", "off", "no", "disable", "disabled":
@@ -58,6 +64,10 @@ type CatalogModel struct {
 }
 
 // ParseModelIDs reads an OpenAI models list. A body with no ids returns an empty slice.
+// 参数 body（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 []string（[]string）：解析模型标识列表。没有匹配时为 nil 或空切片，调用方按长度判断。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_test.go
 func ParseModelIDs(body []byte) []string {
 	items := ParseCatalog(body)
 	ids := make([]string, 0, len(items))
@@ -71,6 +81,10 @@ func ParseModelIDs(body []byte) []string {
 }
 
 // ParseCatalog maps an OpenAI-style models document to catalog cards.
+// 参数 body（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 []CatalogModel（[]CatalogModel）：OpenAI 风格模型目录转成的卡片。同一个 id 只留一张。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_test.go
 func ParseCatalog(body []byte) []CatalogModel {
 	rows := catalogObjects(body)
 	seen := map[string]bool{}
@@ -91,6 +105,11 @@ func ParseCatalog(body []byte) []CatalogModel {
 	return items
 }
 
+// 从目录响应里取出模型数组。既接受 data 包裹，也接受裸数组。
+// 参数 body（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func catalogObjects(body []byte) []map[string]any {
 	var doc struct {
 		Data []map[string]any `json:"data"`
@@ -105,6 +124,11 @@ func catalogObjects(body []byte) []map[string]any {
 	return doc.Data
 }
 
+// 确定目录模型的分类。没有明确分类时按 id 推断。
+// 参数 id（string）：目录分类使用的主键。空串表示调用方没有指定记录；row（map[string]any）：一行价格或模型字段。缺键表示价目表没有这项。
+// 返回 string（string）：目录行的分类。没有分类字段时按模型 id 推断。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func catalogCategory(id string, row map[string]any) string {
 	for _, key := range []string{"category", "type", "modality"} {
 		if value := strings.TrimSpace(str(row[key])); value != "" && value != "model" {
@@ -126,6 +150,11 @@ func catalogCategory(id string, row map[string]any) string {
 	return "llm"
 }
 
+// 从目录行或其 pricing 对象里取出第一个价格。没有时为 nil。
+// 参数 row（map[string]any）：一行价格或模型字段。缺键表示价目表没有这项；keys（...string）：目录价格使用的string。
+// 返回 *float64（*float64）：从目录行或其 pricing 对象里取出第一个价格。找不到或这一步失败时为 nil。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func catalogPrice(row map[string]any, keys ...string) *float64 {
 	if price := firstNumber(row, keys...); price != nil {
 		return price
@@ -137,6 +166,11 @@ func catalogPrice(row map[string]any, keys ...string) *float64 {
 	return firstNumber(pricing, keys...)
 }
 
+// 按键的顺序取出第一个能解析的数字。没有时为 nil。
+// 参数 row（map[string]any）：一行价格或模型字段。缺键表示价目表没有这项；keys（...string）：首个数字使用的string。
+// 返回 *float64（*float64）：按键的顺序取出第一个能解析的数字。找不到或这一步失败时为 nil。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func firstNumber(row map[string]any, keys ...string) *float64 {
 	for _, key := range keys {
 		if value, ok := row[key]; ok {
@@ -148,6 +182,11 @@ func firstNumber(row map[string]any, keys ...string) *float64 {
 	return nil
 }
 
+// 把 JSON 数字收成 *float64。解析失败时为 nil。
+// 参数 value（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 *float64（*float64）：把 JSON 数字收成 *float64。找不到或这一步失败时为 nil。
+// 调用：仅在 builtin.go 内使用。
+// 测试：无直接单测
 func asFloat(value any) *float64 {
 	switch number := value.(type) {
 	case float64:
@@ -163,9 +202,11 @@ func asFloat(value any) *float64 {
 	}
 }
 
-// ModelsURL is the provider model catalog. These URLs are fixed and do not follow a rewritten api_base.
-// Fenno's catalog is https://api.fenno.ai/v1/models and requires the credential key.
-// Qiniu's catalog is https://api.qnaigc.com/v1/models and is public.
+// ModelsURL 拼出拉取上游模型目录的地址。供应商标识决定默认根路径。
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine；base（string）：根地址或完整 URL。空串表示改用供应商默认根，末尾斜杠会去掉。
+// 返回 string（string）：拉取上游模型目录的地址。fenno 和七牛用固定地址，其他供应商用 base 拼上 /models。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_test.go
 func ModelsURL(provider, base string) string {
 	if provider == BuiltinFenno {
 		return "https://api.fenno.ai/v1/models"
@@ -180,6 +221,10 @@ func ModelsURL(provider, base string) string {
 var builtinClient = http.DefaultClient
 
 // SetBuiltinClient replaces the client used to fetch builtin model lists.
+// 参数 c（*http.Client）：写入内置客户端使用的客户端。
+// 返回：无。拉取内置模型目录用的客户端已换成传入的值。传入 nil 时恢复成 http.DefaultClient。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_providers_test.go
 func SetBuiltinClient(c *http.Client) {
 	if c == nil {
 		builtinClient = http.DefaultClient
@@ -188,8 +233,11 @@ func SetBuiltinClient(c *http.Client) {
 	builtinClient = c
 }
 
-// SeedBuiltins removes leftover provider rows and creates the two credentials when they are missing.
-// It does not insert models. A model added later is the same row a person would save by hand.
+// SeedBuiltins removes leftover provider rows and creates the two credentials when they are missing. It does not insert models. A model added later is the same row a person would save by hand.
+// 参数 s（Host）：写入初始Builtins使用的数据面宿主。
+// 返回：无。误存成模型的供应商行已删掉，缺失的 Fenno 和七牛凭据已补上。不插入模型。
+// 调用：gateway/models/admin.go
+// 测试：无直接单测
 func SeedBuiltins(s Host) {
 	if s == nil || s.RecordStore() == nil || !BuiltinsEnabled() {
 		return
@@ -200,8 +248,11 @@ func SeedBuiltins(s Host) {
 	}
 }
 
-// dropProviderShells deletes fennoai and qiniu rows that were stored as models.
-// They are credentials. Leaving them in the model table makes the playground list the provider name.
+// dropProviderShells deletes fennoai and qiniu rows that were stored as models. They are credentials. Leaving them in the model table makes the playground list the provider name.
+// 参数 s（Host）：丢掉供应商Shells使用的数据面宿主。
+// 返回：无。存成模型的 fennoai 和 qiniu 行已删除。它们应是凭据，留在模型表里会被当成可调用模型。
+// 调用：gateway/models/admin.go
+// 测试：无直接单测
 func dropProviderShells(s Host) {
 	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
@@ -222,11 +273,19 @@ func dropProviderShells(s Host) {
 }
 
 // RefreshBuiltin reloads the catalog. It does not add or delete models.
+// 参数 s（Host）：Refresh内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/models/mount.go
+// 测试：无直接单测
 func RefreshBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	ListBuiltin(s, w, r)
 }
 
 // ListBuiltin returns the provider catalog and which names are already saved. It does not write.
+// 参数 s（Host）：列出内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/models/mount.go
+// 测试：无直接单测
 func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	spec, rows, key, _, ok := openBuiltin(s, w, r)
 	if !ok {
@@ -265,8 +324,11 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// AddBuiltinModels saves each selected name the same way the model form does.
-// The row stores the model name and the provider credential. The address and key stay on the credential.
+// AddBuiltinModels saves each selected name the same way the model form does. The row stores the model name and the provider credential. The address and key stay on the credential.
+// 参数 s（Host）：累加内置模型使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/models/mount.go
+// 测试：无直接单测
 func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request) {
 	spec, rows, _, body, ok := openBuiltin(s, w, r)
 	if !ok {
@@ -304,7 +366,11 @@ func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"provider": spec.ID, "updated": len(saved) > 0, "api_base": spec.Base, "model_ids": saved})
 }
 
-// addedModel is one catalog id stored like a model typed into the form.
+// addedModel 判断这个目录模型是否已经在当前部署表里。
+// 参数 provider（string）：供应商标识，例如 openai。name（string）：目录里的模型 id，按表单填写的方式保存。
+// 返回：一条可写入模型表的部署。
+// 调用：内置供应商往目录里加模型之前。
+// 测试：无直接单测
 func addedModel(provider, name string) config.ModelEntry {
 	return config.ModelEntry{
 		ModelName: name,
@@ -321,6 +387,11 @@ func addedModel(provider, name string) config.ModelEntry {
 	}
 }
 
+// 打开一次内置供应商操作。没有管理权限或找不到供应商时最后一个布尔值为假。
+// 参数 s（Host）：打开内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回 Builtin（Builtin）：找到的内置供应商。没有管理权限或找不到时是零值；ProxyModel（[]store.ProxyModel）：已经保存的代理模型。没有时为空切片；string（string）：这次操作要使用的上游密钥。没有可用密钥时为空串；map[string]any（map[string]any）：请求正文解析出的字段。空正文时是空映射；bool（bool）：管理权限通过且找到了这个内置供应商时返回真。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func openBuiltin(s Host, w http.ResponseWriter, r *http.Request) (Builtin, []store.ProxyModel, string, map[string]any, bool) {
 	if s.RequireManage(w, r) == nil {
 		return Builtin{}, nil, "", nil, false
@@ -339,6 +410,11 @@ func openBuiltin(s Host, w http.ResponseWriter, r *http.Request) (Builtin, []sto
 	return spec, rows, providerKey(s, spec, str(body["api_key"])), body, true
 }
 
+// 读完请求正文并解析成对象。空正文得到空对象，不返回 nil。
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func readBody(r *http.Request) map[string]any {
 	raw, _ := io.ReadAll(r.Body)
 	var body map[string]any
@@ -350,6 +426,10 @@ func readBody(r *http.Request) map[string]any {
 }
 
 // providerKey is the key used only to read the catalog. The saved model does not copy it.
+// 参数 s（Host）：供应商密钥使用的数据面宿主；spec（Builtin）：供应商密钥使用的内置供应商；requestKey（string）：供应商密钥使用的请求密钥。空串表示调用方没有提供这项。
+// 返回 string（string）：只用来读目录的密钥。请求里的真实密钥优先，否则用已存凭据，再否则用供应商环境变量。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func providerKey(s Host, spec Builtin, requestKey string) string {
 	if key := realKey(requestKey); key != "" {
 		return key
@@ -360,6 +440,11 @@ func providerKey(s Host, spec Builtin, requestKey string) string {
 	return realKey(os.Getenv(spec.KeyEnv))
 }
 
+// 判断这是不是可以保存的真实密钥。掩码占位符返回空串。
+// 参数 raw（string）：真实密钥使用的原始内容。空串表示调用方没有提供这项。
+// 返回 string（string）：去掉空白后的真实密钥。空串或带掩码的占位符返回空串，表示不要覆盖原密钥。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func realKey(raw string) string {
 	key := strings.TrimSpace(raw)
 	if key == "" || strings.Contains(key, "****") {
@@ -368,6 +453,11 @@ func realKey(raw string) string {
 	return key
 }
 
+// 按凭据 id 读取保存的 api_key。
+// 参数 s（Host）：凭据APIKey使用的数据面宿主；id（string）：密钥 id。空串表示没有指定密钥。
+// 返回 string（string）：凭据表里的 api_key。库不可用或没有这条凭据时为空串。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func credentialAPIKey(s Host, id string) string {
 	if s.RecordStore() == nil {
 		return ""
@@ -380,6 +470,11 @@ func credentialAPIKey(s Host, id string) string {
 	return strings.TrimSpace(str(values["api_key"]))
 }
 
+// 用密钥拉取上游模型目录。有密钥时带 Bearer。
+// 参数 rawURL（string）：根地址或完整 URL。空串表示改用供应商默认根，末尾斜杠会去掉；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
+// 返回 []CatalogModel（[]CatalogModel）：用密钥拉取上游模型目录。没有行时为空切片；error（error）：失败原因，nil 表示成功。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func fetchCatalog(rawURL, key string) ([]CatalogModel, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -404,8 +499,11 @@ func fetchCatalog(rawURL, key string) ([]CatalogModel, error) {
 	return ParseCatalog(body), nil
 }
 
-// fillFromCostMap copies input/output prices from the price-data map when the catalog payload omitted them.
-// The stored rates are per token; the card shows the same per-million-token dollars as Price Data Management.
+// fillFromCostMap copies input/output prices from the price-data map when the catalog payload omitted them. The stored rates are per token; the card shows the same per-million-token dollars as Price Data Management.
+// 参数 item（*CatalogModel）：填充来源费用表使用的目录中的模型。
+// 返回：无。目录没带的输入或输出单价已从价格表补上。两边都有价格时不改。单价按每个 token 计。
+// 调用：仅在 builtin.go 内使用
+// 测试：builtin_test.go
 func fillFromCostMap(item *CatalogModel) {
 	if item.InputPrice != nil && item.OutputPrice != nil {
 		return
@@ -422,6 +520,11 @@ func fillFromCostMap(item *CatalogModel) {
 	}
 }
 
+// 从内置价目表取价格行。带前缀找不到时再试去掉一个前缀。
+// 参数 id（string）：费用行使用的主键。空串表示调用方没有指定记录。
+// 返回 map[string]any（map[string]any）：费用行的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func costRow(id string) map[string]any {
 	prices := catalog.CostMap()
 	if row := prices[id]; row != nil {
@@ -435,6 +538,11 @@ func costRow(id string) map[string]any {
 	return nil
 }
 
+// 把每 token 单价换成每百万 token。类型不符时为 nil。
+// 参数 value（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 *float64（*float64）：把每 token 单价换成每百万 token。找不到或这一步失败时为 nil。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func perMillion(value any) *float64 {
 	rate, ok := value.(float64)
 	if !ok {
@@ -444,6 +552,11 @@ func perMillion(value any) *float64 {
 	return &scaled
 }
 
+// 把目录模型收成返回给控制台的对象。
+// 参数 item（CatalogModel）：目录JSON使用的目录中的模型。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func catalogJSON(item CatalogModel) map[string]any {
 	return map[string]any{
 		"id":           item.ID,
@@ -456,8 +569,18 @@ func catalogJSON(item CatalogModel) map[string]any {
 
 type errString string
 
+// 实现 error 接口，返回写进日志或 HTTP 错误体的文本。
+// 参数：无。
+// 返回 string（string）：error 接口的文本，给日志和 HTTP 错误体使用。
+// 调用：拉取目录失败时返回它，经 error 接口读取。
+// 测试：无直接单测
 func (e errString) Error() string { return string(e) }
 
+// 按 id 查找内置供应商。找不到时布尔值为假。
+// 参数 id（string）：内置按标识使用的主键。空串表示调用方没有指定记录。
+// 返回 Builtin（Builtin）：按 id 查找内置供应商。没有命中时为零值；bool（bool）：按 id 找到了内置供应商时返回真。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func builtinByID(id string) (Builtin, bool) {
 	for _, b := range Builtins() {
 		if b.ID == id {
@@ -468,6 +591,10 @@ func builtinByID(id string) (Builtin, bool) {
 }
 
 // savedNames reports catalog ids already stored for this credential, including older builtin rows.
+// 参数 rows（[]store.ProxyModel）：从用量或目录读出的ProxyModel；provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 map[string]bool（map[string]bool）：saved名称。没有该键表示假，不要当成缺省 JSON。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func savedNames(rows []store.ProxyModel, provider string) map[string]bool {
 	out := map[string]bool{}
 	for _, row := range rows {
@@ -486,8 +613,11 @@ func savedNames(rows []store.ProxyModel, provider string) map[string]bool {
 	return out
 }
 
-// clearCopiedMode removes a mode that older imports copied onto the model.
-// A hand-added model has no mode, so the playground treats it as chat.
+// clearCopiedMode removes a mode that older imports copied onto the model. A hand-added model has no mode, so the playground treats it as chat.
+// 参数 row（*store.ProxyModel）：从用量或目录读出的ProxyModel。
+// 返回 bool（bool）：删掉了旧导入抄到模型上的 mode 时返回真。手加的模型没有 mode，游乐场会把它当成 chat。
+// 调用：gateway/models/admin.go
+// 测试：builtin_test.go
 func clearCopiedMode(row *store.ProxyModel) bool {
 	if row.Info == nil || str(row.Info["builtin"]) == "" {
 		return false
@@ -500,6 +630,11 @@ func clearCopiedMode(row *store.ProxyModel) bool {
 	return true
 }
 
+// 在凭据不存在时写入一条初始凭据。已经存在则不覆盖。
+// 参数 s（Host）：写入初始凭据使用的数据面宿主；spec（Builtin）：写入初始凭据使用的内置供应商；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
+// 返回：无。凭据不存在时写入了一条初始凭据。已经存在则不覆盖。
+// 调用：仅在 builtin.go 内使用
+// 测试：无直接单测
 func seedCredential(s Host, spec Builtin, key string) {
 	if _, err := s.RecordStore().GetKV("credentials", spec.ID); err == nil {
 		return

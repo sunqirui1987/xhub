@@ -31,6 +31,10 @@ import (
 const DefaultDatabaseURL = "postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable"
 
 // DatabaseURL returns the DSN the suites should connect to.
+// 参数：无。
+// 返回 string（string）：测试套件连接 Postgres 的 DSN。环境没有配置时为空串，不能拿去建连。
+// 调用：仅在 postgres.go 内使用
+// 测试：无直接单测
 func DatabaseURL() string {
 	if dsn := os.Getenv("XHUB_TEST_DATABASE_URL"); dsn != "" {
 		return dsn
@@ -38,18 +42,11 @@ func DatabaseURL() string {
 	return DefaultDatabaseURL
 }
 
-// Postgres returns a DSN whose search_path points at a schema created for this
-// one test, and registers the cleanup that drops it.
-//
-// A private schema is what makes these suites safe to run against a database a
-// gateway is also using: the test writes real accounts, real keys and real
-// usage rows, and without the schema it would read the developer's own rows and
-// leave its own behind. The prefix names the caller in the schema, so a schema
-// leaked by a killed test run can be traced back to the package that made it.
-//
-// The test skips when the database is unreachable. It fails only when the
-// database answers and the fixture cannot be built, because that is a real
-// error rather than a missing dependency.
+// Postgres returns a DSN whose search_path points at a schema created for this one test, and registers the cleanup that drops it. A private schema is what makes these suites safe to run against a database a gateway is also using: the test writes real accounts, real keys and real usage rows, and without the schema it would read the developer's own rows and leave its own behind. The prefix names the caller in the schema, so a schema leaked by a killed test run can be traced back to the package that made it. The test skips when the database is unreachable. It fails only when the database answers and the fixture cannot be built, because that is a real error rather than a missing dependency.
+// 参数 t（*testing.T）：当前测试。库不可达时跳过，建夹具失败时让测试失败；prefix（string）：写进 schema 名的前缀，用来认出是哪个包留下的库。不是用来匹配或去掉的路径前缀。
+// 返回 string（string）：search_path 指向本次测试 schema 的 DSN。测试结束时注册的清理会删掉这个 schema。
+// 调用：仅在 postgres.go 内使用
+// 测试：authz_test.go、guard_test.go、guardrail_block_test.go
 func Postgres(t *testing.T, prefix string) string {
 	t.Helper()
 	dsn := DatabaseURL()

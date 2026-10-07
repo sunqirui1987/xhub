@@ -1,18 +1,15 @@
 # catalog/publicdata
 
-## 这个目录做什么
+由 `internal/catalog` 嵌进网关二进制的静态 JSON。进程启动时不从磁盘读这些文件。写入方是测试和 `./cmd/pricedata`。
 
-这里存放 `catalog` 嵌进网关二进制的 JSON。它们是数据，不是 Go 代码。改价格或控制台表单字段，就是改这里的 JSON 然后重新编译。运行中的进程不会监视磁盘上的这些文件。
+| 文件 | 是什么 |
+| --- | --- |
+| `pricedata.json` | 从 Modelink 市场接口 `https://api.modelink.ai/v1/market/models` 生成的模型价格行。每个键都是真实模型 id。没有 LiteLLM 的样例行，也没有 `sample_spec`。 |
+| `routes.json` | 网关在自己的模块之后挂上的 HTTP 目录。`catalog.Load` 返回这些行。不在这个文件里、也不在模块上的路径是 JSON 404。 |
+| 旁边的供应商和字段 JSON | 添加模型时的公开载荷：端点类型在 Go 里登记（`internal/provider`），这个目录放生成好的价格和路由文档。 |
 
-## 文件
+`catalog.loadPriceDocument` 把 `pricedata.json` 解析一次。解析失败时留下空表，进程仍能启动；此时 `Cost` 返回 ok 为 false，调用方不能把这次调用记成免费。`LITELLM_LOCAL_MODEL_COST_MAP=true` 强制只用内置表，不再尝试远程价格源。
 
-- `model_cost_map.json` 是内置价格表，`catalog.CostMap` 读它。表里没有的模型不能当成 0 美元。
-- `autorouter_presets.json` 是控制台展示的自动路由预设。
-- `provider_create_fields.json` 描述操作员添加供应商部署时，控制台要画的字段。
-- `agent_create_fields.json` 描述创建智能体表单的字段。智能体产品面没有挂出来，但这份文档仍跟其它公开数据放在一起，字段定义不另找地方。
+手改的价格不会重写这个文件。`catalog/price_write.go` 留一份基线快照，再把数据库里的覆盖盖在上面。清掉覆盖就恢复基线那一行。
 
-## 怎么改这些数据
-
-改 JSON，保持合法，然后重新编译 `./cmd/gateway`。调用方不要用 `os.ReadFile` 打开这些文件。他们调用 `catalog.CostMap`、`catalog.PublicBody`，或者 `gateway/models` 里的重载函数。
-
-不要在 JSON 里写注释。名字要保持稳定：控制台和价格估算按模型名、字段名精确查找。
+English notes are in `readme.md` in this directory.

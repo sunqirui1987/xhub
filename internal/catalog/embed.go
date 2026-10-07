@@ -12,6 +12,10 @@ import (
 var embedOnce sync.Once
 
 // Embedded returns one embedded JSON document. The first valid document is logged once. A document that is not JSON is logged as an error.
+// 参数 name（string）：Embedded要查找或展示的名称。空串表示还没有命名；raw（[]byte）：原始文本或 JSON 字节。
+// 返回 []byte（[]byte）：Embedded的原始字节。没有内容时长度为 0。
+// 调用：catalog/classify.go、catalog/model_cost.go
+// 测试：无直接单测
 func Embedded(name string, raw []byte) []byte {
 	if !json.Valid(raw) {
 		logx.Error("catalog embed %s is not json bytes=%d", name, len(raw))
@@ -24,14 +28,8 @@ func Embedded(name string, raw []byte) []byte {
 //go:embed routes.json
 var routesJSON []byte
 
-//go:embed publicdata/agent_create_fields.json
-var agentFieldsJSON []byte
-
-//go:embed publicdata/provider_create_fields.json
-var providerFieldsJSON []byte
-
 //go:embed publicdata/autorouter_presets.json
 var autoRouterPresetsJSON []byte
 
-//go:embed publicdata/model_cost_map.json
-var modelCostMapJSON []byte
+//go:embed publicdata/pricedata.json
+var pricedataJSON []byte

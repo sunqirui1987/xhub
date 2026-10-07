@@ -6,7 +6,6 @@ import { modelCreationScope } from "@/utils/modelPermissions";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Card, CardContent } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchSelect, type SearchSelectOption } from "@/components/shared/SearchSelect";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Info } from "lucide-react";
@@ -32,7 +31,7 @@ import ConditionalPublicModelName from "./conditional_public_model_name";
 import LiteLLMModelNameField from "./litellm_model_name";
 import ConnectionErrorDisplay from "./model_connection_test";
 import ProviderSpecificFields from "./provider_specific_fields";
-import { TEST_MODES } from "./add_model_modes";
+import EndpointTypeField from "./endpoint_type_field";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { t } from "@/i18n";
@@ -51,6 +50,7 @@ interface AddModelFormProps {
   setShowAdvancedSettings: (show: boolean) => void;
   teams: Team[] | null;
   credentials: CredentialItem[];
+  modelCostMap?: Record<string, { endpoint_type?: string }> | null;
 }
 
 const connectionTestModelName = (values: MountedFormValues): string | undefined => {
@@ -75,6 +75,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
   setShowAdvancedSettings,
   teams,
   credentials,
+  modelCostMap,
 }) => {
   const testMode = useWatch({ control: form.control, name: "mode" }) as string | undefined;
   const [isResultModalVisible, setIsResultModalVisible] = useState<boolean>(false);
@@ -244,33 +245,7 @@ const AddModelForm: React.FC<AddModelFormProps> = ({
                       {/* Conditionally Render "Public Model Name" */}
                       <ConditionalPublicModelName />
 
-                      {/* Select Mode */}
-                      <MountedFormField label={t("Health check endpoint (optional)")} name="mode" className="mb-1">
-                        {(control) => (
-                          <Select
-                            items={[{ value: "", label: t("Not Set") }, ...TEST_MODES]}
-                            value={(control.value as string | undefined) ?? ""}
-                            onValueChange={(value: string | null) => {
-                              control.onChange(value);
-                            }}
-                          >
-                            <SelectTrigger id={control.id} className="w-full" aria-label={t("Health check endpoint (optional)")}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="">{t("Not Set")}</SelectItem>
-                              {TEST_MODES.map((mode) => (
-                                <SelectItem key={mode.value} value={mode.value}>
-                                  {mode.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </MountedFormField>
-                      <p className="text-sm text-muted-foreground mb-5 mt-1">
-                        {t("Choose an endpoint for health checks only. This does not restrict actual requests. Leave unset if unknown.")}
-                      </p>
+                      <EndpointTypeField selectedProvider={selectedProvider} modelCostMap={modelCostMap} />
 
                       {/* Credentials */}
                       <div className="mb-4">

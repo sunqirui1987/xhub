@@ -1,40 +1,19 @@
 # gateway/keys
 
-## How to use
+Virtual-key routes. Mounted as `keys.Module` before the catalog.
 
-Call the HTTP paths and the Go entry points in the sections below. Authenticate with the master key or an admin session unless a route is public.
+POST `/key/generate` creates a personal key for the caller unless the body sets another owner. The plaintext token is returned once, prefixed `sk-`. What is stored is `iam.HashKey` of that plaintext. POST `/key/service-account/generate` creates a service key owned by a team or a project. A team administrator can narrow `models` down to a subset of the team allow-list and cannot widen it.
 
-## Purpose
+`hashKeyToken` hashes values that start with `sk-` and passes a hash or an id through. `lookupKey` tries the hash first (`KeyByHash`) and then the key id, because the console sends the id and LiteLLM-compatible clients send the plaintext.
 
-`keys` is the HTTP API for virtual keys. Operators create a key, list keys, rotate a secret, reset spend, and block a key without sharing the master key. The plaintext secret is returned only by create and regenerate.
+GET `/key/list` is narrowed in SQL by `KeysScope`, not filtered after the rows are read. A platform administrator sees every key. A team administrator sees their own personal keys plus the service keys of teams they administer. A member sees their own personal keys. The master credential gets a deny-all scope so a forgotten authorize check cannot turn it into a cross-tenant list.
 
-## HTTP paths
+POST `/key/block`, `/key/unblock`, `/key/delete`, `/key/update`, `/key/regenerate` authorize `ActionKeyWrite` on that key id. Regenerate rotates the stored hash. POST `/key/{key}/reset_spend` zeros the key's spend counter. It does not rewrite `usage_events`.
 
-Send `Authorization: Bearer <master key or admin session>`.
+`key_alias` is the display name. RPM and TPM limits on the key are enforced later by `gateway/limits.go` against Redis keys `xhub:rpm:<Principal.Hash>` and `xhub:tpm:<Principal.Hash>`, not against `api_base|model`.
 
-- `POST /key/generate` creates a key. The JSON response includes `key` once.
-- `GET /key/list` and `POST /key/list` list keys. Filters include user, team, and alias.
-- `GET /key/info` reads one key. Pass the hash or the key alias the handler accepts. The stored hash is not a substitute for the plaintext in later calls.
-- `POST /key/update` changes budget, models, and metadata.
-- `POST /key/delete` deletes keys.
-- `POST /key/regenerate` rotates the secret and returns the new plaintext once.
-- `POST /key/block` and `POST /key/unblock` stop or restore use.
-- `POST /key/{key}/reset_spend` clears spend for that key.
-- `GET /key/aliases` lists aliases for pickers in the dashboard.
+## What this package does not do
 
-## Example
+It does not accept the key on `/v1/chat/completions`. That is `auth` plus `dataplane.Serve`. It does not count in-flight calls.
 
-```bash
-curl -s http://127.0.0.1:4000/key/generate \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"key_alias":"ci","models":["gpt-4o-mini"],"max_budget":10}'
-```
-
-Use the returned `key` as the bearer token on `/v1/chat/completions`.
-
-## Go callers
-
-The process mounts `keys.Module`. Other packages do not call `Generate` directly unless they implement `keys.Host`, which `*gateway.Server` does.
-
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

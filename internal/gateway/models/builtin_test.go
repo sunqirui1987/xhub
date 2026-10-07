@@ -108,10 +108,10 @@ func TestParseCatalogKeepsCategoryAndPrices(t *testing.T) {
 }
 
 func TestFillFromCostMapUsesPriceData(t *testing.T) {
-	item := CatalogModel{ID: "gpt-4o", Category: "llm"}
+	item := CatalogModel{ID: "gpt-oss-120b", Category: "llm"}
 	fillFromCostMap(&item)
 	if item.InputPrice == nil || item.OutputPrice == nil || *item.InputPrice <= 0 || *item.OutputPrice <= 0 {
-		t.Fatalf("price data missing for gpt-4o in=%v out=%v", item.InputPrice, item.OutputPrice)
+		t.Fatalf("price data missing for gpt-oss-120b in=%v out=%v", item.InputPrice, item.OutputPrice)
 	}
 	kept := 1.25
 	item.InputPrice = &kept

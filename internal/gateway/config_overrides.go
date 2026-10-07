@@ -13,6 +13,10 @@ import (
 var logTraceOnceConfigOverrides sync.Once
 
 // configOverride reads and stores Hashicorp Vault or CyberArk settings. An empty store is a config object with no values, not a 404.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 config_overrides.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) configOverride(w http.ResponseWriter, r *http.Request) {
 	logTraceOnceConfigOverrides.Do(func() { logx.Trace("enter gateway.configOverride") })
 
@@ -57,6 +61,10 @@ func (s *Server) configOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 // testConfigOverride reports whether a secret backend is configured. It does not dial an external vault.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；kind（string）：分类名，用来选择限额主体、日志类型或官方端点。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：仅在 config_overrides.go 内使用
+// 测试：无直接单测
 func (s *Server) testConfigOverride(w http.ResponseWriter, kind string) {
 	values := map[string]any{}
 	if saved, err := s.Store.GetKV("config_overrides", kind); err == nil {
@@ -77,6 +85,10 @@ func (s *Server) testConfigOverride(w http.ResponseWriter, kind string) {
 }
 
 // configOverrideBody is the settings document the admin tabs render.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；values（map[string]any）：配置Override正文读到的 JSON 对象。缺键表示没有该字段；deleted（bool）：为真时走deleted这一支。为假时保持原来的路径。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 config_overrides.go 内使用
+// 测试：无直接单测
 func configOverrideBody(kind string, values map[string]any, deleted bool) map[string]any {
 	if values == nil {
 		values = map[string]any{}
@@ -93,6 +105,10 @@ func configOverrideBody(kind string, values map[string]any, deleted bool) map[st
 }
 
 // configOverrideSchema lists the fields the admin tab can show for this backend.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点。
+// 返回 map[string]any（map[string]any）：配置Override模式的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 config_overrides.go 内使用
+// 测试：无直接单测
 func configOverrideSchema(kind string) map[string]any {
 	if kind == "hashicorp_vault" {
 		return map[string]any{

@@ -1,47 +1,29 @@
 # gateway/identity
 
-## How to use
+Management routes for accounts, organizations, teams, projects, and the audit list. Mounted by `identity.Module` from `gateway/routes.go` before the embedded catalog, so these paths win over a same path in `routes.json`.
 
-Call the HTTP paths and the Go entry points in the sections below. Authenticate with the master key or an admin session unless a route is public.
+The package does not import `gateway`. It asks a `Gate` for `RequireUser`, `Authorize`, and `Identity()`. `*Server` implements that gate in `wire.go`. A refused decision becomes 401, 403, or 404 through `WriteIAMError` / `WriteAuthz`. A missing object and an object the caller does not own are both 404. The handler does not say which one it was.
 
-## Purpose
+## Routes that change rows
 
-`identity` is the HTTP API for users, teams, organizations, projects, and budgets. The dashboard screens for those objects call these routes. The package does not import the gateway process. The process implements `Gate` and mounts `Module`.
+| Method and path | Handler | What it writes |
+| --- | --- | --- |
+| POST `/user/new` | `UserNew` | Platform account. Role is `admin` or `user` after `storedRolePtr`. |
+| POST `/user/update`, POST `/user/delete` | `UserUpdate`, `UserDelete` | Profile, block flag, or removal. Password changes also use POST `/user/set_password` and POST `/user/{user_id}/password`. |
+| POST `/organization/new` | `OrgNew` | Organization. Only a platform administrator. |
+| POST `/team/new` | `TeamNew` | Team. Display name is `team_alias`, else `team_name`. The caller becomes the first `team_admin` when the body names nobody. |
+| POST `/team/member_add` | `TeamMemberAdd` | Membership. Email is `user_email`, else `user_id`, else `email`. Role `team_admin` or `admin` becomes `iam.TeamAdmin`. Anything else, including a platform role, becomes `iam.TeamMember`. |
+| POST `/team/member_delete` | `TeamMemberRemove` | Removes by user id or email. An email stuffed into `user_id` is treated as an email, because account ids are not addresses. The last `team_admin` cannot be removed. |
+| POST `/project/new` | `ProjectNew` | Project under a team. Name is `project_alias`, else `project_name`. |
 
-## HTTP paths you call
+GET `/team/list` returns an array, which is what that path has always returned. A platform administrator sees every team. Anyone else sees the teams they belong to, with their own role on the row. GET `/team/info` attaches `members_with_roles` for the console detail page.
 
-Authenticate with the master key or an admin session.
+GET `/organization/list` and the member-add routes exist. Permission still comes from team membership. There is no organization-admin role and no project-admin role in `authz`.
 
-Users:
-
-- `POST /user/new` creates a user. `GET /user/list` lists users.
-- `GET /user/info` reads one user. `POST /user/update` edits the user. `POST /user/delete` deletes users.
-- `GET /user/available_roles` lists the roles an admin may assign.
-
-Teams:
-
-- `POST /team/new` creates a team. `GET /team/list` and `GET /v2/team/list` list teams. The v2 route is paged.
-- `GET /team/info?team_id=team_...` returns `team_info` and `team_memberships`. The dashboard detail page reads `team_info`.
-- `POST /team/update` and `POST /team/delete` edit or remove a team.
-- `POST /team/member_add`, `/team/member_update`, and `/team/member_delete` change membership.
-
-Organizations, projects, and budgets follow the same new, list, info, update, and delete pattern under `/organization`, `/project`, and `/budget`.
-
-Spend views:
-
-- `GET /spend/logs` and `GET /global/spend` summarize spend for the admin screens.
-
-## Example
-
-```bash
-curl -s "http://127.0.0.1:4000/team/info?team_id=team_19b51fd9ce95" \
-  -H "Authorization: Bearer sk-local-master"
-```
-
-A 404 means that team id is not in the database this process is using. Check `search_path` if you pointed the process at the `e2e` schema.
+GET `/audit/logs` reads `audit_logs` newest first. `iam` writes those rows. This package does not decide which admin action is audited.
 
 ## What this package does not do
 
-It does not send inference traffic and it does not hash virtual keys. Key plaintext is `gateway/keys`.
+It does not mint virtual keys (`gateway/keys`) and it does not list models (`gateway/models`). It does not check the key budget on an inference call.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

@@ -1,125 +1,25 @@
-# Guardrail Configuration Components
+# 护栏组件
 
-This directory contains reusable React components for configuring various guardrail types in the LiteLLM dashboard.
+控制台 `/guardrails` 用的 React 组件。它们编辑网关键值种类 `guardrails`（以及读取时一并列出的 `guardrail`）。保存之后，只有聊天推理会读到：`dataplane.Serve` 在 `op` 为 `chat` 或空时调用 `GuardrailBlocks`。官方内容生成不跑这些规则。
 
-## Azure Text Moderation Configuration
+匹配在网关 `gateway/guard`，不在浏览器里。动作是 `allow`、`block` 或 `redact`。`block` 和 `always_block` 直接拦截。`blocked_words` 和 `keywords` 做不区分大小写的包含判断。`redact` 把命中的词换成 `[REDACTED]`。拦住的聊天仍会记一条失败用量，状态 400，类型 `guardrail_failed`。
 
-### Overview
+## 这个目录里有什么
 
-The Azure Text Moderation configuration component allows users to configure Azure Content Safety settings for text moderation. It provides an intuitive interface for:
+| 文件 | 作用 |
+| --- | --- |
+| `GuardrailsPanel.tsx` | 列表页。拉护栏列表，打开添加表单和测试面板 |
+| `guardrail_table.tsx`、`guardrailTableColumns.tsx` | 表格列 |
+| `add_guardrail_form.tsx` | 新建或编辑一条护栏 |
+| `guardrail_info.tsx` | 单条详情 |
+| `guardrail_garden.tsx` 和 `guardrail_garden_data.ts` | 预置模式：金融、医疗、法律建议，暴力、自我伤害，偏见，越狱和数据外带 |
+| `content_filter/` | 词表和分类过滤的表单 |
+| `pii_components.tsx`、`pii_configuration.tsx` | PII 规则 |
+| `llm_judge/` | 用模型做判定的配置 |
+| `custom_code/` | 自定义代码护栏的表单字段 |
+| `tool_permission/` | 工具调用是否允许 |
+| `GuardrailTestPlayground.tsx` | 对 `POST /guardrails/apply_guardrail` 发一条样例文本 |
 
-- **Category Selection**: Choose which content categories to monitor (Hate, Sexual, SelfHarm, Violence)
-- **Global Severity Threshold**: Set a default severity level threshold for all categories
-- **Per-Category Thresholds**: Override the global threshold for specific categories (advanced)
+没有 Azure Content Safety 的配置组件，也没有按 0、2、4、6 分档的全局严重级别。那些字段不属于这个网关的匹配器。
 
-### Components
-
-#### `AzureTextModerationConfiguration`
-
-The main configuration component that renders the complete UI for Azure text moderation settings.
-
-**Props:**
-
-```typescript
-interface AzureTextModerationConfigurationProps {
-  categories: string[]; // Available categories
-  selectedCategories: string[]; // Currently selected categories
-  globalSeverityThreshold: number; // Global threshold (0, 2, 4, 6)
-  categorySpecificThresholds: { [key: string]: number }; // Per-category overrides
-  onCategorySelect: (category: string) => void; // Category selection handler
-  onGlobalSeverityChange: (threshold: number) => void; // Global threshold handler
-  onCategorySeverityChange: (category: string, threshold: number) => void; // Per-category handler
-}
-```
-
-#### `AzureTextModerationExample`
-
-A complete example showing how to integrate the configuration component with state management.
-
-### Usage Example
-
-```tsx
-import React, { useState } from "react";
-import { AzureTextModerationConfiguration, AZURE_TEXT_MODERATION_CATEGORIES } from "./guardrails";
-
-const MyComponent = () => {
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(["Hate", "Violence"]);
-  const [globalSeverityThreshold, setGlobalSeverityThreshold] = useState<number>(2);
-  const [categorySpecificThresholds, setCategorySpecificThresholds] = useState<{ [key: string]: number }>({});
-
-  const handleCategorySelect = (category: string) => {
-    setSelectedCategories((prev) =>
-      prev.includes(category) ? prev.filter((c) => c !== category) : [...prev, category],
-    );
-  };
-
-  const handleSave = () => {
-    const config = {
-      categories: selectedCategories,
-      severity_threshold: globalSeverityThreshold,
-      severity_threshold_by_category: categorySpecificThresholds,
-    };
-    // Save to backend...
-  };
-
-  return (
-    <AzureTextModerationConfiguration
-      categories={AZURE_TEXT_MODERATION_CATEGORIES.map((c) => c.name)}
-      selectedCategories={selectedCategories}
-      globalSeverityThreshold={globalSeverityThreshold}
-      categorySpecificThresholds={categorySpecificThresholds}
-      onCategorySelect={handleCategorySelect}
-      onGlobalSeverityChange={setGlobalSeverityThreshold}
-      onCategorySeverityChange={(category, threshold) =>
-        setCategorySpecificThresholds((prev) => ({ ...prev, [category]: threshold }))
-      }
-    />
-  );
-};
-```
-
-### Severity Levels
-
-The component supports Azure's severity levels:
-
-- **Level 0 (Safe)**: Content is appropriate and safe
-- **Level 2 (Low)**: Content may be inappropriate in some contexts
-- **Level 4 (Medium)**: Content is inappropriate and should be filtered
-- **Level 6 (High)**: Content is harmful and should be blocked
-
-### Content Categories
-
-Four predefined categories are supported:
-
-1. **Hate**: Content that attacks or uses discriminatory language based on protected characteristics
-2. **Sexual**: Content that describes sexual activity or other sexual content
-3. **SelfHarm**: Content that promotes, encourages, or depicts acts of self-harm
-4. **Violence**: Content that depicts death, violence, or physical injury
-
-### Configuration Output
-
-The component generates configuration objects compatible with the Azure Text Moderation guardrail:
-
-```json
-{
-  "categories": ["Hate", "Violence"],
-  "severity_threshold": 2,
-  "severity_threshold_by_category": {
-    "Hate": 4,
-    "Violence": 2
-  }
-}
-```
-
-## PII Configuration
-
-The existing PII configuration component provides similar functionality for configuring PII entity detection and actions (MASK/BLOCK).
-
-### Files
-
-- `azure_text_moderation_types.ts` - TypeScript interfaces and constants
-- `azure_text_moderation_configuration.tsx` - Main configuration component
-- `azure_text_moderation_example.tsx` - Usage example
-- `pii_configuration.tsx` - PII configuration component
-- `pii_components.tsx` - PII UI components
-- `types.ts` - PII TypeScript interfaces
+组件测试和文件放在一起（`*.test.tsx`）。它们渲染表单，不启动网关。

@@ -46,11 +46,12 @@ interface ReloadStatus {
 }
 
 interface CostMapSourceInfo {
-  source: "local" | "remote";
+  source: "market" | "local" | "remote";
   url: string | null;
   is_env_forced: boolean;
   fallback_reason: string | null;
   loaded_at: string | null;
+  generated_at?: string | null;
   source_revision: string | null;
   etag: string | null;
   model_count?: number | null;
@@ -358,10 +359,10 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
           <Card size="sm" className="mb-3 bg-muted/30">
             <CardContent className="space-y-2">
               <div className="flex items-center gap-2">
-                {sourceInfo.source === "remote" ? <Cloud className="size-4" /> : <Database className="size-4" />}
+                {sourceInfo.source === "market" ? <Cloud className="size-4" /> : <Database className="size-4" />}
                 <span className="text-sm font-medium">{t("Pricing Data Source")}</span>
                 <Badge variant="secondary" className="ml-auto uppercase">
-                  {sourceInfo.source === "remote" ? t("Remote") : t("Local")}
+                  {sourceInfo.source === "market" ? t("Modelink market") : t("Local")}
                 </Badge>
               </div>
 
@@ -375,7 +376,7 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
               {sourceInfo.url && (
                 <div className="flex items-start justify-between gap-2 text-xs">
                   <span className="shrink-0 text-muted-foreground">
-                    {sourceInfo.source === "remote" ? t("Loaded from:") : t("Attempted URL:")}
+                    {sourceInfo.source === "market" ? t("Loaded from:") : t("Attempted URL:")}
                   </span>
                   <Tooltip>
                     <TooltipTrigger render={<span className="max-w-60 truncate text-primary" />}>
@@ -383,6 +384,13 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
                     </TooltipTrigger>
                     <TooltipContent>{sourceInfo.url}</TooltipContent>
                   </Tooltip>
+                </div>
+              )}
+
+              {sourceInfo.generated_at && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{t("Catalog generated:")}</span>
+                  <span className="font-medium">{formatDateTime(sourceInfo.generated_at)}</span>
                 </div>
               )}
 

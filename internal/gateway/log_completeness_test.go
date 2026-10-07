@@ -45,13 +45,13 @@ func TestLogRecordRoundTripKeepsTheFactsTheConsoleReads(t *testing.T) {
 	cached := 20992
 	messages := `[{"role":"user","content":"hello"}]`
 	response := `{"id":"chatcmpl-probe","choices":[{"message":{"role":"assistant","content":"pong"}}]}`
-	proxy := `{"method":"POST","url":"/v1/chat/completions","headers":{"Authorization":"***","Content-Type":"application/json","X-Request-Id":"trace-probe"},"body":{"model":"gpt-4o"}}`
+	proxy := `{"method":"POST","url":"/v1/chat/completions","headers":{"Authorization":"***","Content-Type":"application/json","X-Request-Id":"trace-probe"},"body":{"model":"gpt-oss-120b"}}`
 
 	gw := &Server{IAM: db}
 	for i, id := range []string{"log-probe-a", "log-probe-b"} {
 		hit := i == 1
 		gw.persistSpend(live.SpendLog{
-			RequestID: id, CallType: "chat", Model: "gpt-4o",
+			RequestID: id, CallType: "chat", Model: "gpt-oss-120b",
 			KeyID: key.ID, KeyHash: key.TokenHash, KeyAlias: key.Name,
 			TeamID: teamID, TeamAlias: "Activity Team",
 			UserID: admin.ID, OwnerType: iam.OwnerService,

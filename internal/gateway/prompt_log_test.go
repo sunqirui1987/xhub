@@ -54,6 +54,11 @@ func TestPromptJSONKeepsHeadersBodyAndResponse(t *testing.T) {
 	if strings.Contains(proxy, "sk-local-master") || strings.Contains(messages, "sk-") {
 		t.Fatalf("secret leaked: %s", proxy)
 	}
+	polled := httptest.NewRequest(http.MethodGet, "/api/v1/generate/record-info?taskId=suno-1", nil)
+	_, _, polledProxy := promptJSON(polled, nil, []byte(`{"data":{"taskId":"suno-1"}}`))
+	if !strings.Contains(polledProxy, "/api/v1/generate/record-info?taskId=suno-1") {
+		t.Fatalf("query dropped %s", polledProxy)
+	}
 }
 
 // TestSpendLogRoundTripReturnsPromptPayload stores one call through the same

@@ -1,4 +1,15 @@
-// Package dataplane sends one inference call: it picks a deployment, encodes the request, and moves to the next deployment after a failure.
+// serve.go is the adapted inference loop: chat, embeddings, images, audio,
+// rerank, and the other catalog operations. Bypass does not enter this file.
+//
+// Serve order: identity, body, model name, budget, guardrail, extensions,
+// cache, route, then one deployment at a time. A deployment without a key
+// is skipped. A 5xx or 429 tries the next attempt and then the next
+// deployment. The first response that is not one of those is the one that
+// is logged and returned.
+//
+// Before RecordSpend the loop calls RememberExchange and AnnotateCall so the
+// usage row has headers, bodies, provider, TTFT, session, and deployment.
+
 package dataplane
 
 import (
@@ -7,8 +18,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +27,6 @@ import (
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
-
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
@@ -28,8 +36,10 @@ var (
 	errEmptyUpstream  = errors.New("empty upstream stream")
 )
 
-// dropPaused removes deployments the dashboard has paused. A paused model must
-// not keep serving while the switch says it is stopped.
+// dropPaused removes deployments the dashboard has paused. A paused model mustnot keep serving while the switch says it is stopped.
+// 参数 pool：已经按模型名匹配过的部署。
+// 返回 active：model_info.blocked 不为 true 的部署。paused：被拿掉的个数。
+// 调用：Serve、pickDeployment。测试没有单独用例，失败日志夹具里的模型都未暂停。
 func dropPaused(pool []config.ModelEntry) ([]config.ModelEntry, int) {
 	active := make([]config.ModelEntry, 0, len(pool))
 	paused := 0
@@ -46,10 +56,15 @@ func dropPaused(pool []config.ModelEntry) ([]config.ModelEntry, int) {
 }
 
 // Serve runs one inference. It picks deployments with the routing strategy, encodes the upstream request, and tries the next deployment after a failure.
-// Serve calls EnforceIdentityLimits for the model allow-list, budget, and rate. When that check returns false the response is already written. Budget and parallel refusals from the hook engine are written here as 429.
-// After those checks, and before the cache and the upstream, extensions run in registration order. A refusal writes an error and returns.
-// An empty extension registry allows the call. A retry count below 1 is treated as one attempt. An empty api_base uses the provider default when one exists. A deployment that still has no key or no base is skipped.
-func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
+// Serve 跑一次适配推理。预算或护栏拒绝时响应已经写好，函数直接返回。
+// 扩展按注册顺序在缓存和上游之前运行。重试次数小于 1 时按 1 次。没有 api_base
+// 时用供应商默认地址。没有密钥或地址的部署跳过。
+//
+// 参数 h：Adapted，不含官方任务钉。w：调用方响应。r：入站请求，正文只读一次。
+// 参数 op：目录操作名，例如 chat、embedding。
+// 返回：无。成功、失败和拒绝都写在 w 上。
+// 调用：gateway/limits.go dataPlane。测试：failure_log_test.go 的 TestServeLogs*。
+func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	traceHop(r.URL.Path)
 	logx.Trace("process path=%s step=start op=%s", r.URL.Path, op)
 	start := time.Now()
@@ -85,8 +100,12 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 		return
 	}
 	if op == "chat" || op == "" {
-		if blocked, msg := h.GuardrailBlocks(body); blocked {
+		if blocked, msg := h.GuardrailBlocks(callID, body); blocked {
 			logx.Error("process path=%s step=guardrail blocked model=%s", r.URL.Path, alias)
+			// The refusal is still a request. Record it so the logs drawer can
+			// show which guardrail stopped the call.
+			h.RememberExchange(callID, r, raw, nil)
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			httpx.WriteTypedError(w, r.URL.Path, 400, "guardrail_failed", msg)
 			return
 		}
@@ -293,7 +312,10 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
 			depID := router.DeploymentID(rawDep)
 			h.RememberExchange(callID, r, raw, respBody)
-			h.AnnotateCall(callID, CallNote{Provider: provider, CacheKey: ck, SessionID: plan.SessionID, DeploymentID: depID})
+			h.AnnotateCall(callID, CallNote{
+				TTFTMs: ttftMillis(elapsed), Provider: provider, CacheKey: ck,
+				SessionID: plan.SessionID, DeploymentID: depID,
+			})
 			h.CommitRoute(plan, depID, responseID(respBody))
 			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, depID)
 			return
@@ -324,6 +346,10 @@ func Serve(h Host, w http.ResponseWriter, r *http.Request, op string) {
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
 }
 
+// preferDeployment 把钉住的部署移到候选列表的第一位。id 为空或不在列表里时顺序不变。
+// 参数 pool：路由排序后的部署。id：deployment_affinity 里存的 api_base|model。
+// 返回：同一批部署，钉住的那条在下标 0。
+// 调用：Serve 在 PlanRoute 给出 Pinned 之后。测试：prefer_test.go TestPreferDeployment*。
 func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
 	if id == "" {
 		return pool
@@ -344,42 +370,11 @@ func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
 	return pool
 }
 
-func ttftMillis(d time.Duration) *int {
-	if d <= 0 {
-		return nil
-	}
-	ms := int(d.Milliseconds())
-	if ms < 1 {
-		ms = 1
-	}
-	return &ms
-}
-
-func responseID(raw []byte) string {
-	var doc map[string]any
-	if json.Unmarshal(raw, &doc) == nil {
-		if id, ok := doc["id"].(string); ok {
-			return id
-		}
-	}
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
-			continue
-		}
-		if json.Unmarshal(line, &doc) != nil {
-			continue
-		}
-		if id, ok := doc["id"].(string); ok && id != "" {
-			return id
-		}
-	}
-	return ""
-}
-
-// applyExtensions runs extensions in registration order before the upstream HTTP call. A refusal has already written the response and returns true.
-// A missing status defaults to 400 and a missing error code defaults to extension_refused. With nothing registered it returns false.
-func applyExtensions(w http.ResponseWriter, r *http.Request, h Host, op, alias string) bool {
+// applyExtensions 按注册顺序跑推理前扩展。任一扩展拒绝时响应已写好，并返回真。
+// 参数 w、r：写拒绝和读取路径。h：提供扩展注册表。op、alias：传给扩展的操作和模型名。
+// 返回：true 表示调用方应停止，不再访问上游。
+// 调用：Serve。测试夹具的扩展注册表是空的，所以现有测试走 false 这条。
+func applyExtensions(w http.ResponseWriter, r *http.Request, h Adapted, op, alias string) bool {
 	d := h.Extensions().Run(plugin.Call{Op: op, Model: alias, Path: r.URL.Path})
 	for k, v := range d.Header {
 		w.Header().Set(k, v)
@@ -401,297 +396,4 @@ func applyExtensions(w http.ResponseWriter, r *http.Request, h Host, op, alias s
 	}
 	httpx.WriteTypedError(w, r.URL.Path, status, code, msg)
 	return true
-}
-
-// EstimateTokens estimates a token hold from the body length. It is not a tokenizer. It only gives budget and TPM checks an upper bound.
-func EstimateTokens(body map[string]any) int {
-	n := 32
-	if mt := asInt(body["max_tokens"]); mt > 0 {
-		n += mt
-	} else {
-		n += 64
-	}
-	switch t := body["messages"].(type) {
-	case []any:
-		for _, m := range t {
-			if mm, ok := m.(map[string]any); ok {
-				n += len(textOf(mm["content"])) / 4
-			}
-		}
-	}
-	if p, ok := body["prompt"].(string); ok {
-		n += len(p) / 4
-	}
-	if p, ok := body["input"].(string); ok {
-		n += len(p) / 4
-	}
-	return n
-}
-
-// textOf reads v as a string. A non-string returns an empty string.
-func textOf(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-// asInt converts a JSON number to int. A float64 is truncated. Any other type returns 0.
-func asInt(v any) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	default:
-		return 0
-	}
-}
-
-var secretInErr = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+|(?i)bearer\s+\S+`)
-
-// safeErr is an error string with URLs reduced to a host and secrets removed.
-func safeErr(err error) string {
-	if err == nil {
-		return ""
-	}
-	s := secretInErr.ReplaceAllString(err.Error(), "***")
-	return regexp.MustCompile(`https?://[^\s"'<>]+`).ReplaceAllStringFunc(s, func(raw string) string {
-		host := baseHost(strings.TrimRight(raw, `",)`))
-		if host == "" {
-			return "***"
-		}
-		return host
-	})
-}
-
-// baseHost is the hostname of an upstream address. Userinfo, path, and query stay out of the log.
-func baseHost(apiBase string) string {
-	u, err := url.Parse(apiBase)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return u.Hostname()
-}
-
-// trimBase removes a trailing slash from api_base so joining an endpoint path does not produce a double slash.
-func trimBase(s string) string {
-	for len(s) > 0 && s[len(s)-1] == '/' {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
-// logMetrics records cache hit, time to first token, and output tokens per second for one finished call.
-// A cache hit did not generate tokens, so tokens_per_s stays 0. ttft is the time until the first byte, or the whole call when the body arrives at once.
-func logMetrics(path, model string, cacheHit bool, pt, ct int, ttft, elapsed time.Duration) {
-	window := elapsed - ttft
-	if window <= 0 {
-		window = elapsed
-	}
-	perSec := 0.0
-	if !cacheHit {
-		perSec = tokensPerSecond(ct, window)
-	}
-	logx.Info("process path=%s step=metrics model=%s cache_hit=%t ttft=%s prompt_tokens=%d completion_tokens=%d total_tokens=%d tokens_per_s=%.2f", path, model, cacheHit, ttft, pt, ct, pt+ct, perSec)
-}
-
-// tokensPerSecond is completion tokens divided by the generation window. A zero window or zero tokens is 0, not infinity.
-func tokensPerSecond(completion int, window time.Duration) float64 {
-	if completion <= 0 || window <= 0 {
-		return 0
-	}
-	return float64(completion) / window.Seconds()
-}
-
-// completeUsage fills token counts the stream did not report. A Responses
-// stream often ends without a usage object; the assistant text is still there,
-// and billing it as zero completion tokens drops the output cost.
-func completeUsage(usage map[string]any, body map[string]any, streamed []byte) map[string]any {
-	if usage == nil {
-		usage = map[string]any{}
-	}
-	pt, ct := usageCounts(usage)
-	if pt == 0 {
-		if n := EstimateTokens(body); n > 0 {
-			usage["prompt_tokens"] = n
-		}
-	}
-	if ct == 0 {
-		if n := outputTokens(streamed); n > 0 {
-			usage["completion_tokens"] = n
-		}
-	}
-	return usage
-}
-
-func outputTokens(raw []byte) int {
-	var b strings.Builder
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
-			continue
-		}
-		var doc map[string]any
-		if json.Unmarshal(line, &doc) != nil {
-			continue
-		}
-		if choices, ok := doc["choices"].([]any); ok && len(choices) > 0 {
-			choice, _ := choices[0].(map[string]any)
-			delta, _ := choice["delta"].(map[string]any)
-			if part, ok := delta["content"].(string); ok {
-				b.WriteString(part)
-			}
-		}
-		if doc["type"] == "response.output_text.delta" {
-			if part, ok := doc["delta"].(string); ok {
-				b.WriteString(part)
-			}
-		}
-	}
-	if b.Len() == 0 {
-		return 0
-	}
-	n := b.Len() / 4
-	if n < 1 {
-		n = 1
-	}
-	return n
-}
-
-// usageCounts reads prompt and completion counts. input_tokens and output_tokens are accepted when the OpenAI names are absent.
-func usageCounts(usage map[string]any) (pt, ct int) {
-	if usage == nil {
-		return 0, 0
-	}
-	pt = asInt(usage["prompt_tokens"])
-	if pt == 0 {
-		pt = asInt(usage["input_tokens"])
-	}
-	ct = asInt(usage["completion_tokens"])
-	if ct == 0 {
-		ct = asInt(usage["output_tokens"])
-	}
-	return pt, ct
-}
-
-// bodyUsage reads the usage object from a JSON response. A body without usage contributes zero tokens.
-func bodyUsage(raw []byte) (pt, ct int) {
-	var doc map[string]any
-	if json.Unmarshal(raw, &doc) != nil {
-		return 0, 0
-	}
-	usage, _ := doc["usage"].(map[string]any)
-	return usageCounts(usage)
-}
-
-// pipeResponsesAsChat copies a Qiniu bypass Responses stream as chat completion chunks.
-// An error status is forwarded unchanged so the client still sees the provider message.
-func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.Time, model string) (bool, map[string]any, time.Duration, []byte) {
-	defer resp.Body.Close()
-	buf := make([]byte, 4096)
-	flusher, _ := w.(http.Flusher)
-	wrote := false
-	var ttft time.Duration
-	var pending []byte
-	var captured []byte
-	var usage map[string]any
-	write := func(chunk []byte) {
-		if len(chunk) == 0 {
-			return
-		}
-		if !wrote {
-			ttft = time.Since(start)
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(resp.StatusCode)
-			wrote = true
-		}
-		_, _ = w.Write(chunk)
-		if flusher != nil {
-			flusher.Flush()
-		}
-		if len(captured) < 2<<20 {
-			take := len(chunk)
-			if len(captured)+take > 2<<20 {
-				take = (2 << 20) - len(captured)
-			}
-			captured = append(captured, chunk[:take]...)
-		}
-		usage = streamUsage(chunk, usage)
-	}
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			pending = append(pending, buf[:n]...)
-			emit, rest := llm.ResponsesSSEToChat(pending, model, false)
-			pending = rest
-			write(emit)
-		}
-		if err != nil {
-			emit, _ := llm.ResponsesSSEToChat(pending, model, true)
-			write(emit)
-			return wrote, usage, ttft, captured
-		}
-	}
-}
-
-// pipeStream copies upstream SSE to the client and tries to extract usage from the stream. It returns wrote false when no byte has been written yet.
-// ttft is the time from start until the first byte. It stays 0 when the body is empty.
-func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bool, map[string]any, time.Duration, []byte) {
-	defer resp.Body.Close()
-	buf := make([]byte, 4096)
-	flusher, _ := w.(http.Flusher)
-	wrote := false
-	var ttft time.Duration
-	var pending []byte
-	var captured []byte
-	var usage map[string]any
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			if !wrote {
-				ttft = time.Since(start)
-				w.Header().Set("Content-Type", "text/event-stream")
-				w.WriteHeader(resp.StatusCode)
-				wrote = true
-			}
-			_, _ = w.Write(buf[:n])
-			if flusher != nil {
-				flusher.Flush()
-			}
-			if len(captured) < 2<<20 {
-				take := n
-				if len(captured)+take > 2<<20 {
-					take = (2 << 20) - len(captured)
-				}
-				captured = append(captured, buf[:take]...)
-			}
-			pending = append(pending, buf[:n]...)
-			usage = streamUsage(pending, usage)
-			if len(pending) > 1<<20 {
-				pending = pending[len(pending)-4096:]
-			}
-		}
-		if err != nil {
-			return wrote, usage, ttft, captured
-		}
-	}
-}
-
-// streamUsage finds the last usage object in the SSE buffer already received. If none is present it keeps prev.
-func streamUsage(raw []byte, prev map[string]any) map[string]any {
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		line = bytes.TrimPrefix(line, []byte("data:"))
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
-			continue
-		}
-		var doc map[string]any
-		if json.Unmarshal(line, &doc) != nil {
-			continue
-		}
-		if u, ok := doc["usage"].(map[string]any); ok {
-			prev = u
-		}
-	}
-	return prev
 }

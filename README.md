@@ -9,7 +9,17 @@
 
 Playground 复制出来的调用示例，以及控制台自己的请求，都指向网关，不指向 `:3000`。网关不提供页面。
 
-文档：[设计修复方案](docs/README.md)
+## 读哪份文档
+
+[docs/README.md](docs/README.md) 把文档分成三层，不要混读：
+
+- `docs/current/` 是现在跑在进程里的规则（团队、用户、权限、测试）。和代码冲突时以代码为准。
+- `docs/design/` 是目标方案，多数还没实现。里面写着的预算预占、结算账本、统一异步媒体状态机，不是今天的行为。
+- 各目录的 `readme.md` / `readme_cn.md` 描述该目录代码现在做什么。例如 `internal/hooks` 只数本进程在途调用，不查预算；`internal/provider/qiniu` 的内容生成路径是 `/v3/contents/generations/tasks`，`internal/provider/volcengine` 是 `/api/v3/contents/generations/tasks`，两者不是同一套接口。
+
+## 一次调用怎么走进网关
+
+客户端把 `base_url` 设为 `:4000`。`engine.go` 的 `Handler` 先看幂等键，再在 Gin 之前做 bypass 匹配（`provider.Match`）。命中则 `dataplane.ServeBypass`：创建官方任务不扣费，任务 id 钉 7 天（`official_task:v1:`），第一次带 usage 的后续查询才记一次账（`official_billed:v1:`）。没匹配上的路径进 Gin。普通推理最后到 `dataplane.Serve`：先身份和预算，再护栏（仅聊天），再 `hooks.Begin` 计在途，再非流式缓存，再按部署 id `api_base|model` 选上游。密钥 RPM/TPM 用的是令牌哈希 `Principal.Hash`，Redis 键是 `xhub:rpm:` 和 `xhub:tpm:`，不是 `api_base|model`。
 
 ## 权限模型
 

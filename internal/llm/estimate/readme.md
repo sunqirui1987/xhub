@@ -1,35 +1,15 @@
 # llm/estimate
 
-## Purpose
+Local token estimates and the OpenAI parameter list a model claims to support. `gateway/tokens.go` calls this for `GET` token-count utilities. `dataplane.EstimateTokens` is a separate, smaller upper bound used before the upstream call for budget and TPM. Do not treat the two numbers as the same counter.
 
-`llm/estimate` prices a call from token counts and provider discounts, and it estimates how many tokens a prompt will use. A missing price must not become zero. A failed token count returns an error instead of pretending the prompt was empty.
+`CountTokens(model, prompt, messages)` follows the local LiteLLM `token_counter` for OpenAI chat. A non-empty prompt, or a nil message list, is counted as plain text. Otherwise each message adds `tokens_per_message`, then the role and the content, and the total adds 3 reply-priming tokens. The tokenizer is `tokenizer.ForModel`. An unknown model name falls back to `cl100k_base`. The returned kind string is `openai_tokenizer` on the success path. A tokenizer that cannot be loaded returns `0, "", err`.
 
-## Features
+`ModelUsedForCount` strips one provider prefix from a deployment model id so `openai/gpt-4o-mini` is counted as `gpt-4o-mini`. `gateway/tokens.go` `modelUsedForCount` uses the deployment's `litellm_params.model` when the request model matches a deployment, and otherwise the request model itself.
 
-- `TokenCost` multiplies prompt and completion tokens by per-token rates.
-- `ApplyDiscount` and `ApplyMargin` adjust a base cost with the provider maps the dashboard stores. `Margin` carries a percent and an optional fixed fee.
-- `CountTokens` estimates a token count for a model, a raw prompt, or a chat message list.
-- `OpenAISupportedParams` lists the OpenAI parameters a model claims to support.
-- `ModelUsedForCount` picks the deployment model when the request alias and the upstream model differ.
-- `MapTrafficType` and `NormalizeServiceTier` normalize the tier strings the cost view understands.
-
-## How another package uses it
-
-Import `github.com/sunqirui1987/xhub/internal/llm/estimate`.
-
-```go
-n, _, err := estimate.CountTokens("gpt-4o-mini", "", messages)
-if err != nil {
-    return err
-}
-input, output := estimate.TokenCost(n, completion, inputRate, outputRate)
-final, percent, amount := estimate.ApplyDiscount(input+output, "openai", discounts)
-```
-
-Rates come from `catalog.CostMap`, not from this package. Pass the rates in. If the map has no row for the model, do not call `TokenCost` with zeros.
+`OpenAISupportedParams` lists the parameters `GET /utils/supported_openai_params` returns. `gpt-4` and `gpt-3.5-turbo-16k` omit `response_format`. Models that appear in the catalog also include `user`.
 
 ## What this package does not do
 
-It does not write a spend log. `store` and `live` persist the number you compute.
+It does not read the price map and it does not multiply by dollars. That is `catalog.Cost`. It does not count tool-call argument text inside a finished completion; output tokens for a stored call are filled in `dataplane/usage.go` from the upstream usage object or from streamed text.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

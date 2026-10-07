@@ -1,4 +1,8 @@
-// Package dataplane reads Redis state on the request path and flushes the spend queue into PostgreSQL.
+// live.go reads Redis for the router's cooldown, latency, and usage snapshot,
+// and flushes the queued spend rows into PostgreSQL. The request path calls
+// State, RecordFailure, RecordLatency, and RecordUsage. FlushLoop is started
+// by the process only when Redis is configured.
+
 package dataplane
 
 import (
@@ -14,9 +18,11 @@ import (
 
 var logTraceOnceLive sync.Once
 
-// State gives the router the in-process concurrency plus cooldown, latency, and usage from Redis.
-// Without Redis only Busy is filled. Cooldown and latency stay empty, and the router uses its local strategy.
-func State(h Host) router.State {
+// State 组装这一刻的在途请求、冷却、延迟和用量，交给路由器排序。没有 Redis 时只有在途请求。
+// 参数 h：Runtime。
+// 返回：router.State。
+// 调用：gateway routerState。测试不连 Redis，prefer_test.go 使用空 State。
+func State(h Runtime) router.State {
 	logTraceOnceLive.Do(func() { logx.Trace("enter dataplane.State") })
 
 	st := router.State{Busy: h.BusyMap()}
@@ -34,9 +40,12 @@ func State(h Host) router.State {
 	return st
 }
 
-// RecordFailure counts a failure using the current router settings. An allowed_fails below 1 does not write Redis.
-// A cooldown_time of 0 or a missing value cools down for one minute, matching the LiteLLM default.
-func RecordFailure(h Host, id string) {
+// RecordFailure 按当前路由设置记一次失败。allowed_fails 小于 1 时不写 Redis。
+// cooldown_time 为 0 或缺失时冷却一分钟。
+// 参数 h：Runtime。id：部署 id。空 id 直接返回。
+// 返回：无。
+// 调用：gateway noteFailure，由 Serve 的 NoteFailure 转来。无单独测试。
+func RecordFailure(h Runtime, id string) {
 	redis := h.Redis()
 	if redis == nil || id == "" {
 		return
@@ -53,7 +62,10 @@ func RecordFailure(h Host, id string) {
 	_ = redis.RecordFailure(id, allowed, cd)
 }
 
-// asFloat converts a JSON number to float64. An int is accepted. Any other type returns 0.
+// asFloat 把路由配置里的数字收成 float64。类型不符时为 0。
+// 参数 v：RouterDocument 里的 cooldown_time 或 allowed_fails。
+// 返回：浮点数，无法识别时为 0。
+// 调用：RecordFailure。无单独测试。
 func asFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
@@ -65,24 +77,33 @@ func asFloat(v any) float64 {
 	}
 }
 
-// RecordLatency stores the milliseconds of one successful call. Without Redis it returns immediately.
-func RecordLatency(h Host, id string, ms float64) {
+// RecordLatency 把这次延迟累进 Redis，供下次排序使用。没有 Redis 时直接返回。
+// 参数 id：部署 id。ms：耗时毫秒。
+// 返回：无。
+// 调用：gateway noteLatency。无单独测试。
+func RecordLatency(h Runtime, id string, ms float64) {
 	if h.Redis() == nil {
 		return
 	}
 	_ = h.Redis().AddLatency(id, ms)
 }
 
-// RecordUsage adds this call's tokens to the deployment's minute bucket. Without Redis it returns immediately.
-func RecordUsage(h Host, id string, tokens int) {
+// RecordUsage 把这次 token 数累进 Redis。没有 Redis 时直接返回。
+// 参数 id：部署 id。tokens：本次 token 数。
+// 返回：无。
+// 调用：gateway noteUsage。无单独测试。
+func RecordUsage(h Runtime, id string, tokens int) {
 	if h.Redis() == nil {
 		return
 	}
 	_ = h.Redis().AddUsage(id, tokens)
 }
 
-// FlushLoop writes Redis spend and logs into PostgreSQL every 60 seconds. The caller should run it on its own after the process starts.
-func FlushLoop(h Host) {
+// FlushLoop 每分钟调用一次 Flush，直到进程退出。只在配置了 Redis 时启动。
+// 参数 h：Runtime。返回：无。这个函数不返回，直到进程退出。
+// 调用：gateway flushLoop，且只在配置了 Redis 时。无单测。
+// 测试：无直接单测
+func FlushLoop(h Runtime) {
 	t := time.NewTicker(60 * time.Second)
 	defer t.Stop()
 	for range t.C {
@@ -95,10 +116,12 @@ var SpendAck = func(c *live.Client, deltas map[string]float64, n int, head strin
 	return c.AckFlushed(deltas, n, head)
 }
 
-// Flush writes the spend logs currently queued in Redis into PostgreSQL once.
-// The Redis acknowledgement runs only after the transaction commits. If acknowledgement fails, both sides keep the data so the next flush can retry.
-// Hot spend and the log prefix are acknowledged together so one side is not dropped without the other.
-func Flush(h Host) {
+// Flush 把 Redis 队列里的花费日志写入 PostgreSQL，成功后再从队列确认删除。
+// 参数 h：Runtime。Redis 或 Identity 为 nil 时立即返回。
+// 返回：无。
+// 调用：FlushLoop 和 gateway FlushSpend。无单测。
+// 测试：无直接单测
+func Flush(h Runtime) {
 	redis := h.Redis()
 	db := h.Identity()
 	if redis == nil || db == nil {
@@ -134,7 +157,7 @@ func Flush(h Host) {
 			EndedAt: end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
 			KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
 			Provider: row.Provider, CachedTokens: row.CachedTokens,
-			SessionID: row.SessionID, CacheKey: row.CacheKey,
+			SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
 		}
 		records = append(records, rec)
 	}
@@ -149,7 +172,10 @@ func Flush(h Host) {
 	_ = SpendAck(redis, hotDeltas(logs), n, head)
 }
 
-// hotDeltas totals the spend each key, team, user, and organization should gain from a batch. A zero or invalid row is skipped.
+// hotDeltas 把一批花费日志按密钥、团队、用户、组织和项目拆成要回写的热计数。
+// 参数 logs：Redis 队列里取出的花费日志。
+// 返回：live.SpendRef 到金额的映射，交给 Redis 确认。
+// 调用：Flush。测试：live_test.go TestHotDeltasIncludesProject。
 func hotDeltas(logs []live.SpendLog) map[string]float64 {
 	out := map[string]float64{}
 	for _, row := range logs {

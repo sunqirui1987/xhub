@@ -1,45 +1,29 @@
 # gateway/identity
 
-## 怎么使用
+账号、组织、团队、项目和审计列表的管理路由。由 `gateway/routes.go` 里的 `identity.Module` 挂上，早于嵌入的目录，所以这些路径赢过 `routes.json` 里的同名路径。
 
-按下面的 HTTP 路径或 Go 入口调用。除了公开路由，请求都要带主密钥或管理员会话。
+这个包不导入 `gateway`。它向 `Gate` 要 `RequireUser`、`Authorize` 和 `Identity()`。`*Server` 在 `wire.go` 里实现这个门。拒绝的判定经 `WriteIAMError` / `WriteAuthz` 变成 401、403 或 404。不存在的对象和调用方不拥有的对象都是 404。处理函数不说明是哪一种。
 
-## 这个模块做什么
+## 会改行的路由
 
-`identity` 是用户、团队、组织、项目和预算的 HTTP 接口。控制台这些页面调用这里的路由。这个包不引用网关进程。进程实现 `Gate` 并装上 `Module`。
+| 方法和路径 | 处理函数 | 写什么 |
+| --- | --- | --- |
+| POST `/user/new` | `UserNew` | 平台账号。角色经 `storedRolePtr` 收成 `admin` 或 `user`。 |
+| POST `/user/update`、POST `/user/delete` | `UserUpdate`、`UserDelete` | 资料、封禁或删除。改密码还走 POST `/user/set_password` 和 POST `/user/{user_id}/password`。 |
+| POST `/organization/new` | `OrgNew` | 组织。只有平台管理员。 |
+| POST `/team/new` | `TeamNew` | 团队。显示名是 `team_alias`，否则 `team_name`。正文没指定管理员时，调用方成为第一位 `team_admin`。 |
+| POST `/team/member_add` | `TeamMemberAdd` | 成员。邮箱依次取 `user_email`、`user_id`、`email`。角色 `team_admin` 或 `admin` 收成 `iam.TeamAdmin`。其余包括平台角色都收成 `iam.TeamMember`。 |
+| POST `/team/member_delete` | `TeamMemberRemove` | 按用户 id 或邮箱移除。塞进 `user_id` 的邮箱当成邮箱，因为账号 id 不是地址。最后一位 `team_admin` 不能被移除。 |
+| POST `/project/new` | `ProjectNew` | 团队下的项目。名称是 `project_alias`，否则 `project_name`。 |
 
-## 你要调用的 HTTP 路径
+GET `/team/list` 返回数组，这条路径一直如此。平台管理员看见全部团队。其他人看见自己所在的团队，行上带着自己的角色。GET `/team/info` 给控制台详情页附上 `members_with_roles`。
 
-用主密钥或管理员会话鉴权。
+GET `/organization/list` 和成员添加路由是有的。权限仍然来自团队成员关系。`authz` 里没有组织管理员角色，也没有项目管理员角色。
 
-用户：
-
-- `POST /user/new` 创建用户。`GET /user/list` 列出用户。
-- `GET /user/info` 读取一个用户。`POST /user/update` 修改。`POST /user/delete` 删除。
-- `GET /user/available_roles` 列出管理员可以分配的角色。
-
-团队：
-
-- `POST /team/new` 创建团队。`GET /team/list` 和 `GET /v2/team/list` 列出团队。v2 是分页的。
-- `GET /team/info?team_id=team_...` 返回 `team_info` 和 `team_memberships`。控制台详情页读 `team_info.members_with_roles`。团队页能改什么，见 [团队管理](../../../docs/current/14-team-management.md)。
-- `POST /team/update` 和 `POST /team/delete` 修改或删除团队。
-- `POST /team/member_add`、`/team/member_update`、`/team/member_delete` 修改成员。
-
-组织、项目和预算在 `/organization`、`/project`、`/budget` 下使用同样的 new、list、info、update、delete。
-
-花费视图：
-
-- `GET /spend/logs` 和 `GET /global/spend` 给管理页面做汇总。
-
-## 例子
-
-```bash
-curl -s "http://127.0.0.1:4000/team/info?team_id=team_19b51fd9ce95" \
-  -H "Authorization: Bearer sk-local-master"
-```
-
-404 表示这个进程使用的数据库里没有这个团队。如果进程连的是 `e2e` schema，先检查 `search_path`。
+GET `/audit/logs` 按最新在前读 `audit_logs`。这些行由 `iam` 写入。这个包不决定哪次管理动作要审计。
 
 ## 这个包不做什么
 
-它不发送推理流量，也不哈希虚拟密钥。密钥明文在 `gateway/keys`。
+它不签发虚拟密钥（`gateway/keys`），也不列出模型（`gateway/models`）。它不在推理调用上查密钥预算。
+
+English notes are in `readme.md` in this directory.

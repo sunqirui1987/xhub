@@ -1,4 +1,15 @@
-// Package gateway registers routes on Gin. Dedicated handlers are mounted first, and the remaining catalog paths are mounted after them.
+// ingress.go mounts catalog paths onto Gin after the modules have mounted.
+// handle is the only registration function. A method and pattern already in
+// s.registered is left alone, which is why a module route beats a catalog
+// route for the same path. Gin parameters are renamed to :pN so two templates
+// that use different placeholder names at the same position do not conflict.
+// The original name is written back with SetPathValue before the handler runs.
+//
+// handlerFor picks the inference family. The default is serveFamilyRoute,
+// which enters the chat data plane. Paths that contain /images, /audio,
+// /rerank, /videos, /responses, /files, or /realtime stay on their own
+// handlers, and those handlers still record spend through the same data plane.
+
 package gateway
 
 import (
@@ -15,10 +26,11 @@ import (
 
 var logTraceOnceIngress sync.Once
 
-// handle mounts one "METHOD /path" pattern on Gin.
-//
-// A {param} in the path becomes :pN per segment. The same position keeps the same parameter name so Gin wildcards do not conflict.
-// A method and pattern that is already mounted is skipped, so a dedicated handler registered first is not overwritten by the catalog.
+// handle mounts one "METHOD /path" pattern on Gin. A {param} in the path becomes :pN per segment. The same position keeps the same parameter name so Gin wildcards do not conflict. A method and pattern that is already mounted is skipped, so a dedicated handler registered first is not overwritten by the catalog.
+// 参数 pattern（string）：要匹配的路径模板或正则；h（http.HandlerFunc）：要挂上的 HTTP 处理函数。
+// 返回：无。这条 METHOD /path 已挂到 Gin。路径里的 {param} 按段变成 :pN。模式无效或路由已删除时不挂。
+// 调用：gateway/routes.go
+// 测试：无直接单测
 func (s *Server) handle(pattern string, h http.HandlerFunc) {
 	logTraceOnceIngress.Do(func() { logx.Trace("enter gateway.handle") })
 
@@ -47,8 +59,11 @@ func (s *Server) handle(pattern string, h http.HandlerFunc) {
 	})
 }
 
-// mountCatalog registers a Gin pattern for every route in routes.json.
-// A path that is not in this table does not match these patterns and gets a 404 from NoRoute.
+// mountCatalog registers a Gin pattern for every route in routes.json. A path that is not in this table does not match these patterns and gets a 404 from NoRoute.
+// 参数：无。
+// 调用：gateway/server.go
+// 测试：无直接单测
+// 返回：无。routes.json 里还在用的路由都挂上了 Gin 模式。不在这张表里的路径不会命中这些模式。
 func (s *Server) mountCatalog() {
 	for _, rt := range s.catalog {
 		if removedColumnRoute(rt.P) {
@@ -58,8 +73,11 @@ func (s *Server) mountCatalog() {
 	}
 }
 
-// handlerFor chooses the family handler for a catalog path.
-// Images, rerank, audio, moderations, videos, responses, files, realtime, and passthrough each have their own entry.
+// handlerFor chooses the family handler for a catalog path. Images, rerank, audio, moderations, videos, responses, files, realtime, and passthrough each have their own entry.
+// 参数 path（string）：handler为要定位的路径。可能是 URL，也可能是字段路径。
+// 返回 http.HandlerFunc（http.HandlerFunc）：请求结束时要调用的释放函数。不需要释放时可能为 nil。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
 func (s *Server) handlerFor(path string) http.HandlerFunc {
 	p := strings.ToLower(path)
 	switch {
@@ -87,6 +105,10 @@ func (s *Server) handlerFor(path string) http.HandlerFunc {
 }
 
 // passthroughPattern reports whether this catalog path is forwarded as-is instead of entering the inference data plane.
+// 参数 path（string）：passthrough模板要定位的路径。可能是 URL，也可能是字段路径。
+// 返回 bool（bool）：这条目录路径按原样转发给上游，而不进入推理数据面时返回真。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
 func passthroughPattern(path string) bool {
 	switch {
 	case strings.HasPrefix(path, "/openai/{"), strings.HasPrefix(path, "/openai_passthrough/"):
@@ -101,6 +123,10 @@ func passthroughPattern(path string) bool {
 }
 
 // ginPathNames turns a catalog template into a pattern Gin can register and lists the parameter names.
+// 参数 p（string）：目录里的路径模板，花括号标出参数段。
+// 返回 string（string）：Gin 能注册的模式，{name} 换成 :p0 这种段。空路径或 / 得到 "/"；[]string（[]string）：每个路径段抽出的参数名。没有花括号的段是空串，整条路径没有参数时为 nil。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
 func ginPathNames(p string) (string, []string) {
 	if p == "" || p == "/" {
 		return "/", nil
@@ -131,8 +157,11 @@ func ginPathNames(p string) (string, []string) {
 	return out, names
 }
 
-// imagesContract is the HTTP contract for the Images family.
-// POST generate and edit enter the data-plane images and images_edits operations, and the protocol codec calls the upstream.
+// imagesContract is the HTTP contract for the Images family. POST generate and edit enter the data-plane images and images_edits operations, and the protocol codec calls the upstream.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) imagesContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		op := "images"
@@ -145,8 +174,11 @@ func (s *Server) imagesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// rerankContract is the HTTP contract for the Rerank family.
-// POST /v1/rerank, /rerank, and /v2/rerank enter the data plane. They do not depend on a "/" catch-all to recognize the operation.
+// rerankContract is the HTTP contract for the Rerank family. POST /v1/rerank, /rerank, and /v2/rerank enter the data plane. They do not depend on a "/" catch-all to recognize the operation.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) rerankContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "rerank")
@@ -156,6 +188,10 @@ func (s *Server) rerankContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // audioContract is the HTTP contract for the Audio family: speech, transcriptions, and translations.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) audioContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		p := strings.ToLower(r.URL.Path)
@@ -173,6 +209,10 @@ func (s *Server) audioContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // moderationsContract is the HTTP contract for the Moderations family.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) moderationsContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "moderations")
@@ -182,6 +222,10 @@ func (s *Server) moderationsContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // videosContract is the HTTP contract for the Videos family.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) videosContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "videos")
@@ -191,6 +235,10 @@ func (s *Server) videosContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // responsesContract is the alias for the Responses family besides the two main paths that are registered separately.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) responsesContract(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		s.dataPlane(w, r, "responses")
@@ -199,14 +247,20 @@ func (s *Server) responsesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// filesContract is the HTTP contract for the Files family.
-// Create, read, and delete persist file rows. The response is a file object rather than an echo of the request body.
+// filesContract is the HTTP contract for the Files family. Create, read, and delete persist file rows. The response is a file object rather than an echo of the request body.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) filesContract(w http.ResponseWriter, r *http.Request) {
 	s.serveFamilyRoute(w, r)
 }
 
-// realtimeContract is the HTTP contract for the Realtime family.
-// The client must start a WebSocket upgrade. An ordinary POST or GET gets 426 instead of a placeholder JSON body.
+// realtimeContract is the HTTP contract for the Realtime family. The client must start a WebSocket upgrade. An ordinary POST or GET gets 426 instead of a placeholder JSON body.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) realtimeContract(w http.ResponseWriter, r *http.Request) {
 	// client_secrets and calls are ordinary JSON. Only the channel itself requires an upgrade.
 	if strings.Contains(r.URL.Path, "/realtime/") || strings.Contains(r.URL.Path, "/live/") {
@@ -237,9 +291,11 @@ func (s *Server) realtimeContract(w http.ResponseWriter, r *http.Request) {
 	_ = buf.Flush()
 }
 
-// passthroughContract is the HTTP contract for a provider prefix that is forwarded as-is.
-// The prefix chooses the provider. The outbound URL uses LiteLLM _join_url_paths: the remaining path is joined, and OpenAI gains /v1/.
-// This only computes the address that would be called. It does not dial the provider.
+// passthroughContract is the HTTP contract for a provider prefix that is forwarded as-is. The prefix chooses the provider. The outbound URL uses LiteLLM _join_url_paths: the remaining path is joined, and OpenAI gains /v1/. This only computes the address that would be called. It does not dial the provider.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) passthroughContract(w http.ResponseWriter, r *http.Request) {
 	if s.requireLLMPrincipal(w, r) == nil {
 		return
@@ -268,6 +324,10 @@ func (s *Server) passthroughContract(w http.ResponseWriter, r *http.Request) {
 }
 
 // passthroughAPIBase is the official root LiteLLM passthrough routes use when the environment variable is unset.
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 string（string）：环境变量没设时这个供应商的官方根地址。openai 是 https://api.openai.com/，anthropic 是 https://api.anthropic.com。不认识时为空串。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
 func passthroughAPIBase(provider string) string {
 	switch provider {
 	case "openai", "openai_passthrough":
@@ -284,30 +344,50 @@ func passthroughAPIBase(provider string) string {
 }
 
 // chat is the chat-completions entry and forwards to the data-plane chat operation.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	logx.Debug("process %s %s step=gateway op=chat", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "chat")
 }
 
 // embeddings is the embeddings entry and forwards to the data-plane embeddings operation.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) embeddings(w http.ResponseWriter, r *http.Request) {
 	logx.Debug("process %s %s step=gateway op=embeddings", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "embeddings")
 }
 
 // completions is the text-completions entry and forwards to the data plane.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) completions(w http.ResponseWriter, r *http.Request) {
 	logx.Debug("process %s %s step=gateway op=completions", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "completions")
 }
 
 // messages is the Anthropic Messages entry and forwards to the data plane.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	logx.Debug("process %s %s step=gateway op=messages", r.Method, r.URL.Path)
 	s.dataPlane(w, r, "messages")
 }
 
 // audioTranslations is the audio-translation entry and forwards to the data plane.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 ingress.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) audioTranslations(w http.ResponseWriter, r *http.Request) {
 	s.dataPlane(w, r, "audio_translation")
 }

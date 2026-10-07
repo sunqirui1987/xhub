@@ -1,38 +1,23 @@
 # httpx
 
-## Purpose
+Small HTTP helpers shared by the gateway and the data plane. No routes live here.
 
-`httpx` writes the JSON the gateway returns and stamps a call ID on the response. Handlers do not set `Content-Type` or assemble the error object themselves. Inference routes can use the provider-shaped error. Management routes use the gateway envelope.
+`CallID` reads 16 random bytes and hex-encodes them. `SetCallID` writes the header `x-litellm-call-id` and does not write a body. `WriteTypedError` fills that header when it is still empty, sets `x-litellm-version` to `xhub-dev` when that header is empty, and sets `Content-Type: application/json`. Status 429 also sets `Retry-After: 1`.
 
-## Features
+The JSON shape depends on the path, lowercased:
 
-- `CallID` makes a new identifier. `SetCallID` writes it onto the response.
-- `WriteJSON` writes a status code and a JSON body.
-- `WriteError` writes the gateway error envelope: `error.type` and `error.message`.
-- `WriteTypedError` picks the envelope shape from the request path. Anthropic message paths and Gemini native paths get their own shape. Everything else gets the gateway envelope.
-- `Bind` builds a `Module`. `Mount` registers `METHOD /path` handlers on a `Registrar`. Feature packages depend on this surface instead of importing the process.
+- Anthropic envelope (`{"type":"error","error":{"type","message"}}`) when the path contains `/messages` and does not contain `chat` or `/threads`.
+- Gemini native envelope (`error.code`, `error.message`, `error.status` as a Google RPC name) when the path contains `generatecontent` or `streamgeneratecontent`, or contains `counttokens` without `/messages`.
+- Otherwise the OpenAI object: `error.message`, `error.type`, `error.param` null, `error.code` the status as a string.
 
-## How another package uses it
+`WriteError` is `WriteTypedError` with an empty path, so it always uses the OpenAI object. Inference paths should call `WriteTypedError` with the real path.
 
-Import `github.com/sunqirui1987/xhub/internal/httpx`.
+`WriteJSON` writes a status and a JSON body for successful management responses.
 
-```go
-httpx.SetCallID(w, httpx.CallID())
-if err != nil {
-    httpx.WriteError(w, 400, "invalid_request", err.Error())
-    return
-}
-httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
-```
-
-On an inference failure, pass the request path so the client sees the shape it expects:
-
-```go
-httpx.WriteTypedError(w, r.URL.Path, 429, "rate_limit_error", "slow down")
-```
+`Bind` / `Module` / `Registrar` are how gateway subpackages mount routes without importing `gateway`. `Mount` no-ops when the registrar or the mount function is nil. `gateway/routes.go` calls `Name` and `Mount` while installing modules. The first method and path wins; a later module does not replace it.
 
 ## What this package does not do
 
-It does not log the call and it does not record spend. The call ID is only a response header value the caller can correlate.
+It does not record spend, choose a deployment, or authenticate. A handler that only calls `SetCallID` has not answered the client.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

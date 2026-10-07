@@ -90,8 +90,18 @@ Two details matter when adding a query:
 
 `EnsureAdmin` creates a platform administrator from configuration if no account with that address exists, and reports whether it created one. It **never** updates an existing row: the configured password is an initial password, so changing the value in a config file does not reset a live account. `Bootstrapped` is the marker the console reads; both the seeding pass and `POST /bootstrap` set it.
 
+## What a request touches
+
+`usage_events` is written by `RecordUsage` in one transaction with `request_logs`, the `usage_daily` roll-up, and the live spend counters on the user, key, team, project, and organization. The insert is `ON CONFLICT (request_id) DO NOTHING`. A replayed flush, including a second gateway draining the same Redis entry, inserts the event once and therefore increments the roll-up once. `usage_events` has no foreign keys: the owner, team, and organization are the snapshot taken when the call was authorized.
+
+`request_logs` holds the stored request body, response body, and proxy request. Reading another account's row is what the audit log records. Platform-admin reads of someone else's personal log go through `authz`, not through a shortcut here.
+
+`CountUsage` counts events inside the caller's `UsageQuery` for paging. A failed count returns `0` and the error. `DailyUsage` groups by the calendar day in the caller's timezone offset. `RollupByKey` and `RollupByTeam` take the display name with a correlated subquery so the join does not multiply the grouped rows.
+
+`api_keys.token_hash` is what `Principal.Hash` points at. RPM and TPM Redis keys use that hash (`xhub:rpm:`, `xhub:tpm:`). They do not use `api_base|model`.
+
 ## What this package does not do
 
-It does not decide authorization. Every predicate — who may read whose usage, who may manage which team — lives in `authz`, and this package only applies the resulting filter. It does not hash or verify session tokens; `auth` does.
+It does not decide authorization. Every predicate — who may read whose usage, who may manage which team — lives in `authz`, and this package only applies the resulting filter. It does not hash or verify session tokens; `auth` does. It does not count in-flight calls (`internal/hooks`) and it does not talk to Redis (`internal/live`).
 
 中文使用说明见同目录的 readme_cn.md。

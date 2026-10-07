@@ -10,6 +10,10 @@ import (
 var logTraceOncePg sync.Once
 
 // quoteIdent quotes a schema name. An empty, too-long, or symbolic name is rejected.
+// 参数 name（string）：要引用的 PostgreSQL 模式名。空串、超过 63 字符或含符号时拒绝。
+// 返回 string（string）：加上双引号的模式名，可以放进 CREATE SCHEMA。空串、过长或含符号时为空串；error（error）：名字不合法。nil 表示可以引用。
+// 调用：store/engine.go
+// 测试：无直接单测
 func quoteIdent(name string) (string, error) {
 	logTraceOncePg.Do(func() { logx.Trace("enter store.quoteIdent") })
 

@@ -1,45 +1,27 @@
 # llm
 
-## Purpose
+Turns one public request into the bytes an upstream expects, and turns the upstream bytes back into the public shape. The data plane calls this package. This package does not pick a deployment and does not listen.
 
-`llm` turns one logical call into the HTTP request a provider expects, and turns the provider bytes back into the public JSON shape. It does not dial. It does not read PostgreSQL. The data plane sends the `Upstream` value this package builds.
+## Address
 
-## Features
+`DefaultAPIBase` is used only when the deployment left `api_base` empty. `openai` is `https://api.openai.com/v1`. `anthropic` is `https://api.anthropic.com`. An unknown provider returns an empty string. `Endpoint` does not fill that in. An empty address stays empty so an unconfigured deployment cannot quietly call the official host. The caller should fail authentication instead.
 
-- `Build` returns the URL, headers, and body for a `Request`. OpenAI-compatible providers use the OpenAI SDK shape. Gemini and Vertex use the Gemini shape. Azure uses the OpenAI JSON with an `api-key` header and a deployment URL.
-- `Encode` and `Decode` are the smaller pair the router adapter calls. `Decode` puts the caller's model alias back into the response.
-- `ProtocolGroup` in this package maps a provider name to its wire group. An unknown provider must be skipped by the caller.
-- `Hydrate` copies credential-store values into deployment parameters. Missing fields stay as they were.
-- `StripProxyParams` removes gateway-only fields before the body is sent, so a provider does not reject an unknown parameter.
-- `ExceptionForStatus` maps an upstream HTTP status to a LiteLLM exception name. Statuses without a branch return `ok == false`.
-- `Allow` and `Filter` decide which URL prefixes are legal inference mounts.
-- `PassthroughURL` joins a base and an endpoint when the body is already in the provider's own protocol.
+`Endpoint(op, provider, apiBase, model)` trims a trailing slash and joins the operation path. OpenAI-compatible providers share `/chat/completions`, `/embeddings`, and the other default branches. Azure inserts `/openai/deployments/<model>`. Anthropic chat is `{base}/v1/messages`. The rules follow each provider's `get_complete_url`, folded into this one function.
 
-## How another package uses it
+`PassthroughURL` joins a subpath onto an `api_base` the way LiteLLM `_join_url_paths` does, and rejects `..`. `PassthroughSubpath` returns `base` unchanged when `include` is false or the subpath is empty.
 
-Import `github.com/sunqirui1987/xhub/internal/llm`.
+## Body
 
-```go
-group, ok := llm.ProtocolGroup(provider)
-if !ok || group == "" {
-    // skip this deployment; do not pretend it is OpenAI-compatible
-    continue
-}
-up, err := llm.Build(ctx, llm.Request{
-    Op: "chat", Provider: provider, APIBase: apiBase, APIKey: apiKey,
-    Model: realModel, Body: publicBody,
-})
-if err != nil {
-    return err
-}
-req, _ := http.NewRequest(http.MethodPost, up.URL, bytes.NewReader(up.Body))
-req.Header = up.Header
-```
+`Encode` writes the upstream body for an operation. The public `model` is the routing alias, so it is overwritten with the deployment's real model name. Other fields are kept. Anthropic Messages fills `max_tokens` with 256 when it is missing, because that API returns 400 without it. `StripProxyParams` deletes LiteLLM proxy fields (`litellm.utils.filter_out_litellm_params`) before the provider sees the body.
 
-`APIBase` and `APIKey` must already be filled by the credential layer. `Build` does not replace an empty base with the vendor's public host.
+`Decode` puts the caller's alias back into `model`. Audio bytes have no JSON model field and are returned unchanged. Image, rerank, and transcription model fields belong to the result and are not overwritten. A Messages operation then turns a chat completion into an Anthropic message.
+
+`Hydrate` copies credential values onto a deployment map. A blank credential field does not overwrite a value already set. `api_key` is the exception: a non-blank credential key replaces a masked `*****` left by the console. Strings that start with `os.environ/` expand through `os.Getenv` at hydrate time, not when the credential is saved. A missing variable becomes empty. `custom_llm_provider` is lowercased.
+
+`Build` is the chat encoder used by `Serve`: OpenAI wire, Anthropic Messages (`x-api-key`, `anthropic-version: 2023-06-01`), Gemini, Cohere, and the other protocol groups. `RealtimeClientSecretsURL` trims a trailing slash and a trailing `/v1`, then appends `/v1/realtime/client_secrets`.
 
 ## What this package does not do
 
-It does not pick which deployment wins and it does not record spend.
+It does not bill, cache, or pin sessions. It does not register the Qiniu or Volcengine contents paths. Those stay on `ServeBypass` and are forwarded with the model field replaced, not re-encoded as chat.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

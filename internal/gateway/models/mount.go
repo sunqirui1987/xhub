@@ -12,6 +12,10 @@ import (
 var logTraceOnceMount sync.Once
 
 // Module is the model list and the management writes. The process implements Host.
+// 参数 h（Host）：实现这一步所需能力的数据面宿主。聊天、直通和刷写各自只依赖自己的方法。
+// 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
+// 调用：gateway/family/mount.go、gateway/guard/mount.go、gateway/identity/mount.go、gateway/keys/mount.go
+// 测试：无直接单测
 func Module(h Host) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter models.Module") })
 
@@ -29,6 +33,14 @@ func Module(h Host) httpx.Module {
 		reg.Handle("POST /schedule/model_cost_map_reload", func(w http.ResponseWriter, r *http.Request) { ScheduleCostMapReload(h, w, r) })
 		reg.Handle("DELETE /schedule/model_cost_map_reload", func(w http.ResponseWriter, r *http.Request) { CancelCostMapReload(h, w, r) })
 		reg.Handle("GET /schedule/model_cost_map_reload/status", func(w http.ResponseWriter, r *http.Request) { CostMapReloadStatus(h, w, r) })
+		// The price catalog: the embedded Modelink baseline plus whatever an
+		// operator adds or edits from the console.
+		reg.Handle("GET /price/catalog", func(w http.ResponseWriter, r *http.Request) { PriceList(h, w, r) })
+		reg.Handle("POST /price/model", func(w http.ResponseWriter, r *http.Request) { UpsertPriceModel(h, w, r) })
+		reg.Handle("DELETE /price/model", func(w http.ResponseWriter, r *http.Request) { DeletePriceModel(h, w, r) })
+		reg.Handle("POST /price/model/reset", func(w http.ResponseWriter, r *http.Request) { ResetPriceModel(h, w, r) })
+		reg.Handle("POST /price/provider", func(w http.ResponseWriter, r *http.Request) { UpsertPriceProvider(h, w, r) })
+		reg.Handle("DELETE /price/provider", func(w http.ResponseWriter, r *http.Request) { DeletePriceProvider(h, w, r) })
 		reg.Handle("POST /model/new", func(w http.ResponseWriter, r *http.Request) { New(h, w, r) })
 		reg.Handle("POST /model/builtin/refresh", func(w http.ResponseWriter, r *http.Request) { RefreshBuiltin(h, w, r) })
 		reg.Handle("POST /model/builtin/models", func(w http.ResponseWriter, r *http.Request) { ListBuiltin(h, w, r) })

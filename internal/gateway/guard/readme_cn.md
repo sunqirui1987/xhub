@@ -1,26 +1,25 @@
 # gateway/guard
 
-## 这个模块做什么
+聊天的护栏。以 `guard.Module` 挂上。
 
-`guard` 在请求发给上游之前执行内容规则。命中拦截时，数据面不再联系供应商。控制台也可以试跑一条规则，而不消耗供应商额度。
+POST `/apply_guardrail` 和 POST `/guardrails/apply_guardrail` 做一次检查并返回动作。推理路径不走这两条路由。`dataplane.Serve` 只在 `op` 是 `chat` 或空时调用 `Host.GuardrailBlocks`，在缓存和上游之前。
 
-## HTTP 和 Go 入口
+`listGuardrails` 从 `RecordStore` 读键值种类 `guardrails` 和 `guardrail`。没有库时跳过检查，并打一条 debug 日志。
 
-- `PreCall` 检查一份 JSON 正文。必须停下来时返回 true 和一条说明。
-- `Apply` 是 `Module` 挂上的 HTTP 试跑入口。
-- 进程在数据面使用上游 HTTP 客户端之前调用服务器上的 `GuardrailBlocks`，它再委托到这里。
+`guardrailText` 是被检查的文本：先 `text`，否则 `input`，否则 `prompt`，再否则把 `messages[].content` 拼起来。
 
-## 调用方怎么用结果
+`matchGuardrail` 读 `litellm_params.guardrail` 或顶层的 `guardrail`：
 
-```go
-if blocked, message := guard.PreCall(host, body); blocked {
-    httpx.WriteTypedError(w, r.URL.Path, 400, "guardrail_violation", message)
-    return
-}
-```
+- `block` 或 `always_block` 返回动作 `block` 和原文。
+- 否则对词表 `blocked_words` 和 `keywords`（在参数上或在护栏上）做不区分大小写的包含判断。种类是 `redact` 或 `litellm_params.mode == redact` 时，返回动作 `redact`，并把命中的词换成 `[REDACTED]`。其他命中返回 `block`。
+- 没有命中返回 `allow` 和原文。
 
-规则是代理上保存的护栏行。标成默认开启的规则即使请求没有点名也会生效。请求里额外点名的护栏会再加进去。
+`Serve` 里的拦截是 HTTP 400 `guardrail_failed`。交换仍会存下来，并以失败调用 `RecordSpend`，这样日志抽屉能看出是哪条护栏拦住的。
+
+控制台的护栏园（`frontend` 的 guardrails 组件）编辑这些键值文档。园里的模式包括金融、医疗、法律、暴力、越狱和 PII 辅助。这个包不调用 Azure Content Safety。Go 匹配器里没有 0、2、4、6 的 Azure 严重级别。
 
 ## 这个包不做什么
 
-除非保存的规则要求，否则它不会调用模型给文本分类。默认匹配器是护栏行上的词表。
+它不跑在 bypass 上。官方内容生成不会扫敏感词。它也不实现插件的 `Decision`。插件在 `Serve` 里更晚运行，即使每条护栏都放行，插件仍可以拒绝。
+
+English notes are in `readme.md` in this directory.

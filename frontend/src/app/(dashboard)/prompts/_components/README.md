@@ -1,77 +1,20 @@
-# Prompts Component
+# 提示词组件
 
-This component provides a view-only interface for viewing prompts in the LiteLLM dashboard, similar to the guardrails component.
+控制台 `/prompts` 用的 React 组件。数据是网关键值种类 `prompts`，不是推理请求里临时带上的 `messages`。
 
-## Components
+| 文件 | 作用 |
+| --- | --- |
+| `index.tsx` | 面板。拉取列表，处理加载和错误 |
+| `PromptTable.tsx`、`PromptTableColumns.tsx` | 表格。列包括提示词 id、创建时间、更新时间、类型。点 id 打开详情 |
+| `prompt_info.tsx` | 单条详情。概览、详情、原始 JSON。原始 JSON 是接口返回的对象，带复制 |
+| `add_prompt_form.tsx` | 新建 |
+| `prompt_editor_view.tsx` | 编辑正文和变量 |
+| `variable_textarea.tsx` | 带变量占位的输入框 |
+| `tool_modal.tsx` | 给这条提示词选工具 |
+| `prompt_utils.tsx` | 列表和详情共用的字段读取 |
 
-### PromptsPanel (`prompts.tsx`)
+保存走网关的提示词写接口，存在 `RecordStore` 的 `prompts` 种类下。id 字段是 `prompt_id`。这不是 `Serve` 里的响应缓存，也不是 `deployment_affinity` 会话钉。
 
-- Main component that displays the prompts list
-- Fetches prompts using the `getPromptsList` API call
-- Handles loading states and error handling
+聊天请求要检查的文本在护栏里，不在这里。这里的页面不调用上游模型。
 
-### PromptTable (`prompt_table.tsx`)
-
-- Table component that displays prompts data
-- Uses Tanstack Table for sorting and filtering
-- Shows: Prompt ID, Created At, Updated At, Type
-- Supports clicking on prompt IDs to open detailed view
-
-### PromptInfoView (`prompt_info.tsx`)
-
-- Detail view component for individual prompts
-- Shows comprehensive prompt information including metadata and parameters
-- Three-tab interface: **Overview**, **Details** (admin-only), and **Raw JSON**
-- **Overview**: Shows formatted prompt information with key details
-- **Details**: Shows structured breakdown of all prompt data (admin users only)
-- **Raw JSON**: Shows exactly what the API returns with copy-to-clipboard functionality
-- Includes copy-to-clipboard functionality for prompt ID and raw JSON
-- Similar structure to GuardrailInfoView component
-
-## Usage
-
-The component is integrated into the main application at:
-
-- **Navigation**: Available in the left sidebar under "Experimental" > "Prompts" (admin role required)
-- **Routing**: Accessible via `?page=prompts` URL parameter
-- **API**: Uses `getPromptsList` and `getPromptInfo` functions from `networking.tsx`
-- **Detail View**: Click any prompt ID to view detailed information
-
-## Props
-
-```typescript
-interface PromptsProps {
-  accessToken: string | null;
-  userRole?: string;
-}
-```
-
-## Data Structure
-
-The component expects prompts with the following structure:
-
-```typescript
-interface PromptItem {
-  prompt_id?: string;
-  prompt_name: string | null;
-  prompt_info: Record<string, any>;
-  created_at?: string;
-  updated_at?: string;
-}
-```
-
-## Integration
-
-The component is fully integrated into the main application:
-
-1. **Left Navigation**: Added to `leftnav.tsx` with `FileTextOutlined` icon
-2. **Main Routing**: Added to `page.tsx` with proper routing logic
-3. **Permissions**: Restricted to admin roles (same as guardrails)
-
-## Future Enhancements
-
-- ✅ Add prompt detail view (similar to GuardrailInfoView) - **COMPLETED**
-- Add create/edit/delete functionality
-- Add bulk operations
-- Add search and filtering capabilities
-- Add export functionality
+测试是同目录的 Vitest 文件（`PromptTable.test.tsx`、`prompt_info.test.tsx`、`add_prompt_form.integration.test.tsx`）。它们不要求 `:4000` 已启动。

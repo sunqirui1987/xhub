@@ -27,12 +27,13 @@ const scheduledStatus = {
   last_run: null,
   next_run: "2026-01-21T00:00:00Z",
 };
-const remoteSource = {
-  source: "remote",
-  url: "https://pricing.example.test/model_prices.json",
+const marketSource = {
+  source: "market",
+  url: "https://api.modelink.ai/v1/market/models",
   is_env_forced: false,
   fallback_reason: null,
   loaded_at: null,
+  generated_at: "2026-10-07T02:33:18Z",
   source_revision: null,
   etag: null,
   model_count: 1234,
@@ -47,20 +48,20 @@ describe("PriceDataReload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getModelCostMapReloadStatus).mockResolvedValue(unscheduledStatus);
-    vi.mocked(getModelCostMapSource).mockResolvedValue(remoteSource as never);
+    vi.mocked(getModelCostMapSource).mockResolvedValue(marketSource as never);
   });
 
   it("shows the pricing source and current reload status", async () => {
     render(<PriceDataReload accessToken="sk-test" />);
 
     expect(await screen.findByText("Pricing Data Source")).toBeInTheDocument();
-    expect(screen.getByText("Remote")).toBeInTheDocument();
+    expect(screen.getByText("Modelink market")).toBeInTheDocument();
     expect(screen.getByText("1,234")).toBeInTheDocument();
     expect(screen.getByText("No periodic reload scheduled")).toBeInTheDocument();
   });
 
   it("renders when the source omits model_count", async () => {
-    vi.mocked(getModelCostMapSource).mockResolvedValue({ ...remoteSource, model_count: undefined } as never);
+    vi.mocked(getModelCostMapSource).mockResolvedValue({ ...marketSource, model_count: undefined } as never);
     render(<PriceDataReload accessToken="sk-test" />);
 
     expect(await screen.findByText("Pricing Data Source")).toBeInTheDocument();
@@ -69,7 +70,7 @@ describe("PriceDataReload", () => {
   });
 
   it("shows which revision of the cost map is loaded when the source reports one", async () => {
-    vi.mocked(getModelCostMapSource).mockResolvedValue({ ...remoteSource, ...provenance } as never);
+    vi.mocked(getModelCostMapSource).mockResolvedValue({ ...marketSource, ...provenance } as never);
     render(<PriceDataReload accessToken="sk-test" />);
 
     expect(await screen.findByText("Source revision:")).toBeInTheDocument();
@@ -84,7 +85,7 @@ describe("PriceDataReload", () => {
 
   it("shows a malformed loaded_at as-is instead of Invalid Date", async () => {
     vi.mocked(getModelCostMapSource).mockResolvedValue({
-      ...remoteSource,
+      ...marketSource,
       ...provenance,
       loaded_at: "yesterday-ish",
     } as never);

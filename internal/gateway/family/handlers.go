@@ -20,6 +20,10 @@ import (
 var logTraceOnceHandlers sync.Once
 
 // ServeDataPlane handles inference paths in the catalog. A recognized operation enters the data plane. The rest are resource reads and writes.
+// 参数 s（Host）：处理数据Plane使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/catalog.go
+// 测试：无直接单测
 func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceHandlers.Do(func() { logx.Trace("enter family.ServeDataPlane") })
 
@@ -56,11 +60,19 @@ func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // Responses is the Responses API entry and always uses the data-plane responses operation.
+// 参数 s（Host）：Responses使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/family/mount.go
+// 测试：无直接单测
 func Responses(s Host, w http.ResponseWriter, r *http.Request) {
 	s.DataPlane(w, r, "responses")
 }
 
 // injectModel fills model from the engines, deployments, or models segment of the URL when the body has none.
+// 参数 path（string）：inject模型要定位的路径。可能是 URL，也可能是字段路径；raw（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 []byte（[]byte）：序列化后的 JSON 字节。失败时为 nil。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func injectModel(path string, raw []byte) []byte {
 	var body map[string]any
 	if len(raw) > 0 {
@@ -82,6 +94,10 @@ func injectModel(path string, raw []byte) []byte {
 }
 
 // modelFromPath returns the model or deployment name from the path. With none of those segments it returns an empty string.
+// 参数 path（string）：URL 路径，用来匹配路由或选择错误包络。
+// 返回 string（string）：路径里 engines、deployments 或 models 下一段的模型名。没有这些段时为空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func modelFromPath(path string) string {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	for i, p := range parts {
@@ -97,6 +113,10 @@ func modelFromPath(path string) string {
 }
 
 // inferenceOp classifies a path as a data-plane operation name. An unrecognized path returns an empty string and must not be treated as chat.
+// 参数 path（string）：inference操作要定位的路径。可能是 URL，也可能是字段路径。
+// 返回 string（string）：路径对应的数据面操作名，例如 chat 或 embedding。认不出时为空串，不能当成 chat。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func inferenceOp(path string) string {
 	p := strings.ToLower(path)
 	switch {
@@ -139,6 +159,10 @@ func inferenceOp(path string) string {
 }
 
 // writeInferenceNative writes the native response shape for an operation that has not entered the general data plane.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；op（string）：操作名或 call_type，写入用量行并选择协议；body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func writeInferenceNative(w http.ResponseWriter, op string, body map[string]any) {
 	id := httpx.CallID()
 	model := str(body["model"])
@@ -242,6 +266,10 @@ func writeInferenceNative(w http.ResponseWriter, op string, body map[string]any)
 }
 
 // resourceCRUD lists, reads, and writes a catalog resource stored as key-value JSON. files and batches return 404 when the id is missing.
+// 参数 s（Host）：resourceCRUD使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求；path（string）：resourceCRUD要定位的路径。可能是 URL，也可能是字段路径；raw（[]byte）：原始文本或 JSON 字节。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, raw []byte) {
 	kind := resourceKind(path)
 	var body map[string]any
@@ -302,6 +330,10 @@ func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, r
 }
 
 // resourceKind reads the resource kind from the path, such as files, batches, or assistants. An unrecognized path is resources.
+// 参数 path（string）：resource种类要定位的路径。可能是 URL，也可能是字段路径。
+// 返回 string（string）：路径里的资源集合名，例如 files、batches、assistants。认不出时是 resources。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func resourceKind(path string) string {
 	p := strings.ToLower(path)
 	switch {
@@ -351,6 +383,10 @@ func resourceKind(path string) string {
 }
 
 // resourcePathID reads the resource id from the path. A collection path has no id.
+// 参数 path（string）：URL 路径，用来匹配路由或选择错误包络。
+// 返回 string（string）：路径最后一段里的资源 id。集合名、动作名和版本段返回空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func resourcePathID(path string) string {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	if len(parts) == 0 {
@@ -376,6 +412,10 @@ func resourcePathID(path string) string {
 }
 
 // nativeResource fills the default fields the public JSON for this resource kind needs.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；body（map[string]any）：已解析或原始的 JSON。
+// 返回 map[string]any（map[string]any）：nativeResource的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func nativeResource(kind string, body map[string]any) map[string]any {
 	id := str(body["id"])
 	if id == "" {
@@ -496,6 +536,10 @@ func nativeResource(kind string, body map[string]any) map[string]any {
 }
 
 // singular is the singular resource name for a collection name.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点。
+// 返回 string（string）：集合名对应的单数资源名。files 得到 file。没有特殊规则时去掉末尾的 s。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func singular(kind string) string {
 	switch kind {
 	case "files":
@@ -524,18 +568,11 @@ func singular(kind string) string {
 	}
 }
 
-// ServeMixed answers the catalog's "mixed" paths, such as /v1/agents, /v1/skills
-// and /v1/workflows.
-//
-// These were removed from the product and only remain in the catalog. They are
-// refused rather than served: the generic store behind them is one shared
-// key-value namespace keyed by resource kind, with no owner and no team column,
-// so serving them let any signed-in member — and any inference key — create
-// records that every other principal could then list. Refusing is what the
-// classification has always described; this makes the code match.
-//
-// The identity is still required before the refusal, so an anonymous caller
-// learns nothing beyond the fact that the path exists.
+// ServeMixed answers the catalog's "mixed" paths, such as /v1/agents, /v1/skills and /v1/workflows. These were removed from the product and only remain in the catalog. They are refused rather than served: the generic store behind them is one shared key-value namespace keyed by resource kind, with no owner and no team column, so serving them let any signed-in member — and any inference key — create records that every other principal could then list. Refusing is what the classification has always described; this makes the code match. The identity is still required before the refusal, so an anonymous caller learns nothing beyond the fact that the path exists.
+// 参数 s（Host）：处理混合使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/catalog.go
+// 测试：无直接单测
 func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireMixed(w, r) == nil {
 		return
@@ -545,6 +582,10 @@ func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeMgmt handles management catalog paths. It requires a management identity, then reads or writes by resource kind.
+// 参数 s（Host）：处理Mgmt使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/catalog.go
+// 测试：无直接单测
 func ServeMgmt(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -553,6 +594,10 @@ func ServeMgmt(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // writeCatalogPersist lists, reads, and writes catalog rows in the key-value table. Credential secrets are masked, and JSON-RPC or token paths return their own JSON.
+// 参数 s（Host）：写入目录Persist使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求；body（map[string]any）：已解析或原始的 JSON。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body map[string]any) {
 	path := r.URL.Path
 	if _, ok := body["jsonrpc"]; ok {
@@ -680,9 +725,11 @@ func writeCatalogPersist(s Host, w http.ResponseWriter, r *http.Request, body ma
 	}
 }
 
-// mergeCredentialPatch merges a credential the way LiteLLM update_db_credential does.
-// Incoming credential_values overlay the existing fields. A masked secret that contains a run of * does not overwrite the original,
-// or an edit form that sends the mask back would store the real secret as asterisks.
+// mergeCredentialPatch merges a credential the way LiteLLM update_db_credential does. Incoming credential_values overlay the existing fields. A masked secret that contains a run of * does not overwritethe original, or an edit form that sends the mask back would store the real secret as asterisks.
+// 参数 dst（map[string]any）：合并凭据Patch读到的 JSON 对象。缺键表示没有该字段；body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回：无。正文里的普通字段已覆盖到凭据上。password 和 credential_values 不在这里整段覆盖。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func mergeCredentialPatch(dst, body map[string]any) {
 	for k, v := range body {
 		if k == "password" || k == "credential_values" {
@@ -711,6 +758,10 @@ func mergeCredentialPatch(dst, body map[string]any) {
 }
 
 // redactCredentialObject masks secret fields on a credential object. When showValues is false the original text is not returned.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；obj（map[string]any）：打码凭据对象读到的 JSON 对象。缺键表示没有该字段；showValues（bool）：为真时走showValues这一支。为假时保持原来的路径。
+// 返回 map[string]any（map[string]any）：打码凭据对象的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func redactCredentialObject(kind string, obj map[string]any, showValues bool) map[string]any {
 	if kind != "credentials" && kind != "credential" {
 		return obj
@@ -733,6 +784,10 @@ func redactCredentialObject(kind string, obj map[string]any, showValues bool) ma
 }
 
 // redactCredentialList masks each credential in a list.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；list（[]map[string]any）：打码凭据列表使用的map[string]any；showValues（bool）：为真时走showValues这一支。为假时保持原来的路径。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func redactCredentialList(kind string, list []map[string]any, showValues bool) []map[string]any {
 	if kind != "credentials" && kind != "credential" {
 		return list
@@ -745,6 +800,10 @@ func redactCredentialList(kind string, list []map[string]any, showValues bool) [
 }
 
 // isSensitiveCredentialKey reports whether a field name looks like a key, token, or password. Those fields are masked by default.
+// 参数 k（string）：是否敏感凭据密钥使用的k。空串表示调用方没有提供这项。
+// 返回 bool（bool）：字段名看起来像密钥、令牌或口令时返回真。这类字段默认打码。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func isSensitiveCredentialKey(k string) bool {
 	l := strings.ToLower(k)
 	for _, w := range []string{"authorization", "token", "key", "secret", "password", "passwd", "credential"} {
@@ -755,9 +814,11 @@ func isSensitiveCredentialKey(k string) bool {
 	return false
 }
 
-// maskCredentialValues matches the list defaults of LiteLLM _get_masked_values.
-// A field whose name contains key, secret, or token keeps two characters at each end and replaces the middle with *. A value shorter than 4 characters becomes *****.
-// An address such as api_base is returned unchanged so an edit form can show the address that was saved.
+// maskCredentialValues 把凭据对象里像密钥、令牌或口令的字段换成掩码，避免明文出现在响应里。
+// 参数 in（map[string]any）：mask凭据Values读到的 JSON 对象。缺键表示没有该字段。
+// 返回 map[string]any（map[string]any）：mask凭据Values的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func maskCredentialValues(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for k, v := range in {
@@ -772,6 +833,10 @@ func maskCredentialValues(in map[string]any) map[string]any {
 }
 
 // maskSecret keeps a few characters at each end of a secret. An empty string stays empty.
+// 参数 v（string）：mask秘密使用的值。空串表示调用方没有提供这项。
+// 返回 string（string）：固定文本 "*****"。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func maskSecret(v string) string {
 	const unmasked = 4
 	if len(v) <= unmasked {
@@ -782,6 +847,10 @@ func maskSecret(v string) string {
 }
 
 // Freeze fills fields the public contract for this resource family requires. An existing value is not overwritten.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；obj（map[string]any）：Freeze读到的 JSON 对象。缺键表示没有该字段。
+// 返回：无。这个资源族对外必须有的字段已补上。已经有值的字段不覆盖，password 会被删掉。
+// 调用：gateway/access.go
+// 测试：无直接单测
 func Freeze(kind string, obj map[string]any) {
 	delete(obj, "password")
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1032,6 +1101,10 @@ func Freeze(kind string, obj map[string]any) {
 }
 
 // setDefault writes a default only when the key is absent.
+// 参数 obj（map[string]any）：写入Default读到的 JSON 对象。缺键表示没有该字段；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥；val（any）：写入Default接到的动态值。类型在函数体内收窄。
+// 返回：无。键不存在时写入了默认值。已有值时不改。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func setDefault(obj map[string]any, key string, val any) {
 	if obj[key] == nil {
 		obj[key] = val
@@ -1039,6 +1112,10 @@ func setDefault(obj map[string]any, key string, val any) {
 }
 
 // parseMgmt reads the resource kind, action, and id from the method and path.
+// 参数 method（string）：HTTP 方法，例如 GET 或 POST；path（string）：解析Mgmt要定位的路径。可能是 URL，也可能是字段路径；body（map[string]any）：已解析或原始的 JSON。
+// 返回 kind（string）：固定文本 "misc"；action（string）：固定文本 "misc"；id（string）：固定文本 "misc"。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func parseMgmt(method, path string, body map[string]any) (kind, action, id string) {
 	parts := catalog.Split(strings.TrimSuffix(path, "/"))
 	filtered := []string{}
@@ -1112,6 +1189,10 @@ func parseMgmt(method, path string, body map[string]any) (kind, action, id strin
 }
 
 // catalogCollectionLast reports whether the last path segment names a collection rather than a concrete id.
+// 参数 last（string）：目录CollectionLast使用的last。空串表示调用方没有提供这项。
+// 返回 bool（bool）：路径最后一段是集合名而不是具体 id 时返回真。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func catalogCollectionLast(last string) bool {
 	switch last {
 	case "server", "servers", "plugins", "health", "access_groups", "submissions", "available_providers",
@@ -1123,6 +1204,10 @@ func catalogCollectionLast(last string) bool {
 }
 
 // catalogListBody wraps a list as the JSON for this resource kind. Some kinds need paging fields and some are a plain array.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；path（string）：目录列表正文要定位的路径。可能是 URL，也可能是字段路径；list（[]map[string]any）：目录列表正文使用的map[string]any。
+// 返回 any（any）：目录列表正文的结果。具体类型由调用方断言。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func catalogListBody(kind, path string, list []map[string]any) any {
 	if list == nil {
 		list = []map[string]any{}
@@ -1234,6 +1319,10 @@ func catalogListBody(kind, path string, list []map[string]any) any {
 }
 
 // idField is the field name this resource uses to identify a row.
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点。
+// 返回 string（string）：这种资源用来标识一行的字段名，例如 credential_name、user_id。没有专门名字时用单数名加 _id。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func idField(kind string) string {
 	switch kind {
 	case "credentials", "credential":
@@ -1273,7 +1362,11 @@ func idField(kind string) string {
 	}
 }
 
-// aliasField is the display-name field for this resource. A kind with no alias returns an empty string.
+// aliasField 是这种资源的显示名字段。没有单独约定时用单数名加 _alias。
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点。
+// 返回 string（string）：显示名字段名。guardrails 是 guardrail_name，没有单独约定时是单数名加 _alias。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func aliasField(kind string) string {
 	switch kind {
 	case "guardrails":
@@ -1294,6 +1387,10 @@ func aliasField(kind string) string {
 }
 
 // pagedListBody slices by page and size and includes the total.
+// 参数 path（string）：paged列表正文要定位的路径。可能是 URL，也可能是字段路径；list（[]map[string]any）：paged列表正文使用的map[string]any；page（int）：页码，从 1 开始；size（int）：最多返回的条数。零或负数表示用默认页大小。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func pagedListBody(path string, list []map[string]any, page, size int) map[string]any {
 	if list == nil {
 		list = []map[string]any{}

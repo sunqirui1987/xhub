@@ -55,21 +55,18 @@ var credentialFields = []string{
 var logTraceOnceCredential sync.Once
 
 // Hydrate fills deployment parameters that are still empty from a named credential.
-//
 // LiteLLM load_credentials_from_list writes a value only when the key is entirely absent.
 // Deployments in this gateway often store api_key as an empty string after a redacted response is read back,
 // so an empty string also counts as unset.
-//
-// api_key is the exception. The dashboard masks a stored key as ***** and the update handler
-// keeps the previous value, so a model can keep a stale key after the user points it at a credential.
-// A non-blank api_key on the credential replaces that stale key. Every other credential field
-// still fills only a blank deployment field, and a non-empty value there still wins.
-//
+// api_key is the exception. The dashboard masks a stored key as ***** and the update handlerkeeps the previous value, so a model can keep a stale key after the user points it at a credential.
+// A non-blank api_key on the credential replaces that stale key. Every other credential fieldstill fills only a blank deployment field, and a non-empty value there still wins.
 // os.environ/NAME inside a string is expanded on this call, not when the credential is saved.
 // The same credential can follow the process environment. custom_llm_provider is then lowercased,
 // so OpenAI in config and openai in the protocol name the same provider.
-//
 // Hydrate returns a new map and does not modify the deployment parameters the caller passed in.
+// 参数 params：部署上已有的 litellm_params。credentialValues：凭证里的字段，空 api_key 不覆盖。
+// 返回：新的参数表。调用方传入的 params 不会被改。
+// 调用：gateway 在挂上凭证时。测试：llm 包内与凭证相关的用例，无同名单测则见调用方测试。
 func Hydrate(params, credentialValues map[string]any) map[string]any {
 	logTraceOnceCredential.Do(func() { logx.Trace("enter llm.Hydrate") })
 
@@ -106,8 +103,11 @@ func Hydrate(params, credentialValues map[string]any) map[string]any {
 	return out
 }
 
-// expandEnv recognizes os.environ/NAME in a config string.
-// A string without that prefix is returned unchanged. A missing variable becomes an empty string, matching os.Getenv.
+// expandEnv recognizes os.environ/NAME in a config string. A string without that prefix is returned unchanged. A missing variable becomes an empty string, matching os.Getenv.
+// 参数 s（string）：配置里的字符串，可能带 os.environ/ 前缀。
+// 返回 string（string）：os.environ/NAME 换成环境变量的值。没有这个前缀时原样返回，变量不存在时为空串。
+// 调用：仅在 credential.go 内使用
+// 测试：无直接单测
 func expandEnv(s string) string {
 	s = strings.TrimSpace(s)
 	const prefix = "os.environ/"
@@ -118,6 +118,10 @@ func expandEnv(s string) string {
 }
 
 // blank reports whether a credential value is empty. A blank field does not overwrite a value already set on the deployment.
+// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 bool（bool）：凭据值是空白时返回真。空白不能覆盖部署上已经写好的值。
+// 调用：仅在 credential.go 内使用
+// 测试：无直接单测
 func blank(v any) bool {
 	if v == nil {
 		return true

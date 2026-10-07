@@ -1,39 +1,34 @@
 # router
 
-## Purpose
+Orders the deployments that share one public model name. It does not send HTTP and it does not read Redis itself. The caller passes a `State` snapshot.
 
-`router` orders the deployments that share one public model name. A model such as `gpt-4o-mini` may have several upstreams. This package decides the order. It does not send HTTP. After `Pick` returns, `EncodeRequest` and `DecodeResponse` hand the body to `llm`.
+## Identity
 
-## Features
+`DeploymentID` is `api_base|model`. Both pieces come from `ModelEntry.ParamString`. An empty `model` parameter falls back to the public `ModelName`. Both empty produces the string `"|"`. Redis cooldown, latency, route TPM, and spend use this id (`xhub:cooldown:`, `xhub:latency:`, `xhub:routetpm:`, `xhub:spend:`). Key RPM/TPM do not. Those use `Principal.Hash`.
 
-- `All` returns every deployment whose `model_name` matches the alias, including wildcard patterns.
-- `Order` sorts those deployments with a strategy and a `State` snapshot of cooldown, latency, and load.
-- `Pick` returns the first deployment that is still usable.
-- `ValidateStrategy` rejects a strategy name the router does not implement.
-- `DeploymentID` is the stable id used as the Redis cooldown key.
-- A deployment that is cooling down is skipped when another deployment is still available.
+## Order of a choice
 
-## How another package uses it
+`matchDeployments` keeps rows whose public name or wildcard pattern matches `alias`. `Order` asks `Pick` for the first usable row, then appends the rest of the pool so a failure can try the next one.
 
-Import `github.com/sunqirui1987/xhub/internal/router`.
+`Pick` drops deployments whose id is in `State.Cooldown` when at least one other deployment is still open. If every candidate is cooling, the cooling ones stay and are attempted anyway.
 
-```go
-if err := router.ValidateStrategy(strategy); err != nil {
-    return err
-}
-st := router.State{Cooldown: cooledIDs, Latency: latencyMS}
-chosen := router.Pick(cfg.ModelList, "gpt-4o-mini", strategy, st)
-if chosen == nil {
-    // no deployment available
-    return
-}
-body, err := router.EncodeRequest("chat", provider, publicJSON, realModel)
-```
+`strategyKind` maps the config name. Hyphens become underscores first. Unknown names return ok false. `ValidateStrategy` turns that into the error `unknown routing strategy`. `Serve` writes that as HTTP 400. It does not substitute `simple-shuffle`.
 
-Strategies include `simple-shuffle`, `least-busy`, `latency-based-routing`, and `usage-based-routing`. Pass the names the settings page stores. An empty strategy is filled by `config.Load` before the process serves traffic.
+| Config name | Internal kind | Who wins |
+| --- | --- | --- |
+| empty, `simple-shuffle`, `simple_shuffle`, `base_routing_strategy`, `adaptive_router`, `auto_router`, `complexity_router`, `quality_router` | `weight` | highest weight |
+| `least-busy`, `least_busy` | `busy` | lowest `State.Busy` |
+| `lowest-cost`, `budget_limiter`, `savings_baseline` | `cost` | lowest cost parameter |
+| `lowest-latency`, `lar1_routing`, `latency_based_routing` | `latency` | lowest `State.Latency` |
+
+`State` zero value has no cooldown and no latency. The gateway fills it from `dataplane.State` when Redis is configured, and always fills `Busy` from the in-process map.
+
+`AdapterURL` and `AdapterURLOp` forward to `llm.Endpoint`. The path table for `/chat/completions`, `/v1/messages`, and the rest lives there, not here.
+
+`EncodeRequest` / `DecodeResponse` in `adapter.go` are the old names for `llm.Encode` and `llm.Decode`.
 
 ## What this package does not do
 
-It does not record a failure. After a failed attempt the data plane calls `live.RecordFailure`, then asks `Pick` again with an updated `State`.
+It does not pin a session. Chat pins (`deployment_affinity:v1:`, one hour) and official task pins (`official_task:v1:`, seven days) are applied by the data plane after `Order`, via `preferDeployment`. It does not skip a paused deployment; `serve.go` `dropPaused` does that and returns 400 `model_paused` when nothing remains.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

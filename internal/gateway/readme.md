@@ -1,54 +1,35 @@
 # gateway
 
-## Purpose
+The process that listens for HTTP and owns `Server`. Subpackages mount routes as `httpx.Module` and do not import this package. `wire.go` is the one place `*Server` implements their `Host` interfaces, plus `dataplane.Host`.
 
-`gateway` is the process. It owns configuration, PostgreSQL, Redis, the Gin engine, sessions, and the module list. External programs start it. Internal packages do not import it; the process implements their Host and Gate interfaces in `wire.go`.
+Listeners are not in this package's constants. The console is a separate Next.js process on `:3000`. This process is the API, default `:4000`. `PublicOrigin` is `XHUB_PUBLIC_ORIGIN` with the trailing slash removed, or `http://localhost:4000`. The console is not mounted under that origin. Playground snippets and the console's own API client use the gateway origin, not `:3000`.
 
-## Features
+## Request order
 
-- `New` builds a `Server` from a `Config` and a `Store`. `Run` listens and starts the spend flush when Redis is set.
-- `Handler` is the `http.Handler` to mount in tests or behind another server. `GinRoutes` lists what was registered. There is no `/` catch-all.
-- `Use` mounts an `httpx.Module` after startup. A duplicate module name fails. The first method and path wins.
-- `RequireManage` and `RequireLLMPrincipal` are the auth doors for admin routes and inference routes.
-- `IsRemovedColumn` reports paths that stay 404, including the removed agent, MCP, and skill surfaces.
-- The console is a separate process. `Handler` does not proxy `/ui`, `/_next`, `/assets`, or `/favicon.ico`, and it does not redirect `/` or `/login` there. `GET /litellm/.well-known/litellm-ui-config` reports `proxy_base_url` as the API origin (`http://localhost:4000`, or `XHUB_PUBLIC_ORIGIN`).
-- Health routes: `GET /health/liveliness` returns `{"status":"ok"}` without a database ping. Readiness pings PostgreSQL.
+`Handler` in `engine.go` is the entry tests mount. It does not mount Gin as the first match.
 
-## How you run it
+1. Idempotency key replay, when the same key, method, and path already completed with a status below 500.
+2. `serveBypass` in `bypass.go`. `provider.Match` on method and path, kind bypass, runs before Gin. A hit calls `dataplane.ServeBypass` and never enters the chat encoder.
+3. Gin. `installModules` registers, in order: health, session, keys, models, tokens, ingress, access, identity, usage, prefs, guard, family. Then ingress mounts every remaining `catalog.Load` route. The first method and path wins. A later registration is skipped.
+4. A catalog path whose handler is the default `serveFamilyRoute` calls `dataPlane` in `limits.go`, which calls `dataplane.Serve`. Images, audio, rerank, videos, responses, files, and realtime have their own family handlers and still end in that data plane.
+5. No `"/"` route. `newEngine` `NoRoute` writes JSON 404 `not_found`, not Gin's plain text.
 
-From the repository root:
+`recordSpend` in `spend.go` writes the usage row for every one of those paths. `AnnotateCall` attaches provider, TTFT, session, and deployment before that write. Prompt storage is optional and keeps headers, body, and response on the same row. Create of an official task does not bill. The first follow-up whose body has usage bills once.
 
-```bash
-go build -o xhub ./cmd/gateway
-./xhub -config configs/config.yaml -addr 127.0.0.1:4000
-curl -s http://127.0.0.1:4000/health/liveliness
-```
+## Pins
 
-From Go:
+Chat affinity (`affinity.go`) uses `deployment_affinity:v1:session:<alias>:<8-byte caller hash>:<sessionID>` for one hour (`affinityTTL`). `previous_response_id` looks up `deployment_affinity:v1:response:<id>` first. Session id order is a client session header, then a cache key, then the previous response, then a hash of the stable prompt prefix. `CommitRoute` writes the pin after a successful adapted call. Bypass does not use this pin to choose a deployment.
 
-```go
-cfg, err := config.Load("configs/config.yaml")
-st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-srv := gateway.New(cfg, st)
-if err := srv.Use(someModule); err != nil {
-    log.Fatal(err)
-}
-log.Fatal(srv.Run("127.0.0.1:4000"))
-```
+Official tasks use `official_task:v1:<taskID>` for seven days (`officialPinTTL`). `official_billed:v1:<taskID>` is the bill-once mark, same TTL. Both go through `live.SetString` when Redis is configured, and an in-process map otherwise.
 
-Call the inference API with the master key or a virtual key:
+## Spend and limits
 
-```bash
-curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
-```
+`EnforceIdentityLimits` checks the model allow-list, budget, and rate limits before `Serve` contacts an upstream. Redis RPM/TPM call `HitRPM` / `HitTPM` with `Principal.Hash`, not `api_base|model`. In-flight counting is `hooks.Begin(keyID)` inside `Serve` only.
 
-Dashboard login is `POST /login` or `POST /v2/login` with the UI username and password. The default username is `admin`. The default password is the master key unless `UI_USERNAME` and `UI_PASSWORD` are set.
+`persistSpend` writes PostgreSQL immediately when Redis is nil. Otherwise the row is queued on `xhub:spendlog` and `flushLoop` calls `dataplane.Flush` every 60 seconds.
 
-## What lives in the child packages
+## What this package does not do
 
-Keys, models, guardrails, identity, usage, settings, and the catalog family are mounted as modules. Their READMEs describe the HTTP paths. This directory is the process that calls them.
+It does not serve the console HTML. It does not register endpoint types; import `internal/provider/all` for that. It does not decide team roles; `internal/authz` does, and this package applies the decision.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

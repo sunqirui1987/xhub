@@ -1,52 +1,35 @@
 # gateway
 
-## 这个模块做什么
+监听 HTTP 并持有 `Server` 的进程。子包以 `httpx.Module` 挂路由，不导入这个包。`wire.go` 是 `*Server` 实现那些 `Host` 接口以及 `dataplane.Host` 的唯一地方。
 
-`gateway` 是进程本身。它持有配置、PostgreSQL、Redis、Gin 引擎、会话和模块列表。外部程序启动它。其它内部包不引用它。进程在 `wire.go` 里实现那些包的 Host 和 Gate。
+监听端口不是这个包里的常量。控制台是另一个 Next.js 进程，在 `:3000`。本进程是 API，默认 `:4000`。`PublicOrigin` 是去掉末尾斜杠的 `XHUB_PUBLIC_ORIGIN`，否则 `http://localhost:4000`。控制台不挂在这个源下面。Playground 复制出来的示例和控制台自己的 API 客户端都用网关的源，不用 `:3000`。
 
-## 功能
+## 请求顺序
 
-- `New` 用 `Config` 和 `Store` 造出 `Server`。`Run` 开始监听，配置了 Redis 时还会启动花费刷写。
-- `Handler` 是可以挂到测试或其它服务器上的 `http.Handler`。`GinRoutes` 列出已经注册的路由。没有 `/` 兜底。
-- `Use` 在启动之后再装一个 `httpx.Module`。模块重名会失败。同一个方法和路径以先注册的为准。
-- `RequireManage` 和 `RequireLLMPrincipal` 是管理路由和推理路由的鉴权门。
-- `IsRemovedColumn` 报告保持 404 的路径，包括已经拿掉的智能体、MCP 和技能表面。
-- 控制台是另一个进程。`Handler` 不反代 `/ui`、`/_next`、`/assets`、`/favicon.ico`，也不把 `/` 或 `/login` 重定向到那里。`GET /litellm/.well-known/litellm-ui-config` 的 `proxy_base_url` 是 API 源（`http://localhost:4000`，或 `XHUB_PUBLIC_ORIGIN`）。
-- 健康检查：`GET /health/liveliness` 不访问数据库，返回 `{"status":"ok"}`。就绪检查会 ping PostgreSQL。
+测试挂上的入口是 `engine.go` 的 `Handler`。它不会让 Gin 做第一次匹配。
 
-## 怎么把它跑起来
+1. 幂等键回放。同一个键、方法和路径已经以低于 500 的状态完成过，就回放那次响应。
+2. `bypass.go` 的 `serveBypass`。在 Gin 之前按方法和路径做 `provider.Match`，种类是 bypass。命中就调用 `dataplane.ServeBypass`，不再进入聊天编码器。
+3. Gin。`installModules` 按顺序登记：health、session、keys、models、tokens、ingress、access、identity、usage、prefs、guard、family。然后 ingress 挂上 `catalog.Load` 里还没被占掉的路由。先登记的方法和路径赢。后面的登记会被跳过。
+4. 目录路径的默认处理函数 `serveFamilyRoute` 调用 `limits.go` 的 `dataPlane`，再调用 `dataplane.Serve`。图像、音频、重排、视频、responses、文件和 realtime 有自己的 family 处理函数，最后仍进同一个数据面。
+5. 没有 `"/"` 路由。`newEngine` 的 `NoRoute` 写 JSON 404 `not_found`，不是 Gin 的纯文本。
 
-在仓库根目录：
+`spend.go` 的 `recordSpend` 给上面每条路径写用量行。写之前 `AnnotateCall` 附上供应商、TTFT、会话和部署。提示词存储是可选的，把头、正文和响应留在同一行。官方任务的创建不记账。第一次正文里带 usage 的后续查询记一次。
 
-```bash
-go build -o xhub ./cmd/gateway
-./xhub -config configs/config.yaml -addr 127.0.0.1:4000
-curl -s http://127.0.0.1:4000/health/liveliness
-```
+## 钉
 
-在 Go 里：
+聊天粘滞（`affinity.go`）用 `deployment_affinity:v1:session:<对外名>:<调用方哈希前 8 字节>:<会话id>`，有效期一小时（`affinityTTL`）。`previous_response_id` 先查 `deployment_affinity:v1:response:<id>`。会话 id 的顺序是客户端会话头、缓存键、上一次响应、稳定提示前缀的哈希。适配调用成功后 `CommitRoute` 写下这根钉。Bypass 不用这根钉来选部署。
 
-```go
-cfg, err := config.Load("configs/config.yaml")
-st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-srv := gateway.New(cfg, st)
-if err := srv.Use(someModule); err != nil {
-    log.Fatal(err)
-}
-log.Fatal(srv.Run("127.0.0.1:4000"))
-```
+官方任务用 `official_task:v1:<任务id>`，七天（`officialPinTTL`）。`official_billed:v1:<任务id>` 是只记一次账的标记，同样的有效期。配了 Redis 时两者都走 `live.SetString`，否则留在进程内的表。
 
-用主密钥或虚拟密钥调用推理：
+## 花费和限额
 
-```bash
-curl -s http://127.0.0.1:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
-```
+`EnforceIdentityLimits` 在 `Serve` 联系上游之前检查模型允许名单、预算和速率。Redis 的 RPM/TPM 用 `Principal.Hash` 调用 `HitRPM` / `HitTPM`，不用 `api_base|model`。在途计数是 `Serve` 里面的 `hooks.Begin(keyID)`，只有适配循环会调用。
 
-控制台登录是 `POST /login` 或 `POST /v2/login`，提交用户名和密码。默认用户名是 `admin`。没有设置 `UI_USERNAME` 和 `UI_PASSWORD` 时，默认密码就是主密钥。
+Redis 是 nil 时 `persistSpend` 在请求里直接写 PostgreSQL。否则行进 `xhub:spendlog`，`flushLoop` 每 60 秒调用 `dataplane.Flush`。
 
-## 子包里有什么
+## 这个包不做什么
 
-密钥、模型、护栏、身份、用量、设置和目录资源族都作为模块装上。它们的 README 写各自的 HTTP 路径。这个目录是调用它们的进程。
+它不提供控制台 HTML。它不登记端点类型；那要导入 `internal/provider/all`。它不判定团队角色；那是 `internal/authz`，这个包只执行判定结果。
+
+English notes are in `readme.md` in this directory.

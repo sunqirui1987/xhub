@@ -318,6 +318,14 @@ describe("provider_info_helpers", () => {
       expect(result).toEqual([]);
     });
 
+    it("should list models for a provider that exists only as a price-map slug", () => {
+      const modelMap = {
+        "qiniu/bytedance/doubao-seedance-2-0-260128": { litellm_provider: "qiniu" },
+        "gpt-4": { litellm_provider: "openai" },
+      };
+      expect(getProviderModels("Qiniu", modelMap)).toEqual(["qiniu/bytedance/doubao-seedance-2-0-260128"]);
+    });
+
     it("should return models matching the provider from modelMap", () => {
       const modelMap = {
         "gpt-3.5-turbo": { litellm_provider: "openai" },

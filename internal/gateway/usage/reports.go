@@ -35,10 +35,11 @@ var logTraceOnceReports sync.Once
 // for the whole table.
 const logPageSize = 50
 
-// LogsV2 is the paged spend-log API behind GET /spend/logs/ui. Every row is
-// narrowed by the caller's log scope, so a member sees their own calls and a
-// team administrator additionally sees their team's service keys. The response
-// shape is the one the console's table reads: data plus the paging metadata.
+// LogsV2 is the paged spend-log API behind GET /spend/logs/ui. Every row is narrowed by the caller's log scope, so a member sees their own calls and a team administrator additionally sees their team's service keys. The response shape is the one the console's table reads: data plus the paging metadata.
+// 参数 s（Host）：LogsV2使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceReports.Do(func() { logx.Trace("enter usage.LogsV2") })
 
@@ -84,8 +85,11 @@ func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, logPageResponse(rows, total, page, pageSize))
 }
 
-// SessionLogs lists every call in one session. The list route folds a session
-// into a single row; this route is what the drawer opens when that row is clicked.
+// SessionLogs lists every call in one session. The list route folds a session into a single row; this route is what the drawer opens when that row is clicked.
+// 参数 s（Host）：会话Logs使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SessionLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(r.URL.Query().Get("session_id")) == "" {
 		httpx.WriteJSON(w, 200, logPageResponse(nil, 0, 1, logPageSize))
@@ -97,8 +101,11 @@ func SessionLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	LogsV2(s, w, r)
 }
 
-// collapseSessions keeps one row per non-empty session and totals the calls
-// that landed on this page. A request with no session stays on its own row.
+// collapseSessions keeps one row per non-empty session and totals the calls that landed on this page. A request with no session stays on its own row.
+// 参数 rows（[]map[string]any）：从用量或目录读出的map[string]any。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func collapseSessions(rows []map[string]any) []map[string]any {
 	type agg struct {
 		row   map[string]any
@@ -137,9 +144,11 @@ func collapseSessions(rows []map[string]any) []map[string]any {
 	return append(out, solo...)
 }
 
-// logQuery builds the scoped log query from the request's filters. The scope is
-// applied first and the filters only narrow inside it, so `user_id` or `api_key`
-// from the query string can never widen a read beyond what the scope allows.
+// logQuery builds the scoped log query from the request's filters. The scope is applied first and the filters only narrow inside it, so `user_id` or `api_key` from the query string can never widen a read beyond what the scope allows.
+// 参数 r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：日志查询使用的权限范围。
+// 返回 UsageQuery（iam.UsageQuery）：在权限范围之内、再按请求筛选收窄的日志查询。筛选不能把范围扩大。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	q := iam.UsageQuery{
@@ -161,8 +170,11 @@ func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	return q
 }
 
-// parseDayEnd extends an inclusive end date to the last instant of that day, so
-// a window of one day covers the whole day rather than just midnight.
+// parseDayEnd extends an inclusive end date to the last instant of that day, so a window of one day covers the whole day rather than just midnight.
+// 参数 v（string）：解析日期终点使用的值。空串表示调用方没有提供这项。
+// 返回 time.Time（time.Time）：解析出的时间。
+// 调用：gateway/usage/activity.go
+// 测试：activity_test.go
 func parseDayEnd(v string) time.Time {
 	from := parseDay(v)
 	if from.IsZero() {
@@ -171,8 +183,11 @@ func parseDayEnd(v string) time.Time {
 	return from.Add(24*time.Hour - time.Nanosecond)
 }
 
-// eventRows renders the stored events in the shape the console's table reads.
-// The field names are the LiteLLM ones the table already binds to.
+// eventRows renders the stored events in the shape the console's table reads. The field names are the LiteLLM ones the table already binds to.
+// 参数 events（[]iam.UsageEvent）：事件行使用的用量事件。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 reports.go 内使用
+// 测试：cost_breakdown_test.go、log_guardrail_test.go
 func eventRows(events []iam.UsageEvent) []map[string]any {
 	out := make([]map[string]any, 0, len(events))
 	for _, e := range events {
@@ -193,6 +208,9 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 		}
 		if e.CachedTokens != nil {
 			meta["cached_tokens"] = *e.CachedTokens
+		}
+		if info := guardrailInformation(e.Guardrail); info != nil {
+			meta["guardrail_information"] = info
 		}
 		row := map[string]any{
 			"request_id":          e.RequestID,
@@ -229,10 +247,27 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 	return out
 }
 
-// costBreakdown is the bill for one call: each side is tokens times the price
-// map's per-token rate, and the stored cost is what was actually charged.
-// A model that is not in the price map still reports the charged total, with
-// the two sides omitted rather than invented.
+// guardrailInformation decodes the monitoring rows stored on the event. A blank or unreadable value is omitted so an ordinary call does not grow an empty section.
+// 参数 raw（string）：护栏Information使用的原始内容。空串表示调用方没有提供这项。
+// 返回 any（any）：护栏Information。没有合格值时为 nil。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
+func guardrailInformation(raw string) any {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// costBreakdown is the bill for one call: each side is tokens times the price map's per-token rate, and the stored cost is what was actually charged. A model that is not in the price map still reports the charged total, with the two sides omitted rather than invented.
+// 参数 model（string）：发给上游或对外展示的模型名；prompt（int）：提示 token 数，用来估价；completion（int）：完成 token 数，用来估价；charged（float64）：费用Breakdown使用的小数。0 表示没有费用或尚未计价。
+// 返回 map[string]any（map[string]any）：费用Breakdown的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 reports.go 内使用
+// 测试：cost_breakdown_test.go
 func costBreakdown(model string, prompt, completion int, charged float64) map[string]any {
 	out := map[string]any{"total_cost": charged}
 	inRate, outRate, ok := catalog.TokenRates(model)
@@ -249,8 +284,11 @@ func costBreakdown(model string, prompt, completion int, charged float64) map[st
 	return out
 }
 
-// logPageResponse wraps rows in the paging envelope. total_pages is at least 1
-// for an empty result, matching the audit table the console renders beside this.
+// logPageResponse wraps rows in the paging envelope. total_pages is at least 1 for an empty result, matching the audit table the console renders beside this.
+// 参数 rows（[]map[string]any）：从用量或目录读出的map[string]any；total（int64）：这一次的总费用；page（int）：页码，从 1 开始；pageSize（int）：日志页响应使用的整数。零表示没有这项或尚未计数。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func logPageResponse(rows []map[string]any, total int64, page, pageSize int) map[string]any {
 	if rows == nil {
 		rows = []map[string]any{}
@@ -268,16 +306,12 @@ func logPageResponse(rows []map[string]any, total int64, page, pageSize int) map
 	}
 }
 
-// LogByID serves GET /spend/logs/ui/{request_id} and returns one log with its
-// stored request and response bodies.
-//
-// The row must first be visible through the caller's log scope. Only then is the
-// body read. A row outside the scope answers 404, not 403: a caller must not be
-// able to probe which request ids exist.
-//
-// When a platform administrator reads a log that is not their own, the read is
-// audited. The audit row names the request being read, so the access is recorded
-// even though the content leaves no other trace.
+// LogByID serves GET /spend/logs/ui/{request_id} and returns one log with its stored request and response bodies. The row must first be visible through the caller's log scope. Only then is the body read
+// . A row outside the scope answers 404, not 403: a caller must not be able to probe which request ids exist. When a platform administrator reads a log that is not their own, the read is audited. The audit row names the request being read, so the access is recorded even though the content leaves no other trace.
+// 参数 s（Host）：日志按标识使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 	p := s.RequireUser(w, r)
 	if p == nil {
@@ -328,8 +362,11 @@ func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, row)
 }
 
-// jsonOrEmpty decodes a stored body for display. A body that is not JSON, or is
-// empty, is returned as an empty document rather than as a parse error.
+// jsonOrEmpty decodes a stored body for display. A body that is not JSON, or is empty, is returned as an empty document rather than as a parse error.
+// 参数 raw（string）：JSON或空使用的原始内容。空串表示调用方没有提供这项。
+// 返回 any（any）：JSON或空的结果。具体类型由调用方断言。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func jsonOrEmpty(raw string) any {
 	if strings.TrimSpace(raw) == "" {
 		return map[string]any{}
@@ -342,6 +379,10 @@ func jsonOrEmpty(raw string) any {
 }
 
 // Activity returns the global usage time series. Platform administrators only.
+// 参数 s（Host）：活动使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func Activity(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -371,6 +412,10 @@ func Activity(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // ActivityModel returns global usage split by model.
+// 参数 s（Host）：活动模型使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func ActivityModel(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -399,9 +444,11 @@ func ActivityModel(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// ActivityCacheHits returns the global cache-hit summary. Cache hits are not a
-// stored dimension of the roll-up, so the counters are reported as zero rather
-// than guessed from a field that does not exist.
+// ActivityCacheHits returns the global cache-hit summary. Cache hits are not a stored dimension of the roll-up, so the counters are reported as zero rather than guessed from a field that does not exist.
+// 参数 s（Host）：活动缓存Hits使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -434,6 +481,10 @@ func ActivityCacheHits(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // SpendLogs returns spend per day. Platform administrators only.
+// 参数 s（Host）：花费Logs使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -452,6 +503,10 @@ func SpendLogs(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // SpendKeys totals spend by key. Platform administrators only.
+// 参数 s（Host）：花费密钥使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendKeys(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -477,6 +532,10 @@ func SpendKeys(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // SpendModels totals spend by model. Platform administrators only.
+// 参数 s（Host）：花费模型使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendModels(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -499,8 +558,11 @@ func SpendModels(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// SpendProvider totals spend by provider. The provider is derived from the model
-// name, which is the only provider evidence a usage row carries.
+// SpendProvider totals spend by provider. The provider is derived from the model name, which is the only provider evidence a usage row carries.
+// 参数 s（Host）：花费供应商使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendProvider(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -533,6 +595,10 @@ func SpendProvider(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // SpendTeams totals spend by team. Platform administrators only.
+// 参数 s（Host）：花费Teams使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openGlobal(s, w, r)
 	if !ok {
@@ -565,8 +631,11 @@ func SpendTeams(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SpendTags totals spend by tag. Tags are not a stored dimension of the usage
-// row, so the answer is empty rather than invented.
+// SpendTags totals spend by tag. Tags are not a stored dimension of the usage row, so the answer is empty rather than invented.
+// 参数 s（Host）：花费Tags使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendTags(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -575,6 +644,10 @@ func SpendTags(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // SpendTagNames returns tag names that have appeared.
+// 参数 s（Host）：花费Tag名称使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendTagNames(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -582,8 +655,11 @@ func SpendTagNames(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"tag_names": []any{}})
 }
 
-// SpendEndUsers totals spend by end user. An end user is a LiteLLM concept the
-// new ownership model does not carry, so the answer is empty.
+// SpendEndUsers totals spend by end user. An end user is a LiteLLM concept the new ownership model does not carry, so the answer is empty.
+// 参数 s（Host）：花费终点Users使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -592,11 +668,19 @@ func SpendEndUsers(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // Keys returns the same totals as SpendKeys, for the console's older route.
+// 参数 s（Host）：密钥使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func Keys(s Host, w http.ResponseWriter, r *http.Request) {
 	SpendKeys(s, w, r)
 }
 
 // Users totals spend by account. Platform administrators only.
+// 参数 s（Host）：Users使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func Users(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -618,9 +702,11 @@ func Users(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// TagList returns the tag catalog read by the usage filter and the key form.
-// Tags are not part of the new model, so the catalog is empty rather than a
-// key-value namespace that nothing writes.
+// TagList returns the tag catalog read by the usage filter and the key form. Tags are not part of the new model, so the catalog is empty rather than a key-value namespace that nothing writes.
+// 参数 s（Host）：Tag列表使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func TagList(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -629,6 +715,10 @@ func TagList(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // Tags totals spend by tag.
+// 参数 s（Host）：Tags使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func Tags(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -636,9 +726,11 @@ func Tags(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"spend_per_tag": []any{}})
 }
 
-// Calculate estimates spend from a model and token counts and does not write the
-// database. An unknown model returns 0 rather than an error, because the caller
-// is showing an estimate and a missing price is not a failed request.
+// Calculate estimates spend from a model and token counts and does not write the database. An unknown model returns 0 rather than an error, because the caller is showing an estimate and a missing priceis not a failed request.
+// 参数 s（Host）：Calculate使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -662,8 +754,11 @@ func Calculate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"cost": total})
 }
 
-// HealthTestConnection checks whether an upstream or dependency is reachable. A
-// failure writes the reason in JSON and is not always a 500.
+// HealthTestConnection checks whether an upstream or dependency is reachable. A failure writes the reason in JSON and is not always a 500.
+// 参数 s（Host）：HealthTestConnection使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -689,6 +784,10 @@ func HealthTestConnection(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // HealthServices returns the health list for dependent services.
+// 参数 s（Host）：HealthServices使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -700,16 +799,21 @@ func HealthServices(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HealthTest runs one health test against the named target. It is public: it
-// proves the process is serving and says nothing about any tenant.
+// HealthTest runs one health test against the named target. It is public: it proves the process is serving and says nothing about any tenant.
+// 参数 s（Host）：HealthTest使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func HealthTest(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "LiteLLM Proxy is running"})
 }
 
-// openGlobal requires a platform administrator and returns the unscoped usage
-// scope. The global spend family is a platform-wide view by definition, so it
-// takes the administrator scope rather than a narrowed one.
+// openGlobal requires a platform administrator and returns the unscoped usage scope. The global spend family is a platform-wide view by definition, so it takes the administrator scope rather than a narrowed one.
+// 参数 s（Host）：打开Global使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回 Scope（*authz.Scope）：平台管理员的不缩小用量范围。不是管理员或鉴权失败时为 nil；bool（bool）：调用方是平台管理员且拿到了不缩小的用量范围时返回真。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func openGlobal(s Host, w http.ResponseWriter, r *http.Request) (*authz.Scope, bool) {
 	p := s.RequireManage(w, r)
 	if p == nil {
@@ -723,8 +827,11 @@ func openGlobal(s Host, w http.ResponseWriter, r *http.Request) (*authz.Scope, b
 	return sc, true
 }
 
-// globalQuery builds the query for a global report from the request's window and
-// filters.
+// globalQuery builds the query for a global report from the request's window and filters.
+// 参数 r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：global查询使用的权限范围。
+// 返回 UsageQuery（iam.UsageQuery）：全局报表的查询。时间窗和筛选都落在权限范围之内。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func globalQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	return iam.UsageQuery{
@@ -740,8 +847,11 @@ func globalQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	}
 }
 
-// globalDaily reads the daily roll-up for the window. Reports over a day already
-// aggregated do not re-read the events.
+// globalDaily reads the daily roll-up for the window. Reports over a day already aggregated do not re-read the events.
+// 参数 s（Host）：global按天使用的数据面宿主；r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：global按天使用的权限范围。
+// 返回 []iam.DailyRow（[]iam.DailyRow）：这个时间窗里按天汇总的用量。没有行时为空切片；error（error）：库不可用或查询失败。nil 表示成功。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func globalDaily(s Host, r *http.Request, sc *authz.Scope) ([]iam.DailyRow, error) {
 	db := s.Identity()
 	if db == nil {
@@ -751,6 +861,10 @@ func globalDaily(s Host, r *http.Request, sc *authz.Scope) ([]iam.DailyRow, erro
 }
 
 // spendDay takes the date from a timestamp for day filters.
+// 参数 ts（string）：用量事件上的时间戳。空串表示用今天的 UTC 日期。
+// 返回 string（string）：用于按日筛选的日历日期，格式 YYYY-MM-DD。解析不了时取前 10 个字符。
+// 调用：仅在 reports.go 内使用
+// 测试：无直接单测
 func spendDay(ts string) string {
 	if ts == "" {
 		return time.Now().UTC().Format("2006-01-02")

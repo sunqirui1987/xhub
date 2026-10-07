@@ -1,33 +1,15 @@
 # gateway/prefs
 
-## How to use
+Router and general settings stored in PostgreSQL and laid over the YAML `Config`. Mounted as `prefs.Module`.
 
-Call the HTTP paths and the Go entry points in the sections below. Authenticate with the master key or an admin session unless a route is public.
+GET `/router/settings` and GET `/router/fields` render the settings page document: strategy, retries, timeout, and the field catalog (`generalFieldCatalog` includes prompt-cache TTL choices `5m` and `1h`). GET `/config/list` returns the merged document. POST `/config/update` replaces a namespace. POST `/config/field/update` and POST `/config/field/delete` change one key.
 
-## Purpose
+`Overlay(base, db)` copies database keys onto the YAML map. A key present in the database wins. Keys only in YAML stay. `ApplyTyped` then copies `routing_strategy`, `num_retries`, and `timeout` into `RouterSettings` when those keys are present. Absent keys leave the typed values from `config.Load` (default strategy `simple-shuffle`, 2 retries, 60 second timeout).
 
-`prefs` serves the router-settings and general-settings screens. The value you read is the YAML baseline overlaid with the database row. A key present in the database wins, even when the value is a list or null. A key absent from the database stays at the YAML value.
+`ValidateStrategy` still runs on each inference request. Saving an unknown strategy name does not make `Serve` treat it as `simple-shuffle`. The request gets HTTP 400 `unknown routing strategy`.
 
-## HTTP paths
+## What this package does not do
 
-- `GET /router/settings` returns the merged router document the dashboard renders. `GET /router/fields` returns the same document for the field editor.
-- `POST /config/update` writes one field into the database overlay. Lists and scalars replace. Nested objects merge.
-- `GET /config/list` returns the general-settings view. `master_key`, `database_url`, and `redis_url` are not copied into that view.
-- Callback listing for the logging screen is mounted next to these routes.
+It does not reload `configs/config.yaml` from disk. The file is read once at process start. It does not change a model's price. That is `/price/model` in `gateway/models`.
 
-## Example
-
-```bash
-curl -s http://127.0.0.1:4000/config/update \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"router_settings":{"routing_strategy":"least-busy"}}'
-```
-
-Then `GET` the router settings route again. `routing_strategy` is `least-busy`, and fields you did not send are still present.
-
-## Go callers
-
-`prefs.MergedRouter` and `prefs.MergedGeneral` return the same documents the HTTP handlers write. `Overlay` puts database keys on top of YAML. `MergePatch` folds a partial update into the current document. Pass a host that can read config and the store. The process implements that host.
-
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

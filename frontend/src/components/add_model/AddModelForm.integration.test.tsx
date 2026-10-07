@@ -184,7 +184,7 @@ describe("AddModelForm", () => {
     const props = createTestProps();
     const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never });
     renderWithProviders(<AddModelForm {...props} />);
-    const endpoint = await screen.findByRole("combobox", { name: "Health check endpoint (optional)" });
+    const endpoint = await screen.findByRole("combobox", { name: /Endpoint type|端点类型/ });
     expect(endpoint).toHaveTextContent("Not Set");
     expect(props.form.getValues("mode")).toBeUndefined();
     await user.click(endpoint);

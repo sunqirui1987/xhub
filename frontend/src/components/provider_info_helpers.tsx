@@ -455,7 +455,9 @@ export const getPlaceholder = (selectedProvider: string): string => {
 
 export const getProviderModels = (provider: string, modelMap: any): Array<string> => {
   let providerKey = provider;
-  let custom_llm_provider = provider_map[providerKey];
+  // A provider added only on the gateway still lists its models. The embedded
+  // dropdown name lowercases to the litellm_provider slug.
+  let custom_llm_provider = provider_map[providerKey] ?? (providerKey ? providerKey.toLowerCase() : providerKey);
 
   let providerModels: Array<string> = [];
 

@@ -1,5 +1,6 @@
-// Package gateway handles login, sessions, and the identity gate. Virtual-key
+// session.go handles login, sessions, and the identity gate. Virtual-key
 // resolution stays in the auth package.
+
 package gateway
 
 import (
@@ -34,9 +35,11 @@ type sessionRec struct {
 	ExpiresAt time.Time
 }
 
-// login accepts an email and password and starts a session. There is no
-// environment credential and no unauthenticated path to an administrator: the
-// only account that exists before anybody signs in is the one /bootstrap made.
+// login accepts an email and password and starts a session. There is no environment credential and no unauthenticated path to an administrator: the only account that exists before anybody signs in is the one /bootstrap made.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	var body struct {
@@ -69,6 +72,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 // loginSuccess starts a session for a user that has already been authenticated.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；u（*iam.User）：用户行，含邮箱、角色和状态。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) loginSuccess(w http.ResponseWriter, u *iam.User) {
 	sess := "sess-" + httpx.CallID()
 	if !s.rememberSession(sess, u.ID, u.SessionVersion) {
@@ -87,8 +94,11 @@ func (s *Server) loginSuccess(w http.ResponseWriter, u *iam.User) {
 	})
 }
 
-// logout ends one session. It is idempotent: a session that is already gone is
-// still a successful logout.
+// logout ends one session. It is idempotent: a session that is already gone is still a successful logout.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	tok := auth.APIKeyFrom(r)
@@ -101,9 +111,11 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
 }
 
-// me reports the caller's identity and capabilities. The capability list comes
-// from the same decision matrix the server enforces, so the console cannot
-// offer a page the server would refuse.
+// me reports the caller's identity and capabilities. The capability list comes from the same decision matrix the server enforces, so the console cannot offer a page the server would refuse.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -130,9 +142,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// bootstrap creates the first platform administrator. It is the only route the
-// master credential reaches besides emergency administration, and it can run
-// exactly once: iam.Bootstrap refuses a second call.
+// bootstrap creates the first platform administrator. It is the only route the master credential reaches besides emergency administration, and it can run exactly once: iam.Bootstrap refuses a second call.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.Cfg.GeneralSettings.MasterKey == "" || auth.APIKeyFrom(r) != s.Cfg.GeneralSettings.MasterKey {
@@ -164,25 +178,11 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	s.loginSuccess(w, u)
 }
 
-// seedAdmin creates the platform administrator named by general_settings at
-// startup, so a deployment does not have to call POST /bootstrap by hand before
-// anybody can sign in.
-//
-// It runs once per process start and is safe to run every time: the account is
-// created only when no account with the configured address exists, and an
-// existing account is never rewritten. The configured password is therefore an
-// initial password, not a managed one.
-//
-// Three configuration states all leave seeding off, and each is a deliberate
-// operator choice rather than an error:
-//
-//   - no admin_email or no admin_password: seeding was never configured
-//   - disable_env_credential_login: the operator refuses a config-supplied account
-//   - a short password: iam reports it, and this logs the refusal instead of
-//     starting with an account nobody can log into
-//
-// A failure here is logged and never fatal. A process that cannot seed can still
-// serve, and POST /bootstrap remains available with the master key.
+// seedAdmin creates the platform administrator named by general_settings at startup, so a deployment does not have to call POST /bootstrap by hand before anybody can sign in.  It runs once per process start and is safe to run every time: the account is created only when no account with the configured address exists, and an existing account is never rewritten. The configured password is therefore an initial password, not a managed one.  Three configuration states all leave seeding off, and each is a deliberate operator choice rather than an error:    - no admin_email or no admin_password: seeding was never configured   - disable_env_credential_login: the operator refuses a config-supplied account   - a short password: iam reports it, and this logs the refusal instead of     starting with an account nobody can log into  A failure here is logged and never fatal. A process that cannot seed can still serve, and POST /bootstrap remains available with the master key.
+// 参数：无。
+// 调用：gateway/server.go
+// 测试：无直接单测
+// 返回：无。按 general_settings 创建了平台管理员。没配库、关了环境登录，或邮箱密码为空时不创建。
 func (s *Server) seedAdmin() {
 	g := s.Cfg.GeneralSettings
 	if s.IAM == nil || g.DisableEnvCredentialLogin {
@@ -201,8 +201,11 @@ func (s *Server) seedAdmin() {
 	}
 }
 
-// bootstrapStatus reports whether the first administrator exists, so the login
-// page can show the setup form instead of a form nobody can use yet.
+// bootstrapStatus reports whether the first administrator exists, so the login page can show the setup form instead of a form nobody can use yet.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	done := false
@@ -216,13 +219,11 @@ func (s *Server) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"bootstrap_required": !done, "bootstrapped": done})
 }
 
-// signSessionJWT issues a session JWT. The signing key comes from configuration
-// and is not written to logs beyond the response.
-//
-// user_role is the console spelling, not the stored one. The admin UI decides
-// who is a platform administrator by reading this claim, and it only recognises
-// proxy_admin. A token that omitted the claim, or that carried the stored
-// "admin", was treated as an ordinary user.
+// signSessionJWT issues a session JWT. The signing key comes from configuration and is not written to logs beyond the response. user_role is the console spelling, not the stored one. The admin UI decides who is a platform administrator by reading this claim, and it only recognises proxy_admin. A token that omitted the claim, or that carried the stored "admin", was treated as an ordinary user.
+// 参数 sess（string）：这次登录的会话 id，写进 JWT 的 key；userID（string）：用户 id，写进 user_id；version（int）：会话版本，改密后旧令牌失效；role（string）：库存角色，会换成控制台认识的 user_role；email（string）：原样写入 user_email，这里不改大小写；secret（string）：HMAC 密钥。空串时用默认值 xhub。
+// 返回 string（string）：header.payload.signature 形式的会话 JWT。
+// 调用：仅在 session.go 内使用
+// 测试：guardrail_block_test.go
 func signSessionJWT(sess, userID string, version int, role, email, secret string) string {
 	if secret == "" {
 		secret = "xhub"
@@ -245,10 +246,11 @@ func signSessionJWT(sess, userID string, version int, role, email, secret string
 	return header + "." + pl + "." + sig
 }
 
-// rememberSession stores a session in the process table and the key-value
-// table. The key-value row is what keeps the session revocable before the JWT
-// expires, so a failure to write it fails the login rather than issuing a token
-// nothing can revoke.
+// rememberSession stores a session in the process table and the key-value table. The key-value row is what keeps the session revocable before the JWT expires, so a failure to write it fails the login rather than issuing a token nothing can revoke.
+// 参数 sess（string）：要保存的会话 id；userID（string）：这条会话属于的用户；version（int）：会话版本，改密后旧会话失效。
+// 返回 bool（bool）：会话已经写入进程表和键值表时返回真。键值表写失败时登录失败，而不是发出无法吊销的令牌。
+// 调用：仅在 session.go 内使用
+// 测试：guardrail_block_test.go
 func (s *Server) rememberSession(sess, userID string, version int) bool {
 	expiresAt := time.Now().Add(sessionTTL)
 	s.mu.Lock()
@@ -274,6 +276,10 @@ func (s *Server) rememberSession(sess, userID string, version int) bool {
 }
 
 // dropSession forgets a session in both the process table and the key-value table.
+// 参数 sess（string）：要从进程表和键值表删掉的会话 id。空串时只清进程内记录。
+// 返回：无。这条会话已从进程内表删掉。id 非空时也从键值表删掉。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) dropSession(sess string) {
 	s.dropMemorySession(sess)
 	if s.Store != nil && sess != "" {
@@ -281,9 +287,11 @@ func (s *Server) dropSession(sess string) {
 	}
 }
 
-// lookupSession resolves a session id or a session JWT. A JWT is accepted only
-// while its session row still exists and has not expired. A process with no
-// store, such as a dial test, keeps the in-memory table as the only record.
+// lookupSession resolves a session id or a session JWT. A JWT is accepted only while its session row still exists and has not expired. A process with no store, such as a dial test, keeps the in-memory table as the only record.
+// 参数 tok（string）：签名或调用方带来的令牌。不会写入响应正文。
+// 返回 sessionRec（sessionRec）：仍然有效的会话记录。没有命中时是零值；bool（bool）：会话 id 或会话 JWT 仍然有效时返回真。JWT 只有在会话行还在且未过期时才接受。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	if tok == "" {
 		return sessionRec{}, false
@@ -308,6 +316,11 @@ func (s *Server) lookupSession(tok string) (sessionRec, bool) {
 	return rec, true
 }
 
+// 从进程内会话表取出这条会话。不存在时 ok 为假。
+// 参数 id（string）：内存会话使用的主键。空串表示调用方没有指定记录。
+// 返回 sessionRec（sessionRec）：从进程内会话表取出这条会话。没有命中时为零值；bool（bool）：进程内会话表里有这条会话时返回真。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) memorySession(id string) (sessionRec, bool) {
 	s.mu.Lock()
 	rec, ok := s.sessions[id]
@@ -322,8 +335,11 @@ func (s *Server) memorySession(id string) (sessionRec, bool) {
 	return rec, true
 }
 
-// storedSession reads the key-value session. A missing or expired row is not a
-// session, even if this process still remembers it.
+// storedSession reads the key-value session. A missing or expired row is not a session, even if this process still remembers it.
+// 参数 id（string）：stored会话使用的主键。空串表示调用方没有指定记录。
+// 返回 sessionRec（sessionRec）：键值表里的会话记录。没有命中时是零值；bool（bool）：键值表里有这条未过期会话时返回真。过期或不存在时，即使进程还记得也不算会话。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) storedSession(id string) (sessionRec, bool) {
 	if s.Store == nil || id == "" {
 		return sessionRec{}, false
@@ -351,17 +367,22 @@ func (s *Server) storedSession(id string) (sessionRec, bool) {
 	return rec, true
 }
 
+// 从进程内会话表删除这条会话。
+// 参数 id（string）：丢掉内存会话使用的主键。空串表示调用方没有指定记录。
+// 返回：无。这条 id 已从进程内会话表删除。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) dropMemorySession(id string) {
 	s.mu.Lock()
 	delete(s.sessions, id)
 	s.mu.Unlock()
 }
 
-// resolve identifies the caller. A session is read from its stored row and
-// checked against the live user, and a virtual key is revalidated in full on
-// every request: owner active, still a member of the key's team, and neither
-// the team, the organization nor the project blocked. A key that passed at
-// login is not trusted later.
+// resolve identifies the caller. A session is read from its stored row and checked against the live user, and a virtual key is revalidated in full on every request: owner active, still a member of the key's team, and neither the team, the organization nor the project blocked. A key that passed at login is not trusted later.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥；error（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/engine.go、gateway/wire.go。
+// 测试：无直接单测
 func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	ctx := r.Context()
 	tok := auth.APIKeyFrom(r)
@@ -400,9 +421,11 @@ func (s *Server) resolve(r *http.Request) (*auth.Principal, error) {
 	return p, nil
 }
 
-// checkKey revalidates a key's whole ownership chain. It runs on every request
-// so removing a member, disabling an owner, or blocking a team takes effect
-// immediately rather than at key expiry.
+// checkKey revalidates a key's whole ownership chain. It runs on every request so removing a member, disabling an owner, or blocking a team takes effect immediately rather than at key expiry.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) checkKey(ctx context.Context, p *auth.Principal) error {
 	g, err := s.guard(ctx, p)
 	if err != nil {
@@ -412,6 +435,10 @@ func (s *Server) checkKey(ctx context.Context, p *auth.Principal) error {
 }
 
 // guard builds the per-request authorization context.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：gateway/wire.go
+// 测试：authz_test.go
+// 返回 *authz.Guard（*authz.Guard）：这次请求的鉴权上下文。鉴权层没有装上时为 nil；error（error）：鉴权层不可用。nil 表示已经装上。
 func (s *Server) guard(ctx context.Context, p *auth.Principal) (*authz.Guard, error) {
 	if s.Authz == nil {
 		return nil, &authz.InternalError{Err: errNoAuthz}
@@ -423,9 +450,18 @@ var errNoAuthz = errorString("gateway: authorization layer unavailable")
 
 type errorString string
 
+// 实现 error 接口，返回写进日志或 HTTP 错误体的文本。
+// 参数：无。
+// 返回 string（string）：error 接口的文本，给日志和 HTTP 错误体使用。
+// 调用：guard 在鉴权层没有装上时返回它，经 error 接口读取。
+// 测试：无直接单测
 func (e errorString) Error() string { return string(e) }
 
 // verifySessionJWT checks a session JWT. A bad signature or an expired token returns ok false.
+// 参数 tok（string）：签名或调用方带来的令牌。不会写入响应正文；secret（string）：签名或调用方带来的令牌。不会写入响应正文。
+// 返回 sess（string）：会话 id。签名无效或过期时为空串；userID（string）：令牌里的用户 id。无效时为空串；version（int）：会话版本。无效时为 0；expiresAt（time.Time）：令牌过期时间。无效时是零值；ok（bool）：签名正确且未过期时返回真。签名坏了或令牌过期时返回假。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func verifySessionJWT(tok, secret string) (sess, userID string, version int, expiresAt time.Time, ok bool) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
@@ -458,8 +494,11 @@ func verifySessionJWT(tok, secret string) (sess, userID string, version int, exp
 	return sess, userID, int(v), time.Unix(int64(exp), 0), true
 }
 
-// requireMaster accepts only the master credential. It reaches the bootstrap and
-// emergency routes and nothing else.
+// requireMaster accepts only the master credential. It reaches the bootstrap and emergency routes and nothing else.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) requireMaster(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil || !p.IsMaster() {
@@ -471,9 +510,11 @@ func (s *Server) requireMaster(w http.ResponseWriter, r *http.Request) *auth.Pri
 	return p
 }
 
-// requireUser accepts any signed-in session or virtual key. It does not grant
-// global management. Personal keys, team membership, usage, and logs use this
-// gate and then narrow the rows.
+// requireUser accepts any signed-in session or virtual key. It does not grant global management. Personal keys, team membership, usage, and logs use this gate and then narrow the rows.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -485,10 +526,11 @@ func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) *auth.Princ
 	return p
 }
 
-// requireManage requires a platform administrator session. A team administrator
-// is not a platform administrator: management routes that a team admin may use
-// resolve the team themselves and are gated by requireUser plus an explicit
-// authorization decision.
+// requireManage requires a platform administrator session. A team administrator is not a platform administrator: management routes that a team admin may use resolve the team themselves and are gated by requireUser plus an explicit authorization decision.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：gateway/access.go、gateway/config_overrides.go、gateway/public_hub.go、gateway/theme_settings.go
+// 测试：无直接单测
 func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -506,6 +548,10 @@ func (s *Server) requireManage(w http.ResponseWriter, r *http.Request) *auth.Pri
 }
 
 // requireMixed accepts either a management identity or an inference identity. If it is neither, it writes 401.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：gateway/tokens.go、gateway/wire.go
+// 测试：无直接单测
 func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -522,8 +568,11 @@ func (s *Server) requireMixed(w http.ResponseWriter, r *http.Request) *auth.Prin
 	return p
 }
 
-// requireLLMPrincipal requires an identity that may call inference. The master
-// key may not: it is an emergency credential for administration.
+// requireLLMPrincipal requires an identity that may call inference. The master key may not: it is an emergency credential for administration.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 *auth.Principal（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 调用：gateway/ingress.go、gateway/wire.go
+// 测试：无直接单测
 func (s *Server) requireLLMPrincipal(w http.ResponseWriter, r *http.Request) *auth.Principal {
 	p, err := s.resolve(r)
 	if err != nil {
@@ -540,15 +589,20 @@ func (s *Server) requireLLMPrincipal(w http.ResponseWriter, r *http.Request) *au
 	return p
 }
 
-// canManage reports platform administration. A key never confers it, whatever
-// role its owner holds: a key is a credential for inference and for reading
-// itself, and nothing else.
+// canManage reports platform administration. A key never confers it, whatever role its owner holds: a key is a credential for inference and for reading itself, and nothing else.
+// 参数 p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 返回 bool（bool）：调用方是平台管理员会话时返回真。密钥永远不能因此获得管理权。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) canManage(p *auth.Principal) bool {
 	return p != nil && p.Kind == authz.KindSession && p.Role == iam.RoleAdmin
 }
 
-// canLLM reports whether the caller may send inference. Any active session may;
-// a key may once it has passed its per-request revalidation in resolve.
+// canLLM reports whether the caller may send inference. Any active session may; a key may once it has passed its per-request revalidation in resolve.
+// 参数 p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 返回 bool（bool）：调用方可以发起推理时返回真。会话通过即可；密钥还要通过本次 resolve 的复查。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func (s *Server) canLLM(p *auth.Principal) bool {
 	if p == nil {
 		return false
@@ -556,10 +610,11 @@ func (s *Server) canLLM(p *auth.Principal) bool {
 	return p.Kind == authz.KindSession || p.Kind == authz.KindKey
 }
 
-// writeAuthError answers a failed identification with the status the authz
-// sentinel implies: 401 for a missing or unusable credential, 500 for a
-// dependency that could not be read, so a database failure is never reported as
-// the client's bad key.
+// writeAuthError answers a failed identification with the status the authz sentinel implies: 401 for a missing or unusable credential, 500 for a dependency that could not be read, so a database failure is never reported as the client's bad key.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；err（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/wire.go
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case authz.IsInternal(err):
@@ -573,9 +628,11 @@ func (s *Server) writeAuthError(w http.ResponseWriter, r *http.Request, err erro
 	}
 }
 
-// authFailureMessage distinguishes a request that brought no credential from
-// one whose credential is no longer accepted. The console treats the second
-// as a finished session and sends the person to sign in again.
+// authFailureMessage distinguishes a request that brought no credential from one whose credential is no longer accepted. The console treats the second as a finished session and sends the person to signin again.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 string（string）：带了密钥时提示会话已结束，没带密钥时提示没有传入 api key。
+// 调用：仅在 session.go 内使用
+// 测试：无直接单测
 func authFailureMessage(r *http.Request) string {
 	if auth.APIKeyFrom(r) != "" {
 		return "Your session has ended. Sign in again."
@@ -583,8 +640,11 @@ func authFailureMessage(r *http.Request) string {
 	return "Authentication Error, No api key passed in."
 }
 
-// writeAuthzError maps an authorization decision onto a response. It never
-// reports a distinction between "does not exist" and "not yours".
+// writeAuthzError maps an authorization decision onto a response. It never reports a distinction between "does not exist" and "not yours".
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；err（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/wire.go
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) writeAuthzError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case err == nil:
@@ -600,9 +660,11 @@ func (s *Server) writeAuthzError(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
-// writeIAMError maps an iam failure onto a response. A conflict is a 409, a
-// rejected value or a protected last administrator is a 400, and a dependency
-// failure is a 500.
+// writeIAMError maps an iam failure onto a response. A conflict is a 409, a rejected value or a protected last administrator is a 400, and a dependency failure is a 500.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；err（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/access.go、gateway/wire.go
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) writeIAMError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case err == nil:

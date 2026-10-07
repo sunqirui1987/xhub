@@ -1,33 +1,32 @@
 # gateway/models
 
-## How to use
+Model list, add-model, block, and the in-memory price overrides. Mounted as `models.Module` before the catalog.
 
-Call the HTTP paths and the Go entry points in the sections below. Authenticate with the master key or an admin session unless a route is public.
+GET `/v1/models` and GET `/models` list deployments the caller may see. `AllowLLM` is false for the master key unless `allow_master_key_llm` is on, and a view that cannot call still may list metadata it was granted. GET `/model/available` is the card list for the signed-in caller. Calling a model stays on the inference routes.
 
-## Purpose
+POST `/model/new` writes one deployment into `proxy_models` and the in-process `ModelTable`. The body selects `endpoint_types` (multi-select). Empty falls back to `mode`, then to `chat`. A custom bypass is `litellm_params.endpoint`, not a new Go file. POST `/model/update` and PATCH `/model/{model_id}/update` edit that row. POST `/model/block` sets `model_info.blocked`. A blocked deployment stays in the table and is refused at request time. POST `/model/delete` removes the row.
 
-`models` lists the models a caller may use and stores dashboard edits. A model saved in PostgreSQL overrides a YAML entry with the same public name. Wildcards such as `openai/*` are expanded in the list the caller actually sees.
+`LockModels` / `UnlockModels` wrap those writes. `LoadStored` merges database rows over the YAML list at startup and drops provider shells that were saved as if they were models.
 
-## HTTP paths
+## Built-in providers
 
-- `GET /v1/models` and `GET /models` list models visible to the bearer token.
-- `POST /model/new` adds a deployment. `POST /model/update` edits it. `POST /model/delete` removes the database row.
-- `POST /model/block` and `POST /model/unblock` hide or restore a model.
-- `GET /model/info` returns the public deployment record.
-- `POST /reload/model_cost_map` reloads prices immediately. The dashboard reads `status`, `models_count`, and `scheduled`.
-- `POST /schedule/model_cost_map_reload` and `DELETE /schedule/model_cost_map_reload` arm or cancel a timed reload. `GET /schedule/model_cost_map_reload/status` reports the timer.
+`SeedBuiltins` runs when `XHUB_BUILTIN_PROVIDERS` is not `off`. It does not insert models. It creates two credentials if they are missing:
 
-## Example
+| id | Catalog URL | Call base | Env |
+| --- | --- | --- | --- |
+| `fennoai` | `https://api.fenno.ai/v1/models` | `https://api.fenno.ai` | `FENNOAI_API_KEY` |
+| `qiniu` | `https://api.qnaigc.com/v1/models` | `https://api.qnaigc.com/bypass/openai/v1` | `QINIU_API_KEY` |
 
-```bash
-curl -s http://127.0.0.1:4000/v1/models \
-  -H "Authorization: Bearer sk-local-master"
-```
+That Qiniu base is the OpenAI-compatible bypass used when adding chat models from the Qiniu catalog. It is not the contents API. Contents generation is `provider/qiniu` at `https://api.qnaigc.com` path `/v3/contents/generations/tasks`.
 
-A virtual key with `models: ["gpt-4o-mini"]` sees only that name, not the full catalog.
+`providerKey` reads a key only to fetch the catalog. A masked placeholder is ignored. The saved model stores the credential name, not a copy of the secret.
 
-## Go callers
+## Price routes
 
-`models.Module` is mounted by the process. `models.List` is the handler behind the public model list. Do not query `catalog.CostMap` to decide what a key may call. The allow-list on the key, team, and user is applied in this package.
+POST `/price/model` and DELETE `/price/model` change the in-memory override. POST `/price/model/reset` restores the baseline row from `catalog`. POST `/reload/model_cost_map` fetches the market feed. POST `/schedule/model_cost_map_reload` arms `scheduledReloadLoop`, which ticks every minute and calls `catalog.ReloadFromMarket` when `next_run` has passed. A failed fetch leaves the prices in use and does not push `next_run` forward.
 
-中文使用说明见同目录的 readme_cn.md。
+## What this package does not do
+
+It does not encode a chat body. After a deployment is chosen, `dataplane.Serve` or `ServeBypass` does that.
+
+中文说明见同目录 `readme_cn.md`。

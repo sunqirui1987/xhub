@@ -1,37 +1,34 @@
 # router
 
-## 这个模块做什么
+给同一个对外模型名下的多条部署排序。它不发 HTTP，自己也不读 Redis。调用方传入一份 `State` 快照。
 
-`router` 给共用一个对外模型名的部署排序。`gpt-4o-mini` 这样的名字可以背后有多个上游。这个包决定顺序。它不发送 HTTP。`Pick` 返回之后，`EncodeRequest` 和 `DecodeResponse` 把正文交给 `llm`。
+## 身份
 
-## 功能
+`DeploymentID` 是 `api_base|model`。两段都来自 `ModelEntry.ParamString`。`model` 参数为空时退回对外的 `ModelName`。两段都空时得到字符串 `"|"`。Redis 的冷却、延迟、路由 TPM 和花费用这个 id（`xhub:cooldown:`、`xhub:latency:`、`xhub:routetpm:`、`xhub:spend:`）。密钥的 RPM/TPM 不用它，那些用 `Principal.Hash`。
 
-- `All` 返回 `model_name` 与别名匹配的全部分部署，包括通配符。
-- `Order` 用策略和一份 `State` 快照排序。快照里有冷却、延迟和负载。
-- `Pick` 返回第一个还能用的部署。
-- `ValidateStrategy` 拒绝路由不认识的策略名。
-- `DeploymentID` 是 Redis 冷却键用的稳定 id。
-- 一个部署在冷却中时，只要还有别的部署可用，就会被跳过。
+## 一次选择的顺序
 
-## 其它包怎么用
+`matchDeployments` 留下对外名或通配模式对上 `alias` 的行。`Order` 先用 `Pick` 取出第一条还能用的，再把池子里其余的接在后面，所以上游失败时还能试下一条。
 
-导入 `github.com/sunqirui1987/xhub/internal/router`。
+`Pick` 在 `State.Cooldown` 里的部署，只要还有别的部署开着，就不会排进去。如果每条都在冷却，冷却中的那些会留下来，照样去试。
 
-```go
-if err := router.ValidateStrategy(strategy); err != nil {
-    return err
-}
-st := router.State{Cooldown: cooledIDs, Latency: latencyMS}
-chosen := router.Pick(cfg.ModelList, "gpt-4o-mini", strategy, st)
-if chosen == nil {
-    // 没有可用部署
-    return
-}
-body, err := router.EncodeRequest("chat", provider, publicJSON, realModel)
-```
+`strategyKind` 映射配置里的名字。先把连字符换成下划线。不认识的名字返回 ok 为 false。`ValidateStrategy` 把这种情况变成错误 `unknown routing strategy`。`Serve` 把它写成 HTTP 400，不会改成 `simple-shuffle`。
 
-策略包括 `simple-shuffle`、`least-busy`、`latency-based-routing` 和 `usage-based-routing`。传入设置页保存的名字。空策略会在进程接流量之前由 `config.Load` 填上。
+| 配置名 | 内部种类 | 谁先被选 |
+| --- | --- | --- |
+| 空、`simple-shuffle`、`simple_shuffle`、`base_routing_strategy`、`adaptive_router`、`auto_router`、`complexity_router`、`quality_router` | `weight` | 权重最高 |
+| `least-busy`、`least_busy` | `busy` | `State.Busy` 最低 |
+| `lowest-cost`、`budget_limiter`、`savings_baseline` | `cost` | 成本参数最低 |
+| `lowest-latency`、`lar1_routing`、`latency_based_routing` | `latency` | `State.Latency` 最低 |
+
+`State` 的零值没有冷却也没有延迟。配了 Redis 时网关用 `dataplane.State` 填它，`Busy` 则始终来自进程内的表。
+
+`AdapterURL` 和 `AdapterURLOp` 转到 `llm.Endpoint`。`/chat/completions`、`/v1/messages` 这些路径表在那边，不在这里。
+
+`adapter.go` 里的 `EncodeRequest` / `DecodeResponse` 是 `llm.Encode` 和 `llm.Decode` 的旧名字。
 
 ## 这个包不做什么
 
-它不记录失败。一次尝试失败后，数据面调用 `live.RecordFailure`，再用更新过的 `State` 重新 `Pick`。
+它不钉会话。聊天钉（`deployment_affinity:v1:`，一小时）和官方任务钉（`official_task:v1:`，七天）是数据面在 `Order` 之后用 `preferDeployment` 贴上去的。它也不丢掉暂停的部署；`serve.go` 的 `dropPaused` 做这件事，池子空了就返回 400 `model_paused`。
+
+English notes are in `readme.md` in this directory.

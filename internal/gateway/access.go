@@ -1,4 +1,6 @@
-// Package gateway serves SSO, email events, cache probes, the customer list, and SCIM. These routes do not enter the inference loop.
+// access.go serves SSO, email events, cache probes, the customer list, and
+// SCIM. These routes do not enter the inference loop and do not record spend.
+
 package gateway
 
 import (
@@ -26,6 +28,10 @@ type emailEventSetting struct {
 }
 
 // defaultEmailEventSettings is the default email-event switches used when the database has no configuration.
+// 参数：无。
+// 返回 []emailEventSetting（[]emailEventSetting）：库里还没有配置时用的邮件事件开关。邀请新用户默认打开，其余默认关闭。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func defaultEmailEventSettings() []emailEventSetting {
 	return []emailEventSetting{
 		{Event: "Virtual Key Created", Enabled: false},
@@ -37,6 +43,10 @@ func defaultEmailEventSettings() []emailEventSetting {
 }
 
 // currentEmailEventSettings returns the email-event settings that are in effect. A nil slice falls back to defaultEmailEventSettings.
+// 参数：无。
+// 返回 []emailEventSetting（[]emailEventSetting）：当前生效的邮件事件开关。进程里还没设过时退回默认列表。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func (s *Server) currentEmailEventSettings() []emailEventSetting {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -49,6 +59,10 @@ func (s *Server) currentEmailEventSettings() []emailEventSetting {
 }
 
 // emailEventSettings reads or updates the email-event settings.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) emailEventSettings(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -69,6 +83,10 @@ func (s *Server) emailEventSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // emailEventSettingsReset restores the email-event settings to the defaults.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) emailEventSettingsReset(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -81,6 +99,10 @@ func (s *Server) emailEventSettingsReset(w http.ResponseWriter, r *http.Request)
 }
 
 // flushCache clears the in-process response cache. It requires a management identity.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -89,6 +111,10 @@ func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
 }
 
 // cacheSettings reads or stores cache settings. It does not return cached bodies.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) cacheSettings(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -116,6 +142,10 @@ func (s *Server) cacheSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowedIPRoute reads and edits the IP allow-list the admin panel shows. The list is stored as JSON and an empty list is data: [].
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) allowedIPRoute(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -159,6 +189,10 @@ func (s *Server) allowedIPRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // readAllowedIPs returns the saved IP allow-list. A missing record is an empty slice.
+// 参数：无。
+// 返回 []string（[]string）：读取AllowedIPs。没有匹配时为 nil 或空切片，调用方按长度判断。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func (s *Server) readAllowedIPs() []string {
 	rec, err := s.Store.GetKV("allowed_ips", "list")
 	if err != nil {
@@ -175,6 +209,10 @@ func (s *Server) readAllowedIPs() []string {
 }
 
 // writeAllowedIPs stores the IP allow-list as one key-value document.
+// 参数 ips（[]string）：ips列表。空切片表示没有可处理的项。
+// 返回：无。IP 允许列表已写成一条键值记录。传入 nil 时写成空列表。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func (s *Server) writeAllowedIPs(ips []string) {
 	if ips == nil {
 		ips = []string{}
@@ -188,6 +226,10 @@ func (s *Server) writeAllowedIPs(ips []string) {
 }
 
 // customerList lists customers. With no data it returns an empty list instead of 404.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) customerList(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -211,6 +253,10 @@ func (s *Server) customerList(w http.ResponseWriter, r *http.Request) {
 }
 
 // cachePing checks whether the cache is usable.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) cachePing(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -227,6 +273,10 @@ func (s *Server) cachePing(w http.ResponseWriter, r *http.Request) {
 }
 
 // callbackDelete deletes one callback configuration.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) callbackDelete(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -259,8 +309,11 @@ func (s *Server) callbackDelete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// scimUsers is the minimal SCIM user collection. It reads the accounts from the
-// identity store; the fields SCIM has no equivalent for are not invented.
+// scimUsers is the minimal SCIM user collection. It reads the accounts from the identity store; the fields SCIM has no equivalent for are not invented.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) scimUsers(w http.ResponseWriter, r *http.Request) {
 	logTraceOnceAccess.Do(func() { logx.Trace("enter gateway.scimUsers") })
 
@@ -289,9 +342,11 @@ func (s *Server) scimUsers(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, scimList("User", resources))
 }
 
-// scimGroups is the minimal SCIM group collection. A team maps to a SCIM group
-// and its members are the team's memberships, read from the one membership
-// source rather than from a mirror.
+// scimGroups is the minimal SCIM group collection. A team maps to a SCIM group and its members are the team's memberships, read from the one membership source rather than from a mirror.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) scimGroups(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
 		return
@@ -316,8 +371,11 @@ func (s *Server) scimGroups(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, scimList("Group", resources))
 }
 
-// scimMembers renders a team's memberships in the SCIM member shape. A failed
-// lookup yields an empty list rather than a broken group entry.
+// scimMembers renders a team's memberships in the SCIM member shape. A failed lookup yields an empty list rather than a broken group entry.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func (s *Server) scimMembers(r *http.Request, teamID string) []map[string]any {
 	members, err := s.IAM.ListMembers(r.Context(), teamID)
 	if err != nil {
@@ -334,7 +392,11 @@ func (s *Server) scimMembers(r *http.Request, teamID string) []map[string]any {
 	return out
 }
 
-// scimList wraps resources as a SCIM ListResponse. A nil resources value becomes an empty array, totalResults is the final length, and startIndex stays 1 because this list is not paged.
+// scimList wraps resources as a SCIM ListResponse. A nil resources value becomes an empty array, total Results is the final length, and startIndex stays 1 because this list is not paged.
+// 参数 resourceType（string）：scim列表使用的resource类型。空串表示调用方没有提供这项；resources（[]map[string]any）：scim列表使用的map[string]any。
+// 返回 map[string]any（map[string]any）：scim列表的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func scimList(resourceType string, resources []map[string]any) map[string]any {
 	if resources == nil {
 		resources = []map[string]any{}

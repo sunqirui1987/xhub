@@ -56,7 +56,7 @@ func (h *logHost) HookEngine() *hooks.Engine       { return h.hooks }
 func (h *logHost) Extensions() *plugin.Registry    { return h.ext }
 func (h *logHost) RouteState() router.State        { return router.State{} }
 func (h *logHost) RouterDocument() map[string]any  { return nil }
-func (h *logHost) GuardrailBlocks(map[string]any) (bool, string) {
+func (h *logHost) GuardrailBlocks(string, map[string]any) (bool, string) {
 	return false, ""
 }
 func (h *logHost) AttachCredential(dep config.ModelEntry) (config.ModelEntry, error) { return dep, nil }
@@ -72,8 +72,14 @@ func (h *logHost) RememberExchange(string, *http.Request, []byte, []byte) {}
 func (h *logHost) PlanRoute(*http.Request, string, map[string]any, *auth.Principal) RoutePlan {
 	return RoutePlan{}
 }
-func (h *logHost) CommitRoute(RoutePlan, string, string) {}
-func (h *logHost) AnnotateCall(string, CallNote)         {}
+func (h *logHost) CommitRoute(RoutePlan, string, string)           {}
+func (h *logHost) AnnotateCall(string, CallNote)                   {}
+func (h *logHost) PinnedDeployment(string) string                  { return "" }
+func (h *logHost) FindDeployment(string) (config.ModelEntry, bool) { return config.ModelEntry{}, false }
+func (h *logHost) PinOfficial(string, string)                      {}
+func (h *logHost) OfficialDeployment(string) string                { return "" }
+func (h *logHost) OfficialBilled(string) bool                      { return false }
+func (h *logHost) MarkOfficialBilled(string)                       {}
 func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, string, []byte, time.Time) {
 }
 func (h *logHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {

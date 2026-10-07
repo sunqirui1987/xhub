@@ -166,6 +166,7 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cached_tokens INT;
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS guardrail TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS usage_events_session_ts ON usage_events (session_id, ts);
 
 CREATE TABLE IF NOT EXISTS request_logs (

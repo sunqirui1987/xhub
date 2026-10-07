@@ -285,6 +285,10 @@ var proxyParams = map[string]struct{}{
 var logTraceOnceProxyParams sync.Once
 
 // StripProxyParams deletes LiteLLM proxy fields and leaves the body the provider understands.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回：无。正文里的 LiteLLM 代理字段已删掉，留下供应商能识别的字段。
+// 调用：llm/call.go
+// 测试：无直接单测
 func StripProxyParams(body map[string]any) {
 	logTraceOnceProxyParams.Do(func() { logx.Trace("enter llm.StripProxyParams") })
 

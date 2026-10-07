@@ -1,5 +1,7 @@
 # XHub 文档
 
+先把两个进程跑起来，再决定读哪一层。控制台是 http://localhost:3000 （`make ui` 或 `frontend` 里的 `npm run dev`）。网关 API 是 http://localhost:4000 （`make run`）。登录 http://localhost:3000/login ，示例账号 `admin@xhub.local` / `admin-pass-1234`。客户端 `base_url` 用 `:4000`。完整安装步骤在仓库根 [README](../README.md)。控制台不是网关，网关也不提供 `:3000` 的页面。
+
 `docs/` 分三层。看文档前先确认自己在哪一层——这三层回答的是不同问题，混着读会得到互相矛盾的结论。
 
 | 目录 | 回答什么 | 可信度 |
@@ -48,6 +50,7 @@
 | [11 可观测性与报表](design/11-observability-and-reporting.md) | 历史归属、指标口径、时区、对账与运行手册 | 部分 |
 | [12 实施迁移](design/12-migration-plan.md) | 阶段依赖、旧数据迁移、发布与回滚 | 否 |
 | [13 测试与验收](design/13-test-and-acceptance-plan.md) | 最坏情况、并发故障、发布门槛 | 部分是验收目标 |
+| [14 添加供应商和模型](design/14-official-bypass.md) | 端点类型在添加模型时选择。目录里登记 Bypass，文档里没有的用自定义 Bypass | 部分 |
 | [权限重构方案](design/permissions-plan.md) | 角色矩阵与全新建库的 DDL 草案 | 大部分已实现，见 current/16 |
 
 配套：
@@ -64,7 +67,9 @@
 - **按作用域收窄的列表**：由 `internal/gateway/visibility_chain_test.go` 和 `frontend/e2e/visibility-chain.spec.ts` 逐层验证。
 - **用量写入的幂等**：`internal/iam/usage.go` 的 `RecordUsage` 在同一事务内用 `ON CONFLICT (request_id) DO NOTHING` 判断是否新事件，只有新事件才累加汇总与作用域支出。
 
-仍然没有实现的：预算预占与结算账本（**没有** reservation/ledger；当前只有 `RecordUsage` 直接写用量与支出）、不可变的请求/尝试/结算事件、统一多维 usage、通用传输层、异步媒体状态机与 Seedance 验收。
+已经接上的官方转发，不要和「异步媒体状态机整篇已实现」混为一谈：`internal/provider/volcengine` 登记方舟 `POST/GET /api/v3/contents/generations/tasks`（另有 list），`internal/provider/qiniu` 登记七牛 `POST/GET /v3/contents/generations/tasks`（没有 `/api`，没有 list）。`dataplane.ServeBypass` 转发，创建不扣费，任务钉 `official_task:v1:` 七天，第一次带 usage 的查询记一次账。这不是结算账本，也不是通用的取消、回调和下载状态机。
+
+仍然没有实现的：预算预占与结算账本（**没有** reservation/ledger；当前只有 `RecordUsage` 直接写用量与支出）、不可变的请求/尝试/结算事件、统一多维 usage、通用传输层，以及 design/09 里那套完整的异步媒体状态机。
 
 ## testdata/ — 测试基线数据
 

@@ -1,36 +1,23 @@
 # httpx
 
-## 这个模块做什么
+网关和数据面共用的一小套 HTTP 工具。这里没有路由。
 
-`httpx` 写出网关返回的 JSON，并在响应上盖调用 ID。处理函数不用自己设置 `Content-Type`，也不自己拼错误对象。推理路由可以用供应商那种错误形状。管理路由用网关自己的信封。
+`CallID` 读 16 个随机字节再编成十六进制。`SetCallID` 写响应头 `x-litellm-call-id`，不写正文。`WriteTypedError` 在这个头还空着时补上，在 `x-litellm-version` 还空着时写成 `xhub-dev`，并设置 `Content-Type: application/json`。状态 429 还会设置 `Retry-After: 1`。
 
-## 功能
+JSON 形状看路径，先转成小写：
 
-- `CallID` 生成一个新标识。`SetCallID` 把它写到响应上。
-- `WriteJSON` 写状态码和 JSON 正文。
-- `WriteError` 写网关错误信封：`error.type` 和 `error.message`。
-- `WriteTypedError` 按请求路径选信封。Anthropic messages 路径和 Gemini 原生路径用各自的形状，其它路径用网关信封。
-- `Bind` 造出一个 `Module`。`Mount` 在 `Registrar` 上登记 `METHOD /path`。功能包依赖这个表面，不引用进程类型。
+- 路径含 `/messages`，并且不含 `chat`、不含 `/threads` 时，用 Anthropic 包络（`{"type":"error","error":{"type","message"}}`）。
+- 路径含 `generatecontent` 或 `streamgeneratecontent`，或者含 `counttokens` 且不含 `/messages` 时，用 Gemini 原生包络（`error.code`、`error.message`、`error.status` 为 Google RPC 名字）。
+- 其他情况用 OpenAI 对象：`error.message`、`error.type`、`error.param` 为 null、`error.code` 是状态码的字符串。
 
-## 其它包怎么用
+`WriteError` 就是路径为空的 `WriteTypedError`，所以永远是 OpenAI 对象。推理路径应把真实路径传给 `WriteTypedError`。
 
-导入 `github.com/sunqirui1987/xhub/internal/httpx`。
+`WriteJSON` 给管理接口的成功响应写状态码和 JSON 正文。
 
-```go
-httpx.SetCallID(w, httpx.CallID())
-if err != nil {
-    httpx.WriteError(w, 400, "invalid_request", err.Error())
-    return
-}
-httpx.WriteJSON(w, 200, map[string]any{"status": "ok"})
-```
-
-推理失败时把请求路径传进去，客户端才能看到它期望的形状：
-
-```go
-httpx.WriteTypedError(w, r.URL.Path, 429, "rate_limit_error", "slow down")
-```
+`Bind` / `Module` / `Registrar` 让网关子包不用导入 `gateway` 就能挂路由。`Mount` 在登记口或挂载函数是 nil 时什么都不做。`gateway/routes.go` 在安装模块时调用 `Name` 和 `Mount`。先登记的方法和路径赢；后面的模块不会替换它。
 
 ## 这个包不做什么
 
-它不记日志，也不记花费。调用 ID 只是响应头上的值，方便调用方对照。
+它不记用量，不选部署，也不做身份认证。只调用了 `SetCallID` 的处理函数还没有回答客户端。
+
+English notes are in `readme.md` in this directory.

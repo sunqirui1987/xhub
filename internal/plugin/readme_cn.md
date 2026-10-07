@@ -1,45 +1,19 @@
 # plugin
 
-## 这个模块做什么
+联系上游之前的扩展点。这个包不导入网关，自己也不带一个内置扩展。调用方按稳定的 `Name` 登记实现。
 
-`plugin` 是调用上游之前的扩展点。扩展能看到操作、模型和路径，可以改响应头，也可以拒绝这次调用。拒绝之后，数据面不读缓存，也不联系上游。这不是加载 `.so` 的打开器。你按名字注册一个 Go 值。
+`Call` 是扩展能读到的内容：`Op`、`Model`（对外名）和 `Path`。正文不在这个结构体上。
 
-## 功能
+`Decision.Refuse == true` 让 `dataplane.Serve` 跳过响应缓存，并且不联系上游。`Status`、`Code`、`Message` 是数据面写出的错误。`Header` 即使放行也会抄到响应上，这样客户端能看出扩展跑过。
 
-- `New` 返回空注册表。空表上的 `Run` 直接放行。
-- `Register` 把扩展加到末尾。重名会失败，原有顺序不变。
-- `Run` 按顺序调用全部扩展。第一个拒绝会停住后面的扩展，并保留已经写下的响应头。
-- `Invoke` 按注册时的名字调用一个扩展。
-- `Names` 按顺序返回名字的副本。
+`New` 返回空注册表。`Registry` 的零值不能用。`Register` 按顺序追加。空名字或重复名字返回错误，已有顺序不动。`Names` 返回一份拷贝。
 
-## 其它包怎么用
+`Run` 按登记顺序调用 `BeforeUpstream`。第一次拒绝就停掉后面的，已经写上的头保留。空注册表返回零值 `Decision`，`Serve` 继续。`Invoke` 只跑一个名字；没有这个名字时返回错误，不会去调别的扩展。
 
-导入 `github.com/sunqirui1987/xhub/internal/plugin`。
-
-```go
-type refuseChat struct{}
-
-func (refuseChat) Name() string { return "gate-refuse" }
-func (refuseChat) BeforeUpstream(c plugin.Call) plugin.Decision {
-    if c.Op == "chat" && c.Model == "blocked-model" {
-        return plugin.Decision{Refuse: true, Status: 403, Code: "extension_refused", Message: "blocked"}
-    }
-    return plugin.Decision{}
-}
-
-reg := plugin.New()
-if err := reg.Register(refuseChat{}); err != nil {
-    log.Fatal(err)
-}
-decision := reg.Run(plugin.Call{Op: "chat", Model: "blocked-model", Path: "/v1/chat/completions"})
-if decision.Refuse {
-    httpx.WriteError(w, decision.Status, decision.Code, decision.Message)
-    return
-}
-```
-
-网关只保留一份注册表，用 `Extensions` 交出去。在开始接流量之前把扩展注册到这个值上。空注册表不改变聊天、花费、冷却，也不改变对未知供应商的跳过。
+`Serve` 在护栏和 `hooks.Begin` 之后、查缓存之前调用 `Run`。`ServeBypass` 不调用它。这里的拒绝不是护栏拦截，也不是预算失败。
 
 ## 这个包不做什么
 
-它不懂 HTTP，也不引用网关。数据面调用 `Run`，并遵守 `Refuse`。
+它不把决定落盘，不读 Redis，也不认识团队。扩展若需要这些，得自己闭包带上。上游返回之后没有钩子。
+
+English notes are in `readme.md` in this directory.

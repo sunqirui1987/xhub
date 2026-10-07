@@ -1,4 +1,7 @@
-// Package gateway checks budget and rate and fills credentials before an upstream call. The send loop itself lives in the dataplane package.
+// limits.go is the gate in front of dataplane.Serve. dataPlane is the wrapper
+// the catalog handlers call. Budget, RPM, and TPM checks live in this file
+// because they need the key, the team, and Redis. The send loop does not.
+
 package gateway
 
 import (
@@ -25,6 +28,10 @@ import (
 var logTraceOnceLimits sync.Once
 
 // dataPlane hands this inference call to dataplane.Serve. Identity, budget, and the upstream loop are not reimplemented in this wrapper.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；op（string）：操作名或 call_type，写入用量行并选择协议。
+// 调用：gateway/ingress.go、gateway/wire.go
+// 测试：dial_log_test.go、guardrail_block_test.go
+// 返回：无。推理的状态码和正文由数据面写进 w，这里不再包一层。
 func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 	logTraceOnceLimits.Do(func() { logx.Trace("enter gateway.dataPlane") })
 	logx.Debug("process %s %s step=dataplane op=%s", r.Method, r.URL.Path, op)
@@ -32,6 +39,10 @@ func (s *Server) dataPlane(w http.ResponseWriter, r *http.Request, op string) {
 }
 
 // estimateTokens calls dataplane.EstimateTokens so budget and TPM checks have an upper bound.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 int（int）：从 JSON 或查询参数转成的整数。类型不符或缺失时为 0，不 panic。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func estimateTokens(body map[string]any) int { return dataplane.EstimateTokens(body) }
 
 // withCredential fills deployment parameters from the credential store using the deployment's credential name. With no name the deployment is returned unchanged.
@@ -40,6 +51,11 @@ var (
 	errCredentialInvalid     = errors.New("credential_invalid")
 )
 
+// 按部署上的凭据名补上 api_key 和 api_base。没有凭据名时原样返回这部署。
+// 参数 dep（config.ModelEntry）：要补密钥的部署。没有 litellm_credential_name 时原样返回。
+// 返回：填好 api_key 和 api_base 的副本。凭证库不可用或凭证无效时返回错误。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error) {
 	name := dep.ParamString("litellm_credential_name", "")
 	var values map[string]any
@@ -65,9 +81,11 @@ func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error
 	return out, nil
 }
 
-// fillBuiltinKey uses the provider environment variable when the stored key is blank.
-// A first install with no key writes an empty credential and then never reads the
-// environment again. The call still picks up QINIU_API_KEY or FENNOAI_API_KEY.
+// fillBuiltinKey uses the provider environment variable when the stored key is blank. A first install with no key writes an empty credential and then never reads the environment again. The call still picks up QINIU_API_KEY or FENNOAI_API_KEY.
+// 参数 name（string）：填充内置密钥要查找或展示的名称。空串表示还没有命名；values（map[string]any）：填充内置密钥读到的 JSON 对象。缺键表示没有该字段。
+// 返回：无。库存密钥为空时，已用供应商环境变量填上。已经有密钥时不改。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func fillBuiltinKey(name string, values map[string]any) {
 	if text, _ := values["api_key"].(string); strings.TrimSpace(text) != "" {
 		return
@@ -83,12 +101,15 @@ func fillBuiltinKey(name string, values map[string]any) {
 	}
 }
 
-// enforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false.
+// enforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false. The budget is checked from the narrowest scope outwards, so the
 //
-// The budget is checked from the narrowest scope outwards, so the refusal names
-// the scope that is actually exhausted: the owner user, then the key, its
-// project, its team, and finally the team's organization. Each scope compares
-// its stored spend plus the spend still hot in Redis against its ceiling.
+//	refusal names the scope that is actually exhausted: the owner user, then the key, its project, its team, and finally the team's organization. Each scope compares its stored spend plus the spend still
+//	hot in Redis against its ceiling.
+//
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；path（string）：enforceIdentityLimits要定位的路径。可能是 URL，也可能是字段路径；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；alias（string）：对外模型名；est（int）：enforceIdentityLimits使用的整数。零表示没有这项或尚未计数。
+// 返回 bool（bool）：模型允许名单、预算和速率都通过时返回真。拒绝时响应已经写好，并返回假。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool {
 	if s.IAM == nil {
 		httpx.WriteTypedError(w, path, http.StatusServiceUnavailable, "authz_unavailable", "authorization is temporarily unavailable")
@@ -123,11 +144,11 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	return p.Key == nil || s.enforceRateLimits(w, path, p, est)
 }
 
-// keyBudgetOK walks the key's ownership chain and returns the first scope that is
-// over budget. The key row is re-read so a spend or status change is visible
-// immediately, and every ceiling above it is the live database value. A missing
-// parent scope is an error rather than a skip: it means the row was deleted
-// while the key still pointed at it.
+// keyBudgetOK walks the key's ownership chain and returns the first scope that is over budget. The key row is re-read so a spend or status change is visible immediately, and every ceiling above it is the live database value. A missing parent scope is an error rather than a skip: it means the row was deleted while the key still pointed at it.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	k, err := s.IAM.GetKey(ctx, p.KeyID)
 	if err != nil {
@@ -192,9 +213,18 @@ var (
 // which keeps the "<Scope> budget has been exceeded" text the console shows.
 type errBudget struct{ scope string }
 
+// 实现 error 接口，返回写进日志或 HTTP 错误体的文本。
+// 参数：无。
+// 返回 string（string）：error 接口的文本，给日志和 HTTP 错误体使用。
+// 调用：预算检查在某个范围用尽时返回它，budgetRefusal 读取这段文本。
+// 测试：无直接单测
 func (e errBudget) Error() string { return e.scope + " budget has been exceeded" }
 
 // budgetRefusal writes the response for a failed ownership walk.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；path（string）：预算Refusal要定位的路径。可能是 URL，也可能是字段路径；err（error）：失败原因，nil 表示这一步成功。
+// 返回：无。预算用尽时写 429 和 JSON 错误。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func budgetRefusal(w http.ResponseWriter, path string, err error) {
 	var over errBudget
 	if errors.As(err, &over) {
@@ -204,13 +234,20 @@ func budgetRefusal(w http.ResponseWriter, path string, err error) {
 	httpx.WriteTypedError(w, path, 401, "invalid_request_error", err.Error())
 }
 
-// overBudget reports a scope that has reached its ceiling. Without a ceiling the
-// scope is unlimited, and stored plus hot spend is what the caller has used.
+// overBudget reports a scope that has reached its ceiling. Without a ceiling the scope is unlimited, and stored plus hot spend is what the caller has used.
+// 参数 ceiling（*float64）：over预算使用的float64；spent（float64）：over预算使用的小数。0 表示没有费用或尚未计价；hot（float64）：over预算使用的小数。0 表示没有费用或尚未计价。
+// 返回 bool（bool）：这个主体的花费已经达到上限时返回真。没有上限时视为不限。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func overBudget(ceiling *float64, spent, hot float64) bool {
 	return ceiling != nil && spent+hot >= *ceiling
 }
 
 // hotSpend is spend still sitting in Redis. Without Redis it is 0 and the budget check uses PostgreSQL only.
+// 参数 id（string）：热花费使用的主键。空串表示调用方没有指定记录。
+// 返回 float64（float64）：热花费。缺失时为 0，不要把它理解成免费除非调用方另有约定。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func (s *Server) hotSpend(id string) float64 {
 	if s.Live == nil {
 		return 0
@@ -218,6 +255,11 @@ func (s *Server) hotSpend(id string) float64 {
 	return s.Live.HotSpend(id)
 }
 
+// 读取这个主体还没刷进数据库的热花费。没有 Redis 时为 0。
+// 参数 kind（string）：分类名，用来选择限额主体、日志类型或官方端点；id（string）：热花费引用使用的主键。空串表示调用方没有指定记录。
+// 返回 float64（float64）：热花费引用。没有计数或类型不符时为 0。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func (s *Server) hotSpendRef(kind, id string) float64 {
 	if s.Live == nil {
 		return 0
@@ -226,6 +268,10 @@ func (s *Server) hotSpendRef(kind, id string) float64 {
 }
 
 // enforceRateLimits uses the Redis minute bucket when Redis is set, otherwise a process-local sliding window. Over the limit it writes 429 and returns false.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；path（string）：enforce单价Limits要定位的路径。可能是 URL，也可能是字段路径；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；est（int）：enforce单价Limits使用的整数。零表示没有这项或尚未计数。
+// 返回 bool（bool）：RPM 和 TPM 都在限额内时返回真。超限时写 429 并返回假。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
 	if p.Key == nil {
 		return true
@@ -272,6 +318,10 @@ func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.P
 }
 
 // enforceRedisRateLimits checks RPM and TPM against the Redis minute bucket. A limit of 0 is treated as already exceeded.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；path（string）：enforceRedis单价Limits要定位的路径。可能是 URL，也可能是字段路径；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；est（int）：enforceRedis单价Limits使用的整数。零表示没有这项或尚未计数。
+// 返回 bool（bool）：Redis 分钟桶里的 RPM 和 TPM 都未超限时返回真。限额为 0 视为已经超限。
+// 调用：仅在 limits.go 内使用
+// 测试：无直接单测
 func (s *Server) enforceRedisRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
 	if p.Key.RPMLimit != nil {
 		n, err := s.Live.HitRPM(p.Hash)

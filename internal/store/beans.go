@@ -22,6 +22,10 @@ type kvRow struct {
 }
 
 // TableName returns the key-value table name.
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 kv。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (kvRow) TableName() string {
 	logTraceOnceBeans.Do(func() { logx.Trace("enter store.TableName") })
 	return "kv"
@@ -36,6 +40,10 @@ type proxyModelRow struct {
 }
 
 // TableName returns the proxy-model table name.
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 proxy_models。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (proxyModelRow) TableName() string { return "proxy_models" }
 
 type configRow struct {
@@ -45,4 +53,8 @@ type configRow struct {
 }
 
 // TableName returns the proxy-config table name.
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 proxy_config。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (configRow) TableName() string { return "proxy_config" }

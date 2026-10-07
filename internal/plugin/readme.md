@@ -1,47 +1,19 @@
 # plugin
 
-## Purpose
+The pre-upstream extension point. This package does not import gateway and does not ship a built-in extension. Callers register implementations by a stable `Name`.
 
-`plugin` is the pre-call extension point. An extension sees the operation, model, and path, and it may change response headers or refuse the call. A refusal means the data plane does not read the cache and does not contact the upstream. This is not a loader for `.so` files. You register a Go value by name.
+`Call` is what an extension may read: `Op`, `Model` (the public alias), and `Path`. The body is not on this struct.
 
-## Features
+`Decision.Refuse == true` tells `dataplane.Serve` to skip the response cache and not contact the upstream. `Status`, `Code`, and `Message` are the error the data plane writes. `Header` is copied onto the response even when the call is allowed, so a client can see that the extension ran.
 
-- `New` returns an empty registry. `Run` on an empty registry allows the call.
-- `Register` appends an extension. A duplicate name fails and the old order stays.
-- `Run` calls every extension in order. The first refusal stops the rest and keeps headers already set.
-- `Invoke` runs one extension by the name it registered.
-- `Names` returns a copy of the names in order.
+`New` returns an empty registry. The zero `Registry` value is not usable. `Register` appends in order. An empty name or a duplicate name returns an error and leaves the existing order unchanged. `Names` returns a copy.
 
-## How another package uses it
+`Run` calls `BeforeUpstream` in registration order. The first refusal stops the rest and keeps headers already set. An empty registry returns a zero `Decision`, and `Serve` continues. `Invoke` runs one name; a missing name returns an error and does not call any other extension.
 
-Import `github.com/sunqirui1987/xhub/internal/plugin`.
-
-```go
-type refuseChat struct{}
-
-func (refuseChat) Name() string { return "gate-refuse" }
-func (refuseChat) BeforeUpstream(c plugin.Call) plugin.Decision {
-    if c.Op == "chat" && c.Model == "blocked-model" {
-        return plugin.Decision{Refuse: true, Status: 403, Code: "extension_refused", Message: "blocked"}
-    }
-    return plugin.Decision{}
-}
-
-reg := plugin.New()
-if err := reg.Register(refuseChat{}); err != nil {
-    log.Fatal(err)
-}
-decision := reg.Run(plugin.Call{Op: "chat", Model: "blocked-model", Path: "/v1/chat/completions"})
-if decision.Refuse {
-    httpx.WriteError(w, decision.Status, decision.Code, decision.Message)
-    return
-}
-```
-
-The gateway keeps one registry and exposes it with `Extensions`. Register extensions on that value before serving traffic. An empty registry leaves chat, spend, cooldown, and the skip of unknown providers unchanged.
+`Serve` calls `Run` after guardrails and after `hooks.Begin`, and before the cache lookup. `ServeBypass` does not call it. A refusal here is not a guardrail block and is not a budget failure.
 
 ## What this package does not do
 
-It does not know about HTTP and it does not import the gateway. The data plane calls `Run` and obeys `Refuse`.
+It does not persist decisions, does not read Redis, and does not know about teams. An extension that needs that context has to close over it itself. There is no hook after the upstream returns.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

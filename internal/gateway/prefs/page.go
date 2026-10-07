@@ -12,6 +12,10 @@ import (
 var logTraceOncePage sync.Once
 
 // Page writes the merged router settings and field descriptions for the dashboard to render.
+// 参数 s（Host）：分页使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/prefs/mount.go
+// 测试：无直接单测
 func Page(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOncePage.Do(func() { logx.Trace("enter prefs.Page") })
 
@@ -31,11 +35,19 @@ func Page(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // PageMap returns the merged router-settings document, including routing_groups.
+// 参数 s（Host）：分页表使用的数据面宿主。
+// 返回 map[string]any（map[string]any）：分页表的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 page.go 内使用
+// 测试：无直接单测
 func PageMap(s Host) map[string]any {
 	return MergedRouter(s)
 }
 
 // routingStrategyDescriptions returns the help text for each known strategy name. An unknown strategy is omitted.
+// 参数：无。
+// 返回 map[string]string（map[string]string）：routingStrategyDescriptions的字符串表。没有该键表示这项没有填。
+// 调用：仅在 page.go 内使用
+// 测试：无直接单测
 func routingStrategyDescriptions() map[string]string {
 	return map[string]string{
 		"simple-shuffle":         "Randomly picks a deployment from the list. Simple and fast.",
@@ -48,6 +60,10 @@ func routingStrategyDescriptions() map[string]string {
 }
 
 // Fields splits router settings into the dashboard field list, with the current value and the default.
+// 参数 s（Host）：Fields使用的数据面宿主；rs（map[string]any）：Fields读到的 JSON 对象。缺键表示没有该字段。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 page.go 内使用
+// 测试：无直接单测
 func Fields(s Host, rs map[string]any) []map[string]any {
 	strats := []string{"simple-shuffle", "least-busy", "latency-based-routing", "cost-based-routing", "usage-based-routing", "usage-based-routing-v2"}
 	type spec struct {
@@ -94,6 +110,10 @@ func Fields(s Host, rs map[string]any) []map[string]any {
 }
 
 // Callbacks returns the callback view. Its router_settings match the merged document.
+// 参数 s（Host）：Callbacks使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/prefs/mount.go
+// 测试：无直接单测
 func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -134,6 +154,10 @@ func Callbacks(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // List returns settings for the requested config_type. general_settings includes stored_in_db.
+// 参数 s（Host）：列出使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/list.go、gateway/models/mount.go
+// 测试：无直接单测
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return

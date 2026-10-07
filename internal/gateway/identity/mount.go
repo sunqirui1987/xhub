@@ -11,15 +11,11 @@ import (
 
 var logTraceOnceMount sync.Once
 
-// Module is users, organizations, teams, members, projects, access groups and
-// the audit trail. The process implements Gate. This package does not import
-// gateway.
-//
-// The paths are the LiteLLM-compatible ones the console already calls, mounted
-// over the new authorization. The routes whose subject does not exist in the new
-// model are gone rather than stubbed: there is no budget object to create, no
-// organization member, no account role beyond the two the matrix has, and no
-// bulk role assignment.
+// Module is users, organizations, teams, members, projects, access groups and the audit trail. The process implements Gate. This package does not import gateway. The paths are the LiteLLM-compatible ones the console already calls, mounted over the new authorization. The routes whose subject does not exist in the new model are gone rather than stubbed: there is no budget object to create, no organization member, no account role beyond the two the matrix has, and no bulk role assignment.
+// 参数 h（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到。
+// 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
+// 调用：gateway/family/mount.go、gateway/guard/mount.go、gateway/keys/mount.go、gateway/models/mount.go
+// 测试：无直接单测
 func Module(h Gate) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter identity.Module") })
 

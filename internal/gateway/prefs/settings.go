@@ -11,8 +11,11 @@ import (
 
 var logTraceOnceSettings sync.Once
 
-// Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here.
-// A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
+// Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here. A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
+// 参数 s（Host）：根地址使用的数据面宿主。
+// 返回 map[string]any（map[string]any）：根地址的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 settings.go 内使用
+// 测试：无直接单测
 func Base(s Host) map[string]any {
 	logTraceOnceSettings.Do(func() { logx.Trace("enter prefs.Base") })
 
@@ -43,6 +46,10 @@ func Base(s Host) map[string]any {
 }
 
 // MergedRouter overlays database router settings on the baseline. Keys absent from the database keep the YAML value.
+// 参数 s（Host）：Merged路由使用的数据面宿主。
+// 返回 map[string]any（map[string]any）：Merged路由的字段表。缺键表示上游或库里没有这个字段。
+// 调用：gateway/prefs/page.go、gateway/server.go、gateway/wire.go
+// 测试：无直接单测
 func MergedRouter(s Host) map[string]any {
 	db, err := s.RecordStore().ListConfig("router_settings")
 	if err != nil || db == nil {
@@ -52,6 +59,10 @@ func MergedRouter(s Host) map[string]any {
 }
 
 // MergedGeneral overlays database general settings on YAML. master_key, database_url, and redis_url are not exposed from the database.
+// 参数 s（Host）：MergedGeneral使用的数据面宿主。
+// 返回 map[string]any（map[string]any）：MergedGeneral的字段表。缺键表示上游或库里没有这个字段。
+// 调用：gateway/spend.go
+// 测试：无直接单测
 func MergedGeneral(s Host) map[string]any {
 	base := map[string]any{}
 	for k, v := range s.Config().GeneralRaw {
@@ -68,6 +79,10 @@ func MergedGeneral(s Host) map[string]any {
 }
 
 // saveNamespacePatch writes a partial update into one namespace. Only keys present in the patch are stored, and a router-settings change refreshes the in-process strategy.
+// 参数 s（Host）：保存NamespacePatch使用的数据面宿主；namespace（string）：保存NamespacePatch使用的namespace。空串表示调用方没有提供这项；patch（map[string]any）：调用方提交的补丁。只覆盖出现的键。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 settings.go 内使用
+// 测试：无直接单测
 func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 	var current map[string]any
 	switch namespace {
@@ -95,6 +110,10 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 }
 
 // ApplyTyped copies strategy, retries, and timeout from the merged document into the typed config. Fields that are absent are left unchanged.
+// 参数 s（Host）：应用Typed使用的数据面宿主；m（map[string]any）：已经解析的 JSON 对象，键是上游或配置里的字段名。
+// 返回：无。合并文档里的策略、重试次数和超时已写进类型化配置。文档没写的字段保持原值。
+// 调用：gateway/server.go
+// 测试：无直接单测
 func ApplyTyped(s Host, m map[string]any) {
 	if v := str(m["routing_strategy"]); v != "" {
 		s.Config().RouterSettings.RoutingStrategy = v
@@ -113,6 +132,10 @@ func ApplyTyped(s Host, m map[string]any) {
 }
 
 // Update accepts a partial update of router, general, or LiteLLM settings. It requires a management identity.
+// 参数 s（Host）：更新使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/admin.go、gateway/models/mount.go
+// 测试：无直接单测
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -142,6 +165,10 @@ type generalField struct {
 }
 
 // generalFieldCatalog returns the field definitions the general-settings page shows, including type and default.
+// 参数：无。
+// 返回 []generalField（[]generalField）：通用设置页要展示的字段，含类型和默认值。
+// 调用：仅在 settings.go 内使用
+// 测试：无直接单测
 func generalFieldCatalog() []generalField {
 	return []generalField{
 		{"enable_anthropic_prompt_caching", "Boolean", "Automatically add Anthropic prompt-cache breakpoints", false, nil, "prompt_caching"},
@@ -155,6 +182,10 @@ func generalFieldCatalog() []generalField {
 }
 
 // GeneralList returns the general-settings list with stored_in_db. A key only in the database is true, a key only in YAML is false, and a key in neither is null.
+// 参数 s（Host）：General列表使用的数据面宿主。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：gateway/prefs/page.go
+// 测试：无直接单测
 func GeneralList(s Host) []map[string]any {
 	yamlBase := map[string]any{}
 	for k, v := range s.Config().GeneralRaw {
@@ -194,6 +225,10 @@ func GeneralList(s Host) []map[string]any {
 }
 
 // FieldUpdate updates one general-settings field. A missing field_name returns 400.
+// 参数 s（Host）：字段Update使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/prefs/mount.go
+// 测试：无直接单测
 func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -216,6 +251,10 @@ func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // FieldDelete deletes one general-settings field. After deletion the YAML baseline applies again.
+// 参数 s（Host）：字段Delete使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/prefs/mount.go
+// 测试：无直接单测
 func FieldDelete(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return

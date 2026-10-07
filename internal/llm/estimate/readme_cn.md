@@ -1,33 +1,15 @@
 # llm/estimate
 
-## 这个模块做什么
+本地的 token 估算，以及一个模型声称支持的 OpenAI 参数列表。`gateway/tokens.go` 在 token 计数工具接口上调用它。`dataplane.EstimateTokens` 是上游调用前用来做预算和 TPM 的另一套更小的上界。不要把这两个数当成同一个计数器。
 
-`llm/estimate` 用 token 数和供应商折扣给一次调用计价，并估算一段提示会用掉多少 token。找不到价格时不能当成 0。token 计数失败要返回错误，不能假装提示是空的。
+`CountTokens(model, prompt, messages)` 按本地 LiteLLM `token_counter` 的规则计 OpenAI 聊天。提示非空，或者消息列表是 nil，就按纯文本计。否则每条消息加上 `tokens_per_message`，再加上 role 和 content，总数再加 3 个回复起始 token。分词器是 `tokenizer.ForModel`。不认识的模型名退回 `cl100k_base`。成功路径返回的种类字符串是 `openai_tokenizer`。分词器装不上时返回 `0, "", err`。
 
-## 功能
+`ModelUsedForCount` 从部署模型 id 上剥掉一层供应商前缀，所以 `openai/gpt-4o-mini` 按 `gpt-4o-mini` 计。`gateway/tokens.go` 的 `modelUsedForCount` 在请求模型对上某条部署时用该部署的 `litellm_params.model`，否则用请求里的模型名。
 
-- `TokenCost` 用每 token 单价乘提示 token 和补全 token。
-- `ApplyDiscount` 和 `ApplyMargin` 用控制台保存的供应商表调整基价。`Margin` 带百分比和可选的固定费用。
-- `CountTokens` 按模型、原始提示或聊天消息列表估算 token 数。
-- `OpenAISupportedParams` 列出某个模型声明支持的 OpenAI 参数。
-- `ModelUsedForCount` 在请求别名和上游模型不同时，选出用来计数的部署模型。
-- `MapTrafficType` 和 `NormalizeServiceTier` 把成本视图认识的档位字符串规范化。
-
-## 其它包怎么用
-
-导入 `github.com/sunqirui1987/xhub/internal/llm/estimate`。
-
-```go
-n, _, err := estimate.CountTokens("gpt-4o-mini", "", messages)
-if err != nil {
-    return err
-}
-input, output := estimate.TokenCost(n, completion, inputRate, outputRate)
-final, percent, amount := estimate.ApplyDiscount(input+output, "openai", discounts)
-```
-
-单价来自 `catalog.CostMap`，不是这个包。把单价传进来。价格表没有这个模型时，不要用 0 去调用 `TokenCost`。
+`OpenAISupportedParams` 是 `GET /utils/supported_openai_params` 返回的参数列表。`gpt-4` 和 `gpt-3.5-turbo-16k` 不含 `response_format`。出现在目录里的模型还会带上 `user`。
 
 ## 这个包不做什么
 
-它不写花费日志。算出来的数字由 `store` 和 `live` 保存。
+它不读价格表，也不乘美元。那是 `catalog.Cost`。它也不把一次完成里的工具调用参数文本算进输出 token；已存储调用的输出 token 由 `dataplane/usage.go` 按上游 usage 对象或流式文本补上。
+
+English notes are in `readme.md` in this directory.

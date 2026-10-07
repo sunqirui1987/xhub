@@ -62,6 +62,14 @@ router_settings:
 
 `database_url` 为空，或者以 `sqlite:`、`file:` 开头时，`Load` 返回错误。
 
+## Load 实际改了什么
+
+YAML 解码之后，`Load` 遍历每条部署 `litellm_params` 里的字符串。以 `os.environ/` 开头的值换成 `os.Getenv`。变量不存在时变成空串，于是这项配置保持关闭，而不是把占位符发给上游。这里不把 `custom_llm_provider` 转成小写；那一步在 `internal/llm` 灌凭据时做。
+
+空的 `routing_strategy` 变成 `simple-shuffle`。`num_retries` 为 0 时变成 2。`timeout` 为 0 时变成 60 秒。这些默认值在 `Load` 里写上，不是路由器写的。
+
+`ModelEntry.ParamString(key, fallback)` 从 `litellm_params` 读一个字符串。缺键或不是字符串时返回 `fallback`。`router.DeploymentID` 用它读 `api_base` 和 `model`，再用 `|` 拼成部署 id。
+
 ## 这个包不做什么
 
-它不合并数据库里的覆盖值。那是 `settings.Overlay`。它也不打开 PostgreSQL。
+它不合并数据库里的覆盖值。那是 `internal/gateway/prefs` 的覆盖。它不打开 PostgreSQL。它也不监听 `:4000`。网关进程在启动时按命令行给出的路径调用一次 `Load`。

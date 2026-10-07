@@ -106,6 +106,7 @@ import type {
 import { MCP_TOOLS_PREVIEW_FORBIDDEN_MESSAGE } from "./mcp_tools/constants";
 import type { ComplexityRouterConfigPayload } from "./add_model/build_complexity_router_config";
 import type { AutoRouterPresetsResponse } from "@/lib/autorouter_presets";
+import type { PriceCatalogDocument } from "@/app/(dashboard)/models-and-endpoints/components/priceCatalogRows";
 import type { VectorStoreIndex } from "@/app/(dashboard)/vector-stores/_components/IndexesTab";
 import type { RoutingDecision } from "./view_logs/LogDetailsDrawer/RoutingDecisionCard";
 import {
@@ -654,6 +655,36 @@ export const getModelCostMapReloadStatus = async (accessToken: string) => {
     throw error;
   }
 };
+// The price catalog: the embedded Modelink baseline plus whatever an operator
+// adds or edits. Unlike the public cost map this needs a management token,
+// because the response also says which rows are hand-entered overrides.
+export const getPriceCatalog = async (accessToken: string) => {
+  return await apiClient.get<PriceCatalogDocument>(`/price/catalog`, { accessToken });
+};
+
+export const upsertPriceModel = async (accessToken: string, body: Record<string, unknown>) => {
+  return await apiClient.post(`/price/model`, { accessToken, body });
+};
+
+export const deletePriceModel = async (accessToken: string, id: string) => {
+  return await apiClient.delete(`/price/model`, { accessToken, body: { id } });
+};
+
+export const resetPriceModel = async (accessToken: string, id: string) => {
+  return await apiClient.post(`/price/model/reset`, { accessToken, body: { id } });
+};
+
+export const upsertPriceProvider = async (accessToken: string, body: Record<string, unknown>) => {
+  return await apiClient.post(`/price/provider`, { accessToken, body });
+};
+
+export const deletePriceProvider = async (accessToken: string, litellmProvider: string) => {
+  return await apiClient.delete(`/price/provider`, {
+    accessToken,
+    body: { litellm_provider: litellmProvider },
+  });
+};
+
 export const modelCreateCall = async (accessToken: string, formValues: Model) => {
   try {
     const data = await apiClient.post(`/model/new`, {

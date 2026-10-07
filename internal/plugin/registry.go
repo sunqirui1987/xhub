@@ -25,7 +25,17 @@ type Decision struct {
 
 // Extension is one named pre-call check. Name must be unique in a registry.
 type Extension interface {
+	// 返回注册表使用的稳定名字。空名字不会被接受。
+	// 参数：无。
+	// 返回：注册表里唯一的扩展名。空串会被 Register 拒绝。
+	// 调用：gateway/routes.go、httpx/module.go
+	// 测试：无直接单测
 	Name() string
+	// 在联系上游之前做一次检查。拒绝时数据面不再访问上游。
+	// 参数 call（Call）：这一次扩展看到的调用，含操作名、模型和路径。
+	// 返回 Decision（Decision）：扩展给出的决定，拒绝时调用方不再访问上游。
+	// 调用：仅在 registry.go 内使用
+	// 测试：无直接单测
 	BeforeUpstream(call Call) Decision
 }
 
@@ -39,6 +49,10 @@ type Registry struct {
 var logTraceOnceRegistry sync.Once
 
 // New returns an empty registry. Run allows the call when nothing is registered.
+// 参数：无。
+// 调用：authz/authz.go、authz/decide.go、cache/cache.go、dataplane/serve.go
+// 测试：activity_http_test.go、authz_test.go、builtin_providers_test.go
+// 返回：空注册表，可以立刻 Register。不会返回 nil。
 func New() *Registry {
 	logTraceOnceRegistry.Do(func() { logx.Trace("enter plugin.New") })
 
@@ -46,6 +60,10 @@ func New() *Registry {
 }
 
 // Register appends an extension. An empty or duplicate name returns an error and leaves the existing order unchanged.
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 registry.go 内使用
+// 测试：无直接单测
+// 参数 ext（Extension）：要注册的扩展。
 func (r *Registry) Register(ext Extension) error {
 	if r == nil {
 		return fmt.Errorf("plugin registry is nil")
@@ -65,6 +83,10 @@ func (r *Registry) Register(ext Extension) error {
 }
 
 // Names returns a copy of the registered names in order. Changing the slice does not change the registry.
+// 参数：无。
+// 调用：仅在 registry.go 内使用
+// 测试：无直接单测
+// 返回：按注册顺序复制的扩展名。改返回的切片不会改注册表。没有扩展时为空切片。
 func (r *Registry) Names() []string {
 	if r == nil {
 		return nil
@@ -79,6 +101,10 @@ func (r *Registry) Names() []string {
 }
 
 // Invoke runs the extension registered under name. A missing name returns an error and does not call any other extension.
+// 参数 name（string）：注册表里的扩展名。没有这个名字时返回错误，不会顺手调用别的扩展；call（Call）：这一次扩展看到的调用，含操作名、模型和路径。
+// 返回 Decision（Decision）：该扩展的决定。拒绝时调用方不再访问上游；error（error）：注册表里没有这个名字时非 nil。
+// 调用：仅在 registry.go 内使用
+// 测试：无直接单测
 func (r *Registry) Invoke(name string, call Call) (Decision, error) {
 	if r == nil {
 		return Decision{}, fmt.Errorf("plugin %q is not registered", name)
@@ -93,6 +119,10 @@ func (r *Registry) Invoke(name string, call Call) (Decision, error) {
 }
 
 // Run calls every extension in registration order. The first refusal stops the rest and keeps headers already set. An empty registry returns a zero Decision so the data plane continues.
+// 调用：dataplane/serve.go、gateway/server.go、live/redis.go
+// 测试：authz_test.go、catalog_reads_test.go、chains_test.go
+// 参数 call（Call）：这一次扩展看到的调用，含操作名、模型和路径。
+// 返回 Decision（Decision）：扩展给出的决定，拒绝时调用方不再访问上游。
 func (r *Registry) Run(call Call) Decision {
 	if r == nil {
 		return Decision{}

@@ -1,28 +1,25 @@
 # gateway/guard
 
-## Purpose
+Guardrail checks for chat. Mounted as `guard.Module`.
 
-`guard` runs content rules before a request is sent upstream. A blocking rule stops the data plane from contacting the provider. The dashboard can also trial a rule without spending provider quota.
+POST `/apply_guardrail` and POST `/guardrails/apply_guardrail` run one check and return the action. The inference path does not use those routes. `dataplane.Serve` calls `Host.GuardrailBlocks` only when `op` is `chat` or empty, before the cache and before the upstream.
 
-## HTTP and Go entry points
+`listGuardrails` reads key-value kinds `guardrails` and `guardrail` from `RecordStore`. No store means the check is skipped and logged at debug.
 
-- `PreCall` inspects a JSON body. It returns true and a message when the call must stop.
-- `Apply` is the HTTP trial endpoint mounted by `Module`.
-- The process calls `GuardrailBlocks` on the server, which delegates here, from the data plane before the upstream HTTP client is used.
+`guardrailText` is the text that is checked: `text`, else `input`, else `prompt`, else the concatenated `messages[].content`.
 
-## How a caller uses the result
+`matchGuardrail` reads `litellm_params.guardrail` or the top-level `guardrail`:
 
-```go
-if blocked, message := guard.PreCall(host, body); blocked {
-    httpx.WriteTypedError(w, r.URL.Path, 400, "guardrail_violation", message)
-    return
-}
-```
+- `block` or `always_block` returns action `block` and the original text.
+- Otherwise the word lists `blocked_words` and `keywords` (on the params or on the guardrail) are tested case-insensitively. A hit with kind `redact` or `litellm_params.mode == redact` returns action `redact` and the text with that word replaced by `[REDACTED]`. Any other hit returns `block`.
+- No hit returns `allow` and the original text.
 
-Rules are the guardrail rows stored for the proxy. A rule marked default-on applies even when the request does not name it. A request that names extra guardrails adds those rules.
+A block in `Serve` is HTTP 400 `guardrail_failed`. The exchange is still stored and `RecordSpend` is called with success false, so the logs drawer can show which guardrail stopped the call.
+
+The console garden (`frontend` guardrails components) edits these key-value documents. Patterns in the garden include financial, medical, legal, violence, jailbreak, and PII helpers. This package does not call Azure Content Safety. There is no Azure severity threshold of 0, 2, 4, 6 in the Go matcher.
 
 ## What this package does not do
 
-It does not call the model to classify text unless a stored rule says so. The default matcher is the word list on the guardrail row.
+It does not run on bypass. Official contents generation is not scanned for blocked words. It does not implement the plugin `Decision` type. Plugins run later, inside `Serve`, and can refuse even when every guardrail allowed the text.
 
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

@@ -1,31 +1,15 @@
 # gateway/prefs
 
-## 怎么使用
+存在 PostgreSQL 里、盖在 YAML `Config` 上的路由和通用设置。以 `prefs.Module` 挂上。
 
-按下面的 HTTP 路径或 Go 入口调用。除了公开路由，请求都要带主密钥或管理员会话。
+GET `/router/settings` 和 GET `/router/fields` 给出设置页文档：策略、重试、超时，以及字段目录（`generalFieldCatalog` 里提示缓存 TTL 的选项是 `5m` 和 `1h`）。GET `/config/list` 返回合并后的文档。POST `/config/update` 替换一个命名空间。POST `/config/field/update` 和 POST `/config/field/delete` 改一个键。
 
-## 这个模块做什么
+`Overlay(base, db)` 把数据库里的键抄到 YAML 表上。数据库里有的键赢。只在 YAML 里的键保留。`ApplyTyped` 再在这些键存在时把 `routing_strategy`、`num_retries`、`timeout` 抄进 `RouterSettings`。缺的键留着 `config.Load` 写上的类型化值（默认策略 `simple-shuffle`、2 次重试、60 秒超时）。
 
-`prefs` 给路由设置页和通用设置页提供数据。你读到的值是 YAML 基线再盖上数据库行。数据库里出现的键胜出，即使值是列表或 null。数据库里没有的键保持 YAML 的值。
+每次推理请求仍会跑 `ValidateStrategy`。存了一个不认识的策略名，不会让 `Serve` 把它当成 `simple-shuffle`。请求得到 HTTP 400 `unknown routing strategy`。
 
-## HTTP 路径
+## 这个包不做什么
 
-- `GET /router/settings` 返回控制台要画的合并后路由文档。`GET /router/fields` 给字段编辑器返回同一份文档。
-- `POST /config/update` 把一个字段写进数据库覆盖。列表和标量是替换。嵌套对象会合并。
-- `GET /config/list` 返回通用设置视图。`master_key`、`database_url` 和 `redis_url` 不会被放进这个视图。
-- 日志页用的回调列表挂在这些路由旁边。
+它不从磁盘重读 `configs/config.yaml`。这个文件在进程启动时读一次。它也不改模型价格。那是 `gateway/models` 的 `/price/model`。
 
-## 例子
-
-```bash
-curl -s http://127.0.0.1:4000/config/update \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"router_settings":{"routing_strategy":"least-busy"}}'
-```
-
-然后再 GET 一次路由设置。`routing_strategy` 会变成 `least-busy`，你没有提交的字段还在。
-
-## Go 调用方
-
-`prefs.MergedRouter` 和 `prefs.MergedGeneral` 返回 HTTP 处理函数写出的同一份文档。`Overlay` 把数据库里的键盖到 YAML 上。`MergePatch` 把局部更新折进当前文档。传入一个能读配置和存储的宿主。进程实现了这个宿主。
+English notes are in `readme.md` in this directory.

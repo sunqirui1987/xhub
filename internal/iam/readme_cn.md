@@ -90,6 +90,16 @@ rows, err := db.ListUsage(ctx, iam.UsageQuery{Cond: sc.Cond, Limit: 50})
 
 `EnsureAdmin` 在该邮箱还没有账号时，按配置创建一位平台管理员，并返回是否创建了。它**从不**更新已有行：配置里的密码是初始密码，改配置文件不会重置线上账号。`Bootstrapped` 是前端读取的标记，创建流程与 `POST /bootstrap` 都会写它。
 
+## 一次请求碰到哪些表
+
+`RecordUsage` 在一个事务里写 `usage_events`、`request_logs`、`usage_daily`，以及用户、密钥、团队、项目、组织上的实时花费计数。插入是 `ON CONFLICT (request_id) DO NOTHING`。重放的刷写，包括另一台网关把同一条 Redis 记录再刷一次，事件只插入一次，汇总也只加一次。`usage_events` 没有外键：属主、团队和组织是这次调用被授权时拍下来的快照。
+
+`request_logs` 存请求正文、响应正文和代理请求。读别人的行会进审计。平台管理员看别人的个人日志走 `authz`，不在这里开后门。
+
+`CountUsage` 数调用方 `UsageQuery` 范围内的事件，给分页。查询失败时返回 `0` 和 error。`DailyUsage` 按调用方时区偏移切日历日。`RollupByKey` 和 `RollupByTeam` 用相关子查询取显示名，避免 join 把分组行乘大。
+
+`api_keys.token_hash` 就是 `Principal.Hash`。RPM 和 TPM 的 Redis 键用这个哈希（`xhub:rpm:`、`xhub:tpm:`），不用 `api_base|model`。
+
 ## 这个包不做什么
 
-它不做鉴权判定。所有判定——谁能读谁的用量、谁能管理哪个团队——都在 `authz`，本包只负责应用最终得到的过滤条件。它也不签发或校验会话令牌，那是 `auth`。
+它不做鉴权判定。所有判定——谁能读谁的用量、谁能管理哪个团队——都在 `authz`，本包只负责应用最终得到的过滤条件。它也不签发或校验会话令牌，那是 `auth`。它不计在途调用（`internal/hooks`），也不连 Redis（`internal/live`）。

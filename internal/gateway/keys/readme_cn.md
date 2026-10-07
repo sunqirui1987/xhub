@@ -1,38 +1,19 @@
 # gateway/keys
 
-## 怎么使用
+虚拟密钥的路由。以 `keys.Module` 挂在目录之前。
 
-按下面的 HTTP 路径或 Go 入口调用。除了公开路由，请求都要带主密钥或管理员会话。
+POST `/key/generate` 默认给调用方建一把个人密钥，除非正文指定了别的属主。明文令牌只返回一次，前缀是 `sk-`。库存的是这段明文的 `iam.HashKey`。POST `/key/service-account/generate` 建一把属于团队或项目的服务密钥。团队管理员只能把 `models` 收窄到团队允许名单的子集，不能放宽。
 
-## 这个模块做什么
+`hashKeyToken` 对 `sk-` 开头的值做哈希，已经是哈希或 id 的原样通过。`lookupKey` 先按哈希查（`KeyByHash`），再按密钥 id 查，因为控制台传 id，LiteLLM 兼容客户端传明文。
 
-`keys` 是虚拟密钥的 HTTP 接口。操作员可以创建密钥、列出密钥、轮换明文、重置花费、封禁密钥，而不必把主密钥交出去。明文只在创建和轮换的响应里出现一次。
+GET `/key/list` 由 `KeysScope` 在 SQL 里收窄，不是查出之后再滤。平台管理员看见全部密钥。团队管理员看见自己的个人密钥，加上所管理团队的服务密钥。成员只看见自己的个人密钥。主密钥得到恒假范围，这样漏掉一次授权也不会变成跨租户列表。
 
-## HTTP 路径
+POST `/key/block`、`/key/unblock`、`/key/delete`、`/key/update`、`/key/regenerate` 对这个密钥 id 做 `ActionKeyWrite`。重新生成会轮换库存哈希。POST `/key/{key}/reset_spend` 把这把密钥的花费计数清零。它不改写 `usage_events`。
 
-请求头带 `Authorization: Bearer <主密钥或管理员会话>`。
+`key_alias` 是显示名。密钥上的 RPM 和 TPM 限额稍后由 `gateway/limits.go` 对 Redis 键 `xhub:rpm:<Principal.Hash>` 和 `xhub:tpm:<Principal.Hash>` 执行，不是对 `api_base|model`。
 
-- `POST /key/generate` 创建密钥。JSON 响应里的 `key` 只出现这一次。
-- `GET /key/list` 和 `POST /key/list` 列出密钥。可以按用户、团队和别名过滤。
-- `GET /key/info` 读取一把密钥。传入处理函数接受的哈希或别名。以后的调用不能用库存哈希代替明文。
-- `POST /key/update` 修改预算、模型和元数据。
-- `POST /key/delete` 删除密钥。
-- `POST /key/regenerate` 轮换明文，新明文只返回一次。
-- `POST /key/block` 和 `POST /key/unblock` 停止或恢复使用。
-- `POST /key/{key}/reset_spend` 清掉这把密钥的花费。
-- `GET /key/aliases` 列出别名，给控制台的选择器使用。
+## 这个包不做什么
 
-## 例子
+它不在 `/v1/chat/completions` 上验收密钥。那是 `auth` 加上 `dataplane.Serve`。它也不计在途调用。
 
-```bash
-curl -s http://127.0.0.1:4000/key/generate \
-  -H "Authorization: Bearer sk-local-master" \
-  -H "Content-Type: application/json" \
-  -d '{"key_alias":"ci","models":["gpt-4o-mini"],"max_budget":10}'
-```
-
-把返回的 `key` 当作 `/v1/chat/completions` 的 bearer token。
-
-## Go 调用方
-
-进程装上 `keys.Module`。其它包不要直接调用 `Generate`，除非它实现了 `keys.Host`。`*gateway.Server` 实现了这个接口。
+English notes are in `readme.md` in this directory.

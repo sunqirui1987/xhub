@@ -42,8 +42,16 @@ type UsageEvent struct {
 	CachedTokens     *int       `xorm:"'cached_tokens'" json:"cached_tokens,omitempty"`
 	SessionID        string     `xorm:"'session_id'" json:"session_id"`
 	CacheKey         string     `xorm:"'cache_key'" json:"cache_key"`
+	// Guardrail is the JSON array the logs drawer reads as guardrail monitoring.
+	// Empty means this call was not checked.
+	Guardrail string `xorm:"'guardrail'" json:"-"`
 }
 
+// 告诉 xorm 这个结构体对应数据库表 usage_events。
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 usage_events。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (UsageEvent) TableName() string { return "usage_events" }
 
 // RequestLog is the stored request and response for one usage event. It is the
@@ -57,6 +65,11 @@ type RequestLog struct {
 	ProxyRequest string `xorm:"'proxy_request'" json:"proxy_request"`
 }
 
+// 告诉 xorm 这个结构体对应数据库表 request_logs。
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 request_logs。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (RequestLog) TableName() string { return "request_logs" }
 
 // UsageDaily is the pre-aggregated roll-up, keyed by day and full ownership.
@@ -77,6 +90,11 @@ type UsageDaily struct {
 	Cost             float64   `xorm:"'cost'" json:"cost"`
 }
 
+// 告诉 xorm 这个结构体对应数据库表 usage_daily。
+// 参数：无。
+// 返回 string（string）：xorm 使用的表名 usage_daily。这个结构体的行都进这张表。
+// 调用：xorm 在映射这张表时。
+// 测试：无直接单测
 func (UsageDaily) TableName() string { return "usage_daily" }
 
 // UsageRecord is one call to be persisted. Ownership is the snapshot taken when
@@ -113,15 +131,17 @@ type UsageRecord struct {
 	CachedTokens     *int
 	SessionID        string
 	CacheKey         string
+	Guardrail        string
 }
 
-// RecordUsage writes the event, its stored request/response, the daily roll-up
-// and the live spend counters in one transaction.
+// RecordUsage writes the event, its stored request/response, the daily roll-up and the live spend counters in one transaction. The batch is idempotent on request_id. A retried flush, or a second gateway
 //
-// The batch is idempotent on request_id. A retried flush, or a second gateway
-// process replaying the same Redis entry, inserts the event once and therefore
-// increments everything else once. The existence check and the increments share
-// the transaction so a partial replay cannot double-count.
+//	process replaying the same Redis entry, inserts the event once and therefore increments everything else once. The existence check and the increments share the transaction so a partial replay cannot double-count.
+//
+// 参数 ctx（context.Context）：上下文，取消时停止；records（[]UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：dataplane/live.go、gateway/spend.go、gateway/wire.go
+// 测试：activity_http_test.go、prompt_log_test.go、usage_idempotency_test.go
 func (db *DB) RecordUsage(ctx context.Context, records []UsageRecord) error {
 	logTraceOnceUsage.Do(func() { logx.Trace("enter iam.RecordUsage") })
 
@@ -154,12 +174,12 @@ func (db *DB) RecordUsage(ctx context.Context, records []UsageRecord) error {
 	})
 }
 
-// insertEvent stores one usage event and reports whether it was new.
-//
-// It never raises a unique violation: a replayed batch, and a second gateway
-// process flushing the same Redis entry, both hit ON CONFLICT DO NOTHING and
-// report "not new". Raising instead would abort the surrounding transaction on
-// PostgreSQL, which would fail the whole batch over one duplicate.
+// insertEvent stores one usage event and reports whether it was new. It never raises a unique violation: a replayed batch, and a second gateway process flushing the same Redis entry, both hit ON CONFLIC
+// T DO NOTHING and report "not new". Raising instead would abort the surrounding transaction on PostgreSQL, which would fail the whole batch over one duplicate.
+// 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 bool（bool）：这次写入是新的用量事件时返回真。冲突插入被忽略时返回假，同时不报唯一约束错误；error（error）：失败原因。nil 表示这一步成功。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
 	var ended any
 	if !r.EndedAt.IsZero() {
@@ -169,14 +189,14 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
         (request_id, ts, key_id, owner_type, user_id, team_id, project_id, organization_id,
          model, call_type, status, prompt_tokens, completion_tokens, cost, duration_ms,
          ended_at, ttft_ms, cache_hit, key_hash, key_alias, team_alias, provider,
-         cached_tokens, session_id, cache_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         cached_tokens, session_id, cache_key, guardrail)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (request_id) DO NOTHING`,
 		r.RequestID, stamp(r.TS), r.KeyID, ownerType(r), r.UserID, r.TeamID, r.ProjectID,
 		r.OrganizationID, r.Model, r.CallType, status(r),
 		r.PromptTokens, r.CompletionTokens, r.Cost, r.DurationMS,
 		ended, r.TTFTMs, r.CacheHit, r.KeyHash, r.KeyAlias, r.TeamAlias, r.Provider,
-		r.CachedTokens, r.SessionID, r.CacheKey)
+		r.CachedTokens, r.SessionID, r.CacheKey, r.Guardrail)
 	if err != nil {
 		return false, mapErr(err)
 	}
@@ -187,8 +207,11 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
 	return n > 0, nil
 }
 
-// putRequestLog stores the bodies for one event. An empty pair is still stored,
-// so "prompt storage was off" stays distinguishable from "the row is gone".
+// putRequestLog stores the bodies for one event. An empty pair is still stored, so "prompt storage was off" stays distinguishable from "the row is gone".
+// 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func putRequestLog(s *xorm.Session, r UsageRecord) error {
 	row := RequestLog{RequestID: r.RequestID, RequestBody: r.RequestBody,
 		ResponseBody: r.ResponseBody, Error: r.Error, ProxyRequest: r.ProxyRequest}
@@ -198,9 +221,11 @@ func putRequestLog(s *xorm.Session, r UsageRecord) error {
 	return nil
 }
 
-// bumpDaily adds one request to the roll-up row for its day and ownership. The
-// conflict target is the full primary key, so the increment is a single
-// statement that cannot lose an update to a concurrent flusher.
+// bumpDaily adds one request to the roll-up row for its day and ownership. The conflict target is the full primary key, so the increment is a single statement that cannot lose an update to a concurrentflusher.
+// 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func bumpDaily(s *xorm.Session, r UsageRecord) error {
 	_, err := s.Exec(`INSERT INTO usage_daily
         (day, organization_id, team_id, project_id, user_id, key_id, owner_type, model,
@@ -216,9 +241,11 @@ func bumpDaily(s *xorm.Session, r UsageRecord) error {
 	return mapErr(err)
 }
 
-// addScopeSpend moves the live counters the budget check reads. It runs in the
-// same transaction as the event, so a budget can never count a call whose event
-// was rolled back, and a rolled-back flush cannot leave a phantom charge.
+// addScopeSpend moves the live counters the budget check reads. It runs in the same transaction as the event, so a budget can never count a call whose event was rolled back, and a rolled-back flush cannot leave a phantom charge.
+// 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func addScopeSpend(s *xorm.Session, r UsageRecord) error {
 	if r.Cost == 0 {
 		return nil
@@ -240,6 +267,10 @@ func addScopeSpend(s *xorm.Session, r UsageRecord) error {
 }
 
 // stamp returns the event time in UTC, using now when the caller had none.
+// 参数 t（time.Time）：时间点。零值表示调用方没有提供时间。
+// 返回 time.Time（time.Time）：解析出的时间。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func stamp(t time.Time) time.Time {
 	if t.IsZero() {
 		return time.Now().UTC()
@@ -248,12 +279,20 @@ func stamp(t time.Time) time.Time {
 }
 
 // day truncates an event time to the UTC calendar day the roll-up keys on.
+// 参数 t（time.Time）：时间点。零值表示调用方没有提供时间。
+// 返回 time.Time（time.Time）：解析出的时间。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func day(t time.Time) time.Time {
 	s := stamp(t)
 	return time.Date(s.Year(), s.Month(), s.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // ownerType is the stored owner, defaulting to service the way the schema does.
+// 参数 r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 string（string）：库存的归属类型。空值按服务账号处理，和表的默认一致。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func ownerType(r UsageRecord) string {
 	if r.OwnerType == "" {
 		return OwnerService
@@ -262,6 +301,10 @@ func ownerType(r UsageRecord) string {
 }
 
 // status is the stored outcome, defaulting to success.
+// 参数 r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
+// 返回 string（string）：库存的结果状态。空值按 success 处理。
+// 调用：仅在 usage.go 内使用
+// 测试：无直接单测
 func status(r UsageRecord) string {
 	if r.Status == "" {
 		return "success"

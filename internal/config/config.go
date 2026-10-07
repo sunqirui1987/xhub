@@ -72,6 +72,10 @@ type GeneralSettings struct {
 var logTraceOnceConfig sync.Once
 
 // Load reads YAML. An empty database_url, or one that starts with sqlite or file:, returns an error instead of silently using a local file database.
+// 参数 path（string）：YAML 配置文件的磁盘路径，不是请求 URL。空路径或 sqlite、file: 开头的数据库地址会返回错误。
+// 调用：catalog/classify.go、gateway/catalog.go
+// 测试：activity_http_test.go、builtin_providers_test.go、chains_test.go
+// 返回：解析后的进程配置。error 非 nil 时配置为 nil，原因是读文件失败、YAML 无效，或数据库地址为空、sqlite、file:。
 func Load(path string) (*Config, error) {
 	logTraceOnceConfig.Do(func() { logx.Trace("enter config.Load") })
 
@@ -128,10 +132,11 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// resolve expands environment placeholders in a config string. A variable that
-// is not set becomes the empty string, which is what makes "os.environ/NAME"
-// safe to write: the feature that key configures stays off rather than acting on
-// placeholder text.
+// resolve expands environment placeholders in a config string. A variable that is not set becomes the empty string, which is what makes "os.environ/NAME" safe to write: the feature that key configures stays off rather than acting on placeholder text.
+// 参数 s（string）：解析要处理的文本。空串表示这段没有内容。
+// 返回 string（string）：展开环境变量后的配置文本。变量不存在时保留原样或变成空，由占位符写法决定。
+// 调用：Load 在展开每条部署的 litellm_params 时。
+// 测试：无直接单测
 func resolve(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "os.environ/") {
@@ -140,7 +145,10 @@ func resolve(s string) string {
 	return s
 }
 
-// ParamString reads a string from LiteLLMParams. A missing or wrong-typed value returns fallback.
+// ParamString 从一条部署的 litellm_params 里按名字读字符串。缺键或类型不对时返回 fallback。
+// 参数 e：一条模型部署。key：参数名，例如 model 或 api_base。fallback：缺值或类型不对时的结果。
+// 返回：读到的字符串，或 fallback。
+// 调用：router.DeploymentID、数据面选上游地址。测试：bypass_logic_test.go 间接使用。
 func (e ModelEntry) ParamString(key, fallback string) string {
 	if e.LiteLLMParams == nil {
 		return fallback
@@ -157,6 +165,10 @@ func (e ModelEntry) ParamString(key, fallback string) string {
 }
 
 // SplitProviderModel splits provider/model. With no slash the provider is empty and the model name is the whole string.
+// 参数 raw（string）：拆分供应商模型使用的原始内容。空串表示调用方没有提供这项。
+// 返回 provider（string）：供应商标识，例如 openai 或 volcengine；model（string）：发给上游或对外展示的模型名。
+// 调用：dataplane/serve.go
+// 测试：builtin_providers_test.go
 func SplitProviderModel(raw string) (provider, model string) {
 	raw = strings.TrimSpace(raw)
 	if i := strings.Index(raw, "/"); i > 0 {

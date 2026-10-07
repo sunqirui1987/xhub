@@ -14,6 +14,10 @@ import (
 var logTraceOnceKeys sync.Once
 
 // UpsertProxyModel updates a proxy model by id, or inserts it when the row is missing.
+// 参数 m（ProxyModel）：正在累加或展示的ProxyModel。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/models/admin.go、gateway/models/builtin.go
+// 测试：builtin_providers_test.go、chains_test.go
 func (s *Store) UpsertProxyModel(m ProxyModel) error {
 	logTraceOnceKeys.Do(func() { logx.Trace("enter store.UpsertProxyModel") })
 
@@ -45,8 +49,11 @@ func (s *Store) UpsertProxyModel(m ProxyModel) error {
 	return nil
 }
 
-// ListProxyModels lists every proxy model. A nil store has no models, which is
-// the same answer as an empty table.
+// ListProxyModels lists every proxy model. A nil store has no models, which is the same answer as an empty table.
+// 参数：无。
+// 调用：gateway/models/admin.go、gateway/models/builtin.go
+// 测试：builtin_providers_test.go、chains_test.go
+// 返回 []ProxyModel（[]ProxyModel）：库存里的模型行；error（error）：失败原因，nil 表示成功。
 func (s *Store) ListProxyModels() ([]ProxyModel, error) {
 	traceProxyModels()
 	if s == nil {
@@ -73,6 +80,10 @@ func (s *Store) ListProxyModels() ([]ProxyModel, error) {
 }
 
 // DeleteProxyModel deletes a proxy model by id and clears the cache.
+// 参数 id（string）：部署、模型或凭据 id。空串表示没有选定。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/models/admin.go、gateway/models/builtin.go
+// 测试：builtin_providers_test.go、chains_test.go
 func (s *Store) DeleteProxyModel(id string) error {
 	_, err := s.Engine.ID(id).Delete(&proxyModelRow{})
 	s.bust(new(proxyModelRow))
@@ -80,6 +91,10 @@ func (s *Store) DeleteProxyModel(id string) error {
 }
 
 // PutConfig writes one namespaced configuration row. An existing row is updated and a missing row is inserted.
+// 参数 namespace（string）：放入配置使用的namespace。空串表示调用方没有提供这项；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥；value（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/models/cost_reload.go、gateway/prefs/settings.go
+// 测试：无直接单测
 func (s *Store) PutConfig(namespace, key string, value any) error {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -100,15 +115,21 @@ func (s *Store) PutConfig(namespace, key string, value any) error {
 }
 
 // DeleteConfig deletes one namespaced configuration row and clears the cache.
+// 参数 namespace（string）：删除配置使用的namespace。空串表示调用方没有提供这项；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：gateway/prefs/settings.go
+// 测试：无直接单测
 func (s *Store) DeleteConfig(namespace, key string) error {
 	_, err := s.Engine.ID(coreIDs(namespace, key)).Delete(&configRow{})
 	s.bust(new(configRow))
 	return err
 }
 
-// ListConfig reads every configuration row in one namespace. A nil store has no
-// configuration, so a caller that overlays it keeps the YAML baseline instead of
-// crashing on a deployment that runs without framework records.
+// ListConfig reads every configuration row in one namespace. A nil store has no configuration, so a caller that overlays it keeps the YAML baseline instead of crashing on a deployment that runs without framework records.
+// 参数 namespace（string）：配置命名空间，例如 general 或 router。
+// 返回：该空间里键到 JSON 值的表。Store 为 nil 时返回空表而不是错误，调用方就继续用 YAML。库错误时表为 nil。
+// 调用：gateway 合并数据库里的设置覆盖。
+// 测试：无直接单测。
 func (s *Store) ListConfig(namespace string) (map[string]any, error) {
 	if s == nil {
 		return map[string]any{}, nil

@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownUp, Boxes, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowDownUp, Boxes, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { t } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FALLBACK_CATEGORY, priceCatalogRows, type PriceCatalogRow } from "./priceCatalogRows";
+import { FALLBACK_CATEGORY, type PriceCatalogRow } from "./priceCatalogRows";
 
 type SortOrder = "name" | "input" | "output";
 
@@ -19,7 +19,18 @@ function categoryLabel(category: string): string {
   return category === FALLBACK_CATEGORY ? t("Other") : category;
 }
 
-function ModelCard({ row }: { row: PriceCatalogRow }) {
+function ModelCard({
+  row,
+  onEdit,
+  onDelete,
+  onReset,
+}: {
+  row: PriceCatalogRow;
+  onEdit?: (row: PriceCatalogRow) => void;
+  onDelete?: (row: PriceCatalogRow) => void;
+  onReset?: (row: PriceCatalogRow) => void;
+}) {
+  const editable = Boolean(onEdit || onDelete || onReset);
   return (
     <article
       data-testid={"price-row-" + row.id}
@@ -35,11 +46,50 @@ function ModelCard({ row }: { row: PriceCatalogRow }) {
             {row.provider ?? t("priceCatalog.unknownProvider")}
           </p>
         </div>
+        {editable && (
+          <div className="flex shrink-0 gap-1">
+            {onReset && row.overridden && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t("priceData.resetModel")}
+                title={t("priceData.resetModel")}
+                onClick={() => onReset(row)}
+              >
+                <RotateCcw aria-hidden="true" />
+              </Button>
+            )}
+            {onEdit && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t("Edit")}
+                title={t("Edit")}
+                onClick={() => onEdit(row)}
+              >
+                <Pencil aria-hidden="true" />
+              </Button>
+            )}
+            {onDelete && (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t("Delete")}
+                title={t("Delete")}
+                onClick={() => onDelete(row)}
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
+            )}
+          </div>
+        )}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         <Badge variant="outline" className="font-mono text-xs">
           {categoryLabel(row.category)}
         </Badge>
+        {row.overridden && <Badge variant="secondary">{t("priceData.edited")}</Badge>}
+        {row.removed && <Badge variant="destructive">{t("priceData.removed")}</Badge>}
         {row.capabilities.map((capability) => (
           <Badge key={capability} variant="secondary">
             {t("priceCatalog." + capability)}
@@ -104,16 +154,96 @@ function ModelCard({ row }: { row: PriceCatalogRow }) {
   );
 }
 
+/** The search, sort, filter and add controls above the model list. */
+function CatalogToolbar({
+  query,
+  onQuery,
+  sort,
+  onSort,
+  showFilters,
+  onToggleFilters,
+  activeFilters,
+  onAdd,
+}: {
+  query: string;
+  onQuery: (value: string) => void;
+  sort: SortOrder;
+  onSort: (value: SortOrder) => void;
+  showFilters: boolean;
+  onToggleFilters: () => void;
+  activeFilters: number;
+  onAdd?: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:flex-row">
+      <div className="relative min-w-0 flex-1">
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          aria-label={t("Search")}
+          placeholder={t("priceCatalog.search")}
+          className="h-11 border-0 bg-transparent pl-10 shadow-none"
+          value={query}
+          onChange={(event) => onQuery(event.target.value)}
+        />
+      </div>
+      <label className="flex h-11 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm sm:w-56">
+        <ArrowDownUp aria-hidden="true" className="size-4 text-muted-foreground" />
+        <select
+          aria-label={t("priceCatalog.sort")}
+          className="min-w-0 flex-1 bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={sort}
+          onChange={(event) => onSort(event.target.value as SortOrder)}
+        >
+          <option value="name">{t("priceCatalog.sortName")}</option>
+          <option value="input">{t("priceCatalog.sortInput")}</option>
+          <option value="output">{t("priceCatalog.sortOutput")}</option>
+        </select>
+      </label>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-11 px-4"
+        aria-expanded={showFilters}
+        aria-controls="price-catalog-filters"
+        onClick={onToggleFilters}
+      >
+        <SlidersHorizontal aria-hidden="true" />
+        {t("priceCatalog.filters")}
+        {activeFilters > 0 && <Badge variant="secondary">{activeFilters}</Badge>}
+      </Button>
+      {onAdd && (
+        <Button type="button" className="h-11 px-4" onClick={onAdd} data-testid="price-add-model">
+          <Plus aria-hidden="true" />
+          {t("priceData.addModel")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function PriceCatalog({
   costMap,
+  rows: providedRows,
   isLoading,
   isError,
   onRetry,
+  onAdd,
+  onEdit,
+  onDelete,
+  onReset,
 }: {
-  costMap: Record<string, unknown> | null | undefined;
+  costMap?: Record<string, unknown> | null;
+  rows?: PriceCatalogRow[];
   isLoading?: boolean;
   isError?: boolean;
   onRetry?: () => void;
+  onAdd?: () => void;
+  onEdit?: (row: PriceCatalogRow) => void;
+  onDelete?: (row: PriceCatalogRow) => void;
+  onReset?: (row: PriceCatalogRow) => void;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
@@ -121,7 +251,7 @@ export function PriceCatalog({
   const [sort, setSort] = useState<SortOrder>("name");
   const [showFilters, setShowFilters] = useState(false);
   const [limit, setLimit] = useState(60);
-  const rows = useMemo(() => priceCatalogRows(costMap), [costMap]);
+  const rows = useMemo(() => providedRows ?? [], [providedRows]);
   const categories = useMemo(() => ["all", ...Array.from(new Set(rows.map((row) => row.category))).sort()], [rows]);
   const providers = useMemo(
     () =>
@@ -152,54 +282,29 @@ export function PriceCatalog({
     setLimit(60);
   }
 
+  const emptyResult = !isLoading && !isError && visible.length === 0;
+
+  const emptyCatalog = visible.length === 0;
+  const catalogIsEmpty = rows.length === 0;
+
   return (
     <section aria-label={t("Price catalog")}>
-      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:flex-row">
-        <div className="relative min-w-0 flex-1">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            aria-label={t("Search")}
-            placeholder={t("priceCatalog.search")}
-            className="h-11 border-0 bg-transparent pl-10 shadow-none"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setLimit(60);
-            }}
-          />
-        </div>
-        <label className="flex h-11 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm sm:w-56">
-          <ArrowDownUp aria-hidden="true" className="size-4 text-muted-foreground" />
-          <select
-            aria-label={t("priceCatalog.sort")}
-            className="min-w-0 flex-1 bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={sort}
-            onChange={(event) => {
-              setSort(event.target.value as SortOrder);
-              setLimit(60);
-            }}
-          >
-            <option value="name">{t("priceCatalog.sortName")}</option>
-            <option value="input">{t("priceCatalog.sortInput")}</option>
-            <option value="output">{t("priceCatalog.sortOutput")}</option>
-          </select>
-        </label>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-11 px-4"
-          aria-expanded={showFilters}
-          aria-controls="price-catalog-filters"
-          onClick={() => setShowFilters(!showFilters)}
-        >
-          <SlidersHorizontal aria-hidden="true" />
-          {t("priceCatalog.filters")}
-          {activeFilters > 0 && <Badge variant="secondary">{activeFilters}</Badge>}
-        </Button>
-      </div>
+      <CatalogToolbar
+        query={query}
+        onQuery={(value) => {
+          setQuery(value);
+          setLimit(60);
+        }}
+        sort={sort}
+        onSort={(value) => {
+          setSort(value);
+          setLimit(60);
+        }}
+        showFilters={showFilters}
+        onToggleFilters={() => setShowFilters(!showFilters)}
+        activeFilters={activeFilters}
+        onAdd={onAdd}
+      />
 
       {showFilters && (
         <div id="price-catalog-filters" className="mt-3 space-y-5 rounded-xl border border-border bg-card p-5">
@@ -282,7 +387,7 @@ export function PriceCatalog({
         <>
           <div className="grid items-start gap-4 md:grid-cols-2">
             {visible.slice(0, limit).map((row) => (
-              <ModelCard key={row.id} row={row} />
+              <ModelCard key={row.id} row={row} onEdit={onEdit} onDelete={onDelete} onReset={onReset} />
             ))}
           </div>
           {visible.length > limit && (
@@ -294,13 +399,19 @@ export function PriceCatalog({
           )}
         </>
       )}
-      {!isLoading && !isError && visible.length === 0 && (
+      {emptyResult && (
         <div className="rounded-xl border border-dashed border-border p-12 text-center">
           <Search aria-hidden="true" className="mx-auto mb-4 size-7 text-muted-foreground" />
-          <p className="font-medium">{t(rows.length ? "priceCatalog.noMatches" : "priceCatalog.empty")}</p>
+          <p className="font-medium">{t(catalogIsEmpty ? "priceCatalog.empty" : "priceCatalog.noMatches")}</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            {t(rows.length ? "priceCatalog.tryFilters" : "priceCatalog.tryReload")}
+            {t(catalogIsEmpty ? "priceData.emptyHint" : "priceCatalog.tryFilters")}
           </p>
+          {onAdd && (
+            <Button className="mt-5" onClick={onAdd}>
+              <Plus aria-hidden="true" />
+              {t("priceData.addModel")}
+            </Button>
+          )}
         </div>
       )}
     </section>

@@ -1,35 +1,33 @@
 # hooks
 
-## Purpose
+`hooks` counts how many calls one virtual key has in flight inside this gateway process. It does not decide whether the call is allowed.
 
-`hooks` stops a call before it spends money. It checks the key budget and the number of calls already in flight for that key. When either limit is already exhausted, the data plane must not contact the upstream.
+## Entry
 
-## Features
+`gateway/server.go` calls `hooks.New()` while assembling the process and stores the engine on `Server.Hooks`. The data plane never constructs its own engine. `Serve` reaches the shared one through `Host.HookEngine`.
 
-- `New` creates an empty gate. Counts are kept in memory for this process.
-- `Begin` reserves one slot. It returns a release function and an empty reason on success.
-- When the key budget is already spent, `Begin` returns the reason `"budget"` and a nil release function.
-- When the parallel limit is full, `Begin` returns `"parallel"` and a nil release function.
+`New` always returns a non-nil `*Engine`. The only state is `inflight map[string]int` behind a mutex. The map key is `Principal.KeyID`, the account id of the virtual key, not `Principal.Hash` and not the deployment id `api_base|model`.
 
-## How another package uses it
+## What Begin does
 
-Import `github.com/sunqirui1987/xhub/internal/hooks`.
+`dataplane.Serve` calls `Begin` only after `EnforceIdentityLimits` has already accepted the request:
 
-```go
-gate := hooks.New()
-release, reason := gate.Begin(key)
-if reason != "" {
-    // "budget" or "parallel": do not call the provider
-    return
-}
-defer release()
-// contact the upstream
+```text
+done := h.HookEngine().Begin(p.KeyID)
+defer done()
 ```
 
-The gateway stores one engine on `Server.Hooks` and exposes it with `HookEngine`. Use that instance so every request shares the same in-flight map. A nil key is allowed through and the release function is a no-op.
+- An empty `keyID` returns a no-op function and does not touch the map. A session with no key still gets a release function.
+- Any other id increments `inflight[keyID]` and returns a function that decrements it. When the count falls to 0 or below, the id is deleted.
+
+`Begin` returns one function. It does not return a reason string, an error, or a boolean. It never looks at `max_budget`, RPM, TPM, or Redis. There is no `"budget"` result and no `"parallel"` result. A full map does not refuse the call; this package does not even expose a way to read the count.
+
+The deferred release runs when `Serve` returns, including the paths that later fail at the upstream. `ServeBypass` does not call `Begin`. An official task create or poll does not take a slot here.
 
 ## What this package does not do
 
-It does not read Redis and it does not write spend. Hot spend and cooldown live in `live`.
+Budget for the key, the team, the project, and the organization is checked earlier, in `gateway/limits.go` (`EnforceIdentityLimits`) using rows from `internal/iam`. RPM and TPM against Redis are also there: `enforceRedisRateLimits` calls `live.Client.HitRPM` and `HitTPM` with `Principal.Hash`, the token hash, on keys `xhub:rpm:` and `xhub:tpm:`.
 
-中文使用说明见同目录的 readme_cn.md。
+The in-flight count is per process. A second gateway has its own map. Spend, cooldown, and the spend queue live in `internal/live`.
+
+中文说明见同目录 `readme_cn.md`。

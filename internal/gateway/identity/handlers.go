@@ -21,13 +21,11 @@ var logTraceOnceHandlers sync.Once
 
 // ---------- users ----------
 
-// UserNew creates an account. Only a platform administrator may, because the
-// account's existence changes what every other decision can see.
-//
-// The account, its team membership, its organization administration and its
-// budget are all set here rather than by follow-up calls: a create that half
-// succeeded used to leave a person who existed but could reach nothing, and the
-// console had to guess whether the second call was needed.
+// UserNew creates an account. Only a platform administrator may, because the account's existence changes what every other decision can see. The account, its team membership, its organization administration and its budget are all set here rather than by follow-up calls: a create that half succeeded used to leave a person who existed but could reach nothing, and the console had to guess whether the second call was needed.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceHandlers.Do(func() { logx.Trace("enter identity.UserNew") })
 
@@ -74,10 +72,11 @@ func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, userPublic(u, nil))
 }
 
-// UserList lists accounts the caller may see. A platform administrator sees
-// every account. An organization administrator sees the people in that
-// organization's teams. A team administrator sees the people in the teams they
-// administer. Everyone else sees only themselves.
+// UserList lists accounts the caller may see. A platform administrator sees every account. An organization administrator sees the people in that organization's teams. A team administrator sees the people in the teams they administer. Everyone else sees only themselves.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -140,8 +139,11 @@ func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// membershipsOf reads each user's team roles. A platform administrator's
-// listing is the only caller, so a read failure is a real failure.
+// membershipsOf reads each user's team roles. A platform administrator's listing is the only caller, so a read failure is a real failure.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；rows（[]iam.User）：从用量或目录读出的用户行。
+// 返回 map[string][]map[string]any（map[string][]map[string]any）：memberships的的字段表。缺键表示上游或库里没有这个字段；error（error）：失败原因。nil 表示这一步成功。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func membershipsOf(g Gate, r *http.Request, rows []iam.User) (map[string][]map[string]any, error) {
 	out := make(map[string][]map[string]any, len(rows))
 	for i := range rows {
@@ -163,8 +165,11 @@ func membershipsOf(g Gate, r *http.Request, rows []iam.User) (map[string][]map[s
 	return out, nil
 }
 
-// UserFilterUI is the account picker the console builds filters from. It
-// returns names and ids only and is a platform administrator route.
+// UserFilterUI is the account picker the console builds filters from. It returns names and ids only and is a platform administrator route.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserFilterUI(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -191,14 +196,20 @@ func UserFilterUI(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"users": out})
 }
 
-// AvailableUsers is the account picker. It is the same listing as the filter
-// picker: only a platform administrator may enumerate accounts.
+// AvailableUsers is the account picker. It is the same listing as the filter picker: only a platform administrator may enumerate accounts.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func AvailableUsers(g Gate, w http.ResponseWriter, r *http.Request) {
 	UserFilterUI(g, w, r)
 }
 
-// UserInfo reads one account. A caller reads themselves; a platform
-// administrator reads anybody.
+// UserInfo reads one account. A caller reads themselves; a platform administrator reads anybody.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -230,9 +241,11 @@ func UserInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, roles[u.ID])})
 }
 
-// UserUpdate changes a role, a status, a budget or an email. Only a platform
-// administrator may, and only their own name and password are reachable through
-// the profile routes.
+// UserUpdate changes a role, a status, a budget or an email. Only a platform administrator may, and only their own name and password are reachable through the profile routes.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -292,9 +305,11 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, nil)})
 }
 
-// storedRolePtr reads the console role and maps it onto the stored spelling.
-// A missing field stays nil so an update that does not mention the role leaves
-// it alone.
+// storedRolePtr reads the console role and maps it onto the stored spelling. A missing field stays nil so an update that does not mention the role leaves it alone.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 *string（*string）：控制台 user_role 映射后的库存角色。正文没写这个字段时为 nil，更新不会改角色。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func storedRolePtr(body map[string]any) *string {
 	raw := stringPtr(body, "user_role")
 	if raw == nil {
@@ -305,6 +320,10 @@ func storedRolePtr(body map[string]any) *string {
 }
 
 // statusPtr reads the block flag the console sends as blocked.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 *string（*string）：blocked 为真时是 disabled，为假时是 active。正文没有 blocked 时为 nil。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func statusPtr(body map[string]any) *string {
 	if v, ok := body["blocked"].(bool); ok {
 		s := iam.StatusActive
@@ -317,6 +336,10 @@ func statusPtr(body map[string]any) *string {
 }
 
 // updateProfile applies the two fields a person owns.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；id（string）：更新Profile使用的主键。空串表示调用方没有指定记录；body（map[string]any）：已解析或原始的 JSON。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func updateProfile(g Gate, r *http.Request, p *auth.Principal, id string, body map[string]any) error {
 	ctx := r.Context()
 	if name := str(body["user_alias"]); name != "" {
@@ -332,22 +355,11 @@ func updateProfile(g Gate, r *http.Request, p *auth.Principal, id string, body m
 	return nil
 }
 
-// UserSetPassword sets somebody else's password. It is what the console calls
-// when a person has forgotten theirs, and it replaces the reset link the
-// product used to generate: that link pointed at an onboarding page which has
-// no backend behind it, so the flow could not work and a password typed into it
-// was discarded.
-//
-// A platform administrator may reset any account. A team administrator may
-// reset a member of a team they administer, and an organization administrator
-// a member of any team in their organization. That is narrower than the power
-// to change a role, and the decision in authz refuses an account that runs the
-// platform or administers another organization.
-//
-// The new password is checked by the store, not here: the eight-character
-// minimum lives with the hash so every writer of a password obeys it. Sessions
-// the account has open end immediately, because a reset is the one moment the
-// change must take effect before the next request rather than at the next login.
+// UserSetPassword sets somebody else's password. It is what the console calls when a person has forgotten theirs, and it replaces the reset link the product used to generate: that link pointed at an onboarding page which has no backend behind it, so the flow could not work and a password typed into it was discarded. A platform administrator may reset any account. A team administrator may reset a member of a team they administer, and an organization administrator a member of any team in their organization. That is narrower than the power to change a role, and the decision in authz refuses an account that runs the platform or administers another organization. The new password is checked by the store, not here: the eight-character minimum lives with the hash so every writer of a password obeysit. Sessions the account has open end immediately, because a reset is the one moment the change must take effect before the next request rather than at the next login.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserSetPassword(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -381,8 +393,11 @@ func UserSetPassword(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"user_id": target, "password_updated": true})
 }
 
-// UserDelete removes an account. Its memberships go with it and its personal
-// keys are revoked; service keys belong to teams and are untouched.
+// UserDelete removes an account. Its memberships go with it and its personal keys are revoked; service keys belong to teams and are untouched.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func UserDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -415,8 +430,11 @@ func UserDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 
 // ---------- organizations ----------
 
-// OrgNew creates an organization. Only a platform administrator may: an
-// organization is a grouping of teams, not something a tenant owns.
+// OrgNew creates an organization. Only a platform administrator may: an organization is a grouping of teams, not something a tenant owns.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -436,9 +454,11 @@ func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, orgPublic(o))
 }
 
-// OrgList lists the organizations the caller may see. A platform administrator
-// sees every one; everybody else sees only the organizations that own one of
-// their teams, which is what the console shows as the team's grouping.
+// OrgList lists the organizations the caller may see. A platform administrator sees every one; everybody else sees only the organizations that own one of their teams, which is what the console shows asthe team's grouping.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func OrgList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -476,6 +496,10 @@ func OrgList(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // OrgInfo reads one organization.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func OrgInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -504,8 +528,11 @@ func OrgInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, view)
 }
 
-// orgIDFrom resolves the organization a request names, as a query parameter or
-// in the body.
+// orgIDFrom resolves the organization a request names, as a query parameter or in the body.
+// 参数 _（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；_（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名。
+// 返回 string（string）：组织 id。先取路径参数 organization_id，再取查询参数，再取正文。都没有时为空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func orgIDFrom(_ Gate, r *http.Request, _ *auth.Principal) string {
 	if id := r.PathValue("organization_id"); id != "" {
 		return id
@@ -517,6 +544,10 @@ func orgIDFrom(_ Gate, r *http.Request, _ *auth.Principal) string {
 }
 
 // OrgUpdate changes an organization's name, status or budget.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -553,6 +584,10 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // orgNamePtr reads the name, which the console may send under either key.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 *string（*string）：组织显示名。优先 organization_alias，否则 organization_name。都没有时为 nil。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func orgNamePtr(body map[string]any) *string {
 	if v := stringPtr(body, "organization_alias"); v != nil {
 		return v
@@ -560,9 +595,11 @@ func orgNamePtr(body map[string]any) *string {
 	return stringPtr(body, "organization_name")
 }
 
-// OrgDelete removes an organization. It refuses while teams remain, because
-// deleting the teams underneath as a side effect of a rename-shaped request is
-// not what the caller asked for.
+// OrgDelete removes an organization. It refuses while teams remain, because deleting the teams underneath as a side effect of a rename-shaped request is not what the caller asked for.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func OrgDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -587,8 +624,11 @@ func OrgDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 
 // ---------- teams ----------
 
-// TeamNew creates a team inside an organization, together with its first
-// administrator. Only a platform administrator may create or move a team.
+// TeamNew creates a team inside an organization, together with its first administrator. Only a platform administrator may create or move a team.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -627,8 +667,11 @@ func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, teamPublic(t, iam.TeamAdmin))
 }
 
-// teamName reads the team's display name, which the console sends under
-// team_alias.
+// teamName reads the team's display name, which the console sends under team_alias.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 string（string）：团队显示名。优先 team_alias，否则 team_name。都没有时为空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func teamName(body map[string]any) string {
 	if v := str(body["team_alias"]); v != "" {
 		return v
@@ -637,6 +680,10 @@ func teamName(body map[string]any) string {
 }
 
 // teamAdminID reads the first administrator. The console sends an email.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 string（string）：第一位管理员。优先 admin_user_id，否则 user_id。控制台传来的常常是邮箱。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func teamAdminID(body map[string]any) string {
 	if v := str(body["admin_user_id"]); v != "" {
 		return v
@@ -644,9 +691,12 @@ func teamAdminID(body map[string]any) string {
 	return str(body["user_id"])
 }
 
-// TeamList lists the teams the caller belongs to, or every team for a platform
-// administrator. The rows carry the caller's own role. The body is an array,
-// which is what GET /team/list has always returned.
+// TeamList lists the teams the caller belongs to, or every team for a platform administrator. The rows carry the caller's own role. The body is an array, which is what GET /team/list has always returned
+// .
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamList(g Gate, w http.ResponseWriter, r *http.Request) {
 	out, ok := loadTeamList(g, w, r)
 	if !ok {
@@ -655,9 +705,11 @@ func TeamList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// TeamListV2 is GET /v2/team/list. The console's paged query reads teams,
-// total, page, page_size and total_pages. A bare array makes teams undefined,
-// and React Query rejects a query function that returns undefined.
+// TeamListV2 is GET /v2/team/list. The console's paged query reads teams, total, page, page_size and total_pages. A bare array makes teams undefined, and React Query rejects a query function that returns undefined.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamListV2(g Gate, w http.ResponseWriter, r *http.Request) {
 	out, ok := loadTeamList(g, w, r)
 	if !ok {
@@ -700,11 +752,12 @@ func TeamListV2(g Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// loadTeamList reads the teams this caller may see and applies the query
-// filters on top of that scope. A platform administrator who passes user_id
-// narrows to that account; omitting it lists every team. Anyone else is always
-// limited to their own memberships, so a query parameter cannot widen the list.
-// status=deleted is an empty list: teams are removed, not archived.
+// loadTeamList reads the teams this caller may see and applies the query filters on top of that scope. A platform administrator who passes user_id narrows to that account; omitting it lists every team.
+// Anyone else is always limited to their own memberships, so a query parameter cannot widen the list. status=deleted is an empty list: teams are removed, not archived.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页；bool（bool）：调用方还有权限看见的团队、查询可以继续时返回真。无权时响应已写好并返回假。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func loadTeamList(g Gate, w http.ResponseWriter, r *http.Request) ([]map[string]any, bool) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -749,13 +802,20 @@ func loadTeamList(g Gate, w http.ResponseWriter, r *http.Request) ([]map[string]
 	return out, true
 }
 
-// TeamAvailable lists the teams the caller could put a resource in, which is
-// the same set as their own teams.
+// TeamAvailable lists the teams the caller could put a resource in, which is the same set as their own teams.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamAvailable(g Gate, w http.ResponseWriter, r *http.Request) {
 	TeamList(g, w, r)
 }
 
 // TeamInfo reads one team.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -793,9 +853,11 @@ func TeamInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// myTeamRole reads the caller's own role in a team, for the console's
-// role-dependent buttons. A platform administrator who is not a member of the
-// team has no team role.
+// myTeamRole reads the caller's own role in a team, for the console's role-dependent buttons. A platform administrator who is not a member of the team has no team role.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 string（string）：调用方在这个团队里的角色，给控制台决定按钮。不是成员或查询失败时为空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func myTeamRole(g Gate, r *http.Request, p *auth.Principal, teamID string) string {
 	roles, err := g.Identity().Memberships(r.Context(), p.UserID)
 	if err != nil {
@@ -804,9 +866,11 @@ func myTeamRole(g Gate, r *http.Request, p *auth.Principal, teamID string) strin
 	return roles[teamID]
 }
 
-// attachRoster puts the roster on the team object the console reads. The
-// detail page lists team_info.members_with_roles, so an empty placeholder
-// there hides everyone who was added.
+// attachRoster puts the roster on the team object the console reads. The detail page lists team_info.members_with_roles, so an empty placeholder there hides everyone who was added.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；team（map[string]any）：附上Roster读到的 JSON 对象。缺键表示没有该字段。
+// 返回：无。成员名单和人数已写进控制台读取的团队对象。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func attachRoster(g Gate, r *http.Request, p *auth.Principal, team map[string]any) {
 	id, _ := team["team_id"].(string)
 	roster := teamRoster(g, r, p, id)
@@ -814,9 +878,11 @@ func attachRoster(g Gate, r *http.Request, p *auth.Principal, team map[string]an
 	team["members_count"] = len(roster)
 }
 
-// teamRoster reads the team's members. A caller who may not read them, and a
-// store failure, both produce an empty list rather than a second error after
-// the team itself was already served.
+// teamRoster reads the team's members. A caller who may not read them, and a store failure, both produce an empty list rather than a second error after the team itself was already served.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func teamRoster(g Gate, r *http.Request, p *auth.Principal, teamID string) []map[string]any {
 	out := []map[string]any{}
 	if err := g.Authorize(r, p, authz.ActionMemberRead, authz.Object{Type: authz.ObjectMember, TeamID: teamID}); err != nil {
@@ -832,10 +898,11 @@ func teamRoster(g Gate, r *http.Request, p *auth.Principal, teamID string) []map
 	return out
 }
 
-// TeamUpdate changes a team. A team administrator may change the name and the
-// description of their own team; the status and the budget ceiling are a
-// platform administrator's decision, and the two are separate actions because
-// the matrix separates them.
+// TeamUpdate changes a team. A team administrator may change the name and the description of their own team; the status and the budget ceiling are a platform administrator's decision, and the two are separate actions because the matrix separates them.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -890,6 +957,10 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // profilePatch reads the two fields a team administrator owns.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 *string（*string）：团队显示名，优先 team_alias，否则 team_name。正文没写时为 nil；*string（*string）：团队描述 team_description。正文没写时为 nil，表示这一项不改。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func profilePatch(body map[string]any) (*string, *string) {
 	var name *string
 	if has(body, "team_alias") {
@@ -908,6 +979,10 @@ func profilePatch(body map[string]any) (*string, *string) {
 }
 
 // adminTeamPatch reads the two fields only a platform administrator owns.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 *string（*string）：团队状态。blocked 为真时是 blocked，为假时是 active，否则取 status。都没写时为 nil；**float64（**float64）：max_budget 的两层可选。字段不在正文里时为 nil。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func adminTeamPatch(body map[string]any) (*string, **float64) {
 	var status *string
 	if v, ok := body["blocked"].(bool); ok {
@@ -922,8 +997,11 @@ func adminTeamPatch(body map[string]any) (*string, **float64) {
 	return status, optionalFloat(body, "max_budget")
 }
 
-// TeamDelete removes a team. Its projects, memberships and key assignments go
-// with it, and its keys stop working on their next request.
+// TeamDelete removes a team. Its projects, memberships and key assignments go with it, and its keys stop working on their next request.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -949,8 +1027,11 @@ func TeamDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": true})
 }
 
-// TeamMove changes the organization a team belongs to. It is a platform
-// administrator route because it re-scopes every access group the team holds.
+// TeamMove changes the organization a team belongs to. It is a platform administrator route because it re-scopes every access group the team holds.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamMove(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -982,6 +1063,10 @@ func TeamMove(g Gate, w http.ResponseWriter, r *http.Request) {
 // ---------- projects ----------
 
 // ProjectNew creates a project inside a team. A team administrator may.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func ProjectNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1013,6 +1098,10 @@ func ProjectNew(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // projectName reads the project's display name.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 string（string）：项目显示名。优先 project_alias，否则 project_name。都没有时为空串。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func projectName(body map[string]any) string {
 	if v := str(body["project_alias"]); v != "" {
 		return v
@@ -1020,9 +1109,11 @@ func projectName(body map[string]any) string {
 	return str(body["project_name"])
 }
 
-// ProjectList lists projects. A platform administrator sees every project; a
-// member sees the projects of the teams they belong to; nobody sees a project
-// of a team they are not in. The narrowing happens in SQL.
+// ProjectList lists projects. A platform administrator sees every project; a member sees the projects of the teams they belong to; nobody sees a project of a team they are not in. The narrowing happensin SQL.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func ProjectList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1074,6 +1165,10 @@ func ProjectList(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // ProjectInfo reads one project.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func ProjectInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1104,8 +1199,11 @@ func ProjectInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"project": projectPublic(proj)})
 }
 
-// ProjectUpdate changes a project's name, status, narrowing and budget. The
-// store refuses a narrowing that is not inside the team's grants.
+// ProjectUpdate changes a project's name, status, narrowing and budget. The store refuses a narrowing that is not inside the team's grants.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func ProjectUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1152,6 +1250,10 @@ func ProjectUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 }
 
 // ProjectDelete removes a project and its keys.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func ProjectDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1179,8 +1281,11 @@ func ProjectDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"deleted": true})
 }
 
-// TeamModels reports the models a team may reach. A member may read it for
-// their own team.
+// TeamModels reports the models a team may reach. A member may read it for their own team.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func TeamModels(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -1210,6 +1315,10 @@ func TeamModels(g Gate, w http.ResponseWriter, r *http.Request) {
 // ---------- audit ----------
 
 // AuditLog lists the audit trail. Only a platform administrator may read it.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/identity/mount.go
+// 测试：无直接单测
 func AuditLog(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireManage(w, r)
@@ -1245,8 +1354,11 @@ func AuditLog(g Gate, w http.ResponseWriter, r *http.Request) {
 
 // ---------- public shapes ----------
 
-// userPublic is the public JSON for an account. The password hash never
-// appears; the field is not even carried on the bean the handler holds.
+// userPublic is the public JSON for an account. The password hash never appears; the field is not even carried on the bean the handler holds.
+// 参数 u（*iam.User）：用户行，含邮箱、角色和状态；teams（[]map[string]any）：用户公开使用的map[string]any。
+// 返回 map[string]any（map[string]any）：用户公开的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func userPublic(u *iam.User, teams []map[string]any) map[string]any {
 	if teams == nil {
 		teams = []map[string]any{}
@@ -1277,6 +1389,10 @@ func userPublic(u *iam.User, teams []map[string]any) map[string]any {
 }
 
 // teamPublic is the public JSON for a team. The role is the caller's own.
+// 参数 t（*iam.Team）：团队行，含组织、名称和预算；role（string）：角色名。控制台的 admin 或 user 会映射成库存的写法。
+// 返回 map[string]any（map[string]any）：团队公开的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func teamPublic(t *iam.Team, role string) map[string]any {
 	var budgetDuration any
 	return map[string]any{
@@ -1302,6 +1418,10 @@ func teamPublic(t *iam.Team, role string) map[string]any {
 }
 
 // orgPublic is the public JSON for an organization.
+// 参数 o（*iam.Organization）：组织行。
+// 返回 map[string]any（map[string]any）：组织公开的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func orgPublic(o *iam.Organization) map[string]any {
 	budget := floatJSON(o.MaxBudget)
 	return map[string]any{
@@ -1324,8 +1444,11 @@ func orgPublic(o *iam.Organization) map[string]any {
 	}
 }
 
-// orgView adds the administrators and the teams. Both are properties of the
-// organization, not of the account that is reading it.
+// orgView adds the administrators and the teams. Both are properties of the organization, not of the account that is reading it.
+// 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；r（*http.Request）：入站 HTTP 请求；o（*iam.Organization）：组织行。
+// 返回 map[string]any（map[string]any）：组织View的字段表。缺键表示上游或库里没有这个字段；error（error）：失败原因。nil 表示这一步成功。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func orgView(g Gate, r *http.Request, o *iam.Organization) (map[string]any, error) {
 	pub := orgPublic(o)
 	admins, err := g.Identity().ListOrgAdmins(r.Context(), o.ID)
@@ -1356,6 +1479,10 @@ func orgView(g Gate, r *http.Request, o *iam.Organization) (map[string]any, erro
 }
 
 // projectPublic is the public JSON for a project.
+// 参数 p（*iam.Project）：项目行，含所属团队、允许的模型和预算。
+// 返回 map[string]any（map[string]any）：项目公开的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 handlers.go 内使用
+// 测试：无直接单测
 func projectPublic(p *iam.Project) map[string]any {
 	return map[string]any{
 		"project_id":      p.ID,
@@ -1375,6 +1502,10 @@ func projectPublic(p *iam.Project) map[string]any {
 }
 
 // actorOf is the audit actor for a write.
+// 参数 p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
+// 返回 Actor（iam.Actor）：写入审计的操作者。ID 是用户 id，Kind 是身份种类。
+// 调用：gateway/identity/members.go。
+// 测试：无直接单测
 func actorOf(p *auth.Principal) iam.Actor {
 	return iam.Actor{ID: p.UserID, Kind: string(p.Kind)}
 }

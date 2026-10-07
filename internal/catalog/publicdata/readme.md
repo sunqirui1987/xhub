@@ -1,20 +1,15 @@
 # catalog/publicdata
 
-## Purpose
+Static JSON embedded into the gateway binary by `internal/catalog`. The process does not read these files from disk at startup. Tests and `./cmd/pricedata` are the writers.
 
-This directory holds the JSON documents that `catalog` embeds into the gateway binary. They are data, not Go code. Changing a price or a dashboard form field means editing the JSON here and rebuilding. The running process does not watch these files on disk.
+| File | What it is |
+| --- | --- |
+| `pricedata.json` | Model price rows generated from the Modelink market feed `https://api.modelink.ai/v1/market/models`. Every key is a real model id. There is no LiteLLM sample row and no `sample_spec`. |
+| `routes.json` | The HTTP catalog the gateway mounts after its own modules. `catalog.Load` returns these rows. A path that is not in this file and not on a module is a JSON 404. |
+| Provider and field JSON next to those | The public add-model payload: endpoint types are registered in Go (`internal/provider`), while this directory holds the generated price and route documents. |
 
-## Files
+`catalog.loadPriceDocument` parses `pricedata.json` once. A parse failure leaves an empty map so the process can still start; `Cost` then returns ok false and the caller must not record the call as free. `LITELLM_LOCAL_MODEL_COST_MAP=true` forces the built-in map and skips a remote price source.
 
-- `model_cost_map.json` is the built-in price map. `catalog.CostMap` reads it. A model missing from this file must not be priced as zero.
-- `autorouter_presets.json` is the preset list the dashboard shows for auto routers.
-- `provider_create_fields.json` describes the fields the dashboard renders when an operator adds a provider deployment.
-- `agent_create_fields.json` describes the fields for the agent create form. The agent product surface is not mounted, but the document remains part of the embedded catalog so the field definitions stay with the other public data.
+Hand-entered prices do not rewrite this file. `catalog/price_write.go` keeps a baseline snapshot and lays database overrides on top. Clearing an override restores the baseline row.
 
-## How to change the data
-
-Edit the JSON, keep it valid, and rebuild `./cmd/gateway`. Callers do not open these files with `os.ReadFile`. They call `catalog.CostMap`, `catalog.PublicBody`, or the reload helpers in `gateway/models`.
-
-Do not add comments inside the JSON. Keep identifiers stable: the dashboard and the price estimator look up model names and field names exactly.
-
-中文使用说明见同目录的 readme_cn.md。
+中文说明见同目录 `readme_cn.md`。

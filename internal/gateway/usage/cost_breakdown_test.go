@@ -9,11 +9,11 @@ import (
 )
 
 func TestCostBreakdownMultipliesTokensByRate(t *testing.T) {
-	inRate, outRate, ok := catalog.TokenRates("gpt-4o")
+	inRate, outRate, ok := catalog.TokenRates("gpt-oss-120b")
 	if !ok || inRate <= 0 || outRate <= 0 {
-		t.Fatal("gpt-4o has no per-token rates")
+		t.Fatal("gpt-oss-120b has no per-token rates")
 	}
-	got := costBreakdown("gpt-4o", 96, 0, 96*inRate)
+	got := costBreakdown("gpt-oss-120b", 96, 0, 96*inRate)
 	if got["input_cost"] != 96*inRate {
 		t.Fatalf("input cost: %#v", got["input_cost"])
 	}
@@ -30,7 +30,7 @@ func TestCostBreakdownMultipliesTokensByRate(t *testing.T) {
 
 func TestEventRowCarriesTheBill(t *testing.T) {
 	rows := eventRows([]iam.UsageEvent{{
-		RequestID: "r1", Model: "gpt-4o", PromptTokens: 96, CompletionTokens: 0,
+		RequestID: "r1", Model: "gpt-oss-120b", PromptTokens: 96, CompletionTokens: 0,
 		Cost: 0.000384, TS: time.Now().UTC(),
 	}})
 	meta, _ := rows[0]["metadata"].(map[string]any)
@@ -49,7 +49,7 @@ func TestEventRowExposesTheConsoleColumns(t *testing.T) {
 	end := time.Now().UTC()
 	start := end.Add(-time.Second)
 	rows := eventRows([]iam.UsageEvent{{
-		RequestID: "r-cols", Model: "gpt-4o", PromptTokens: 10, CompletionTokens: 2,
+		RequestID: "r-cols", Model: "gpt-oss-120b", PromptTokens: 10, CompletionTokens: 2,
 		Cost: 0.01, TS: start, EndedAt: &end, TTFTMs: &ttft, CacheHit: true,
 		KeyHash: "hash-1", KeyAlias: "key-1", TeamAlias: "team-1",
 		Provider: "openai", CachedTokens: &cached, SessionID: "sess-1", CacheKey: "ck-1",

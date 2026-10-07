@@ -1,10 +1,12 @@
-// Package gateway finishes a local connect flow and lists shadow-eval tasks.
-// These handlers do not call an external identity provider.
+// onboarding.go finishes a local connect flow and lists shadow-eval tasks.
+// These handlers do not call an external identity provider. It is not part
+// of inference.
 //
 // The invitation flow is gone. It minted a session from a key-value invite
 // record and a hard-coded "internal_user" default, which is a third account role
 // the model no longer has: an account is created with a password by a platform
 // administrator, and that is the only way one comes into being.
+
 package gateway
 
 import (
@@ -22,6 +24,10 @@ import (
 var logTraceOnceOnboarding sync.Once
 
 // shadowEvalList returns the task array. An object envelope makes the shadow-eval page crash when it filters.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 onboarding.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) shadowEvalList(w http.ResponseWriter, r *http.Request) {
 	logTraceOnceOnboarding.Do(func() { logx.Trace("enter gateway.shadowEvalList") })
 
@@ -29,6 +35,10 @@ func (s *Server) shadowEvalList(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeFlow describes one connect attempt from a local fixture and does not call an external identity provider.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 onboarding.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) authorizeFlow(w http.ResponseWriter, r *http.Request) {
 	flow := r.URL.Query().Get("flow")
 	body := map[string]any{
@@ -51,6 +61,10 @@ func (s *Server) authorizeFlow(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeComplete accepts the connect form and returns a fixed local result.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 onboarding.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) authorizeComplete(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	flow, decision := "", ""
@@ -79,6 +93,10 @@ func (s *Server) authorizeComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 // mcpOAuthToken answers the console's follow-up after the OAuth callback stores a code.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 onboarding.go 内使用
+// 测试：无直接单测
+// 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) mcpOAuthToken(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{
 		"access_token": "at-" + httpx.CallID()[:12],

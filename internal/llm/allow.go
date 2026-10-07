@@ -123,6 +123,10 @@ var mountPaths = map[string]struct{}{
 var logTraceOnceAllow sync.Once
 
 // PathPrefixes returns the prefixes in the allowlist.py order so a test can compare them with the Python source.
+// 参数：无。
+// 返回 []string（[]string）：路径Prefixes。没有匹配时为空切片。
+// 调用：仅在 allow.go 内使用
+// 测试：无直接单测
 func PathPrefixes() []string {
 	logTraceOnceAllow.Do(func() { logx.Trace("enter llm.PathPrefixes") })
 
@@ -131,10 +135,14 @@ func PathPrefixes() []string {
 	return out
 }
 
-// Allow reports whether a path may stay on the gateway process.
+// Allow reports whether a path may stay on the gateway process. When mount is true only the mount table is checked, matching a FastAPI Mount. An ordinary route checks an exact path first, then a prefix.
 //
-// When mount is true only the mount table is checked, matching a FastAPI Mount. An ordinary route checks an exact path first,
-// then a prefix. An empty path is not a data-plane path. The comparison uses the path from route registration, not a URL with a query string.
+//	An empty path is not a data-plane path. The comparison uses the path from route registration, not a URL with a query string.
+//
+// 参数 path（string）：允许要定位的路径。可能是 URL，也可能是字段路径；mount（bool）：为真时走挂载这一支。为假时保持原来的路径。
+// 返回 bool（bool）：这条路径可以留在网关进程里处理时返回真。mount 为真时只查挂载表。
+// 调用：仅在 allow.go 内使用
+// 测试：无直接单测
 func Allow(path string, mount bool) bool {
 	if path == "" {
 		return false
@@ -154,11 +162,11 @@ func Allow(path string, mount bool) bool {
 	return false
 }
 
-// Filter drops management routes before the process serves them.
-//
-// The Python gateway trims the route table after startup, once registration is finished. Here the request has already reached
-// a registered handler, and the same list decides whether to allow it or return 404. The effect matches: the data plane stays,
-// and management routes such as /key/generate are not served by this filter.
+// Filter drops management routes before the process serves them. The Python gateway trims the route table after startup, once registration is finished. Here the request has already reached a registeredhandler, and the same list decides whether to allow it or return 404. The effect matches: the data plane stays, and management routes such as /key/generate are not served by this filter.
+// 参数 next（http.Handler）：过滤使用的Handler。
+// 返回 http.Handler（http.Handler）：接住该路径的处理函数。
+// 调用：仅在 allow.go 内使用
+// 测试：无直接单测
 func Filter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

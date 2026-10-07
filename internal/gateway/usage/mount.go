@@ -19,6 +19,10 @@ type mountHost interface {
 var logTraceOnceMount sync.Once
 
 // Module is spend reports, activity summaries, and health probes.
+// 参数 h（mountHost）：实现这一步所需能力的mountHost。聊天、直通和刷写各自只依赖自己的方法。
+// 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
+// 调用：gateway/family/mount.go、gateway/guard/mount.go、gateway/identity/mount.go、gateway/keys/mount.go
+// 测试：无直接单测
 func Module(h mountHost) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter usage.Module") })
 

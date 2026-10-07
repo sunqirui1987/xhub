@@ -1,19 +1,23 @@
-// Package catalog loads the built-in model price map and lists models by provider. sample_spec is not a model.
+// Package catalog loads the built-in model price map and lists models by provider.
+//
+// The price map is generated from the Modelink market feed
+// (https://api.modelink.ai/v1/market/models) by ./cmd/pricedata and
+// embedded as publicdata/pricedata.json. There is no LiteLLM price file and no
+// sample_spec row: every key in the map is a real model.
 package catalog
 
 import (
-	"encoding/json"
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// LiteLLM 1.102.0 model_prices_and_context_window.json, parsed once.
-// Wildcard expansion (openai/*) reads the same per-provider sets LiteLLM
-// builds in litellm._populate_provider_model_sets / models_by_provider.
+// The price map and the per-provider index, parsed once at startup.
+// Wildcard expansion (openai/*) reads the per-provider sets built from each
+// row's litellm_provider field.
 var (
 	modelCostMu          sync.RWMutex
 	modelCostMapValue    any
@@ -21,434 +25,59 @@ var (
 	modelsByProvider     map[string][]string
 )
 
-var bedrockPricingOnly = regexp.MustCompile(`^bedrock/[a-zA-Z0-9_-]+/.+$`)
-
 var logTraceOnceModelCost sync.Once
 
 // init loads the embedded data this package depends on. A parse failure falls back to an empty map so the process can still start.
+// 参数：无。
+// 调用：Go 在载入这个包时自动执行。
+// 测试：无直接单测
+// 返回：无。嵌入的价格表已载入，并记下了载入时刻。解析失败时表为空，进程仍能启动。
 func init() {
 	logTraceOnceModelCost.Do(func() { logx.Trace("enter catalog.init") })
 
-	loadModelCatalog()
+	loadPriceDocument()
 	modelCostMapLoadedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
-// loadModelCatalog parses the embedded price map and indexes model ids by provider. sample_spec is not added to a model set.
-func loadModelCatalog() {
-	var raw map[string]any
-	if err := json.Unmarshal(Embedded("model_cost", modelCostMapJSON), &raw); err != nil {
-		modelCostMapValue = map[string]any{}
-		modelsByProvider = map[string][]string{}
-		return
-	}
-	modelCostMapValue = raw
-	sets := map[string][]string{}
-	add := func(set, id string) {
-		sets[set] = append(sets[set], id)
-	}
-	for key, v := range raw {
-		info, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		prov, _ := info["litellm_provider"].(string)
-		mode, _ := info["mode"].(string)
-		switch prov {
-		case "openai":
-			if !isOpenAIFinetuneModel(key) {
-				add("openai_chat", key)
-			}
-		case "text-completion-openai":
-			add("openai_text", key)
-		case "azure_text":
-			add("azure_text", key)
-		case "cohere":
-			add("cohere", key)
-		case "cohere_chat":
-			add("cohere_chat", key)
-		case "mistral":
-			add("mistral", key)
-		case "anthropic":
-			add("anthropic", key)
-		case "openrouter":
-			add("openrouter", key)
-		case "vercel_ai_gateway":
-			add("vercel_ai_gateway", key)
-		case "datarobot":
-			add("datarobot", key)
-		case "vertex_ai-text-models":
-			add("vertex_text", key)
-		case "vertex_ai-code-text-models":
-			add("vertex_code_text", key)
-		case "vertex_ai-language-models":
-			add("vertex_language", key)
-		case "vertex_ai-vision-models":
-			add("vertex_vision", key)
-		case "vertex_ai-chat-models":
-			add("vertex_chat", key)
-		case "vertex_ai-code-chat-models":
-			add("vertex_code_chat", key)
-		case "vertex_ai-embedding-models":
-			add("vertex_embedding", key)
-		case "vertex_ai-anthropic_models":
-			add("vertex_anthropic", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-llama_models":
-			add("vertex_llama", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-deepseek_models":
-			add("vertex_deepseek", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-mistral_models":
-			add("vertex_mistral", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-ai21_models":
-			add("vertex_ai21", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-image-models":
-			add("vertex_image", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-video-models":
-			add("vertex_video", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-openai_models":
-			add("vertex_openai", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-minimax_models":
-			add("vertex_minimax", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-moonshot_models":
-			add("vertex_moonshot", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "vertex_ai-zai_models":
-			add("vertex_zai", strings.ReplaceAll(key, "vertex_ai/", ""))
-		case "ai21":
-			if mode == "chat" {
-				add("ai21_chat", key)
-			} else {
-				add("ai21", key)
-			}
-		case "nlp_cloud":
-			add("nlp_cloud", key)
-		case "aleph_alpha":
-			add("aleph_alpha", key)
-		case "bedrock":
-			if mode == "guardrail" || isBedrockPricingOnlyModel(key) {
-				continue
-			}
-			add("bedrock", key)
-		case "bedrock_converse":
-			add("bedrock_converse", key)
-		case "deepinfra":
-			add("deepinfra", key)
-		case "perplexity":
-			add("perplexity", key)
-		case "watsonx":
-			add("watsonx", key)
-		case "gemini":
-			add("gemini", key)
-		case "fireworks_ai":
-			if !strings.Contains(key, "-to-") && !strings.Contains(key, "fireworks-ai-default") {
-				add("fireworks_ai", key)
-			}
-		case "fireworks_ai-embedding-models":
-			if !strings.Contains(key, "-to-") {
-				add("fireworks_ai_embedding", key)
-			}
-		case "text-completion-codestral":
-			add("text_completion_codestral", key)
-		case "text-completion-inception":
-			add("text_completion_inception", key)
-		case "xai":
-			add("xai", key)
-		case "zai":
-			add("zai", key)
-		case "fal_ai":
-			add("fal_ai", key)
-		case "deepseek":
-			add("deepseek", key)
-		case "tencent":
-			add("tencent", key)
-		case "runwayml":
-			add("runwayml", key)
-		case "meta_llama":
-			add("llama", key)
-		case "nscale":
-			add("nscale", key)
-		case "azure_ai":
-			add("azure_ai", key)
-		case "voyage":
-			add("voyage", key)
-		case "infinity":
-			add("infinity", key)
-		case "databricks":
-			add("databricks", key)
-		case "cloudflare":
-			add("cloudflare", key)
-		case "codestral":
-			add("codestral", key)
-		case "friendliai":
-			add("friendliai", key)
-		case "palm":
-			add("palm", key)
-		case "groq":
-			add("groq", key)
-		case "azure":
-			add("azure", key)
-		case "azure_anthropic":
-			add("azure_anthropic", key)
-		case "anyscale":
-			add("anyscale", key)
-		case "cerebras":
-			add("cerebras", key)
-		case "galadriel":
-			add("galadriel", key)
-		case "nvidia_nim":
-			add("nvidia_nim", key)
-		case "nvidia_riva":
-			add("nvidia_riva", key)
-		case "soniox":
-			add("soniox", key)
-		case "sambanova":
-			add("sambanova", key)
-		case "sambanova-embedding-models":
-			add("sambanova_embedding", key)
-		case "novita":
-			add("novita", key)
-		case "nebius-chat-models":
-			add("nebius", key)
-		case "nebius-embedding-models":
-			add("nebius_embedding", key)
-		case "aiml":
-			add("aiml", key)
-		case "assemblyai":
-			add("assemblyai", key)
-		case "jina_ai":
-			add("jina_ai", key)
-		case "snowflake":
-			add("snowflake", key)
-		case "gradient_ai":
-			add("gradient_ai", key)
-		case "featherless_ai":
-			add("featherless_ai", key)
-		case "deepgram":
-			add("deepgram", key)
-		case "elevenlabs":
-			add("elevenlabs", key)
-		case "heroku":
-			add("heroku", key)
-		case "dashscope":
-			add("dashscope", key)
-		case "qwencloud":
-			add("qwencloud", key)
-		case "qwen_ai_platform":
-			add("qwen_ai_platform", key)
-		case "modelscope":
-			add("modelscope", key)
-		case "moonshot":
-			add("moonshot", key)
-		case "publicai":
-			add("publicai", key)
-		case "darkbloom":
-			add("darkbloom", key)
-		case "v0":
-			add("v0", key)
-		case "morph":
-			add("morph", key)
-		case "lambda_ai":
-			add("lambda_ai", key)
-		case "inception":
-			add("inception", key)
-		case "hyperbolic":
-			add("hyperbolic", key)
-		case "black_forest_labs":
-			add("black_forest_labs", key)
-		case "recraft":
-			add("recraft", key)
-		case "cometapi":
-			add("cometapi", key)
-		case "oci":
-			add("oci", key)
-		case "volcengine":
-			add("volcengine", key)
-		case "wandb":
-			add("wandb", key)
-		case "ovhcloud":
-			add("ovhcloud", key)
-		case "ovhcloud-embedding-models":
-			add("ovhcloud_embedding", key)
-		case "lemonade":
-			add("lemonade", key)
-		case "docker_model_runner":
-			add("docker_model_runner", key)
-		case "amazon_nova":
-			add("amazon_nova", key)
-		case "stability":
-			add("stability", key)
-		case "github_copilot":
-			add("github_copilot", key)
-		case "chatgpt":
-			add("chatgpt", key)
-		case "minimax":
-			add("minimax", key)
-		case "aws_polly":
-			add("aws_polly", key)
-		case "gigachat":
-			add("gigachat", key)
-		case "llamagate":
-			add("llamagate", key)
-		case "reducto":
-			add("reducto", key)
-		case "bedrock_mantle":
-			add("bedrock_mantle", key)
-		}
-	}
-	// Hardcoded seeds LiteLLM keeps outside the price map.
-	add("ollama", "llama2")
-	add("petals", "petals-team/StableBeluga2")
-	add("maritalk", "maritalk")
-
-	u := func(names ...string) []string {
-		var out []string
-		seen := map[string]struct{}{}
-		for _, name := range names {
-			for _, id := range sets[name] {
-				if _, ok := seen[id]; ok {
-					continue
-				}
-				seen[id] = struct{}{}
-				out = append(out, id)
-			}
-		}
-		return out
-	}
-	modelsByProvider = map[string][]string{
-		"openai":                    u("openai_chat", "openai_text"),
-		"text-completion-openai":    u("openai_text"),
-		"cohere":                    u("cohere", "cohere_chat"),
-		"cohere_chat":               u("cohere_chat"),
-		"anthropic":                 u("anthropic"),
-		"openrouter":                u("openrouter"),
-		"vercel_ai_gateway":         u("vercel_ai_gateway"),
-		"datarobot":                 u("datarobot"),
-		"vertex_ai":                 u("vertex_chat", "vertex_text", "vertex_anthropic", "vertex_vision", "vertex_language", "vertex_deepseek", "vertex_minimax", "vertex_moonshot", "vertex_zai"),
-		"ai21":                      u("ai21"),
-		"bedrock":                   u("bedrock", "bedrock_converse"),
-		"ollama":                    u("ollama"),
-		"ollama_chat":               u("ollama"),
-		"deepinfra":                 u("deepinfra"),
-		"perplexity":                u("perplexity"),
-		"maritalk":                  u("maritalk"),
-		"watsonx":                   u("watsonx"),
-		"gemini":                    u("gemini"),
-		"fireworks_ai":              u("fireworks_ai", "fireworks_ai_embedding"),
-		"aleph_alpha":               u("aleph_alpha"),
-		"text-completion-codestral": u("text_completion_codestral"),
-		"text-completion-inception": u("text_completion_inception"),
-		"xai":                       u("xai"),
-		"zai":                       u("zai"),
-		"fal_ai":                    u("fal_ai"),
-		"deepseek":                  u("deepseek"),
-		"tencent":                   u("tencent"),
-		"runwayml":                  u("runwayml"),
-		"mistral":                   u("mistral"),
-		"azure_ai":                  u("azure_ai"),
-		"voyage":                    u("voyage"),
-		"infinity":                  u("infinity"),
-		"databricks":                u("databricks"),
-		"cloudflare":                u("cloudflare"),
-		"codestral":                 u("codestral"),
-		"nlp_cloud":                 u("nlp_cloud"),
-		"friendliai":                u("friendliai"),
-		"palm":                      u("palm"),
-		"groq":                      u("groq"),
-		"azure":                     u("azure", "azure_text"),
-		"azure_anthropic":           u("azure_anthropic"),
-		"azure_text":                u("azure_text"),
-		"anyscale":                  u("anyscale"),
-		"cerebras":                  u("cerebras"),
-		"galadriel":                 u("galadriel"),
-		"nvidia_nim":                u("nvidia_nim"),
-		"nvidia_riva":               u("nvidia_riva"),
-		"soniox":                    u("soniox"),
-		"sambanova":                 u("sambanova", "sambanova_embedding"),
-		"novita":                    u("novita"),
-		"nebius":                    u("nebius", "nebius_embedding"),
-		"aiml":                      u("aiml"),
-		"assemblyai":                u("assemblyai"),
-		"jina_ai":                   u("jina_ai"),
-		"snowflake":                 u("snowflake"),
-		"gradient_ai":               u("gradient_ai"),
-		"meta_llama":                u("llama"),
-		"nscale":                    u("nscale"),
-		"featherless_ai":            u("featherless_ai"),
-		"deepgram":                  u("deepgram"),
-		"elevenlabs":                u("elevenlabs"),
-		"heroku":                    u("heroku"),
-		"dashscope":                 u("dashscope"),
-		"qwencloud":                 u("qwencloud"),
-		"qwen_ai_platform":          u("qwen_ai_platform"),
-		"modelscope":                u("modelscope"),
-		"moonshot":                  u("moonshot"),
-		"publicai":                  u("publicai"),
-		"darkbloom":                 u("darkbloom"),
-		"v0":                        u("v0"),
-		"morph":                     u("morph"),
-		"lambda_ai":                 u("lambda_ai"),
-		"inception":                 u("inception"),
-		"hyperbolic":                u("hyperbolic"),
-		"black_forest_labs":         u("black_forest_labs"),
-		"recraft":                   u("recraft"),
-		"cometapi":                  u("cometapi"),
-		"oci":                       u("oci"),
-		"volcengine":                u("volcengine"),
-		"wandb":                     u("wandb"),
-		"ovhcloud":                  u("ovhcloud", "ovhcloud_embedding"),
-		"lemonade":                  u("lemonade"),
-		"clarifai":                  u("clarifai"),
-		"amazon_nova":               u("amazon_nova"),
-		"stability":                 u("stability"),
-		"github_copilot":            u("github_copilot"),
-		"chatgpt":                   u("chatgpt"),
-		"minimax":                   u("minimax"),
-		"aws_polly":                 u("aws_polly"),
-		"gigachat":                  u("gigachat"),
-		"llamagate":                 u("llamagate"),
-		"reducto":                   u("reducto"),
-		"bedrock_mantle":            u("bedrock_mantle"),
-		"petals":                    u("petals"),
-		"docker_model_runner":       u("docker_model_runner"),
-	}
-}
-
-// isOpenAIFinetuneModel reports an OpenAI fine-tune model name. Those names are not placed in the openai_chat set.
-func isOpenAIFinetuneModel(key string) bool {
-	return strings.HasPrefix(key, "ft:") && strings.Count(key, ":") <= 1
-}
-
-// isBedrockPricingOnlyModel reports a name that appears only in the Bedrock price map and cannot be treated as a callable deployment.
-func isBedrockPricingOnlyModel(key string) bool {
-	if strings.Contains(key, "month-commitment") {
-		return true
-	}
-	return bedrockPricingOnly.MatchString(key)
-}
-
 // providerModels returns the model ids indexed for that provider. A missing provider returns nil.
+// 调用：ProviderModels。
+// 测试：无直接单测
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 []string（[]string）：这个供应商在价格表里的模型 id。没有这个供应商时为 nil。
 func providerModels(provider string) []string {
+	modelCostMu.RLock()
+	defer modelCostMu.RUnlock()
 	return modelsByProvider[provider]
 }
 
-// modelCostMapCount is the number of entries in the loaded price map. sample_spec is field documentation and is not counted as a model.
+// modelCostMapCount is the number of models in the loaded price map.
+// 参数：无。
+// 调用：Count。
+// 测试：无直接单测
+// 返回 int（int）：价格表里的模型条数。零表示还没有载入。
 func modelCostMapCount() int {
+	modelCostMu.RLock()
+	defer modelCostMu.RUnlock()
 	raw, ok := modelCostMapValue.(map[string]any)
 	if !ok {
 		return 0
 	}
-	n := len(raw)
-	if _, ok := raw["sample_spec"]; ok {
-		n--
-	}
-	return n
+	return len(raw)
 }
 
 // localCostMapForced reports whether only the built-in price map may be used.
+// 参数：无。
+// 返回 bool（bool）：环境变量 LITELLM_LOCAL_MODEL_COST_MAP 为 true 时返回真。
+// 调用：EnvForced。
+// 测试：无直接单测
 func localCostMapForced() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("LITELLM_LOCAL_MODEL_COST_MAP")), "true")
 }
 
-// knownLLMProviders is LiteLLM's LlmProviders values. A leading segment is
-// stripped only when it is one of these, so org ids like meta-llama/ stay.
+// knownLLMProviders holds the prefixes that name a supplier rather than an
+// organization id. While expanding a wildcard, only a known prefix is stripped
+// and then rejoined with the caller's prefix, so org ids like meta-llama/ stay.
+// Provider packages add to this set when they register.
 var knownLLMProviders = map[string]struct{}{
 	"openai": {}, "chatgpt": {}, "openai_like": {}, "jina_ai": {}, "xai": {}, "zai": {},
 	"custom_openai": {}, "text-completion-openai": {}, "cohere": {}, "cohere_chat": {},
@@ -482,21 +111,35 @@ var knownLLMProviders = map[string]struct{}{
 	"xiaomi_mimo": {}, "tensormesh": {}, "libertai": {}, "pinstripes": {}, "cognition": {},
 	"scx-ai": {}, "darkbloom": {}, "meta": {}, "litellm_agent": {}, "cursor": {},
 	"bedrock_mantle": {}, "gdc": {},
+	// Suppliers the embedded Modelink catalog names.
+	"kling": {}, "vidu": {}, "byteplus": {}, "meituan": {}, "stepfun": {}, "arcee_ai": {},
 }
 
-// Raw returns the raw JSON object of the built-in price map. sample_spec is still inside it.
-func Raw() any { return modelCostMapValue }
+// Raw returns the raw JSON object of the built-in price map.
+// 参数：无。
+// 调用：gateway/catalog.go
+// 测试：无直接单测
+// 返回 any（any）：any，供调用方继续使用。
+func Raw() any {
+	modelCostMu.RLock()
+	defer modelCostMu.RUnlock()
+	return modelCostMapValue
+}
 
-// TokenRates returns the per-token input and output prices for one model in the built-in price map.
-// The name is matched as stored, and if that misses, the provider prefix before the first slash is dropped.
-// A missing name, sample_spec, or a row with no per-token prices returns ok false.
+// TokenRates returns the per-token input and output prices for one model in the built-in price map. The name is matched as stored, and if that misses, the provider prefix before the first slash is dropped. A missing name or a row with no per-token prices returns ok false.
+// 参数 model（string）：对外模型名，用来选部署和记用量。
+// 调用：catalog/cost.go、gateway/usage/reports.go
+// 测试：cost_breakdown_test.go、match_test.go、seedance_test.go
+// 返回 input（float64）：输入侧费用；output（float64）：输出侧费用；ok（bool）：真表示找到了可用结果。
 func TokenRates(model string) (input, output float64, ok bool) {
+	modelCostMu.RLock()
+	defer modelCostMu.RUnlock()
 	raw, isMap := modelCostMapValue.(map[string]any)
 	if !isMap {
 		return 0, 0, false
 	}
 	model = strings.TrimSpace(model)
-	if model == "" || model == "sample_spec" {
+	if model == "" {
 		return 0, 0, false
 	}
 	if row, found := priceRow(raw, model); found {
@@ -507,10 +150,19 @@ func TokenRates(model string) (input, output float64, ok bool) {
 			return tokenRatesFrom(row)
 		}
 	}
+	if id, found := aliasKeyLocked(model); found {
+		if row, found := priceRow(raw, id); found {
+			return tokenRatesFrom(row)
+		}
+	}
 	return 0, 0, false
 }
 
 // priceRow reads one object from the price map. A missing key or a non-object returns ok false.
+// 返回 map[string]any（map[string]any）：价格表里这个键对应的对象。原键没有时再试小写。都没有时为 nil；bool（bool）：找到对象时为真。
+// 调用：仅在 model_cost.go 内使用
+// 测试：无直接单测
+// 参数 raw（map[string]any）：原始文本或 JSON 字节；key（string）：要读取的字段名或映射键。
 func priceRow(raw map[string]any, key string) (map[string]any, bool) {
 	row, ok := raw[key].(map[string]any)
 	if ok {
@@ -525,6 +177,10 @@ func priceRow(raw map[string]any, key string) (map[string]any, bool) {
 }
 
 // tokenRatesFrom reads input_cost_per_token and output_cost_per_token. Both missing returns ok false. A missing side is zero.
+// 参数 row（map[string]any）：价格表里这一条模型的字段。
+// 调用：仅在 model_cost.go 内使用
+// 测试：无直接单测
+// 返回 input（float64）：输入侧费用；output（float64）：输出侧费用；ok（bool）：真表示找到了可用结果。
 func tokenRatesFrom(row map[string]any) (input, output float64, ok bool) {
 	in, inOK := floatField(row["input_cost_per_token"])
 	out, outOK := floatField(row["output_cost_per_token"])
@@ -535,6 +191,10 @@ func tokenRatesFrom(row map[string]any) (input, output float64, ok bool) {
 }
 
 // floatField reads a JSON number. A missing or non-numeric value returns ok false.
+// 调用：仅在 model_cost.go 内使用
+// 测试：无直接单测
+// 参数 v（any）：待转换或待保存的值。
+// 返回 float64（float64）：JSON 数字转成的小数。不是数字时为 0；bool（bool）：值是 float64、int 或 int64 时为真。
 func floatField(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -549,12 +209,18 @@ func floatField(v any) (float64, bool) {
 }
 
 // CostMap turns the price map into a model-name to fields map. An entry that is not an object is dropped.
+// 参数：无。
+// 返回 map[string]map[string]any（map[string]map[string]any）：模型名到价格字段的表。不是对象的条目会被丢掉。还没载入时为空表。
+// 调用：gateway/catalog.go、gateway/models/available.go、gateway/models/builtin.go、gateway/public_hub.go
+// 测试：无直接单测
 func CostMap() map[string]map[string]any {
+	modelCostMu.RLock()
+	defer modelCostMu.RUnlock()
 	raw, ok := modelCostMapValue.(map[string]any)
 	if !ok {
 		return map[string]map[string]any{}
 	}
-	out := map[string]map[string]any{}
+	out := make(map[string]map[string]any, len(raw))
 	for id, v := range raw {
 		row, ok := v.(map[string]any)
 		if ok {
@@ -564,34 +230,61 @@ func CostMap() map[string]map[string]any {
 	return out
 }
 
-// Count is the number of models in the price map. sample_spec is field documentation and is not counted.
+// Count is the number of models in the price map.
+// 参数：无。
+// 调用：gateway/catalog.go、gateway/models/admin.go、iam/teams.go、iam/usage_read.go
+// 测试：authz_test.go、usage_idempotency_test.go
+// 返回 int（int）：价格表里的模型条数。
 func Count() int { return modelCostMapCount() }
 
 // LoadedAt is the UTC time, in RFC3339, when the process loaded this built-in price map.
+// 参数：无。
+// 调用：gateway/catalog.go、gateway/models/admin.go
+// 测试：无直接单测
+// 返回 string（string）：内置价格表的载入时刻，UTC 的 RFC3339。还没载入时为空串。
 func LoadedAt() string {
 	modelCostMu.RLock()
 	defer modelCostMu.RUnlock()
 	return modelCostMapLoadedAt
 }
 
-// MarkReloaded sets the load time to now and returns the current model count.
-// The price map comes from an embedded file. Reloading does not change the entries. It only shows the dashboard a new load time.
+// MarkReloaded records that the price catalog was refreshed and returns the
+// number of models now in it. The rows themselves come from ReloadFromMarket;
+// this only stamps the time the console displays.
+// 参数：无。
+// 调用：gateway/models/cost_reload.go
+// 测试：无直接单测
+// 返回 int（int）：价格表里的模型条数。
 func MarkReloaded() int {
 	modelCostMu.Lock()
 	defer modelCostMu.Unlock()
 	modelCostMapLoadedAt = time.Now().UTC().Format(time.RFC3339)
-	return modelCostMapCount()
+	raw, ok := modelCostMapValue.(map[string]any)
+	if !ok {
+		return 0
+	}
+	return len(raw)
 }
 
-// EnvForced reports that LITELLM_LOCAL_MODEL_COST_MAP is set to true, ignoring case.
-// When it is true the gateway uses only the built-in map and does not try a remote price source.
+// EnvForced reports that LITELLM_LOCAL_MODEL_COST_MAP is set to true, ignoring case. When it is true the gateway uses only the built-in map and does not try a remote price source.
+// 参数：无。
+// 返回 bool（bool）：环境变量 LITELLM_LOCAL_MODEL_COST_MAP 为 true 时返回真。
+// 调用：gateway/catalog.go、gateway/models/admin.go
+// 测试：无直接单测
 func EnvForced() bool { return localCostMapForced() }
 
 // ProviderModels returns the model ids for one provider in the built-in map. An unknown provider returns nil.
+// 调用：gateway/catalog.go、gateway/models/list.go
+// 测试：无直接单测
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 []string（[]string）：这个供应商在价格表里的模型 id。没有这个供应商时为 nil。
 func ProviderModels(provider string) []string { return providerModels(provider) }
 
-// KnownProvider reports that this prefix is a LiteLLM provider name rather than an organization id.
-// While expanding a wildcard, only a known provider prefix is stripped and then joined with the caller's prefix.
+// KnownProvider reports that this prefix is a supplier name rather than an organization id. While expanding a wildcard, only a known provider prefix is stripped and then joined with the caller's prefix.
+// 返回 bool（bool）：这个前缀是供应商标识而不是组织 id 时返回真。通配符展开时只剥这种前缀。
+// 调用：gateway/models/list.go
+// 测试：无直接单测
+// 参数 name（string）：名称，用来查找或展示这一项。
 func KnownProvider(name string) bool {
 	_, ok := knownLLMProviders[name]
 	return ok

@@ -14,9 +14,11 @@ import (
 
 var logTraceOnceAdmin sync.Once
 
-// ServiceAccount generates a service key for a team or one of its projects. It
-// has no owner, so it requires the team's administration rather than mere
-// membership; Authorize makes that decision.
+// ServiceAccount generates a service key for a team or one of its projects. It has no owner, so it requires the team's administration rather than mere membership; Authorize makes that decision.
+// 参数 s（Host）：ServiceAccount使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceAdmin.Do(func() { logx.Trace("enter keys.ServiceAccount") })
 
@@ -47,8 +49,11 @@ func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*k, plain, true))
 }
 
-// Regenerate rotates the key plaintext. The old plaintext stops working
-// immediately, and the key's own limits and narrowing are untouched.
+// Regenerate rotates the key plaintext. The old plaintext stops working immediately, and the key's own limits and narrowing are untouched.
+// 参数 s（Host）：Regenerate使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -81,9 +86,11 @@ func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*out, plain, true))
 }
 
-// ResetSpend sets the key spend back to zero, or to reset_to when the body
-// carries one. Historical usage rows are not deleted, so the figures that
-// produced the old total remain.
+// ResetSpend sets the key spend back to zero, or to reset_to when the body carries one. Historical usage rows are not deleted, so the figures that produced the old total remain.
+// 参数 s（Host）：Reset花费使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func ResetSpend(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -121,6 +128,10 @@ func ResetSpend(s Host, w http.ResponseWriter, r *http.Request) {
 }
 
 // Aliases lists the key names the caller may see, for the dashboard pickers.
+// 参数 s（Host）：Aliases使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func Aliases(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -159,8 +170,11 @@ func Aliases(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Health checks that a credential still passes identification. It is the
-// liveness probe the LiteLLM clients call before their first request.
+// Health checks that a credential still passes identification. It is the liveness probe the LiteLLM clients call before their first request.
+// 参数 s（Host）：Health使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func Health(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	if s.RequireMixed(w, r) == nil {
@@ -172,8 +186,11 @@ func Health(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// BulkUpdate applies one patch to many keys. A key the caller may not write is
-// skipped rather than failing the batch, and updated is the count that landed.
+// BulkUpdate applies one patch to many keys. A key the caller may not write is skipped rather than failing the batch, and updated is the count that landed.
+// 参数 s（Host）：BulkUpdate使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/keys/mount.go
+// 测试：无直接单测
 func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -202,8 +219,11 @@ func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"updated": n, "keys": out})
 }
 
-// hashKeyToken is the stored hash of a plaintext key. A value that is already a
-// hash or an id is passed through, so one lookup serves both client styles.
+// hashKeyToken is the stored hash of a plaintext key. A value that is already a hash or an id is passed through, so one lookup serves both client styles.
+// 参数 token（string）：签名或调用方带来的令牌。不会写入响应正文。
+// 返回 string（string）：以 sk- 开头时是存库用的哈希，已经是哈希或 id 时原样返回。
+// 调用：gateway/keys/generate.go
+// 测试：无直接单测
 func hashKeyToken(token string) string {
 	if strings.HasPrefix(token, "sk-") {
 		return iam.HashKey(token)

@@ -12,6 +12,10 @@ import (
 var logTraceOnceMount sync.Once
 
 // Module creates, lists, updates, and rotates virtual keys.
+// 参数 h（Host）：实现这一步所需能力的数据面宿主。聊天、直通和刷写各自只依赖自己的方法。
+// 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
+// 调用：gateway/family/mount.go、gateway/guard/mount.go、gateway/identity/mount.go、gateway/models/mount.go
+// 测试：无直接单测
 func Module(h Host) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter keys.Module") })
 

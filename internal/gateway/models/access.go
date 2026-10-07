@@ -8,19 +8,12 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// AllowsModel is the model authorization decision shared by the model catalog
-// and the inference path, so a listed model is always a usable model.
-//
-// The permitted set comes from iam alone, which resolves it down one chain:
-//
-//	team    = union of the team's active access groups
-//	project = team ∩ project narrowing (when the key names a project)
-//	key     = (project or team) ∩ key narrowing (when the key narrows)
-//
-// teamID narrows a session that is browsing one team's catalog; a key ignores it
-// and answers for the single team it is bound to, never merging capabilities
-// across teams. A scope with no grants at all is unrestricted: nothing has been
-// assigned yet, and an empty assignment is not a denial.
+// AllowsModel is the model authorization decision shared by the model catalog and the inference path, so a listed model is always a usable model. The permitted set comes from iam alone, which resolves it down one chain: team = union of the team's active access groups project = team ∩ project narrowing (when the key names a project) key = (project or team) ∩ key narrowing (when the key narrows) teamI
+// D narrows a session that is browsing one team's catalog; a key ignores it and answers for the single team it is bound to, never merging capabilities across teams. A scope with no grants at all is unrestricted: nothing has been assigned yet, and an empty assignment is not a denial.
+// 参数 s（Host）：Allows模型使用的数据面宿主；ctx（context.Context）：上下文，取消时停止；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；teamID（string）：团队 id。空串表示没有指定团队；alias（string）：对外模型名。
+// 返回 bool（bool）：这个调用方被允许使用该模型时返回真。目录和推理走同一判断，列出的模型就是可用的模型。
+// 调用：gateway/limits.go、gateway/models/available.go、gateway/models/list.go
+// 测试：无直接单测
 func AllowsModel(s Host, ctx context.Context, p *auth.Principal, teamID, alias string) bool {
 	logx.Trace("evaluate model access")
 	alias = strings.TrimSpace(alias)
@@ -46,12 +39,11 @@ func AllowsModel(s Host, ctx context.Context, p *auth.Principal, teamID, alias s
 	return false
 }
 
-// effectiveModels is the caller's permitted model names. A nil slice means the
-// caller is unrestricted; an error means the check could not be made and the
-// caller must deny rather than fall open.
-//
-// Only a key carries a model binding. A session has none of its own, so it is
-// narrowed only when it names a team, and otherwise sees every deployment.
+// effectiveModels is the caller's permitted model names. A nil slice means the caller is unrestricted; an error means the check could not be made and the caller must deny rather than fall open. Only a key carries a model binding. A session has none of its own, so it is narrowed only when it names a team, and otherwise sees every deployment.
+// 参数 s（Host）：effective模型使用的数据面宿主；ctx（context.Context）：上下文，取消时停止；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 []string（[]string）：effective模型。没有匹配时为 nil 或空切片，调用方按长度判断；error（error）：失败原因。nil 表示这一步成功。
+// 调用：仅在 access.go 内使用
+// 测试：无直接单测
 func effectiveModels(s Host, ctx context.Context, p *auth.Principal, teamID string) ([]string, error) {
 	if s == nil || s.Identity() == nil {
 		return nil, nil

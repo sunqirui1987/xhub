@@ -148,7 +148,7 @@ const menuGroups: MenuGroup[] = [
     groupLabel: "nav.groups.team",
     items: [
       { key: "teams", page: "teams", label: "nav.teams", icon: <Users {...ICON} /> },
-      { key: "projects", page: "projects", label: "nav.projects", icon: <Folder {...ICON} />, beta: true },
+      { key: "projects", page: "projects", label: "nav.projects", icon: <Folder {...ICON} /> },
       { key: "organizations", page: "organizations", label: "nav.organizations", icon: <Building2 {...ICON} /> },
       { key: "users", page: "users", label: "nav.users", icon: <User {...ICON} /> },
     ],

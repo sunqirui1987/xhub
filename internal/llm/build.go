@@ -44,12 +44,11 @@ type Upstream struct {
 
 var logTraceOnceBuild sync.Once
 
-// Build builds the upstream request for the protocol group.
-//
-// OpenAI and providers that only change the base URL and a Bearer key use github.com/openai/openai-go.
-// Gemini and Vertex generateContent use google.golang.org/genai.
-// Azure still uses the OpenAI SDK JSON, but the URL is the deployment path and the auth header is api-key.
-// Anthropic, Cohere, and Bedrock each have their own path and body. They are not posted to /chat/completions.
+// Build builds the upstream request for the protocol group.  OpenAI and providers that only change the base URL and a Bearer key use github.com/openai/openai-go. Gemini and Vertex generateContent use google.golang.org/genai. Azure still uses the OpenAI SDK JSON, but the URL is the deployment path and the auth header is api-key. Anthropic, Cohere, and Bedrock each have their own path and body. They are not posted to /chat/completions.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：dataplane/serve.go、llm/call.go
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func Build(ctx context.Context, in Request) (Upstream, error) {
 	logTraceOnceBuild.Do(func() { logx.Trace("enter llm.Build") })
 
@@ -110,12 +109,17 @@ var (
 type errString string
 
 // Error returns the text for an encoding failure. An unknown or retired provider uses a fixed sentence.
+// 参数：无。
+// 返回 string（string）：error 接口的文本，给日志和 HTTP 错误体使用。
+// 调用：Build 在供应商未知或已退役时返回它，经 error 接口读取。
+// 测试：无直接单测
 func (e errString) Error() string { return string(e) }
 
-// ChatProbeUsesFixture reports that the standard test upstream can answer this chat.
-//
-// Those providers' chat URLs end in /chat/completions, /v1/messages, or :generateContent.
-// Every other protocol group must be checked from the URL and body Build returns. Success cannot be judged from the same OpenAI path.
+// ChatProbeUsesFixture reports that the standard test upstream can answer this chat. Those providers' chat URLs end in /chat/completions, /v1/messages, or :generateContent. Every other protocol group must be checked from the URL and body Build returns. Success cannot be judged from the same OpenAI path.
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 bool（bool）：标准测试上游能回答这次聊天时返回真。其他协议组必须按 URL 和正文另行判断。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func ChatProbeUsesFixture(provider string) bool {
 	group, ok := ProtocolGroup(strings.ToLower(strings.TrimSpace(provider)))
 	if !ok {
@@ -130,6 +134,10 @@ func ChatProbeUsesFixture(provider string) bool {
 }
 
 // buildOpenAIWire builds the upstream URL, headers, and body for an OpenAI-compatible group. Most providers use this instead of copying it.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildOpenAIWire(ctx context.Context, in Request) (Upstream, error) {
 	op := in.Op
 	if op == "" || op == OpChat || op == "gemini" {
@@ -143,6 +151,10 @@ func buildOpenAIWire(ctx context.Context, in Request) (Upstream, error) {
 }
 
 // buildAzure builds a request on the Azure deployment path. The model name goes in the deployment segment of the URL, not in the model field of the body.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildAzure(ctx context.Context, in Request) (Upstream, error) {
 	// The Azure OpenAI path puts the model in the deployment name. Authentication is api-key, not a Bearer call to /chat/completions.
 	body, err := openAIChatBody(ctx, in.APIBase, in.APIKey, in.Model, in.Body)
@@ -161,6 +173,10 @@ func buildAzure(ctx context.Context, in Request) (Upstream, error) {
 }
 
 // buildAzureAI builds a request with the Azure AI address rules. The key source differs from Azure OpenAI.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildAzureAI(ctx context.Context, in Request) (Upstream, error) {
 	// Foundry is not the public Azure deployment path. Chat uses /openai/v1/chat/completions and an azure-ai header.
 	body, err := openAIChatBody(ctx, in.APIBase, in.APIKey, in.Model, in.Body)
@@ -175,6 +191,10 @@ func buildAzureAI(ctx context.Context, in Request) (Upstream, error) {
 }
 
 // buildAnthropic rewrites a chat request into the Anthropic Messages API body and headers.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildAnthropic(in Request) (Upstream, error) {
 	// The Messages API path is {api_base}/v1/messages.
 	// LiteLLM turns a string content into [{type:text,text}]. The headers are x-api-key and anthropic-version: 2023-06-01.
@@ -190,8 +210,11 @@ func buildAnthropic(in Request) (Upstream, error) {
 	return Upstream{URL: strings.TrimRight(in.APIBase, "/") + "/v1/messages", Header: h, Body: raw}, nil
 }
 
-// RealtimeClientSecretsURL matches LiteLLM OpenAIRealtimeHTTPConfig.get_complete_url.
-// A custom api_base that ends in /v1 is trimmed first and then joined with /v1/realtime/client_secrets.
+// RealtimeClientSecretsURL matches LiteLLM OpenAIRealtimeHTTPConfig.get_complete_url. A custom api_base that ends in /v1 is trimmed first and then joined with /v1/realtime/client_secrets.
+// 参数 apiBase（string）：上游根地址，末尾斜杠会被去掉再拼路径。
+// 返回 string（string）：去掉末尾斜杠和末尾 /v1 之后，接上 /v1/realtime/client_secrets 的地址。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func RealtimeClientSecretsURL(apiBase string) string {
 	base := strings.TrimRight(apiBase, "/")
 	base = strings.TrimSuffix(base, "/v1")
@@ -199,6 +222,10 @@ func RealtimeClientSecretsURL(apiBase string) string {
 }
 
 // buildCohere builds a Cohere protocol-group request. Chat and completion use different paths.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildCohere(in Request) (Upstream, error) {
 	if in.Op == OpRerank {
 		return buildCohereRerank(in)
@@ -227,9 +254,11 @@ func buildCohere(in Request) (Upstream, error) {
 	return Upstream{URL: base, Header: h, Body: raw}, nil
 }
 
-// buildCohereRerank matches LiteLLM CohereRerankV2Config.
-// When api_base is set and does not already end in /v2/rerank, that path is appended. Otherwise https://api.cohere.ai/v2/rerank is used.
-// LiteLLM defaults return_documents to true when it is omitted. Authentication is only Bearer, without the chat request-source header.
+// buildCohereRerank matches LiteLLM CohereRerankV2Config. When api_base is set and does not already end in /v2/rerank, that path is appended. Otherwise https://api.cohere.ai/v2/rerank is used. LiteLLM defaults return_documents to true when it is omitted. Authentication is only Bearer, without the chat request-source header.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildCohereRerank(in Request) (Upstream, error) {
 	base := strings.TrimRight(in.APIBase, "/")
 	if base == "" {
@@ -263,6 +292,10 @@ func buildCohereRerank(in Request) (Upstream, error) {
 }
 
 // anthropicBody extracts the messages and system Anthropic needs from an OpenAI-shaped body.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func anthropicBody(body map[string]any) map[string]any {
 	msgs, ok := body["messages"].([]any)
 	if !ok {
@@ -286,6 +319,10 @@ func anthropicBody(body map[string]any) map[string]any {
 }
 
 // buildBedrock builds a request on the Bedrock model path. Region and keys do not read environment variables in this function.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildBedrock(in Request) (Upstream, error) {
 	// Bedrock InvokeModel puts the model id in the path and uses AWS SigV4 headers instead of Bearer plus /chat/completions.
 	// This assembles the credential scope for the signed headers. It does not connect to AWS.
@@ -307,6 +344,10 @@ func buildBedrock(in Request) (Upstream, error) {
 }
 
 // buildSearch builds a search upstream request. The body still comes from the caller. This function only chooses the address and headers.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildSearch(in Request) (Upstream, error) {
 	// Search providers accept query, not chat messages.
 	q := str(in.Body["query"])
@@ -325,6 +366,10 @@ func buildSearch(in Request) (Upstream, error) {
 }
 
 // buildImageHost builds the upstream address for image generation or editing.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildImageHost(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{
 		"model":  in.Model,
@@ -341,6 +386,10 @@ func buildImageHost(in Request) (Upstream, error) {
 }
 
 // buildAudioHost builds the upstream address for speech or transcription.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildAudioHost(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"model": in.Model, "text": firstText(in.Body)})
 	if err != nil {
@@ -354,6 +403,10 @@ func buildAudioHost(in Request) (Upstream, error) {
 }
 
 // buildEmbedHost builds the upstream address for embeddings.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildEmbedHost(in Request) (Upstream, error) {
 	// DashScope, Jina, and Voyage embedding paths are not the OpenAI /embeddings path.
 	payload, err := json.Marshal(map[string]any{"model": in.Model, "input": in.Body["input"]})
@@ -368,6 +421,10 @@ func buildEmbedHost(in Request) (Upstream, error) {
 }
 
 // buildVector builds the upstream address for a vector-store call.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildVector(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"provider": in.Provider, "query": firstText(in.Body)})
 	if err != nil {
@@ -381,6 +438,10 @@ func buildVector(in Request) (Upstream, error) {
 }
 
 // buildSandbox builds the upstream address for a sandbox or code-execution call.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildSandbox(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"code": firstText(in.Body)})
 	if err != nil {
@@ -394,6 +455,10 @@ func buildSandbox(in Request) (Upstream, error) {
 }
 
 // buildOCR builds the upstream address for an OCR call.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildOCR(in Request) (Upstream, error) {
 	payload, err := json.Marshal(map[string]any{"document": in.Body["document"], "model": in.Model})
 	if err != nil {
@@ -407,6 +472,10 @@ func buildOCR(in Request) (Upstream, error) {
 }
 
 // buildOwn builds an upstream request for this process's custom protocol. Unknown fields are not dropped here.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildOwn(in Request) (Upstream, error) {
 	// The main operation of these packages is not OpenAI chat. ollama uses /api/chat and the others use /invoke.
 	path := "/invoke"
@@ -424,12 +493,20 @@ func buildOwn(in Request) (Upstream, error) {
 }
 
 // buildShared joins addresses shared by several protocol groups. Protocol differences stay in each build function.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildShared(in Request) (Upstream, error) {
 	// base_llm, custom_httpx, and pass_through are not callable provider URLs.
 	return Upstream{}, errUnknownProvider
 }
 
 // legacy is the old encoding entry. New callers should not depend on the field names here.
+// 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func legacy(in Request) (Upstream, error) {
 	raw, err := Encode(in.Op, in.Provider, cloneMap(in.Body), in.Model)
 	if err != nil {
@@ -443,6 +520,10 @@ func legacy(in Request) (Upstream, error) {
 }
 
 // captureOpenAIChat builds one OpenAI chat request with the official SDK so a test can compare the URL and body. It does not dial.
+// 参数 ctx（context.Context）：上下文，取消时停止；base（string）：根地址或完整 URL。空串表示改用供应商默认根，末尾斜杠会去掉；apiKey（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥；model（string）：发给上游或对外展示的模型名；body（map[string]any）：已解析或原始的 JSON。
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func captureOpenAIChat(ctx context.Context, base, apiKey, model string, body map[string]any) (Upstream, error) {
 	raw, err := openAIChatBody(ctx, base, apiKey, model, body)
 	if err != nil {
@@ -467,6 +548,10 @@ func captureOpenAIChat(ctx context.Context, base, apiKey, model string, body map
 }
 
 // openAIChatBody encodes a chat body as the JSON the OpenAI SDK would send.
+// 参数 ctx（context.Context）：上下文，取消时停止；base（string）：根地址或完整 URL。空串表示改用供应商默认根，末尾斜杠会去掉；apiKey（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥；model（string）：发给上游或对外展示的模型名；body（map[string]any）：已解析或原始的 JSON。
+// 返回 []byte（[]byte）：序列化后的 JSON 字节。失败时为 nil；error（error）：失败原因。nil 表示这一步成功。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func openAIChatBody(ctx context.Context, base, apiKey, model string, body map[string]any) ([]byte, error) {
 	cap := &capture{}
 	client := openai.NewClient(
@@ -506,6 +591,10 @@ func openAIChatBody(ctx context.Context, base, apiKey, model string, body map[st
 }
 
 // chatParams turns a map body into the SDK chat parameters. A field the SDK cannot represent does not silently succeed as a zero value.
+// 参数 model（string）：对外模型名，用来选部署和记用量；body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 ChatCompletionNewParams（openai.ChatCompletionNewParams）：把正文收成的 SDK 聊天参数。messages 逐条转成 SDK 消息。SDK 表达不了的字段不会假装成功。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func chatParams(model string, body map[string]any) openai.ChatCompletionNewParams {
 	var msgs []openai.ChatCompletionMessageParamUnion
 	if raw, ok := body["messages"].([]any); ok {
@@ -536,6 +625,10 @@ func chatParams(model string, body map[string]any) openai.ChatCompletionNewParam
 }
 
 // buildGemini builds a Gemini or Vertex generateContent request.
+// 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；in（Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
+// 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
 func buildGemini(ctx context.Context, in Request) (Upstream, error) {
 	cap := &capture{}
 	cfg := &genai.ClientConfig{
@@ -593,6 +686,10 @@ func buildGemini(ctx context.Context, in Request) (Upstream, error) {
 }
 
 // geminiLiteLLMBody turns a Gemini response into the JSON shape LiteLLM expects.
+// 参数 raw（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 []byte（[]byte）：序列化后的 JSON 字节。失败时为 nil。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func geminiLiteLLMBody(raw []byte) []byte {
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
@@ -614,6 +711,10 @@ func geminiLiteLLMBody(raw []byte) []byte {
 }
 
 // asInt32 converts a number to int32. A wrong type returns ok false, and the caller must not treat it as 0.
+// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 int32（int32）：收成的 32 位整数。类型不对时为 0，同时布尔值为假，调用方不能把 0 当成合法转换；bool（bool）：这个值能收成 int32 时返回真。类型不对时返回假，调用方不能把它当成 0。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func asInt32(v any) (int32, bool) {
 	switch n := v.(type) {
 	case int:
@@ -634,6 +735,10 @@ func asInt32(v any) (int32, bool) {
 }
 
 // geminiContents turns a message list into Gemini Content. Empty content still produces one user message so the upstream does not reject empty contents.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 []*genai.Content（[]*genai.Content）：消息列表收成的 Gemini Content。正文为空时仍有一条 user 消息，避免上游拒收空内容。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func geminiContents(body map[string]any) []*genai.Content {
 	if raw, ok := body["contents"].([]any); ok && len(raw) > 0 {
 		var out []*genai.Content
@@ -685,6 +790,10 @@ type capture struct {
 }
 
 // RoundTrip records the request and returns a fixed success JSON. The capture type uses it as a test transport.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 调用：仅在 build.go 内使用
+// 测试：builtin_providers_test.go
+// 返回 *http.Response（*http.Response）：上游的 HTTP 响应，调用方负责关闭 Body；error（error）：失败原因，nil 表示成功。
 func (c *capture) RoundTrip(r *http.Request) (*http.Response, error) {
 	b, _ := io.ReadAll(r.Body)
 	c.body = b
@@ -700,6 +809,10 @@ func (c *capture) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // cloneMap shallow-copies a map. Later edits to the copy do not change the original.
+// 参数 in（map[string]any）：复制表读到的 JSON 对象。缺键表示没有该字段。
+// 返回 map[string]any（map[string]any）：复制表的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 build.go 内使用。
+// 测试：无直接单测
 func cloneMap(in map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range in {
@@ -709,6 +822,10 @@ func cloneMap(in map[string]any) map[string]any {
 }
 
 // firstText takes the first text part from the body for a provider that has no messages field.
+// 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
+// 返回 string（string）：prompt、input、query 或第一条消息里的文本。都没有时为空串。
+// 调用：仅在 build.go 内使用
+// 测试：无直接单测
 func firstText(body map[string]any) string {
 	if s := str(body["prompt"]); s != "" {
 		return s
@@ -728,6 +845,10 @@ func firstText(body map[string]any) string {
 }
 
 // str reads v as a string. A non-string returns an empty string and does not panic.
+// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 string（string）：按字符串读出的值。不是字符串或没有该键时为空串，不 panic。
+// 调用：仅在 build.go 内使用。
+// 测试：无直接单测
 func str(v any) string {
 	s, _ := v.(string)
 	return s

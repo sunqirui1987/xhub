@@ -8,7 +8,14 @@ import (
 
 var logTraceOnceGroups sync.Once
 
-// ProtocolGroup returns the protocol group for a provider name from the LiteLLM 1.102.0 provider set. Groups follow wire format and authentication, not the old Python package layout. An unknown or empty name returns false.
+// ProtocolGroup returns the protocol group for a provider name from the LiteLLM 1.102.0 provider set. Groups follow wire format and authentication, not the old Python package layout. An unknown or empty
+//
+//	name returns false.
+//
+// 参数 provider（string）：供应商标识，例如 openai 或 volcengine。
+// 返回 string（string）：供应商所属的协议组。认不出时为空串，同时布尔值为假；bool（bool）：认得出这个供应商的协议组时返回真。空名或未知名返回假。
+// 调用：dataplane/serve.go、llm/build.go
+// 测试：无直接单测
 func ProtocolGroup(provider string) (string, bool) {
 	logTraceOnceGroups.Do(func() { logx.Trace("enter llm.ProtocolGroup") })
 

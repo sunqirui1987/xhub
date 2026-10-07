@@ -65,6 +65,7 @@ export default function AddModelPanel() {
       setShowAdvancedSettings={setShowAdvancedSettings}
       teams={teams ?? null}
       credentials={credentialsResponse?.credentials || []}
+      modelCostMap={modelCostMapData as Record<string, { endpoint_type?: string }> | undefined}
     />
   );
 }

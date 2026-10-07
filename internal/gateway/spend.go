@@ -1,4 +1,14 @@
-// Package gateway records spend, response headers, and in-process concurrency after a successful inference. When Redis is set, the request does not write PostgreSQL.
+// spend.go writes one usage row for every finished inference call, chat and
+// bypass included. recordSpend is the only writer. It copies the exchange
+// (headers, body, response) and the call note (provider, TTFT, session,
+// deployment) that the handler stored under the call id, then deletes them.
+//
+// Redis, when Live is set, takes the hot spend update and queues the row.
+// Otherwise persistSpend writes PostgreSQL before the response returns.
+// A cache hit keeps the token counts and forces the billed amount to zero.
+// A status at or above 400 keeps the row for the log and forces the billed
+// amount to zero as well.
+
 package gateway
 
 import (
@@ -25,6 +35,10 @@ import (
 var logTraceOnceSpend sync.Once
 
 // incBusy increments the in-process concurrency count for a deployment.
+// 参数 id（string）：部署 id，形状是 api_base|model。空串时计数没有对应的部署。
+// 返回：无。该部署的进程内在途数加一。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) incBusy(id string) {
 	logTraceOnceSpend.Do(func() { logx.Trace("enter gateway.incBusy") })
 
@@ -34,6 +48,10 @@ func (s *Server) incBusy(id string) {
 }
 
 // decBusy decrements the in-process concurrency count for a deployment.
+// 参数 id（string）：部署 id，形状是 api_base|model。必须和 incBusy 用同一个 id。
+// 返回：无。该部署的进程内在途数减一。必须和 incBusy 成对。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) decBusy(id string) {
 	s.mu.Lock()
 	s.Busy[id]--
@@ -41,6 +59,10 @@ func (s *Server) decBusy(id string) {
 }
 
 // setChatHeaders sets response headers such as the model name, spend, and latency.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；alias（string）：对外模型名；apiBase（string）：上游根地址，末尾斜杠会被去掉再拼路径。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/engine.go、gateway/wire.go
+// 测试：无直接单测
 func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias, apiBase string) {
 	w.Header().Set("x-litellm-model-name", alias)
 	w.Header().Set("x-litellm-model-api-base", apiBase)
@@ -59,14 +81,74 @@ func (s *Server) setChatHeaders(w http.ResponseWriter, p *auth.Principal, alias,
 	}
 }
 
+// callCost prices one call. A price typed on the deployment wins. Otherwise the price map is read by the upstream model id, then by the public name.
+// 参数 alias（string）：对外模型名；depID（string）：部署 id。空串表示当前没有钉住的部署；prompt（int）：提示 token 数，用来估价；completion（int）：完成 token 数，用来估价。
+// 返回 total（float64）：这一次的总费用；input（float64）：输入侧费用；output（float64）：输出侧费用；ok（bool）：真表示找到了可用结果。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
+func (s *Server) callCost(alias, depID string, prompt, completion int) (total, input, output float64, ok bool) {
+	if dep, found := s.FindDeployment(depID); found {
+		inRate, inOK := floatParam(dep.LiteLLMParams, "input_cost_per_token")
+		outRate, outOK := floatParam(dep.LiteLLMParams, "output_cost_per_token")
+		if inOK || outOK {
+			input = float64(prompt) * inRate
+			output = float64(completion) * outRate
+			return input + output, input, output, true
+		}
+		if id := dep.ParamString("model", ""); id != "" && id != alias {
+			if total, input, output, ok = catalog.Cost(id, prompt, completion); ok {
+				return total, input, output, true
+			}
+		}
+	}
+	return catalog.Cost(alias, prompt, completion)
+}
+
+// 从 litellm_params 读取一个小数。缺键或类型不符时 ok 为假。
+// 参数 params（map[string]any）：部署上的 litellm_params。常见键是 model、api_base、api_key；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
+// 返回 float64（float64）：小数参数。缺失时为 0，不要把它理解成免费除非调用方另有约定；bool（bool）：litellm_params 里有这个小数键且类型正确时返回真。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
+func floatParam(params map[string]any, key string) (float64, bool) {
+	if params == nil {
+		return 0, false
+	}
+	v, ok := params[key]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
 // recordSpend records this call's spend. With Redis it updates the hot path and queues a log instead of writing PostgreSQL inside the request.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；alias（string）：对外模型名；op（string）：操作名，例如 chat；usage（map[string]any）：用量对象。字段可能是 prompt_tokens，也可能是 input_tokens；start（time.Time）：时间范围的起点。零值表示不限制开始；cacheHit（bool）：为真时走缓存命中这一支。为假时保持原来的路径；status（int）：HTTP 状态码；depID（string）：部署 id。空串表示当前没有钉住的部署。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, alias, op string, usage map[string]any, start time.Time, cacheHit bool, status int, depID string) {
 	if usage == nil {
 		usage = map[string]any{}
 	}
 	pt := asInt(usage["prompt_tokens"])
 	ct := asInt(usage["completion_tokens"])
-	total, in, out, okc := catalog.Cost(alias, pt, ct)
+	total, in, out, okc := s.callCost(alias, depID, pt, ct)
 	// A cache hit is a request fact, but it is not a second upstream generation.
 	// Keep the token metadata for observability while making the billable delta
 	// explicitly zero. This must happen before both the Redis and PostgreSQL
@@ -147,6 +229,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
 		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
 		SessionID: note.SessionID, CachedTokens: cachedTokens(usage),
+		Guardrail: s.takeGuardrail(callID),
 	}
 	if p != nil && p.Key != nil {
 		row.KeyHash = p.Key.TokenHash
@@ -164,6 +247,10 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 }
 
 // persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
+// 参数 row（live.SpendLog）：从用量或目录读出的SpendLog；spend（float64）：这一行要累加的费用，单位是美元；ex（promptExchange）：persist花费使用的promptExchange；start（time.Time）：时间范围的起点。零值表示不限制开始；end（time.Time）：时间范围的终点。零值表示直到现在。
+// 返回：无。这条花费已写入 PostgreSQL。没配库时直接返回，不写。
+// 调用：仅在 spend.go 内使用
+// 测试：log_completeness_test.go
 func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchange, start, end time.Time) {
 	if s.IAM == nil {
 		return
@@ -176,10 +263,11 @@ func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchang
 	}
 }
 
-// sessionLogBinding marks a console call as that person's own log. When they
-// belong to one team, the row is filed there so the team and its organization
-// administrator can read it. More than one membership leaves the team blank:
-// the caller still sees the row, and a guess would file it under the wrong team.
+// sessionLogBinding marks a console call as that person's own log. When they belong to one team, the row is filed there so the team and its organization administrator can read it. More than one membership leaves the team blank: the caller still sees the row, and a guess would file it under the wrong team.
+// 参数 ownerType（string）：会话日志Binding使用的归属类型。空串表示调用方没有提供这项；teamID（string）：团队 id。空串表示没有指定团队；orgID（string）：组织 id。空串表示不按组织过滤；memberships（[]iam.Membership）：会话日志Binding使用的Membership。
+// 返回 string（string）：归属类型。入参为空时按个人密钥；string（string）：要写入用量行的团队 id。只属于一个团队且入参为空时用那个团队；string（string）：要写入用量行的组织 id。跟团队一起补上，已经有值时不改。
+// 调用：仅在 spend.go 内使用
+// 测试：spend_session_test.go
 func sessionLogBinding(ownerType, teamID, orgID string, memberships []iam.Membership) (string, string, string) {
 	if ownerType == "" {
 		ownerType = iam.OwnerPersonal
@@ -193,9 +281,14 @@ func sessionLogBinding(ownerType, teamID, orgID string, memberships []iam.Member
 	return ownerType, teamID, orgID
 }
 
-// teamOrg returns the organization that owns a team, for the ownership snapshot
-// written onto a usage row. A lookup failure records an empty organization rather
-// than dropping the row: the spend itself is already known and must be billed.
+// teamOrg returns the organization that owns a team, for the ownership snapshot written onto a usage row. A lookup failure records an empty organization rather than dropping the row: the spend itself is
+//
+//	already known and must be billed.
+//
+// 参数 teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 string（string）：这个团队所属的组织 id，写进用量行的归属快照。库没有或查不到时为空串。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func (s *Server) teamOrg(teamID string) string {
 	if s.IAM == nil || teamID == "" {
 		return ""
@@ -208,7 +301,11 @@ func (s *Server) teamOrg(teamID string) string {
 	return team.OrganizationID
 }
 
-// deref reads an optional string. A nil pointer is the empty string.
+// usageFromSpend 把一条热花费和暂存的请求、响应正文收成可以写入 PostgreSQL 的用量行。
+// 参数 row（live.SpendLog）：Redis 队列里的花费日志，含密钥、团队、模型和 token；spend（float64）：这条日志的美元费用；messages（string）：已打码的请求 JSON。没开正文保存时为空串；response（string）：已打码的响应 JSON。没开正文保存时为空串；proxy（string）：发给上游的请求 JSON。没开正文保存时为空串；start（time.Time）：请求开始时间；end（time.Time）：请求结束时间，用来算耗时。
+// 返回 UsageRecord（iam.UsageRecord）：准备写入 usage_events 的一行。费用、正文和归属都来自上面的参数。
+// 调用：persistSpend。
+// 测试：无直接单测
 func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy string, start, end time.Time) iam.UsageRecord {
 	return iam.UsageRecord{
 		RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
@@ -220,10 +317,15 @@ func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy 
 		EndedAt: end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
 		KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
 		Provider: row.Provider, CachedTokens: row.CachedTokens,
-		SessionID: row.SessionID, CacheKey: row.CacheKey,
+		SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
 	}
 }
 
+// 从用量明细里取出缓存命中的 token 数。没有明细时为 nil。
+// 参数 usage（map[string]any）：用量对象。字段可能是 prompt_tokens，也可能是 input_tokens。
+// 返回 *int（*int）：从用量明细里取出缓存命中的 token 数。找不到或这一步失败时为 nil。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func cachedTokens(usage map[string]any) *int {
 	if usage == nil {
 		return nil
@@ -243,6 +345,11 @@ func cachedTokens(usage map[string]any) *int {
 	return &n
 }
 
+// deref 读取可选字符串。nil 指针当成空串，避免把没有填写的列写成 "<nil>"。
+// 参数 s（*string）：用量行上的可选文本，例如团队别名。nil 表示这一列没有值。
+// 返回 string（string）：指针指向的字符串。指针为 nil 时为空串。
+// 调用：仅在 spend.go 内使用。
+// 测试：无直接单测
 func deref(s *string) string {
 	if s == nil {
 		return ""
@@ -257,8 +364,11 @@ type promptExchange struct {
 	proxy    string
 }
 
-// promptsEnabled reports whether new spend logs should keep the request and response.
-// The YAML flag wins when it is set. A database override can turn the same key on later.
+// promptsEnabled reports whether new spend logs should keep the request and response. The YAML flag wins when it is set. A database override can turn the same key on later.
+// 参数：无。
+// 返回 bool（bool）：新的花费日志要保存请求和响应正文时返回真。YAML 已设置时以 YAML 为准。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func (s *Server) promptsEnabled() bool {
 	if s == nil || s.Cfg == nil {
 		return false
@@ -280,6 +390,10 @@ func (s *Server) promptsEnabled() bool {
 }
 
 // rememberExchange keeps one call's headers and bodies until recordSpend writes the row.
+// 参数 callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；reqBody（[]byte）：remember交换要读的原始字节；respBody（[]byte）：remember交换要读的原始字节。
+// 返回：无。这次调用的头和正文已留到写用量行时再用。没开提示词记录或 callID 为空时不留。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) rememberExchange(callID string, r *http.Request, reqBody, respBody []byte) {
 	if s == nil || callID == "" || !s.promptsEnabled() {
 		return
@@ -293,6 +407,11 @@ func (s *Server) rememberExchange(callID string, r *http.Request, reqBody, respB
 	s.mu.Unlock()
 }
 
+// 取出并删掉这次调用暂存的请求和响应，供记用量时写入日志。
+// 参数 callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行。
+// 返回 promptExchange（promptExchange）：取出并删掉这次调用暂存的请求和响应，供记用量时写入日志。没有命中时为零值。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func (s *Server) takeExchange(callID string) promptExchange {
 	if s == nil {
 		return promptExchange{}
@@ -304,8 +423,11 @@ func (s *Server) takeExchange(callID string) promptExchange {
 	return ex
 }
 
-// promptJSON builds the three documents the log drawer reads: messages, response, and proxy_server_request.
-// Authorization and API key headers are replaced so the stored log does not keep a credential.
+// promptJSON builds the three documents the log drawer reads: messages, response, and proxy_server_request. Authorization and API key headers are replaced so the stored log does not keep a credential.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；reqBody（[]byte）：输入JSON要读的原始字节；respBody（[]byte）：输入JSON要读的原始字节。
+// 返回 messages（string）：打码后的请求 JSON，日志抽屉的请求面板读它；response（string）：打码后的响应 JSON；proxy（string）：打码后发给上游的请求 JSON。三段都去掉了 Authorization 和 API 密钥。
+// 调用：仅在 spend.go 内使用
+// 测试：prompt_log_test.go
 func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, proxy string) {
 	reqDoc := jsonDocument(reqBody)
 	respDoc := jsonDocument(respBody)
@@ -328,7 +450,7 @@ func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, 
 	method, path := "", ""
 	if r != nil {
 		method = r.Method
-		path = r.URL.Path
+		path = r.URL.RequestURI()
 		for k, vals := range r.Header {
 			headers[k] = strings.Join(vals, ", ")
 		}
@@ -343,9 +465,11 @@ func promptJSON(r *http.Request, reqBody, respBody []byte) (messages, response, 
 	return mustJSON(messagesDoc), mustJSON(respDoc), mustJSON(proxyDoc)
 }
 
-// assembleLoggedResponse turns a stored event stream into the final response
-// document the log drawer can read. A chat or Responses stream is not one JSON
-// value, so it used to be kept as a raw body and the output panel stayed empty.
+// assembleLoggedResponse turns a stored event stream into the final response document the log drawer can read. A chat or Responses stream is not one JSON value, so it used to be kept as a raw body and the output panel stayed empty.
+// 参数 raw（[]byte）：原始文本或 JSON 字节；parsed（any）：assembleLogged响应接到的动态值。类型在函数体内收窄。
+// 返回 any（any）：assembleLogged响应。没有合格值时为 nil。
+// 调用：仅在 spend.go 内使用
+// 测试：prompt_response_test.go
 func assembleLoggedResponse(raw []byte, parsed any) any {
 	text := ""
 	switch doc := parsed.(type) {
@@ -435,6 +559,11 @@ type streamTool struct {
 	args strings.Builder
 }
 
+// 把流式工具调用增量按 index 拼进已有的工具调用。
+// 参数 dst（map[int]*streamTool）：追加流工具使用的map[int]*streamTool；raw（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回：无。流式工具调用增量已按 index 拼进已有的工具调用。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func appendStreamTools(dst map[int]*streamTool, raw any) {
 	list, _ := raw.([]any)
 	for _, item := range list {
@@ -464,6 +593,11 @@ func appendStreamTools(dst map[int]*streamTool, raw any) {
 	}
 }
 
+// 把拼好的流式工具调用收成响应里的 tool_calls 数组。
+// 参数 tools（map[int]*streamTool）：流工具Calls使用的map[int]*streamTool。
+// 返回 []any（[]any）：把拼好的流式工具调用收成响应里的 tool_calls 数组。没有行时为空切片。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func streamToolCalls(tools map[int]*streamTool) []any {
 	if len(tools) == 0 {
 		return nil
@@ -488,11 +622,21 @@ func streamToolCalls(tools map[int]*streamTool) []any {
 	return out
 }
 
+// 粗略判断正文是不是 SSE，避免把事件流当成普通 JSON 解析。
+// 参数 raw（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 bool（bool）：正文像 SSE：含 data:，并且像事件流或聊天块时为真。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func looksLikeEventStream(raw []byte) bool {
 	s := string(raw)
 	return strings.Contains(s, "data:") && (strings.Contains(s, "event:") || strings.Contains(s, "\"choices\""))
 }
 
+// 把正文解析成 JSON。空正文或解析失败时为 nil。
+// 参数 raw（[]byte）：原始正文。可能是 JSON，也可能是 SSE，由调用方按内容解析。
+// 返回 any（any）：解析后的 JSON。空正文或解析失败时为 nil。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func jsonDocument(raw []byte) any {
 	if len(raw) == 0 {
 		return nil
@@ -504,6 +648,11 @@ func jsonDocument(raw []byte) any {
 	return v
 }
 
+// 把值序列化成 JSON 文本。nil 或失败时为空串。
+// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
+// 返回 string（string）：序列化后的 JSON 文本。值是 nil 或序列化失败时为空串。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func mustJSON(v any) string {
 	if v == nil {
 		return ""
@@ -515,6 +664,11 @@ func mustJSON(v any) string {
 	return string(b)
 }
 
+// 就地打码敏感头。Authorization、Cookie 和各类 api-key 变成星号。
+// 参数 h（map[string]string）：字符串到字符串的表。缺键表示这项没有填，不要补成空 JSON。
+// 返回：无。Authorization、Cookie 和各类 api-key 已就地换成星号。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func redactHeaders(h map[string]string) {
 	for k, v := range h {
 		if sensitiveHeader(k) {
@@ -525,6 +679,11 @@ func redactHeaders(h map[string]string) {
 	}
 }
 
+// 判断这个头是不是凭证或 Cookie。
+// 参数 name（string）：HTTP 头名称。
+// 返回 bool（bool）：这个头会携带凭证或 Cookie，必须打码时为真。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func sensitiveHeader(name string) bool {
 	switch strings.ToLower(name) {
 	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key", "x-litellm-api-key", "x-goog-api-key":
@@ -536,11 +695,20 @@ func sensitiveHeader(name string) bool {
 
 var promptSecret = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+`)
 
+// 把文本里的密钥样式替换成星号。
+// 参数 s（string）：即将写入日志的一行，可能含 bearer、sk- 或上游 URL。
+// 返回 string（string）：打码后的文本。看起来像密钥的片段换成星号。
+// 调用：仅在 spend.go 内使用
+// 测试：无直接单测
 func redactSecretText(s string) string {
 	return promptSecret.ReplaceAllString(s, "***")
 }
 
 // writeCacheHit returns a cached body and records a cache-hit spend log.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；alias（string）：对外模型名；ck（string）：写入缓存命中使用的ck。空串表示调用方没有提供这项；op（string）：操作名，例如 chat；hit（[]byte）：缓存命中的响应正文；start（time.Time）：时间范围的起点。零值表示不限制开始。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time) {
 	w.Header().Set("cache_hit", "true")
 	w.Header().Set("x-litellm-cache-hit", "true")
@@ -563,6 +731,10 @@ func (s *Server) writeCacheHit(w http.ResponseWriter, p *auth.Principal, callID,
 }
 
 // writeChatJSON writes the upstream JSON back to the client and records the spend.
+// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；alias（string）：对外模型名；ck（string）：写入对话JSON使用的ck。空串表示调用方没有提供这项；op（string）：操作名，例如 chat；provider（string）：供应商标识，例如 openai 或 volcengine；respBody（[]byte）：写入对话JSON要读的原始字节；status（int）：HTTP 状态码；start（time.Time）：时间范围的起点。零值表示不限制开始；depID（string）：部署 id。空串表示当前没有钉住的部署。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/wire.go
+// 测试：无直接单测
 func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string) {
 	if op == "audio_speech" {
 		// Speech responses do not carry chat-token usage. Do not manufacture

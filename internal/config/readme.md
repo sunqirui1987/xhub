@@ -62,8 +62,16 @@ router_settings:
 
 `Load` returns an error when `database_url` is missing or starts with `sqlite:` or `file:`.
 
+## What Load actually rewrites
+
+After YAML decode, `Load` walks every string in each deployment's `litellm_params`. A value that starts with `os.environ/` is replaced with `os.Getenv`. A missing variable becomes the empty string, so the feature that key configures stays off instead of sending the placeholder upstream. `custom_llm_provider` is not lowercased here; credential hydration in `internal/llm` does that later.
+
+An empty `routing_strategy` becomes `simple-shuffle`. `num_retries` of 0 becomes 2. `timeout` of 0 becomes 60 seconds. Those defaults are applied in `Load`, not by the router.
+
+`ModelEntry.ParamString(key, fallback)` reads one string from `litellm_params`. A missing key or a non-string returns `fallback`. `router.DeploymentID` uses it for `api_base` and `model`, and joins them with `|`.
+
 ## What this package does not do
 
-It does not merge database overrides. That is `settings.Overlay`. It does not open PostgreSQL.
+It does not merge database overrides. That is the prefs overlay in `internal/gateway/prefs`. It does not open PostgreSQL. It does not listen on `:4000`. The gateway process calls `Load` once at startup from the path in the process flags.
 
 中文使用说明见同目录的 readme_cn.md。

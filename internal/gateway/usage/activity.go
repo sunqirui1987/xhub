@@ -19,26 +19,30 @@ const activityPageSize = 50
 
 var logTraceOnceActivity sync.Once
 
-// UserDailyActivity is GET /user/daily/activity. It groups stored usage into the
-// daily rollup the usage page reads, newest day first and paged. The entity
-// breakdown is per user, which is what "用户用量" renders, and the scope is the
-// caller's own rows plus the teams they oversee.
+// UserDailyActivity is GET /user/daily/activity. It groups stored usage into the daily rollup the usage page reads, newest day first and paged. The entity breakdown is per user, which is what "用户用量" renders, and the scope is the caller's own rows plus the teams they oversee.
+// 参数 s（Host）：用户按天活动使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func UserDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceActivity.Do(func() { logx.Trace("enter usage.UserDailyActivity") })
 	writeDailyActivity(s, w, r, entityUser, false)
 }
 
-// UserDailyActivityAggregated is GET /user/daily/activity/aggregated. The same
-// rollup in a single response, which is what "你的用量" and the global view load
-// first. A user id on the query narrows to that account inside the scope.
+// UserDailyActivityAggregated is GET /user/daily/activity/aggregated. The same rollup in a single response, which is what "你的用量" and the global view load first. A user id on the query narrows to that account inside the scope.
+// 参数 s（Host）：用户按天活动聚合使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func UserDailyActivityAggregated(s Host, w http.ResponseWriter, r *http.Request) {
 	writeDailyActivity(s, w, r, entityUser, true)
 }
 
-// GatewayDailyActivity is GET /gateway/daily/activity. Request counts come from
-// the same usage rows, split by outcome and route. The scope decides whose calls
-// are counted: a platform administrator sees the gateway, anyone else sees only
-// their own calls and the calls inside the teams they belong to.
+// GatewayDailyActivity is GET /gateway/daily/activity. Request counts come from the same usage rows, split by outcome and route. The scope decides whose calls are counted: a platform administrator seesthe gateway, anyone else sees only their own calls and the calls inside the teams they belong to.
+// 参数 s（Host）：网关按天活动使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
+// 返回：无。状态码和正文写进调用方的响应。
+// 调用：gateway/usage/mount.go
+// 测试：无直接单测
 func GatewayDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
 	sc, ok := openActivity(s, w, r, r.URL.Query().Get("team_id"))
 	if !ok {
@@ -52,11 +56,11 @@ func GatewayDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, gatewayActivityBody(rows))
 }
 
-// openActivity accepts any signed-in caller and returns the usage scope that
-// narrows every row the handler will read. A key reaches only its own usage; a
-// session reaches its own rows plus the teams it belongs to; a platform
-// administrator reaches everything. The scope is required rather than optional,
-// so a handler cannot fall through to an unfiltered read.
+// openActivity accepts any signed-in caller and returns the usage scope that narrows every row the handler will read. A key reaches only its own usage; a session reaches its own rows plus the teams it belongs to; a platform administrator reaches everything. The scope is required rather than optional, so a handler cannot fall through to an unfiltered read.
+// 参数 s（Host）：打开活动使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求；teamID（string）：团队 id。空串表示没有指定团队。
+// 返回 Scope（*authz.Scope）：缩小到调用方可见用量的范围。未登录或计算失败时为 nil；bool（bool）：调用方已登录且拿到了用量范围时返回真。密钥只能看自己的用量。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func openActivity(s Host, w http.ResponseWriter, r *http.Request, teamID string) (*authz.Scope, bool) {
 	p := s.RequireUser(w, r)
 	if p == nil {
@@ -96,6 +100,11 @@ type metric struct {
 	failed     int
 }
 
+// 把一次调用的费用、token 和成败累加进这个指标。
+// 参数 prompt（int）：提示 token 数，用来估价；completion（int）：完成 token 数，用来估价；spend（float64）：这一行要累加的费用，单位是美元；success（bool）：为真时这次调用计入成功次数。
+// 返回：无。这次调用的费用、token 和成败已累加进指标。成功计入成功次数，否则计入失败次数。
+// 调用：gateway/usage/entity_activity.go。
+// 测试：无直接单测
 func (m *metric) add(prompt, completion int, spend float64, success bool) {
 	m.spend += spend
 	m.prompt += prompt
@@ -108,6 +117,11 @@ func (m *metric) add(prompt, completion int, spend float64, success bool) {
 	m.failed++
 }
 
+// 把另一组指标累加进当前指标。
+// 参数 other（metric）：合并使用的metric。
+// 返回：无。另一组指标的费用、token 和次数已加进当前指标。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func (m *metric) fold(other metric) {
 	m.spend += other.spend
 	m.prompt += other.prompt
@@ -117,6 +131,11 @@ func (m *metric) fold(other metric) {
 	m.failed += other.failed
 }
 
+// 把指标收成报表 JSON。费用和 token 用这里累加的值。
+// 参数：无。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func (m metric) json() map[string]any {
 	return map[string]any{
 		"spend":                                  m.spend,
@@ -160,21 +179,20 @@ type dayMetric struct {
 	entities  map[string]*entityBucket
 }
 
-// loadActivity reads the usage rows the caller may see and turns them into the
-// flat rows the rollup folds.
-//
-// The scope is applied first and the query's own filters only narrow within it,
-// never widen it. That ordering matters: `user_id` and `api_key` arrive straight
-// from the query string, so a caller could otherwise ask for another account's
-// rows by passing their id. Inside the scope the worst that reaches is a row the
-// caller was already allowed to see, and a filter that names someone else simply
-// returns the empty intersection.
+// loadActivity reads the usage rows the caller may see and turns them into the flat rows the rollup folds. The scope is applied first and the query's own filters only narrow within it, never widen it. That ordering matters: `user_id` and `api_key` arrive straight from the query string, so a caller could otherwise ask for another account's rows by passing their id. Inside the scope the worst that reaches is a row the caller was already allowed to see, and a filter that names someone else simply returns the empty intersection.
+// 参数 s（Host）：载入活动使用的数据面宿主；r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：载入活动使用的权限范围。
+// 返回 []activityRow（[]activityRow）：调用方能看见的用量，收成汇总要折叠的扁平行。先套权限范围，再套筛选；error（error）：查询失败。nil 表示成功，没有行时为空切片。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func loadActivity(s Host, r *http.Request, sc *authz.Scope) ([]activityRow, error) {
 	return loadActivityQuery(s, r, activityQuery(r, sc))
 }
 
-// loadActivityQuery reads the events for a query that already carries the scope
-// and any narrowing filters, then flattens them for the roll-up.
+// loadActivityQuery reads the events for a query that already carries the scope and any narrowing filters, then flattens them for the roll-up.
+// 参数 s（Host）：载入活动查询使用的数据面宿主；r（*http.Request）：入站 HTTP 请求；q（iam.UsageQuery）：用量查询条件，含时间范围、团队和分页。
+// 返回 []activityRow（[]activityRow）：这条已经带范围和筛选的查询读出的事件，收成扁平行。没有库时为空切片；error（error）：查询失败。nil 表示成功。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func loadActivityQuery(s Host, r *http.Request, q iam.UsageQuery) ([]activityRow, error) {
 	db := s.Identity()
 	if db == nil {
@@ -187,9 +205,11 @@ func loadActivityQuery(s Host, r *http.Request, q iam.UsageQuery) ([]activityRow
 	return eventsToActivity(events, uiTimezone(r)), nil
 }
 
-// activityQuery builds the scoped query from the request. The scope comes from
-// authz and is never nil, so an actor who may see nothing gets a filter that
-// matches nothing rather than no filter at all.
+// activityQuery builds the scoped query from the request. The scope comes from authz and is never nil, so an actor who may see nothing gets a filter that matches nothing rather than no filter at all.
+// 参数 r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：活动查询使用的权限范围。
+// 返回 UsageQuery（iam.UsageQuery）：从请求的起止日期和筛选收成的用量查询。权限范围来自 authz，先套上，筛选只能在里面收窄。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func activityQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	return iam.UsageQuery{
@@ -207,9 +227,11 @@ func activityQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	}
 }
 
-// eventsToActivity flattens the stored events into the rows the rollup folds.
-// Provider comes from the price map, falling back to the model name so an
-// unknown model is still attributed rather than dropped.
+// eventsToActivity flattens the stored events into the rows the rollup folds. Provider comes from the price map, falling back to the model name so an unknown model is still attributed rather than dropped.
+// 参数 events（[]iam.UsageEvent）：events到活动使用的用量事件；tzMinutes（int）：调用方时区相对 UTC 的分钟偏移，用来把日期切到本地日。
+// 返回 []activityRow（[]activityRow）：用量事件收成的扁平行，费用为 0 的事件不进入。供应商先查价格表，没有时退回模型名里的前缀。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 	prices := catalog.CostMap()
 	out := make([]activityRow, 0, len(events))
@@ -241,9 +263,11 @@ func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 	return out
 }
 
-// uiTimezone reads the browser's UTC offset in minutes. The console sends
-// Date.getTimezoneOffset(), which is positive west of Greenwich, so the sign is
-// flipped to get the offset east of it that the day boundary needs.
+// uiTimezone reads the browser's UTC offset in minutes. The console sends Date.getTimezoneOffset(), which is positive west of Greenwich, so the sign is flipped to get the offset east of it that the dayboundary needs.
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 int（int）：调用方时区相对 UTC 的分钟偏移，东边为正。查询参数 timezone 是浏览器的 getTimezoneOffset，这里取反。缺失或不是整数时为 0，也就是按 UTC。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func uiTimezone(r *http.Request) int {
 	off, err := strconv.Atoi(r.URL.Query().Get("timezone"))
 	if err != nil {
@@ -252,8 +276,11 @@ func uiTimezone(r *http.Request) int {
 	return -off
 }
 
-// parseDay reads a YYYY-MM-DD date filter. An unset or unparseable value leaves
-// that side of the window open rather than filtering everything out.
+// parseDay reads a YYYY-MM-DD date filter. An unset or unparseable value leaves that side of the window open rather than filtering everything out.
+// 参数 v（string）：解析日期使用的值。空串表示调用方没有提供这项。
+// 返回 time.Time（time.Time）：解析出的时间。
+// 调用：gateway/usage/reports.go
+// 测试：activity_test.go
 func parseDay(v string) time.Time {
 	if v == "" {
 		return time.Time{}
@@ -269,13 +296,20 @@ func parseDay(v string) time.Time {
 // bound, not an authorization one: the scope already decided what is visible.
 const activityScanLimit = 5000
 
+// 把用量行收成按天的活动报表。
+// 参数 rows（[]activityRow）：从用量或目录读出的用量行；page（int）：页码，从 1 开始；aggregated（bool）：为真时返回汇总值，而不是按天拆开。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 activity.go 内使用
+// 测试：activity_test.go
 func dailyActivityResponse(rows []activityRow, page int, aggregated bool) map[string]any {
 	return activityBody(rows, page, aggregated, entityNone, entityLabels{})
 }
 
-// activityBody is the usage-page payload. dim chooses the breakdown.entities
-// key: a team, an organization, or a user. entityNone leaves that map empty,
-// which is what the gateway count view and the older callers want.
+// activityBody 把用量行收成按天、并按请求维度拆开的报表 JSON。
+// 参数 rows（[]activityRow）：从用量或目录读出的用量行；page（int）：页码，从 1 开始；aggregated（bool）：为真时返回汇总值，而不是按天拆开；dim（entityDim）：聚合维度，例如团队、组织、用户或密钥；labels（entityLabels）：活动正文使用的id 到展示名。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：gateway/usage/entity_activity.go
+// 测试：activity_test.go
 func activityBody(rows []activityRow, page int, aggregated bool, dim entityDim, labels entityLabels) map[string]any {
 	days := rollupDays(rows, dim)
 	names := dayNames(days, true)
@@ -311,6 +345,11 @@ func activityBody(rows []activityRow, page int, aggregated bool, dim entityDim, 
 	}
 }
 
+// 把网关视角的用量收成按天、按路由的报表。
+// 参数 rows（[]activityRow）：从用量或目录读出的用量行。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 activity.go 内使用
+// 测试：activity_test.go
 func gatewayActivityBody(rows []activityRow) map[string]any {
 	days := rollupDays(rows, entityNone)
 	names := dayNames(days, false)
@@ -364,6 +403,11 @@ func gatewayActivityBody(rows []activityRow) map[string]any {
 	}
 }
 
+// 列出有数据的日期，并可按从新到旧排序。
+// 参数 days（map[string]*dayMetric）：日期名称使用的map[string]*dayMetric；newestFirst（bool）：为真时日期从新到旧。
+// 返回 []string（[]string）：日期名称。没有匹配时为空切片。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func dayNames(days map[string]*dayMetric, newestFirst bool) []string {
 	names := make([]string, 0, len(days))
 	for name := range days {
@@ -377,6 +421,11 @@ func dayNames(days map[string]*dayMetric, newestFirst bool) []string {
 	return names
 }
 
+// 按页切出日期。页码小于 1 时从第 1 页开始。
+// 参数 names（[]string）：名称列表。空切片表示没有可处理的项；page（int）：页码，从 1 开始。
+// 返回 int（int）：分页日期的个数。没有元素时为 0；[]string（[]string）：分页日期。没有匹配时为空切片；int（int）：分页日期的个数。没有元素时为 0。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func pageDays(names []string, page int) (int, []string, int) {
 	if page < 1 {
 		page = 1
@@ -396,6 +445,11 @@ func pageDays(names []string, page int) (int, []string, int) {
 	return page, names[start:end], totalPages
 }
 
+// 从查询参数读取页码。缺失或小于 1 时为 1。
+// 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
+// 返回 int（int）：分页来源查询。解析失败或小于 1 时用约定的默认。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func pageFromQuery(r *http.Request) int {
 	n, err := strconv.Atoi(r.URL.Query().Get("page"))
 	if err != nil || n < 1 {
@@ -404,6 +458,11 @@ func pageFromQuery(r *http.Request) int {
 	return n
 }
 
+// 把用量行按天，并按请求的维度收进桶里。
+// 参数 rows（[]activityRow）：从用量或目录读出的用量行；dim（entityDim）：聚合维度，例如团队、组织、用户或密钥。
+// 返回 map[string]*dayMetric（map[string]*dayMetric）：汇总日期的字段表。缺键表示上游或库里没有这个字段。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 	days := map[string]*dayMetric{}
 	for _, row := range rows {
@@ -426,6 +485,7 @@ func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 		addNamed(day.endpoints, row.route, row)
 		// An empty hash is still a key the usage page must list. Dropping it
 		// hides every master-key call from the key tab.
+		// An empty hash is still a key the usage page must list. Dropping ithides every master-key call from the key tab.
 		addKey(day.keys, row.apiKey, row)
 		route := day.routes[row.route]
 		if route == nil {
@@ -440,6 +500,11 @@ func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 	return days
 }
 
+// 按名称把这一行累加进对应的桶。
+// 参数 into（map[string]*namedMetric）：累加命名使用的map[string]*namedMetric；name（string）：累加命名要查找或展示的名称。空串表示还没有命名；row（activityRow）：从用量或目录读出的用量行。
+// 返回：无。这一行已按名称累加进对应的桶。桶不存在时先建。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func addNamed(into map[string]*namedMetric, name string, row activityRow) {
 	bucket := into[name]
 	if bucket == nil {
@@ -452,6 +517,11 @@ func addNamed(into map[string]*namedMetric, name string, row activityRow) {
 	}
 }
 
+// 按密钥哈希把这一行累加进密钥桶，并保留别名和团队。
+// 参数 into（map[string]*keyMetric）：累加密钥使用的map[string]*keyMetric；hash（string）：密钥哈希，用来对齐热花费和日志；row（activityRow）：从用量或目录读出的用量行。
+// 返回：无。这一行已按密钥哈希累加，并保留别名、团队和用户。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func addKey(into map[string]*keyMetric, hash string, row activityRow) {
 	bucket := into[hash]
 	if bucket == nil {
@@ -461,6 +531,11 @@ func addKey(into map[string]*keyMetric, hash string, row activityRow) {
 	bucket.add(row.prompt, row.completion, row.spend, row.success)
 }
 
+// 把按名称聚合的桶收成报表对象。
+// 参数 in（map[string]*namedMetric）：调用方提交的map[string]*namedMetric。字段为空表示这项不改。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func namedJSON(in map[string]*namedMetric) map[string]any {
 	out := map[string]any{}
 	for name, bucket := range in {
@@ -473,6 +548,11 @@ func namedJSON(in map[string]*namedMetric) map[string]any {
 	return out
 }
 
+// 把按密钥聚合的桶收成报表对象，别名为空时写成 null。
+// 参数 in（map[string]*keyMetric）：调用方提交的map[string]*keyMetric。字段为空表示这项不改。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func keysJSON(in map[string]*keyMetric) map[string]any {
 	out := map[string]any{}
 	for hash, bucket := range in {
@@ -489,6 +569,11 @@ func keysJSON(in map[string]*keyMetric) map[string]any {
 	return out
 }
 
+// 收成报表顶部的合计，含费用、token、请求数和页码。
+// 参数 total（metric）：这一次的总费用；page（int）：页码，从 1 开始；totalPages（int）：元数据JSON使用的整数。零表示没有这项或尚未计数。
+// 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func metadataJSON(total metric, page, totalPages int) map[string]any {
 	return map[string]any{
 		"total_spend":                                  total.spend,
@@ -512,6 +597,11 @@ func metadataJSON(total metric, page, totalPages int) map[string]any {
 	}
 }
 
+// 空字符串改成 nil，这样 JSON 里是 null。
+// 参数 s（string）：可能为空的文本。空串要变成 nil，避免把空值写成 JSON 字符串。
+// 返回 any（any）：非空时是原字符串。空串返回 nil，这样 JSON 里是 null 而不是空字符串。
+// 调用：gateway/usage/entity_activity.go
+// 测试：无直接单测
 func nilIfEmpty(s string) any {
 	if s == "" {
 		return nil
@@ -519,9 +609,11 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-// activityDay renders the calendar day of an event in the caller's timezone.
-// The roll-up is folded per rendered day, so the offset is applied here rather
-// than in SQL: the event carries a timestamp, not a day.
+// activityDay renders the calendar day of an event in the caller's timezone. The roll-up is folded per rendered day, so the offset is applied here rather than in SQL: the event carries a timestamp, nota day.
+// 参数 ts（time.Time）：时间点。零值表示调用方没有提供时间；tzMinutes（int）：调用方时区相对 UTC 的分钟偏移，用来把日期切到本地日。
+// 返回 string（string）：事件在调用方时区里的日历日，格式 YYYY-MM-DD。时间是零值时用现在。
+// 调用：仅在 activity.go 内使用
+// 测试：activity_test.go
 func activityDay(ts time.Time, tzMinutes int) string {
 	if ts.IsZero() {
 		return time.Now().UTC().Add(time.Duration(tzMinutes) * time.Minute).Format("2006-01-02")
@@ -529,6 +621,11 @@ func activityDay(ts time.Time, tzMinutes int) string {
 	return ts.UTC().Add(time.Duration(tzMinutes) * time.Minute).Format("2006-01-02")
 }
 
+// 判断这一天是否落在查询的起止日期里。
+// 参数 day（string）：日期边界，格式由调用方约定，空串表示这一端不限制；start（string）：日期边界，格式由调用方约定，空串表示这一端不限制；end（string）：日期边界，格式由调用方约定，空串表示这一端不限制。
+// 返回 bool（bool）：这一天落在起止日期里时为真。空日期为假。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func dayInRange(day, start, end string) bool {
 	if day == "" {
 		return false
@@ -542,6 +639,11 @@ func dayInRange(day, start, end string) bool {
 	return true
 }
 
+// 从价目表或模型名得到供应商名称。
+// 参数 model（string）：对外模型名，用来选部署和记用量；prices（map[string]map[string]any）：供应商名称使用的map[string]map[string]any。
+// 返回 string（string）：价目表或模型名上的供应商。都没有时给一个小写兜底。
+// 调用：gateway/usage/reports.go
+// 测试：无直接单测
 func providerName(model string, prices map[string]map[string]any) string {
 	if row, ok := prices[model]; ok {
 		if p, ok := row["litellm_provider"].(string); ok && p != "" {
@@ -566,6 +668,11 @@ func providerName(model string, prices map[string]map[string]any) string {
 	return model
 }
 
+// 把调用类型映射成公开路径。
+// 参数 callType（string）：操作名或 call_type，写入用量行并选择协议。
+// 返回 string（string）：这种调用类型对应的公开路径，例如 chat 对应 /chat/completions。
+// 调用：仅在 activity.go 内使用
+// 测试：无直接单测
 func llmRoute(callType string) string {
 	switch callType {
 	case "", "chat":
