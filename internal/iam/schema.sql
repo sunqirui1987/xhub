@@ -6,6 +6,29 @@ CREATE TABLE IF NOT EXISTS bootstrap_state (
     completed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Named router settings that organizations, teams and keys select from.
+--
+-- body is one router_settings document, the same shape /config/update already
+-- accepts, so an existing settings blob can be copied in without translation.
+-- It is JSON rather than a column per field because the field set is still
+-- growing and each addition would otherwise be a schema change; the shape is
+-- defined by prefs/page.go, which is already the single source of it.
+--
+-- There is deliberately no "platform default" row. The platform default is the
+-- global router_settings document the gateway already keeps, so a scope that
+-- selects nothing inherits that. A copy here would give the same settings two
+-- homes and make whichever one the console does not read a lie.
+--
+-- Declared before organizations because that table references it.
+CREATE TABLE IF NOT EXISTS route_templates (
+    id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    name       TEXT NOT NULL UNIQUE CHECK (name <> ''),
+    body       TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     email           TEXT NOT NULL CHECK (email <> ''),
@@ -172,6 +195,50 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS guardrail TEXT NOT NULL DEFAUL
 -- its JSON here: nothing queries inside it, the log detail only hands it back.
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS price_snapshot TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS usage_events_session_ts ON usage_events (session_id, ts);
+
+-- Router template selection, one scope per level of the inheritance chain.
+--
+-- Null means "not selected", which is what makes a scope inherit from the level
+-- above it. There is no third state: a scope either selects a template or it
+-- does not, and "selects nothing" is the same row value as "never chosen".
+--
+-- ON DELETE SET NULL is a backstop only. The delete endpoint refuses while a
+-- template is still selected, so in practice no row is ever cleared this way;
+-- the constraint is there so an out-of-band delete cannot leave a dangling id.
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS route_template_id TEXT
+    REFERENCES route_templates (id) ON DELETE SET NULL;
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS route_template_id TEXT
+    REFERENCES route_templates (id) ON DELETE SET NULL;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS route_template_id TEXT
+    REFERENCES route_templates (id) ON DELETE SET NULL;
+-- These three indexes back "which scopes currently select this template", the
+-- query the delete path runs before refusing.
+CREATE INDEX IF NOT EXISTS organizations_route_template ON organizations (route_template_id);
+CREATE INDEX IF NOT EXISTS teams_route_template ON teams (route_template_id);
+CREATE INDEX IF NOT EXISTS api_keys_route_template ON api_keys (route_template_id);
+
+-- Ownership. Two columns rather than an owner_type plus an id, because the
+-- authorization layer already carries OrgID and TeamID on every object: the
+-- existing OrgAdminOf / TeamAdminOf take them directly, and a type tag would make
+-- every decision translate one shape into the other first.
+--
+-- Both NULL is a platform template, which everyone reads. Only the organization
+-- is a template for that organization and the teams beneath it. Both means a
+-- template for one team.
+--
+-- CASCADE, unlike the SET NULL on the selection columns below: those say "which
+-- one was chosen", so a deleted template means nothing was chosen. These say
+-- "who owns it", and a configuration whose owner is gone has no meaning.
+ALTER TABLE route_templates ADD COLUMN IF NOT EXISTS organization_id TEXT
+    REFERENCES organizations (id) ON DELETE CASCADE;
+ALTER TABLE route_templates ADD COLUMN IF NOT EXISTS team_id TEXT
+    REFERENCES teams (id) ON DELETE CASCADE;
+-- A team template without an organization would be unreachable by every rule that
+-- reads the organization first, so the pair is constrained rather than trusted.
+ALTER TABLE route_templates DROP CONSTRAINT IF EXISTS route_templates_team_needs_org;
+ALTER TABLE route_templates ADD CONSTRAINT route_templates_team_needs_org
+    CHECK (team_id IS NULL OR organization_id IS NOT NULL);
+CREATE INDEX IF NOT EXISTS route_templates_ownership ON route_templates (organization_id, team_id);
 
 CREATE TABLE IF NOT EXISTS request_logs (
     request_id    TEXT PRIMARY KEY REFERENCES usage_events (request_id) ON DELETE CASCADE,

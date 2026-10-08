@@ -253,7 +253,7 @@ func TestLogDetailMatchesTheRowInTheList(t *testing.T) {
 	}
 	h.flushSpend()
 
-	detail := h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil).json()
+	detail := logDetail(t, h, admin, callID)
 	if got := firstString(detail, "request_id", "id"); got != callID {
 		t.Fatalf("detail returned request_id=%q, want %q", got, callID)
 	}

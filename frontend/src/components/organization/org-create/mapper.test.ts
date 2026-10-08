@@ -33,6 +33,12 @@ describe("buildOrgCreateBody", () => {
     expect(buildOrgCreateBody(filledForm)).toStrictEqual(expectedBody);
   });
 
+  it("sends the route template the organization selected", () => {
+    expect(
+      buildOrgCreateBody({ ...emptyOrgFormValues, organization_alias: "acme", route_template_id: "tpl-1" }),
+    ).toMatchObject({ route_template_id: "tpl-1" });
+  });
+
   it("does not send MCP, skill, policy, or vector-store fields", () => {
     const body = buildOrgCreateBody({ ...emptyOrgFormValues, organization_alias: "acme" });
     expect(body).not.toHaveProperty("object_permission");

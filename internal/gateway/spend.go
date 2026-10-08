@@ -114,7 +114,7 @@ func (s *Server) callCost(alias, depID string, usage catalog.Usage, start time.T
 	return c.Total, c.Input, c.Output, true, c
 }
 
-// deploymentCost prices a call from the rates typed on the deployment itself.
+// deploymentCost prices a call from the prices typed on the deployment itself.
 //
 // A deployment may carry its own rate table, and it has the same shape as the
 // catalog's, so a deployment can express an off-peak price and a peak price
@@ -122,9 +122,13 @@ func (s *Server) callCost(alias, depID string, usage catalog.Usage, start time.T
 // price meant it.
 //
 // The flat fields are still accepted for rows written before the rate table
-// existed. They carry no window, so they are billed at every hour; that is a
-// deliberate degradation for old data rather than a silent one, because a flat
-// override is an explicit statement of one price.
+// existed, and for everything the console writes: the unit-price form submits
+// one field per side rather than a table. They go through catalog.RatesFromFlat
+// and then the same arithmetic as a rate table, rather than through a second
+// copy of the billing rules here. That second copy is what used to happen, and
+// it dropped three things an operator had already typed: the peak price, the
+// cache-write price, and every measure that is not a token - so a video
+// deployment with a per-second price recorded a row of zero spend.
 //
 // 参数 dep（config.ModelEntry）：这条部署；usage（catalog.Usage）：这一次调用报出来的用量；start（time.Time）：调用开始的时刻。
 // 返回 catalog.Charge（catalog.Charge）：按部署自己的费率算出的账单；bool（bool）：部署上写了价时为真。
@@ -135,36 +139,19 @@ func deploymentCost(dep config.ModelEntry, usage catalog.Usage, start time.Time)
 	if params == nil {
 		return catalog.Charge{}, false
 	}
-	// A rate table on the deployment is the full form and can carry windows.
+	// A rate table on the deployment is the full form and can carry windows and
+	// variants the flat fields have no name for.
 	if rates, ok := deploymentRates(params); ok {
 		if charge, ok := catalog.CostFromRates(rates, usage, start); ok {
 			return charge, true
 		}
 	}
-	inRate, inOK := floatParam(params, "input_cost_per_token")
-	outRate, outOK := floatParam(params, "output_cost_per_token")
-	if !inOK && !outOK {
-		return catalog.Charge{}, false
-	}
-	charge := catalog.Charge{Window: catalog.WindowAt(start)}
-	charge.Input = float64(usage.PromptTokens) * inRate
-	charge.Output = float64(usage.CompletionTokens) * outRate
-	// A deployment that typed its own flat token price gets the same cache
-	// treatment the catalog gives: a cached prompt is not billed at the input
-	// rate when the deployment priced the cache separately.
-	if cacheRate, cacheOK := floatParam(params, "cache_read_input_token_cost"); cacheOK {
-		cached := usage.CachedTokens
-		if cached > usage.PromptTokens {
-			cached = usage.PromptTokens
-		}
-		if cached > 0 {
-			uncachedRate := inRate
-			charge.Input = float64(usage.PromptTokens-cached)*uncachedRate + float64(cached)*cacheRate
-			charge.Cache = float64(cached) * cacheRate
-		}
-	}
-	charge.Total = charge.Input + charge.Output + charge.Cache
-	return charge, true
+	// Otherwise the flat fields, read through the same biller. A field that is
+	// absent stays absent: the difference between "no price" and "a price of
+	// zero" decides whether this call is billed at all.
+	return catalog.CostFromFlatOrRates(func(field string) (float64, bool) {
+		return floatParam(params, field)
+	}, usage, start)
 }
 
 // deploymentRates reads a rate table typed on a deployment. The shape is the
@@ -224,9 +211,8 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	if usage == nil {
 		usage = map[string]any{}
 	}
-	pt := asInt(usage["prompt_tokens"])
-	ct := asInt(usage["completion_tokens"])
-	billed := usageOf(pt, ct, usage, alias)
+	billed := catalog.NormalizeUsage(usage)
+	pt, ct := billed.PromptTokens, billed.CompletionTokens
 	// The start instant decides the billing window. A window-priced model costs
 	// twice as much inside its peak hours, so this is the difference between
 	// charging the published rate and charging half of it.
@@ -311,7 +297,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		TeamID: teamID, UserID: userID, OrgID: orgID, ProjectID: projectID,
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
 		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
-		SessionID: note.SessionID, CachedTokens: cachedTokens(usage),
+		SessionID: note.SessionID, CachedTokens: cachedColumn(usage),
 		Guardrail:     s.takeGuardrail(callID),
 		PriceSnapshot: catalog.Snapshot(charge),
 	}
@@ -330,67 +316,54 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	s.persistSpend(row, spend, ex, start, end)
 }
 
-// usageOf builds the billable quantities for one call from the upstream usage
-// object.
+// usageOf answers what the upstream reported, for the parts of the usage row
+// that are not the charge: the cached-token column the console displays.
 //
-// The token counts are passed in because recordSpend already read them and the
-// row stores the same numbers; reading them twice is how the row and the charge
-// drift apart. The remaining measures are read here:
+// The billable quantities come from catalog.NormalizeUsage, which is also what
+// the charge is computed from. This used to be a second reader of the same
+// object, and the two disagreed: the billing path resolved the Anthropic shape
+// (a cache read beside a prompt count that excludes it) while the stored column
+// read only prompt_tokens_details, so a row could be charged for 800 cached
+// tokens and display 0.
 //
-//   - cached_tokens is the prompt side that hit the cache. It is a subset of
-//     prompt_tokens, not an addition, and it selects a different input rate.
-//   - images, seconds and searches are the quantities a per-picture, per-second
-//     and per-query model bills on. A chat call reports none of them, and a
-//     video call reports no tokens. Zero means "not reported by this call",
-//     which is why CostAt skips a zero measure instead of billing it at zero.
-//
-// 参数 pt（int）：提示 token 数，已经从同一份用量里读出；ct（int）：完成 token 数，同上；
-// usage（map[string]any）：上游报出来的用量对象；alias（string）：对外模型名，用来在用量里找供应商特有的计数。
-//
-// 返回 catalog.Usage（catalog.Usage）：可以交给 catalog.CostAt 的用量。
+// 参数 usage（map[string]any）：上游报出来的用量对象。
+// 返回 *int（*int）：要写进 cached_tokens 列的命中数。上游没报这个数时为 nil，不写这一列。
 // 调用：recordSpend。
 // 测试：call_cost_test.go
-func usageOf(pt, ct int, usage map[string]any, alias string) catalog.Usage {
-	out := catalog.Usage{PromptTokens: pt, CompletionTokens: ct}
-	out.CachedTokens = cachedTokensOf(usage)
-	out.CacheWriteTokens = asInt(firstPresent(usage, "cache_creation_input_tokens", "cache_write_tokens"))
-	out.Images = asInt(firstPresent(usage, "images", "image_count", "num_images", "output_images"))
-	out.Seconds = asFloat(firstPresent(usage, "seconds", "duration_seconds", "video_seconds", "audio_seconds"))
-	out.Searches = asInt(firstPresent(usage, "searches", "search_count", "web_search_requests"))
-	return out
+func cachedColumn(usage map[string]any) *int {
+	if usage == nil {
+		return nil
+	}
+	// Absent and zero are different here. Zero written into the column says the
+	// upstream reported a cache and nothing hit it; nil says it did not report
+	// one, and the console shows that as no figure rather than as a miss.
+	if !reportsCachedTokens(usage) {
+		return nil
+	}
+	n := catalog.NormalizeUsage(usage).CachedTokens
+	return &n
 }
 
-// firstPresent returns the first of the given keys the usage object carries with
-// a non-nil value. Providers spell the same quantity differently, and an absent
-// key must stay absent rather than being read as zero.
-// 参数 usage（map[string]any）：上游报出来的用量对象；keys（...string）：按优先顺序给出的键名。
-// 返回 any（any）：第一个有值的键对应的值。一个都没有时为 nil。
-// 调用：usageOf。
+// reportsCachedTokens answers whether the usage object carries a cached-prompt
+// count at all, in any of the spellings the providers use.
+// 参数 usage（map[string]any）：上游报出来的用量对象。
+// 返回 bool（bool）：上游报了这个数时为真。
+// 调用：cachedColumn。
 // 测试：call_cost_test.go
-func firstPresent(usage map[string]any, keys ...string) any {
-	for _, key := range keys {
-		if v, ok := usage[key]; ok && v != nil {
-			return v
+func reportsCachedTokens(usage map[string]any) bool {
+	for _, key := range []string{"cached_tokens", "cache_read_input_tokens", "cache_read_tokens"} {
+		if _, ok := usage[key]; ok {
+			return true
 		}
 	}
-	return nil
-}
-
-// cachedTokensOf reads the number of prompt tokens that hit the cache. The
-// provider-specific nestings are checked because several adapters keep the
-// count under prompt_tokens_details rather than at the top level.
-// 参数 usage（map[string]any）：上游报出来的用量对象。
-// 返回 int（int）：命中缓存的提示 token 数。没有报这个数时为 0。
-// 调用：usageOf 和 cachedTokens。
-// 测试：call_cost_test.go
-func cachedTokensOf(usage map[string]any) int {
-	if n := asInt(firstPresent(usage, "cached_tokens", "cache_read_input_tokens")); n != 0 {
-		return n
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if details, ok := usage[key].(map[string]any); ok {
+			if _, ok := details["cached_tokens"]; ok {
+				return true
+			}
+		}
 	}
-	if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
-		return asInt(details["cached_tokens"])
-	}
-	return 0
+	return false
 }
 
 // persistSpend writes spend to PostgreSQL immediately. Requests take this path when Redis is not configured.
@@ -467,30 +440,6 @@ func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy 
 		SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
 		PriceSnapshot: row.PriceSnapshot,
 	}
-}
-
-// 从用量明细里取出缓存命中的 token 数。没有明细时为 nil。
-// 参数 usage（map[string]any）：用量对象。字段可能是 prompt_tokens，也可能是 input_tokens。
-// 返回 *int（*int）：从用量明细里取出缓存命中的 token 数。找不到或这一步失败时为 nil。
-// 调用：仅在 spend.go 内使用
-// 测试：无直接单测
-func cachedTokens(usage map[string]any) *int {
-	if usage == nil {
-		return nil
-	}
-	details, _ := usage["prompt_tokens_details"].(map[string]any)
-	if details == nil {
-		details, _ = usage["input_tokens_details"].(map[string]any)
-	}
-	if details == nil {
-		return nil
-	}
-	raw, ok := details["cached_tokens"]
-	if !ok {
-		return nil
-	}
-	n := asInt(raw)
-	return &n
 }
 
 // deref 读取可选字符串。nil 指针当成空串，避免把没有填写的列写成 "<nil>"。

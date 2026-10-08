@@ -39,6 +39,7 @@ describe("orgToForm", () => {
       tpm_limit: "1000",
       rpm_limit: "50",
       metadata: JSON.stringify({ cost_center: "eng" }, null, 2),
+      route_template_id: "",
     });
   });
 
@@ -58,6 +59,7 @@ describe("orgToForm", () => {
       tpm_limit: "",
       rpm_limit: "",
       metadata: "",
+      route_template_id: "",
     });
   });
 });

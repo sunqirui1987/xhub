@@ -41,6 +41,15 @@ type Gate interface {
 	// 调用：authz/decide.go、gateway/identity/handlers.go、gateway/wire.go
 	// 测试：authz_test.go
 	TeamFilter(r *http.Request, p *auth.Principal) ([]string, error)
+	// RouterDocument is the merged platform router settings - the bottom of the
+	// inheritance chain a scope falls back to when it selects no template. It is
+	// here so the console resolves effective settings through the same code the
+	// request path uses rather than a second copy that can disagree with it.
+	// 参数：无。
+	// 返回 map[string]any（map[string]any）：合并后的平台路由设置。
+	// 调用：gateway/identity/route_template.go
+	// 测试：route_template_test.go
+	RouterDocument() map[string]any
 	// Identity is the store. A handler reads its rows from here, but only after Authorize has permitted the action that reads them.
 	// 参数：无。
 	// 返回 *iam.DB（*iam.DB）：处理函数读取用户、团队和密钥的库，而且必须先通过 Authorize。没有数据库时为 nil。

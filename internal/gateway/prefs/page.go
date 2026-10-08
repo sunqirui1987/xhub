@@ -56,6 +56,7 @@ func routingStrategyDescriptions() map[string]string {
 		"cost-based-routing":     "Routes to the deployment with the lowest cost per token.",
 		"usage-based-routing":    "Routes to the deployment with the lowest TPM (Tokens Per Minute) usage. (deprecated)",
 		"usage-based-routing-v2": "Improved version of usage-based routing with better tracking.",
+		"weighted-split":         "Sends each deployment a share of traffic proportional to its weight. The share lives on the deployment, not in this template.",
 	}
 }
 
@@ -65,7 +66,7 @@ func routingStrategyDescriptions() map[string]string {
 // 调用：仅在 page.go 内使用
 // 测试：无直接单测
 func Fields(s Host, rs map[string]any) []map[string]any {
-	strats := []string{"simple-shuffle", "least-busy", "latency-based-routing", "cost-based-routing", "usage-based-routing", "usage-based-routing-v2"}
+	strats := []string{"simple-shuffle", "least-busy", "latency-based-routing", "cost-based-routing", "usage-based-routing", "usage-based-routing-v2", "weighted-split"}
 	type spec struct {
 		name, typ, desc, ui string
 		def                 any

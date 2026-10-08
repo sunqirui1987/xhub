@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
 )
 
@@ -35,10 +37,30 @@ func chatDeployment(name string) config.ModelEntry {
 
 // expectedCost 是一次假补全必须被扣的钱：假供应商报的 token 数乘部署上的单价。
 // 计费断言拿它做基准，所以它必须和上面两个常量同源。
+//
+// 金额走和网关同一段计费，而不是在这里把单价乘一遍。两段各自用 float64 乘，
+// 编译器对其中一段做常量折叠时会差一个最小单位。额度判定是精确的大于等于，
+// 差这一点，上限刚好等于一次调用的用例就会放行下一次。
 // 参数：无。
 // 返回 float64（float64）：这一次调用的应付金额。
 func expectedCost() float64 {
-	return float64(defaultReply.PromptTokens)*testInputRate + float64(defaultReply.CompletionTokens)*testOutputRate
+	charge, ok := catalog.CostFromFlatOrRates(func(field string) (float64, bool) {
+		switch field {
+		case "input_cost_per_token":
+			return testInputRate, true
+		case "output_cost_per_token":
+			return testOutputRate, true
+		default:
+			return 0, false
+		}
+	}, catalog.Usage{
+		PromptTokens:     defaultReply.PromptTokens,
+		CompletionTokens: defaultReply.CompletionTokens,
+	}, time.Date(2026, 1, 15, 3, 0, 0, 0, time.UTC))
+	if !ok {
+		return float64(defaultReply.PromptTokens)*testInputRate + float64(defaultReply.CompletionTokens)*testOutputRate
+	}
+	return charge.Total
 }
 
 // TestProviderSetupAddsFennoaiAndQiniu 证明两个内置供应商能配起来、它们的模型目录

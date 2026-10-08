@@ -1,4 +1,6 @@
 import { zhPhrases } from "./phrases.zh-CN";
+import { pageDescriptionsZhCN } from "./pageDescriptions.zh-CN";
+import { routeTemplatesZhCN } from "./routeTemplates.zh-CN";
 
 export const zhCN = {
   myModels: {
@@ -82,8 +84,7 @@ export const zhCN = {
   },
   endpoints: {
     callType: "调用方式",
-    callTypeHint:
-      "这条模型怎么被调用。已登记的直通把供应商自己的接口原样转发；其余由网关按供应商和调用方式编译请求。",
+    callTypeHint: "这条模型怎么被调用。已登记的直通把供应商自己的接口原样转发；其余由网关按供应商和调用方式编译请求。",
     chat: "对话",
     completion: "补全",
     embedding: "向量",
@@ -96,8 +97,7 @@ export const zhCN = {
   },
   priceData: {
     eyebrow: "模型与价格",
-    description:
-      "内置价格目录来自 Modelink，可按需手动补充或修正。这里改的价格立即生效，并且优先于内置目录。",
+    description: "内置价格目录来自 Modelink，可按需手动补充或修正。这里改的价格立即生效，并且优先于内置目录。",
     generatedAt: "内置目录生成时间：{value0}",
     models: "模型",
     providers: "供应商",
@@ -252,16 +252,17 @@ export const zhCN = {
     users: "用户",
     organizations: "组织",
     accessGroups: "访问组",
-  "Administrator": "管理员",
-  "User": "用户",
-  'Runs the deployment: every organization, team and model.': "管理整个部署：所有组织、团队和模型。",
-  'Reaches what their teams are granted.': "只能访问所在团队被授予的资源。",
-  'You are not a member of any team.': "你不属于任何团队。",
-  "Team": "团队",
-  'No models granted: this team may use any model the deployment offers.': "未限制模型：该团队可以使用部署提供的任何模型。",
-  'No MCP servers granted to this team.': "该团队还没有被授予 MCP 服务器。",
-  'No skills granted to this team.': "该团队还没有被授予技能。",
-  'No access groups granted to this team.': "该团队还没有被授予访问组。",
+    Administrator: "管理员",
+    User: "用户",
+    "Runs the deployment: every organization, team and model.": "管理整个部署：所有组织、团队和模型。",
+    "Reaches what their teams are granted.": "只能访问所在团队被授予的资源。",
+    "You are not a member of any team.": "你不属于任何团队。",
+    Team: "团队",
+    "No models granted: this team may use any model the deployment offers.":
+      "未限制模型：该团队可以使用部署提供的任何模型。",
+    "No MCP servers granted to this team.": "该团队还没有被授予 MCP 服务器。",
+    "No skills granted to this team.": "该团队还没有被授予技能。",
+    "No access groups granted to this team.": "该团队还没有被授予访问组。",
     permissions: "权限总览",
     budgets: "预算",
     apiReference: "API 参考",
@@ -274,6 +275,7 @@ export const zhCN = {
     tagManagement: "标签管理",
     oldUsage: "旧用量",
     settings: "设置",
+    routeTemplates: "路由与负载均衡",
     routerSettings: "路由设置",
     loggingAndAlerts: "日志与告警",
     adminPanel: "管理员设置",
@@ -339,8 +341,7 @@ export const zhCN = {
         "项目挂在团队下面。密钥可以挂到某个项目上。一次调用的花费会同时记到这把密钥、它的用户、这个项目、所属团队和所属组织。",
       guideWho:
         "平台管理员能看到全部项目。组织管理员能看到本组织里各团队的项目。团队成员只能看到自己团队的项目，别的组织看不到。",
-      guideModels:
-        "模型名单留空，表示沿用团队已经允许的模型。写了名单，就只能是团队名单里的模型，两边取交集。",
+      guideModels: "模型名单留空，表示沿用团队已经允许的模型。写了名单，就只能是团队名单里的模型，两边取交集。",
       guideBudget:
         "项目预算是这一层的花费上限，不能高于所属团队的上限。花到上限之后，挂在这个项目上的密钥会被拒绝，拒绝发生在访问上游之前，也不会扣费。把上限再抬高，并且仍不超过团队之后，同一把密钥又能调用。",
       guideBlock:
@@ -612,8 +613,13 @@ export const zhCN = {
       routingGroups: "路由组",
       fallbacks: "回退",
       promptCaching: "提示缓存",
-      general: "常规",
+      general: "通用",
+      documentTitle: "完整配置",
+      documentHint:
+        "这是平台默认那一份路由设置的全文，不是模板。上面的表单改字段，这里改整份 JSON，也可以上传一个 .json 文件。路由组、提示缓存和通用设置是旁边的页签，不在这份文档里。",
+      saveDocument: "保存这份配置",
     },
+    routeTemplates: routeTemplatesZhCN,
     loggingAndAlerts: {
       title: "日志与告警",
       loggingCallbacks: "日志回调",
@@ -704,45 +710,7 @@ export const zhCN = {
       back: "返回提示词",
     },
   },
-  desc: {
-    "api-keys": "管理用于 API 访问与鉴权的虚拟密钥",
-    "llm-playground": "交互式调试台，用于测试 LLM 请求",
-    models: "配置并管理 LLM 模型与端点",
-    agents: "创建并管理智能体",
-    agentic: "管理智能体资源：智能体、工作流运行与记忆",
-    workflows: "跟踪并查看持久化工作流运行历史",
-    "mcp-servers": "配置 Model Context Protocol 服务器",
-    memory: "查看并管理 /v1/memory 下的智能体记忆",
-    guardrails: "配置内容审核与安全护栏",
-    policies: "定义访问控制与用量策略",
-    "search-tools": "配置 RAG 搜索与检索工具",
-    "tool-policies": "配置工具使用策略与权限",
-    "vector-stores": "管理用于嵌入的向量库",
-    new_usage: "查看用量分析与指标",
-    "cost-optimization": "跟踪并配置省钱能力：提示压缩、缓存与自动路由",
-    logs: "查看请求与响应日志",
-    "guardrails-monitor": "监控护栏表现并查看日志",
-    users: "管理内部用户账号与权限",
-    teams: "创建并管理用于访问控制的团队",
-    organizations: "管理组织及其成员",
-    projects: "管理团队内的项目",
-    "access-groups": "管理基于角色的访问组",
-    budgets: "设置并监控花费预算",
-    api_ref: "浏览 API 文档与端点",
-    "model-hub-table": "浏览可用的 AI 模型与供应商",
-    "learning-resources": "查看教程与文档",
-    caching: "配置响应缓存与协调 Redis",
-    "transform-request": "配置请求转换规则",
-    "cost-tracking": "跟踪并分析 API 成本",
-    "ui-theme": "自定义控制台外观",
-    "tag-management": "用标签组织资源",
-    prompts: "管理并版本化提示词模板",
-    skills: "浏览并管理 Claude Code 技能",
-    usage: "查看旧版用量控制台",
-    "router-settings": "配置路由与负载均衡",
-    "logging-and-alerts": "配置日志与告警",
-    "admin-panel": "打开管理员面板与设置",
-  },
+  desc: pageDescriptionsZhCN,
   license: {
     expiresToday: "今天到期",
     expiresInOneDay: "1 天后到期",

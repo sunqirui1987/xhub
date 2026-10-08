@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/authz"
+	"github.com/sunqirui1987/xhub/internal/gateway/templateauth"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -46,6 +48,10 @@ func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 	obj := authz.Object{Type: authz.ObjectKey, TeamID: in.TeamID, ProjectID: in.ProjectID,
 		OwnerType: in.OwnerType, OwnerUserID: in.UserID}
 	if err := s.Authorize(r, p, authz.ActionKeyCreate, obj); err != nil {
+		s.WriteAuthz(w, r, err)
+		return
+	}
+	if err := templateauth.Selection(s, r, p, str(body["route_template_id"])); err != nil {
 		s.WriteAuthz(w, r, err)
 		return
 	}
@@ -273,27 +279,32 @@ func Response(k iam.Key, plain string, includePlain bool) map[string]any {
 		token = plain
 	}
 	m := map[string]any{
-		"token_id":    k.ID,
-		"token":       token,
-		"key_name":    k.Name,
-		"key_alias":   k.Name,
-		"key_prefix":  k.KeyPrefix,
-		"owner_type":  k.OwnerType,
-		"user_id":     emptyNil(deref(k.UserID)),
-		"team_id":     emptyNil(k.TeamID),
-		"project_id":  emptyNil(deref(k.ProjectID)),
-		"created_by":  emptyNil(deref(k.CreatedBy)),
-		"models":      nonNilStrings(k.Models),
-		"max_budget":  floatJSON(k.MaxBudget),
-		"spend":       k.Spend,
-		"tpm_limit":   intJSON(k.TPMLimit),
-		"rpm_limit":   intJSON(k.RPMLimit),
-		"status":      k.Status,
-		"blocked":     k.Status == iam.StatusBlocked,
-		"expires":     expires,
-		"last_active": lastActive,
-		"created_at":  created,
-		"updated_at":  updated,
+		"token_id":   k.ID,
+		"token":      token,
+		"key_name":   k.Name,
+		"key_alias":  k.Name,
+		"key_prefix": k.KeyPrefix,
+		"owner_type": k.OwnerType,
+		"user_id":    emptyNil(deref(k.UserID)),
+		"team_id":    emptyNil(k.TeamID),
+		"project_id": emptyNil(deref(k.ProjectID)),
+		"created_by": emptyNil(deref(k.CreatedBy)),
+		"models":     nonNilStrings(k.Models),
+		"max_budget": floatJSON(k.MaxBudget),
+		// The router template this key selects. Without it the key's edit screen
+		// shows an empty field, which reads as "selects nothing" - and an
+		// operator who had set one would see their choice apparently lost, then
+		// save over it.
+		"route_template_id": emptyNil(deref(k.RouteTemplateID)),
+		"spend":             k.Spend,
+		"tpm_limit":         intJSON(k.TPMLimit),
+		"rpm_limit":         intJSON(k.RPMLimit),
+		"status":            k.Status,
+		"blocked":           k.Status == iam.StatusBlocked,
+		"expires":           expires,
+		"last_active":       lastActive,
+		"created_at":        created,
+		"updated_at":        updated,
 	}
 	if includePlain {
 		m["key"] = plain
@@ -389,6 +400,11 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 		MaxBudget: parseFloat(body["max_budget"]),
 		TPMLimit:  parseInt(body["tpm_limit"]),
 		RPMLimit:  parseInt(body["rpm_limit"]),
+		// The selection must be read here as well as on update. It was only on
+		// update, so a key created with a template silently got none and the
+		// first request through it routed by the team's settings instead -
+		// a difference nothing in the console showed.
+		RouteTemplateID: routeTemplatePatch(body),
 	}
 	if in.Name == "" {
 		in.Name = str(body["key_name"])
@@ -424,6 +440,7 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 func patchFrom(cur *iam.Key, body map[string]any) iam.KeyInput {
 	in := iam.KeyInput{Name: cur.Name, Models: cur.Models,
 		MaxBudget: cur.MaxBudget, TPMLimit: cur.TPMLimit, RPMLimit: cur.RPMLimit}
+	in.RouteTemplateID = routeTemplatePatch(body)
 	if v, ok := body["key_alias"].(string); ok {
 		in.Name = v
 	}
@@ -482,3 +499,27 @@ type errString string
 // 调用：生成密钥的处理函数在缺少用户或团队时返回它，经 error 接口读取。
 // 测试：无直接单测
 func (e errString) Error() string { return string(e) }
+
+// routeTemplatePatch reads the template selection out of a key body.
+//
+// It is a two-level optional: an absent field leaves the current selection
+// alone, and an explicit null or empty string clears it, which puts the key back
+// on inheriting from its team. Reading it into a plain string would collapse
+// "not sent" into "clear it", and every unrelated key edit would drop the
+// selection.
+//
+// 参数 body map string any 已经解析的 JSON 对象。
+// 返回 **string 字段不在正文里时为 nil，在正文里时指向内层指针，空值表示清除。
+// 调用: keyInputFrom、patchFrom。
+// 测试 无直接单测
+func routeTemplatePatch(body map[string]any) **string {
+	raw, ok := body["route_template_id"]
+	if !ok {
+		return nil
+	}
+	var inner *string
+	if value := strings.TrimSpace(str(raw)); value != "" {
+		inner = &value
+	}
+	return &inner
+}

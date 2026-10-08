@@ -37,6 +37,7 @@ export const pageDescriptions: Record<string, string> = {
   prompts: "管理并版本化提示词模板",
   skills: "浏览并管理 Claude Code 技能",
   usage: "查看旧版用量控制台",
+  "route-templates": "路由模板，包含系统默认。组织、团队和密钥各选一份",
   "router-settings": "配置路由与负载均衡",
   "admin-panel": "打开管理员面板与设置",
 };

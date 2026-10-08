@@ -1,6 +1,5 @@
 import { mapDisplayToInternalNames } from "../callback_info_helpers";
 import { NEVER_RESETS_BUDGET_DURATION } from "../common_components/budget_duration_dropdown";
-import type { RouterSettingsAccordionValue } from "../common_components/RouterSettingsAccordion";
 import type { BudgetWindowEntry } from "../key_team_helpers/BudgetWindowsEditor";
 import type { ModelMaxBudget } from "../key_team_helpers/ModelMaxBudgetEditor";
 import { tagRowsToLimits, type TagRateLimitEntry } from "../key_team_helpers/TagRateLimitEditor";
@@ -20,16 +19,16 @@ export interface KeyCreateInput {
   readonly keyOwner: string;
   readonly userID: string | null;
   readonly selectedAgentId: string | null;
-  readonly loggingSettings: KeyLoggingSetting[];
-  readonly disabledCallbacks: string[];
+  readonly loggingSettings?: KeyLoggingSetting[];
+  readonly disabledCallbacks?: string[];
   readonly autoRotationEnabled: boolean;
   readonly rotationInterval: string;
-  readonly modelAliases: Record<string, string>;
-  readonly routerSettings: RouterSettingsAccordionValue | null;
-  readonly budgetLimits: BudgetWindowEntry[];
-  readonly tagRateLimits: TagRateLimitEntry[];
-  readonly budgetFallbacks: Record<string, string[]>;
-  readonly modelMaxBudget: ModelMaxBudget;
+  readonly modelAliases?: Record<string, string>;
+  readonly routeTemplateId: string;
+  readonly budgetLimits?: BudgetWindowEntry[];
+  readonly tagRateLimits?: TagRateLimitEntry[];
+  readonly budgetFallbacks?: Record<string, string[]>;
+  readonly modelMaxBudget?: ModelMaxBudget;
 }
 
 export type KeyPayloadResult =
@@ -56,12 +55,15 @@ const buildMetadataJson = (values: Record<string, unknown>, input: KeyCreateInpu
     (parsed as Record<string, unknown>).service_account_id = values.key_alias;
   }
   const logged =
-    input.loggingSettings.length > 0
-      ? { ...(parsed as object), logging: input.loggingSettings.filter((config) => config.callback_name) }
+    (input.loggingSettings?.length ?? 0) > 0
+      ? { ...(parsed as object), logging: input.loggingSettings?.filter((config) => config.callback_name) }
       : parsed;
   const disabled =
-    input.disabledCallbacks.length > 0
-      ? { ...(logged as object), litellm_disabled_callbacks: mapDisplayToInternalNames(input.disabledCallbacks) }
+    (input.disabledCallbacks?.length ?? 0) > 0
+      ? {
+          ...(logged as object),
+          litellm_disabled_callbacks: mapDisplayToInternalNames(input.disabledCallbacks ?? []),
+        }
       : logged;
   return JSON.stringify(disabled);
 };
@@ -108,16 +110,14 @@ export const buildKeyCreatePayload = (input: KeyCreateInput): KeyPayloadResult =
   const dropped = consumedSourceKeys(values);
 
   const duration = values.duration;
-  const validWindows = input.budgetLimits.filter(
+  const validWindows = (input.budgetLimits ?? []).filter(
     (window) => window.budget_duration && window.max_budget !== null && window.max_budget !== undefined,
   );
-  const { tag_rpm_limit } = tagRowsToLimits(input.tagRateLimits);
-  const routerSettings = input.routerSettings?.router_settings;
-  const configuredRouterSettings =
-    routerSettings &&
-    Object.values(routerSettings).some((value) => value !== null && value !== undefined && value !== "")
-      ? routerSettings
-      : undefined;
+  const { tag_rpm_limit } = tagRowsToLimits(input.tagRateLimits ?? []);
+  const routeTemplateId = input.routeTemplateId.trim();
+  const modelAliases = input.modelAliases ?? {};
+  const budgetFallbacks = input.budgetFallbacks ?? {};
+  const modelMaxBudget = input.modelMaxBudget ?? {};
 
   return {
     kind: "ok",
@@ -130,12 +130,12 @@ export const buildKeyCreatePayload = (input: KeyCreateInput): KeyPayloadResult =
       ...(input.autoRotationEnabled && { auto_rotate: true, rotation_interval: input.rotationInterval }),
       duration: !duration || (duration as string).trim() === "" ? null : duration,
       metadata: buildMetadataJson(values, input),
-      ...(Object.keys(input.modelAliases).length > 0 && { aliases: JSON.stringify(input.modelAliases) }),
-      ...(configuredRouterSettings && { router_settings: configuredRouterSettings }),
+      ...(Object.keys(modelAliases).length > 0 && { aliases: JSON.stringify(modelAliases) }),
+      ...(routeTemplateId !== "" && { route_template_id: routeTemplateId }),
       ...(validWindows.length > 0 && { budget_limits: validWindows }),
       ...(Object.keys(tag_rpm_limit).length > 0 && { tag_rpm_limit }),
-      ...(Object.keys(input.budgetFallbacks).length > 0 && { budget_fallbacks: input.budgetFallbacks }),
-      ...(Object.keys(input.modelMaxBudget).length > 0 && { model_max_budget: input.modelMaxBudget }),
+      ...(Object.keys(budgetFallbacks).length > 0 && { budget_fallbacks: budgetFallbacks }),
+      ...(Object.keys(modelMaxBudget).length > 0 && { model_max_budget: modelMaxBudget }),
       ...(values.budget_duration === NEVER_RESETS_BUDGET_DURATION && { budget_duration: null }),
     },
   };

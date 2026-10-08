@@ -12,7 +12,7 @@ const baseInput: KeyCreateInput = {
   autoRotationEnabled: false,
   rotationInterval: "30d",
   modelAliases: {},
-  routerSettings: null,
+  routeTemplateId: "",
   budgetLimits: [],
   tagRateLimits: [],
   budgetFallbacks: {},
@@ -273,21 +273,14 @@ describe("keys sourced from component state", () => {
     );
   });
 
-  it("sends router settings that hold at least one value", () => {
-    expect(
-      payloadOf(build({ key_alias: "my-key" }, { routerSettings: { router_settings: { num_retries: 3 } } })),
-    ).toStrictEqual(aliasOnly({ router_settings: { num_retries: 3 } }));
+  it("sends the template the operator selected", () => {
+    expect(payloadOf(build({ key_alias: "my-key" }, { routeTemplateId: "tpl-cheap" }))).toStrictEqual(
+      aliasOnly({ route_template_id: "tpl-cheap" }),
+    );
   });
 
-  it("skips router settings whose every field is blank", () => {
-    expect(
-      payloadOf(
-        build(
-          { key_alias: "my-key" },
-          { routerSettings: { router_settings: { num_retries: null, timeout: undefined, routing_strategy: "" } } },
-        ),
-      ),
-    ).toStrictEqual(aliasOnly());
+  it("omits the template when the key inherits", () => {
+    expect(payloadOf(build({ key_alias: "my-key" }, { routeTemplateId: "  " }))).toStrictEqual(aliasOnly());
   });
 
   it("keeps only budget windows that carry both a duration and a limit", () => {

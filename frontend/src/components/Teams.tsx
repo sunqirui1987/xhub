@@ -26,7 +26,7 @@ import {
   metadataPairsToObject,
 } from "./common_components/MetadataKeyValueFields";
 import { useTeamMetadataSchema } from "@/app/(dashboard)/hooks/teams/useTeamMetadataSchema";
-import { RouterSettingsAccordionValue } from "./common_components/RouterSettingsAccordion";
+
 import { fetchAvailableModelsForTeamOrKey } from "./key_team_helpers/fetch_available_models_team_key";
 import type { Team } from "./key_team_helpers/key_list";
 import { toast } from "@/lib/toast";
@@ -48,6 +48,7 @@ interface TeamProps {
 
 import DeleteResourceModal from "./common_components/DeleteResourceModal";
 import { teamCreateCall } from "./networking";
+import RouteTemplateSelect from "./route_templates/RouteTemplateSelect";
 import { ModelSelect } from "./ModelSelect/ModelSelect";
 
 const SUPPRESSED_BY_DESCRIPTION = "";
@@ -87,6 +88,7 @@ const teamCreateFieldsSchema = z.object({
   allowed_agents_and_groups: z.object({ agents: z.array(z.string()), accessGroups: z.array(z.string()) }).optional(),
   object_permission_search_tools: z.array(z.string()).optional(),
   object_permission_skills: z.array(z.string()).optional(),
+  route_template_id: z.string().optional(),
 });
 
 type TeamCreateFormValues = z.infer<typeof teamCreateFieldsSchema>;
@@ -118,6 +120,7 @@ const EMPTY_TEAM_CREATE_VALUES: TeamCreateFormValues = {
   allowed_agents_and_groups: undefined,
   object_permission_search_tools: undefined,
   object_permission_skills: undefined,
+  route_template_id: "",
 };
 
 const ADDITIONAL_SETTINGS_FIELDS = [
@@ -256,8 +259,6 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
   const [policiesList, setPoliciesList] = useState<string[]>([]);
   const [loggingSettings, setLoggingSettings] = useState<any[]>([]);
   const [modelAliases, setModelAliases] = useState<{ [key: string]: string }>({});
-  const [routerSettings, setRouterSettings] = useState<RouterSettingsAccordionValue | null>(null);
-  const [routerSettingsKey, setRouterSettingsKey] = useState<number>(0);
 
   const { data: defaultTeamSettings } = useQuery({
     queryKey: ["defaultTeamSettings"],
@@ -318,8 +319,6 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
     setSearchToolSettingsOpen(false);
     setLoggingSettings([]);
     setModelAliases({});
-    setRouterSettings(null);
-    setRouterSettingsKey((prev) => prev + 1);
   };
 
   const handleCancel = () => {
@@ -426,23 +425,13 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
           formValues.model_aliases = modelAliases;
         }
 
-        // Add router_settings if any are defined
-        if (routerSettings?.router_settings) {
-          // Only include router_settings if it has at least one non-null value
-          const hasValues = Object.values(routerSettings.router_settings).some(
-            (value) => value !== null && value !== undefined && value !== "",
-          );
-          if (hasValues) {
-            formValues.router_settings = routerSettings.router_settings;
-          }
-        }
-
         await teamCreateCall(accessToken, {
           team_alias: formValues.team_alias,
           team_description: formValues.team_description ?? "",
           organization_id: formValues.organization_id,
           models: Array.isArray(formValues.models) ? formValues.models : [],
           max_budget: formValues.max_budget,
+          ...(formValues.route_template_id ? { route_template_id: formValues.route_template_id } : {}),
         });
         toast.success(t("Team created"));
         await refreshTeams();
@@ -686,6 +675,17 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                         options={{ includeSpecialOptions: false }}
                         context="team"
                         dataTestId="create-team-models-select"
+                      />
+                    )}
+                  </FormField>
+
+                  <FormField control={form.control} name="route_template_id" label={t("pages.routeTemplates.title")}>
+                    {({ value, onChange }) => (
+                      <RouteTemplateSelect
+                        accessToken={accessToken}
+                        value={value ?? ""}
+                        onChange={onChange}
+                        scope="team"
                       />
                     )}
                   </FormField>

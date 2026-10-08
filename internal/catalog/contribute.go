@@ -63,7 +63,13 @@ func Contribute(row Row) {
 		raw = map[string]any{}
 		modelCostMapValue = raw
 	}
-	if _, exists := raw[row.ID]; !exists {
+	official := strings.TrimSpace(row.Official)
+	_, officialExists := raw[official]
+	// 价目表里已经有这个官方 id 时，再插一条没有费率的网关名会挡住它。
+	// 查价先撞上这条空行，带供应商前缀的部署就算不出钱。这种登记只把网关名
+	// 指回已有的那一行，不另造空壳，也不把官方 id 改指到空壳上。
+	shadow := official != "" && official != row.ID && officialExists && !row.Priced
+	if _, exists := raw[row.ID]; !exists && !shadow {
 		entry := map[string]any{
 			"litellm_provider": row.Provider,
 			"mode":             row.Mode,
@@ -77,14 +83,18 @@ func Contribute(row Row) {
 			entry["endpoint_type"] = row.EndpointType
 		}
 		raw[row.ID] = entry
-		if modelsByProvider == nil {
-			modelsByProvider = map[string][]string{}
-		}
-		modelsByProvider[row.Provider] = appendUnique(modelsByProvider[row.Provider], row.ID)
-		knownLLMProviders[row.Provider] = struct{}{}
 	}
-	if official := strings.TrimSpace(row.Official); official != "" && official != row.ID {
-		officialAlias[official] = row.ID
+	if modelsByProvider == nil {
+		modelsByProvider = map[string][]string{}
+	}
+	modelsByProvider[row.Provider] = appendUnique(modelsByProvider[row.Provider], row.ID)
+	knownLLMProviders[row.Provider] = struct{}{}
+	if official != "" && official != row.ID {
+		if shadow {
+			officialAlias[row.ID] = official
+		} else {
+			officialAlias[official] = row.ID
+		}
 	}
 }
 

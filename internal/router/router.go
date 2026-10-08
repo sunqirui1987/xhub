@@ -131,14 +131,18 @@ func deploymentRates(e config.ModelEntry) []catalog.Rate {
 // 返回：尝试顺序。还有其它部署可用时，处于冷却的不会排在第一。
 func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry {
 	pool := All(list, alias)
+	if IsSplitStrategy(strategy) {
+		pool = splitCandidates(pool, st)
+	}
 	first := Pick(list, alias, strategy, st)
 	if first == nil {
+		if IsSplitStrategy(strategy) { return nil }
 		return pool
 	}
-	fid := DeploymentID(*first)
+	fid := CooldownID(*first)
 	out := []config.ModelEntry{*first}
 	for _, e := range pool {
-		if DeploymentID(e) != fid {
+		if CooldownID(e) != fid {
 			out = append(out, e)
 		}
 	}
@@ -152,13 +156,16 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 // 返回：Order 的第一条。没有可用部署时为 nil。
 func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry {
 	pool := matchDeployments(list, alias)
+	if IsSplitStrategy(strategy) {
+		return pickSplit(pool, st)
+	}
 	if len(pool) == 0 {
 		return nil
 	}
 	if len(st.Cooldown) > 0 {
 		open := make([]config.ModelEntry, 0, len(pool))
 		for _, e := range pool {
-			if !st.Cooldown[DeploymentID(e)] {
+			if !st.Cooldown[CooldownID(e)] {
 				open = append(open, e)
 			}
 		}
@@ -288,21 +295,18 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 	if len(pool) == 0 {
 		return nil
 	}
-	if len(pool) == 1 {
-		return &pool[0]
-	}
 	ids := make([]string, len(pool))
 	weights := make([]float64, len(pool))
 	available := make([]bool, len(pool))
 	for i, e := range pool {
-		ids[i] = DeploymentID(e)
+		ids[i] = CooldownID(e)
 		weights[i] = paramFloat(e, "weight", 1)
-		available[i] = !st.Cooldown[ids[i]]
+		available[i] = !st.Cooldown[ids[i]] && weights[i] > 0 && !math.IsNaN(weights[i]) && !math.IsInf(weights[i], 0)
 	}
 	// st.Splits is nil when the gateway never installed one. Falling back to the
 	// highest weight keeps that case working rather than failing every request.
 	if st.Splits == nil {
-		best := 0
+		best := -1
 		bestW := -1.0
 		for i, w := range weights {
 			if !available[i] {
@@ -313,6 +317,7 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 				best = i
 			}
 		}
+		if best < 0 { return nil }
 		return &pool[best]
 	}
 	picked := st.Splits.PickWeighted(ids, weights, available)
@@ -320,6 +325,18 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 		return nil
 	}
 	return &pool[picked]
+}
+
+// Retry candidates obey the same exclusions as the first weighted choice.
+func splitCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
+	out := make([]config.ModelEntry, 0, len(pool))
+	for _, e := range pool {
+		w := paramFloat(e, "weight", 1)
+		if w > 0 && !math.IsNaN(w) && !math.IsInf(w, 0) && !st.Cooldown[CooldownID(e)] {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // matchDeployments finds deployments whose public model name matches, including wildcards. It does not sort them. matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
@@ -432,6 +449,68 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 // 返回：api_base|model。Redis 冷却、延迟和用量都用这个 id。两端都空时是 "|"。
 func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
+}
+
+// CooldownID isolates failures of named credentials sharing an endpoint. Usage
+// and latency retain DeploymentID; no API key is ever included in this ID.
+func CooldownID(e config.ModelEntry) string {
+	id := DeploymentID(e)
+	if name := e.ParamString("litellm_credential_name", ""); name != "" {
+		return id + "|credential:" + name
+	}
+	return id
+}
+
+// IsSplitStrategy reports whether strategy divides traffic by weight.
+// Hyphens and underscores are the same name. Anything else, including
+// simple-shuffle, is not a split: simple-shuffle still picks the heaviest
+// deployment, and treating it as a split would change that.
+// 参数 strategy（string）：路由策略名。
+// 返回 bool（bool）：这个名字是按权重分流时为真。
+// 调用：dataplane/serve.go，只在这时把文档里的份额写进部署。
+// 测试：split_test.go
+func IsSplitStrategy(strategy string) bool {
+	switch strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_") {
+	case "weighted_split", "weighted_round_robin", "traffic_split":
+		return true
+	default:
+		return false
+	}
+}
+
+// ApplyWeights copies list and sets weight on the deployments named in overrides.
+//
+// The key is DeploymentID (api_base|model). A deployment that is not in the map
+// keeps the weight already on it, which defaults to 1 inside the split. An empty
+// map returns the same slice, so a document that does not configure shares does
+// not allocate or change the pool.
+//
+// The copy matters: ModelList is the process config, and writing weight onto it
+// would leak one request's template into the next request.
+// 参数 list（[]config.ModelEntry）：候选部署；overrides（map[string]float64）：部署 id 到份额，空表示不改。
+// 返回 []config.ModelEntry（[]config.ModelEntry）：带上份额之后的部署。没有覆盖时就是原来的切片。
+// 调用：dataplane/serve.go。
+// 测试：split_test.go
+func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry {
+	if len(overrides) == 0 {
+		return list
+	}
+	out := make([]config.ModelEntry, len(list))
+	for i, entry := range list {
+		weight, ok := overrides[DeploymentID(entry)]
+		if !ok {
+			out[i] = entry
+			continue
+		}
+		params := make(map[string]any, len(entry.LiteLLMParams)+1)
+		for key, value := range entry.LiteLLMParams {
+			params[key] = value
+		}
+		params["weight"] = weight
+		entry.LiteLLMParams = params
+		out[i] = entry
+	}
+	return out
 }
 
 // paramFloat reads a float from deployment parameters. A missing value returns fallback.

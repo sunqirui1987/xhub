@@ -22,6 +22,7 @@ const APP_PAGES = new Set([
   "/projects",
   "/users",
   "/organizations",
+  "/route-templates",
   "/router-settings",
   "/admin-panel",
   "/chat",

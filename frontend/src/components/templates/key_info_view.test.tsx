@@ -89,6 +89,11 @@ vi.mock("../networking", () => ({
   getPolicyInfoWithGuardrails: vi.fn().mockResolvedValue({
     resolved_guardrails: ["guardrail-1", "guardrail-2"],
   }),
+  getRouteTemplatesCall: vi.fn().mockResolvedValue([{ id: "tpl-cheap", name: "便宜优先" }]),
+  getRouteTemplateBindingCall: vi.fn().mockResolvedValue({
+    route_template_id: "tpl-cheap",
+    effective: { template_id: "tpl-cheap", name: "便宜优先", scope_type: "key", scope_id: "test-token-123" },
+  }),
 }));
 
 const mockResetKeySpendMutate = vi.fn();
@@ -272,12 +277,12 @@ describe("KeyInfoView", () => {
     });
   });
 
-  it("should render the key's saved router fallbacks", async () => {
+  it("should show the route template this key selects", async () => {
     vi.mocked(useAuthorized).mockReturnValue(baseUseAuthorizedMock);
 
     renderWithProviders(
       <KeyInfoView
-        keyData={{ ...MOCK_KEY_DATA, router_settings: { num_retries: 2, fallbacks: [{ "gpt-4": ["gpt-4o"] }] } }}
+        keyData={{ ...MOCK_KEY_DATA, route_template_id: "tpl-cheap" }}
         onClose={() => {}}
         keyId={"test-key-id"}
         onKeyDataUpdate={() => {}}
@@ -285,10 +290,8 @@ describe("KeyInfoView", () => {
       />,
     );
 
-    expect(await screen.findByText("Router Settings")).toBeInTheDocument();
-    expect(screen.getByText("gpt-4")).toBeInTheDocument();
-    expect(screen.getByText("gpt-4o")).toBeInTheDocument();
-    expect(screen.getByText("Number of Retries: 2")).toBeInTheDocument();
+    expect(await screen.findByText("Route Templates")).toBeInTheDocument();
+    expect(await screen.findByText("In effect: 便宜优先 (from Key)")).toBeInTheDocument();
   });
 
   it("should render tags", async () => {

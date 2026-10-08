@@ -115,6 +115,10 @@ type OrgUpdate struct {
 	Name      *string
 	Status    *string
 	MaxBudget **float64
+	// RouteTemplateID selects a named router settings template. A non-nil pointer
+	// to an empty string clears the selection, which puts the organization back
+	// on the platform default; nil leaves the current selection alone.
+	RouteTemplateID **string
 }
 
 // UpdateOrg applies an OrgUpdate.
@@ -138,7 +142,10 @@ func (db *DB) UpdateOrg(ctx context.Context, by Actor, id string, in OrgUpdate) 
 		if in.MaxBudget != nil {
 			cur.MaxBudget = *in.MaxBudget
 		}
-		if _, err := s.ID(id).Cols("name", "status", "max_budget").Update(cur); err != nil {
+		if in.RouteTemplateID != nil {
+			cur.RouteTemplateID = *in.RouteTemplateID
+		}
+		if _, err := s.ID(id).Cols("name", "status", "max_budget", "route_template_id").Update(cur); err != nil {
 			return err
 		}
 		if out, err = getOrg(ctx, s, id); err != nil {

@@ -91,6 +91,25 @@ type Principal struct {
 	TeamID    string
 	ProjectID string
 	OwnerType string
+	// OrgID is the organization above the caller's team. It is filled while the
+	// identity chain is walked for budget checks, so a later reader does not
+	// have to fetch the team again to learn it. A session with no team, or a key
+	// whose team has gone, leaves it empty.
+	OrgID string
+	// RouteTemplateID is the router settings template this caller runs under,
+	// already resolved to the narrowest scope that selects one, and
+	// RouteTemplateSource names that scope: "key", "team" or "organization".
+	//
+	// Both are filled by the walk the budget check already makes - key, then
+	// team, then organization - so resolving them costs no extra read. The
+	// source is recorded as the walk goes rather than reconstructed afterwards,
+	// because reconstructing it means asking the same three rows the same
+	// question twice and hoping the answers agree.
+	//
+	// An empty id means no scope in the chain selected one, so the platform
+	// default applies.
+	RouteTemplateID     string
+	RouteTemplateSource string
 	// Session and Version identify a UI session. Version is the user row's
 	// session_version when the session was issued, and a request is refused
 	// once the stored version has moved past it.

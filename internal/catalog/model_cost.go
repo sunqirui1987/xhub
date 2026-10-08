@@ -134,28 +134,17 @@ func Raw() any {
 func TokenRates(model string) (input, output float64, ok bool) {
 	modelCostMu.RLock()
 	defer modelCostMu.RUnlock()
-	raw, isMap := modelCostMapValue.(map[string]any)
-	if !isMap {
-		return 0, 0, false
-	}
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return 0, 0, false
 	}
-	if row, found := priceRow(raw, model); found {
-		return tokenRatesFrom(row)
+	// 和 CostAt 走同一份候选键。只看写下来的第一个键会停在没有单价的空壳上，
+	// 价目表里后面那条同名模型的每 token 价就读不到了。
+	row, found := priceRowForLocked(model)
+	if !found {
+		return 0, 0, false
 	}
-	if i := strings.Index(model, "/"); i > 0 {
-		if row, found := priceRow(raw, model[i+1:]); found {
-			return tokenRatesFrom(row)
-		}
-	}
-	if id, found := aliasKeyLocked(model); found {
-		if row, found := priceRow(raw, id); found {
-			return tokenRatesFrom(row)
-		}
-	}
-	return 0, 0, false
+	return tokenRatesFrom(row)
 }
 
 // priceRow reads one object from the price map. A missing key or a non-object returns ok false.

@@ -12,7 +12,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { hasCapability } from "../../utils/capabilities";
 import { isProxyAdminRole, rolesWithWriteAccess } from "../../utils/roles";
 import AccessGroupSelector from "../common_components/AccessGroupSelector";
@@ -22,8 +22,7 @@ import KeyLifecycleSettings from "../common_components/KeyLifecycleSettings";
 import PassThroughRoutesSelector from "../common_components/PassThroughRoutesSelector";
 import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
 import OrganizationDropdown from "../common_components/OrganizationDropdown";
-import RouterSettingsAccordion, { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
-import { routerSettingsEditorValue, routerSettingsUpdate } from "../common_components/routerSettingsPayload";
+import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
 import { estimateTooltips, withNormalizedEstimates } from "./estimatedOutputTokens";
 import {
   currentValuePlaceholder,
@@ -125,8 +124,8 @@ export function KeyEditView({
     keyData.budget_fallbacks && typeof keyData.budget_fallbacks === "object" ? keyData.budget_fallbacks : {},
   );
   const modelBudget = useModelMaxBudgetField(keyData.token, keyData.model_max_budget);
-  const routerSettingsRef = useRef<RouterSettingsAccordionRef>(null);
   const keyTypeFieldId = React.useId();
+  const keyId = keyData.token_id || keyData.token;
   const { data: organizations, isLoading: isOrganizationsLoading } = useOrganizations();
   const { data: uiSettingsData } = useUISettings();
   const enableProjectsUI = Boolean(uiSettingsData?.values?.enable_projects_ui);
@@ -279,14 +278,6 @@ export function KeyEditView({
       }
 
       modelBudget.applyTo(values);
-
-      const routerSettings = routerSettingsUpdate(
-        routerSettingsRef.current?.getValue()?.router_settings,
-        keyData.router_settings,
-      );
-      if (routerSettings) {
-        values.router_settings = routerSettings;
-      }
 
       await onSubmit(
         withNormalizedEstimates({
@@ -741,15 +732,22 @@ export function KeyEditView({
             />
           )}
 
-          <Field>
-            <FieldLabel>{t("Router Settings")}</FieldLabel>
-            <RouterSettingsAccordion
-              ref={routerSettingsRef}
-              accessToken={accessToken || ""}
-              teamId={keyData.team_id}
-              value={routerSettingsEditorValue(keyData.router_settings)}
-            />
-          </Field>
+          {/* The router template this key selects. It replaced a free-form
+              router settings block whose value the gateway never read: it was
+              collected into the save payload and dropped, so every field in it
+              was decoration. A selection is what the request path actually
+              honours. */}
+          <FormField control={form.control} name="route_template_id" label={t("pages.routeTemplates.title")}>
+            {({ value, onChange }) => (
+              <RouteTemplateSelect
+                accessToken={accessToken || ""}
+                value={value ?? ""}
+                onChange={onChange}
+                scope="key"
+                scopeId={keyId}
+              />
+            )}
+          </FormField>
 
           <FormField control={form.control} name="logging_settings" label={t("Logging Settings")}>
             {({ value, onChange }) => (

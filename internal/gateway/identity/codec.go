@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -116,6 +117,29 @@ func stringPtr(body map[string]any, key string) *string {
 	}
 	s := str(body[key])
 	return &s
+}
+
+// optionalString is a two-level optional for a field that can be cleared: nil
+// means the field was absent, a non-nil pointer to nil means the body asked to
+// clear it.
+//
+// The distinction matters for route_template_id: absent leaves the current
+// selection alone, while an explicit null is how a scope goes back to
+// inheriting. Collapsing the two would make every unrelated save silently drop
+// the scope's template.
+// 参数 body（map[string]any）：已经解析的 JSON 对象；key（string）：要读取的字段名。
+// 返回 **string（**string）：字段的两层可选。字段不在正文里时为 nil。在正文里时指向 *string，值是 null 或空串则内层为 nil。
+// 调用：gateway/identity/handlers.go
+// 测试：无直接单测
+func optionalString(body map[string]any, key string) **string {
+	if !has(body, key) {
+		return nil
+	}
+	var inner *string
+	if value := strings.TrimSpace(str(body[key])); value != "" {
+		inner = &value
+	}
+	return &inner
 }
 
 // stringList reads a model or access-group list. A missing or unrecognized value is nil, which means "inherit" rather than "deny".

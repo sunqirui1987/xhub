@@ -19,25 +19,28 @@ import (
 // Key is a virtual key. A personal key belongs to a user inside a team; a
 // service key belongs to the team (or one of its projects) with no owner.
 type Key struct {
-	ID         string     `xorm:"pk 'id'" json:"id"`
-	TokenHash  string     `xorm:"'token_hash'" json:"-"`
-	KeyPrefix  string     `xorm:"'key_prefix'" json:"key_prefix"`
-	OwnerType  string     `xorm:"'owner_type'" json:"owner_type"`
-	UserID     *string    `xorm:"'user_id'" json:"user_id"`
-	TeamID     string     `xorm:"'team_id'" json:"team_id"`
-	ProjectID  *string    `xorm:"'project_id'" json:"project_id"`
-	CreatedBy  *string    `xorm:"'created_by'" json:"created_by"`
-	Name       string     `xorm:"'name'" json:"name"`
-	Models     []string   `xorm:"json 'models'" json:"models"`
-	MaxBudget  *float64   `xorm:"'max_budget'" json:"max_budget"`
-	Spend      float64    `xorm:"'spend'" json:"spend"`
-	TPMLimit   *int       `xorm:"'tpm_limit'" json:"tpm_limit"`
-	RPMLimit   *int       `xorm:"'rpm_limit'" json:"rpm_limit"`
-	Status     string     `xorm:"'status'" json:"status"`
-	ExpiresAt  *time.Time `xorm:"'expires_at'" json:"expires_at"`
-	LastUsedAt *time.Time `xorm:"'last_used_at'" json:"last_used_at"`
-	CreatedAt  time.Time  `xorm:"created 'created_at'" json:"created_at"`
-	UpdatedAt  time.Time  `xorm:"updated 'updated_at'" json:"-"`
+	ID        string   `xorm:"pk 'id'" json:"id"`
+	TokenHash string   `xorm:"'token_hash'" json:"-"`
+	KeyPrefix string   `xorm:"'key_prefix'" json:"key_prefix"`
+	OwnerType string   `xorm:"'owner_type'" json:"owner_type"`
+	UserID    *string  `xorm:"'user_id'" json:"user_id"`
+	TeamID    string   `xorm:"'team_id'" json:"team_id"`
+	ProjectID *string  `xorm:"'project_id'" json:"project_id"`
+	CreatedBy *string  `xorm:"'created_by'" json:"created_by"`
+	Name      string   `xorm:"'name'" json:"name"`
+	Models    []string `xorm:"json 'models'" json:"models"`
+	MaxBudget *float64 `xorm:"'max_budget'" json:"max_budget"`
+	Spend     float64  `xorm:"'spend'" json:"spend"`
+	TPMLimit  *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
+	RPMLimit  *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
+	Status    string   `xorm:"'status'" json:"status"`
+	// RouteTemplateID is the named router settings this key selects. Empty means
+	// it selects nothing and inherits from its team.
+	RouteTemplateID *string    `xorm:"'route_template_id'" json:"route_template_id,omitempty"`
+	ExpiresAt       *time.Time `xorm:"'expires_at'" json:"expires_at"`
+	LastUsedAt      *time.Time `xorm:"'last_used_at'" json:"last_used_at"`
+	CreatedAt       time.Time  `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt       time.Time  `xorm:"updated 'updated_at'" json:"-"`
 }
 
 // 告诉 xorm 这个结构体对应数据库表 api_keys。
@@ -107,6 +110,11 @@ type KeyInput struct {
 	TPMLimit  *int
 	RPMLimit  *int
 	ExpiresAt *time.Time
+	// RouteTemplateID is a two-level optional: nil leaves the current selection
+	// alone, and a non-nil pointer to nil clears it, which puts the key back on
+	// inheriting from its team. The double pointer is what keeps "not sent" apart
+	// from "sent as null".
+	RouteTemplateID **string
 }
 
 // CreateKey stores a key and returns it with the plaintext, which is shown once.
@@ -152,6 +160,12 @@ func (db *DB) CreateKey(ctx context.Context, by Actor, in KeyInput) (*Key, strin
 		}
 		if in.ProjectID != "" {
 			k.ProjectID = &in.ProjectID
+		}
+		// A selection sent with the create is stored with it. Update honoured
+		// this and create did not, so a key minted with a template silently got
+		// none and routed by its team's settings instead.
+		if in.RouteTemplateID != nil {
+			k.RouteTemplateID = *in.RouteTemplateID
 		}
 		if _, err := s.Insert(&k); err != nil {
 			return err
@@ -260,6 +274,9 @@ func (db *DB) UpdateKey(ctx context.Context, by Actor, id string, in KeyInput) (
 		cols := []string{"name", "models", "max_budget", "tpm_limit", "rpm_limit"}
 		if in.ExpiresAt != nil {
 			patch.ExpiresAt, cols = in.ExpiresAt, append(cols, "expires_at")
+		}
+		if in.RouteTemplateID != nil {
+			patch.RouteTemplateID, cols = *in.RouteTemplateID, append(cols, "route_template_id")
 		}
 		if _, err := s.ID(id).Cols(cols...).Update(&patch); err != nil {
 			return err

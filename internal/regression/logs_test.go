@@ -104,7 +104,7 @@ func TestCallIdIsTheSameEverywhereItAppears(t *testing.T) {
 	}
 
 	// 用这个 id 能直接查到详情。
-	detail := h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil).json()
+	detail := logDetail(t, h, admin, callID)
 	if got := firstString(detail, "request_id", "id"); got != callID {
 		t.Fatalf("detail returned request_id=%q, want %q", got, callID)
 	}
@@ -252,6 +252,7 @@ func logDetail(t *testing.T, h *harness, admin, callID string) map[string]any {
 	if callID == "" {
 		t.Fatal("the response carried no call id")
 	}
+	h.flushSpend()
 	return h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil).json()
 }
 

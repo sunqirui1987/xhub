@@ -173,6 +173,38 @@ func TestSplitWithoutStateFallsBackToHighestWeight(t *testing.T) {
 // 而它是另外六个别名的实现。改它会连带改那六个。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
+// TestApplyWeightsUsesTheDocumentWithoutTouchingThePool 证明模板里的份额
+// 盖过部署上的 weight，而且不改原来的配置切片。
+//
+// 部署自己写着 1 和 9。文档写成 3 和 7。分流必须按 3:7，原来的切片仍是 1 和 9，
+// 下一次没带这份文档的请求不能继承这次的比例。
+// 参数 t（*testing.T）：当前测试。
+// 返回：无。
+func TestApplyWeightsUsesTheDocumentWithoutTouchingThePool(t *testing.T) {
+	pool := []config.ModelEntry{
+		deployment("shared-name", "https://a.example.com", 1),
+		deployment("shared-name", "https://b.example.com", 9),
+	}
+	overrides := map[string]float64{
+		"https://a.example.com|shared-name": 3,
+		"https://b.example.com|shared-name": 7,
+	}
+	weighted := ApplyWeights(pool, overrides)
+	counts := drawSplit(t, weighted, 10)
+	if counts["https://a.example.com"] != 3 || counts["https://b.example.com"] != 7 {
+		t.Fatalf("document shares split %v, want 3 and 7", counts)
+	}
+	if pool[0].LiteLLMParams["weight"] != 1.0 || pool[1].LiteLLMParams["weight"] != 9.0 {
+		t.Fatalf("the original pool was rewritten: %#v", pool)
+	}
+	if !IsSplitStrategy("weighted-split") || IsSplitStrategy("simple-shuffle") {
+		t.Fatalf("split detection drifted")
+	}
+	if same := ApplyWeights(pool, nil); len(same) != len(pool) || &same[0] != &pool[0] {
+		t.Fatalf("an empty override should be the same slice")
+	}
+}
+
 func TestWeightedSplitIsItsOwnStrategy(t *testing.T) {
 	kind, ok := strategyKind("weighted_split")
 	if !ok || kind != "split" {

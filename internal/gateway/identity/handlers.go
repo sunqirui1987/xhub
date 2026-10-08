@@ -12,6 +12,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/authz"
+	"github.com/sunqirui1987/xhub/internal/gateway/templateauth"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -442,6 +443,10 @@ func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
 	if err := g.Authorize(r, p, authz.ActionOrgWrite, authz.Object{Type: authz.ObjectOrg}); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
@@ -450,6 +455,15 @@ func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
+	}
+	if selected := strings.TrimSpace(str(body["route_template_id"])); selected != "" {
+		if err := g.Identity().SetScopeRouteTemplate(r.Context(), actorOf(p), "organization", o.ID, selected); err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		if refreshed, err := g.Identity().GetOrg(r.Context(), o.ID); err == nil && refreshed != nil {
+			o = refreshed
+		}
 	}
 	httpx.WriteJSON(w, 200, orgPublic(o))
 }
@@ -570,10 +584,18 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
+	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
 	in := iam.OrgUpdate{
 		Name:      orgNamePtr(body),
 		Status:    stringPtr(body, "status"),
 		MaxBudget: optionalFloat(body, "max_budget"),
+		// Selecting a router template is the organization administrator's, so it
+		// travels with the name rather than with the budget: it does not widen
+		// what the organization can reach, only how traffic inside it is spread.
+		RouteTemplateID: optionalString(body, "route_template_id"),
 	}
 	o, err := g.Identity().UpdateOrg(r.Context(), actorOf(p), id, in)
 	if err != nil {
@@ -636,6 +658,10 @@ func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
 	if err := g.Authorize(r, p, authz.ActionTeamCreate, authz.Object{Type: authz.ObjectTeam}); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
@@ -663,6 +689,15 @@ func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
+	}
+	if selected := strings.TrimSpace(str(body["route_template_id"])); selected != "" {
+		if err := g.Identity().SetScopeRouteTemplate(r.Context(), actorOf(p), "team", t.ID, selected); err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		if refreshed, err := g.Identity().GetTeam(r.Context(), t.ID); err == nil && refreshed != nil {
+			t = refreshed
+		}
 	}
 	httpx.WriteJSON(w, 200, teamPublic(t, iam.TeamAdmin))
 }
@@ -922,6 +957,10 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
+	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
+		g.WriteAuthz(w, r, err)
+		return
+	}
 	name, description := profilePatch(body)
 	if name != nil || description != nil {
 		if _, err := g.Identity().UpdateTeamProfile(r.Context(), actorOf(p), id, name, description); err != nil {
@@ -938,12 +977,28 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		v := stringList(body["models"])
 		models = &v
 	}
+	// Selecting a router template sits with the profile rather than with the
+	// budget: a team administrator chooses which template their own team routes
+	// by, but they cannot edit the template's contents, so the reach they can
+	// grant themselves is bounded by what the platform published.
 	if status != nil || budget != nil || models != nil {
 		if err := g.Authorize(r, p, authz.ActionTeamBudget, authz.Object{Type: authz.ObjectTeam, ID: id}); err != nil {
 			g.WriteAuthz(w, r, err)
 			return
 		}
 		if _, err := g.Identity().AdminUpdateTeam(r.Context(), actorOf(p), id, status, budget, models); err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+	}
+	// Selecting a router template is a separate write with a separate
+	// authorization: the team administrator's ActionTeamWrite, which this handler
+	// already checked above, rather than the budget action. It is written through
+	// the same store call the binding route uses so both entries agree on what an
+	// empty value means.
+	if raw, ok := body["route_template_id"]; ok {
+		selected := strings.TrimSpace(str(raw))
+		if err := g.Identity().SetScopeRouteTemplate(r.Context(), actorOf(p), "team", id, selected); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
@@ -1424,9 +1479,13 @@ func teamPublic(t *iam.Team, role string) map[string]any {
 		"members_count":      0,
 		"models":             nonNilStrings(t.Models),
 		"keys":               []any{},
-		"created_at":         t.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":         t.UpdatedAt.UTC().Format(time.RFC3339),
-		"metadata":           map[string]any{},
+		// The router template this team selects. Absent means it selects nothing
+		// and inherits; the console shows the effective one from the binding
+		// route, which walks the chain.
+		"route_template_id": deref(t.RouteTemplateID),
+		"created_at":        t.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":        t.UpdatedAt.UTC().Format(time.RFC3339),
+		"metadata":          map[string]any{},
 	}
 }
 
@@ -1451,9 +1510,13 @@ func orgPublic(o *iam.Organization) map[string]any {
 		"models":               []string{},
 		"members":              []any{},
 		"teams":                []any{},
-		"created_at":           o.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at":           o.UpdatedAt.UTC().Format(time.RFC3339),
-		"metadata":             map[string]any{},
+		// The router template this organization selects. Absent means it selects
+		// nothing and inherits the platform default; the console shows the
+		// effective one from the binding route, which walks the chain.
+		"route_template_id": deref(o.RouteTemplateID),
+		"created_at":        o.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":        o.UpdatedAt.UTC().Format(time.RFC3339),
+		"metadata":          map[string]any{},
 	}
 }
 

@@ -48,6 +48,138 @@ type upstreamReply struct {
 // defaultReply 是每一次假补全的回答。数字选得小且固定，因为计费断言要拿它算钱。
 var defaultReply = upstreamReply{PromptTokens: 11, CompletionTokens: 5, Content: "regression-ok"}
 
+// 假供应商回答的字段名照抄真实上游，值可以是构造的。
+//
+// 字段名必须真：形状错了，用例就测不到真实路径上会发生的错。这里的两套形状是
+// 从两家在跑的供应商实际抓下来的（2026-10 抓取）：
+//
+//	api.qnaigc.com/v1/chat/completions   OpenAI 形状，多两个 details 对象
+//	api.fenno.ai/v1/messages             Anthropic 形状，用量在另一套字段上
+//
+// 从前这里对两条路径都回 OpenAI 形状。那正是"计量准不准"这件事一直没被测到的
+// 原因：真实 Messages 上游报的是 input_tokens 加一笔独立的 cache_read_input_tokens，
+// 而假上游报的是 prompt_tokens，于是整类解析错——缓存那一半被丢掉、剩下的一半
+// 按缓存价收——在套件里根本无从发生。
+//
+// 值仍然由 defaultReply 固定，因为计费断言要拿它算钱；构造的是数字，不是形状。
+
+// openAIUsage 是 OpenAI 兼容上游（qiniu 那一路）回的 usage。
+//
+// 真实回答里 prompt_tokens_details 和 completion_tokens_details 是存在的空对象，
+// 缓存命中时会带 cached_tokens。空对象和缺键在解析上是两件事，所以这里照抄。
+// 参数 override（map[string]any）：要替换成的 usage。空时用 defaultReply 的数字。
+// 返回 map[string]any（map[string]any）：写进回答的 usage 对象。
+func openAIUsage(override map[string]any) map[string]any {
+	if override != nil {
+		out := map[string]any{}
+		for k, v := range override {
+			out[k] = v
+		}
+		if _, set := out["total_tokens"]; !set {
+			out["total_tokens"] = asIntAny(out["prompt_tokens"]) + asIntAny(out["completion_tokens"])
+		}
+		if _, set := out["prompt_tokens_details"]; !set {
+			out["prompt_tokens_details"] = map[string]any{}
+		}
+		if _, set := out["completion_tokens_details"]; !set {
+			out["completion_tokens_details"] = map[string]any{}
+		}
+		return out
+	}
+	return map[string]any{
+		"prompt_tokens":             defaultReply.PromptTokens,
+		"completion_tokens":         defaultReply.CompletionTokens,
+		"total_tokens":              defaultReply.PromptTokens + defaultReply.CompletionTokens,
+		"prompt_tokens_details":     map[string]any{},
+		"completion_tokens_details": map[string]any{},
+	}
+}
+
+// anthropicUsage 是 Anthropic 形状上游（fenno 那一路）回的 usage。
+//
+// 这一套字段名和 OpenAI 的不是一套：input_tokens 只是没命中缓存的那部分，
+// cache_read_input_tokens 是**另外一笔**，cache_creation 是个嵌套对象，
+// 还有 output_tokens_details、service_tier、inference_geo 这些计费不读但确实
+// 在回答里的键。
+//
+// 参数 override（map[string]any）：要替换成的 usage。给了 input_tokens 这类键时按
+// Anthropic 的语义读：input_tokens 不加缓存读，除非调用方自己写了缓存那一笔。
+// 返回 map[string]any（map[string]any）：写进回答的 usage 对象。
+func anthropicUsage(override map[string]any) map[string]any {
+	if override != nil {
+		out := map[string]any{}
+		for k, v := range override {
+			out[k] = v
+		}
+		if _, set := out["input_tokens"]; !set {
+			out["input_tokens"] = 0
+		}
+		if _, set := out["output_tokens"]; !set {
+			out["output_tokens"] = 0
+		}
+		if _, set := out["cache_creation_input_tokens"]; !set {
+			out["cache_creation_input_tokens"] = 0
+		}
+		if _, set := out["cache_read_input_tokens"]; !set {
+			out["cache_read_input_tokens"] = 0
+		}
+		out["cache_creation"] = map[string]any{
+			"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0,
+		}
+		if _, set := out["output_tokens_details"]; !set {
+			out["output_tokens_details"] = map[string]any{"thinking_tokens": 0}
+		}
+		if _, set := out["service_tier"]; !set {
+			out["service_tier"] = "standard"
+		}
+		if _, set := out["inference_geo"]; !set {
+			out["inference_geo"] = "global"
+		}
+		return out
+	}
+	return map[string]any{
+		"input_tokens":                defaultReply.PromptTokens,
+		"output_tokens":               defaultReply.CompletionTokens,
+		"cache_creation_input_tokens": 0,
+		"cache_read_input_tokens":     0,
+		"cache_creation": map[string]any{
+			"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0,
+		},
+		"output_tokens_details": map[string]any{"thinking_tokens": 0},
+		"service_tier":          "standard",
+		"inference_geo":         "global",
+	}
+}
+
+// chatAnswer 是 OpenAI 兼容上游的一次补全回答，字段照抄 qiniu 的形状。
+// 参数 model（string）：上游模型名；override（map[string]any）：要替换的 usage。
+// 返回 map[string]any（map[string]any）：回答对象。
+func chatAnswer(model string, override map[string]any) map[string]any {
+	return map[string]any{
+		"id": "chatcmpl-regression", "object": "chat.completion", "created": 1, "model": model,
+		"choices": []any{map[string]any{
+			"index": 0, "finish_reason": "stop",
+			"message": map[string]any{"role": "assistant", "content": defaultReply.Content},
+		}},
+		"usage": openAIUsage(override),
+	}
+}
+
+// anthropicAnswer 是 Anthropic 形状上游的一次问答回答，字段照抄 fenno 的形状。
+// 参数 model（string）：上游模型名；override（map[string]any）：要替换的 usage。
+// 返回 map[string]any（map[string]any）：回答对象。
+func anthropicAnswer(model string, override map[string]any) map[string]any {
+	return map[string]any{
+		"id": "msg_regression", "type": "message", "role": "assistant", "model": model,
+		"content":            []any{map[string]any{"type": "text", "text": defaultReply.Content, "citations": []any{}}},
+		"stop_reason":        "end_turn",
+		"stop_sequence":      nil,
+		"stop_details":       nil,
+		"context_management": map[string]any{"applied_edits": []any{}},
+		"usage":              anthropicUsage(override),
+	}
+}
+
 // harness 是一个已经跑起来的网关，外加测试需要用到的所有把手：往里发请求的
 // httptest server、真身份库 db、框架记录库 store、假供应商、以及假供应商收到过
 // 的每一次请求。
@@ -215,9 +347,10 @@ func (h *harness) serveUpstream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 流式：真的按 SSE 回，因为流式的计费和形状是另一条路径——
-	// 一个只回 JSON 的假供应商会让流式用例假通过。
+	// 一个只回 JSON 的假供应商会让流式用例假通过。两条协议的事件形状不同，
+	// 所以按上游路径分流，和真实上游一样。
 	if stream, _ := body["stream"].(bool); stream {
-		h.serveStream(w, model)
+		h.serveStream(w, model, strings.Contains(r.URL.Path, "/messages"), rule.usage)
 		return
 	}
 
@@ -231,27 +364,40 @@ func (h *harness) serveUpstream(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(r.URL.Path, "contents/generations"):
 		// Seedance 的形状：先给一个任务 id，还没有用量。用量要等查询那一次。
 		writeJSON(w, map[string]any{"id": "regression-task-1", "status": "queued"})
+	case strings.Contains(r.URL.Path, "/messages"):
+		// Messages 端点的上游是 Anthropic 形状，它的用量字段和 OpenAI 的不是一套。
+		writeJSON(w, anthropicAnswer(model, rule.usage))
 	default:
-		writeJSON(w, map[string]any{
-			"id": "chatcmpl-regression", "object": "chat.completion", "created": 1, "model": model,
-			"choices": []any{map[string]any{
-				"index": 0, "finish_reason": "stop",
-				"message": map[string]any{"role": "assistant", "content": defaultReply.Content},
-			}},
-			"usage": answerUsage(rule.usage),
-		})
+		writeJSON(w, chatAnswer(model, rule.usage))
 	}
 }
 
 // serveStream 按 SSE 回一次流式补全。分几个 chunk 发出去，最后补一个带 usage 的
 // chunk 和终止行——真实供应商就是这么发的，而 usage 只出现在流的尾巴上，
 // 这正是流式计费容易漏掉的地方。
-// 参数 w（http.ResponseWriter）：写响应；model（string）：本次请求的模型名。
+//
+// 两种上游的流是两种协议，所以分流。Anthropic 的流是一条事件序列
+// （message_start / content_block_delta / message_delta / message_stop），
+// usage 在 message_start 里先报一次、在 message_delta 里带上最终输出数再报一次；
+// 计费要认的是后一次那个数。OpenAI 的流是 data: 行，usage 只在最后一个 chunk 上。
+//
+// 参数 w（http.ResponseWriter）：写响应；model（string）：本次请求的模型名；
+// anthropic（bool）：按 Anthropic 事件流回，还是按 OpenAI data: 行回；
+// override（map[string]any）：要替换的 usage。空时用 defaultReply 的数字。
 // 返回：无。
-func (h *harness) serveStream(w http.ResponseWriter, model string) {
+func (h *harness) serveStream(w http.ResponseWriter, model string, anthropic bool, override map[string]any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	if anthropic {
+		h.serveAnthropicStream(w, model, override, flush)
+		return
+	}
 
 	chunks := []map[string]any{
 		{"id": "chatcmpl-regression", "object": "chat.completion.chunk", "created": 1, "model": model,
@@ -261,26 +407,70 @@ func (h *harness) serveStream(w http.ResponseWriter, model string) {
 	}
 	for _, chunk := range chunks {
 		_, _ = io.WriteString(w, "data: "+string(mustJSON(chunk))+"\n\n")
-		if flusher != nil {
-			flusher.Flush()
-		}
+		flush()
 	}
 
 	// 最后一个 chunk 带 usage，和真实供应商一样。
 	final := map[string]any{
 		"id": "chatcmpl-regression", "object": "chat.completion.chunk", "created": 1, "model": model,
 		"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}},
-		"usage": map[string]any{
-			"prompt_tokens":     defaultReply.PromptTokens,
-			"completion_tokens": defaultReply.CompletionTokens,
-			"total_tokens":      defaultReply.PromptTokens + defaultReply.CompletionTokens,
-		},
+		"usage":   openAIUsage(override),
 	}
 	_, _ = io.WriteString(w, "data: "+string(mustJSON(final))+"\n\n")
 	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	if flusher != nil {
-		flusher.Flush()
+	flush()
+}
+
+// serveAnthropicStream 按 Anthropic 的事件序列回一次流。
+//
+// 顺序和字段名照抄真实上游：ping、message_start（先报一次输入用量）、
+// content_block_start、content_block_delta、content_block_stop、
+// message_delta（带最终输出用量）、message_stop。
+//
+// 两边都报用量是有意的：中间那一版 message_delta 的 usage 里 output_tokens 还是
+// 很小的数，最终那一版才是完整的。只认第一次拿到的 usage 会少记输出 token。
+//
+// 参数 w（http.ResponseWriter）：写响应；model（string）：本次请求的模型名；
+// override（map[string]any）：要替换的 usage；flush（func()）：把这一段推给调用方。
+// 返回：无。
+func (h *harness) serveAnthropicStream(w http.ResponseWriter, model string, override map[string]any, flush func()) {
+	event := func(name string, doc map[string]any) {
+		_, _ = io.WriteString(w, "event: "+name+"\ndata: "+string(mustJSON(doc))+"\n\n")
+		flush()
 	}
+	event("ping", map[string]any{"type": "ping"})
+
+	// 第一版用量：输入已经定了，输出只有第一个 token。
+	first := anthropicUsage(override)
+	event("message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"model": model, "id": "msg_regression", "type": "message", "role": "assistant",
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil, "stop_details": nil,
+			"usage": first,
+		},
+	})
+	event("content_block_start", map[string]any{
+		"type": "content_block_start", "index": 0,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	})
+	event("content_block_delta", map[string]any{
+		"type": "content_block_delta", "index": 0,
+		"delta": map[string]any{"type": "text_delta", "text": defaultReply.Content},
+	})
+	event("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+
+	// 最终用量：输出这一侧到这一刻才是完整的。
+	final := anthropicUsage(override)
+	event("message_delta", map[string]any{
+		"type": "message_delta",
+		"delta": map[string]any{
+			"stop_reason": "end_turn", "stop_sequence": nil, "stop_details": nil,
+		},
+		"usage":              final,
+		"context_management": map[string]any{"applied_edits": []any{}},
+	})
+	event("message_stop", map[string]any{"type": "message_stop"})
 }
 
 // upstreamCalls 返回假供应商收到过的请求的副本。返回副本而不是切片本身，是为了
@@ -375,6 +565,36 @@ func (h *harness) usageOverride(model string, usage map[string]any) {
 	rule := h.rules[model]
 	rule.usage = usage
 	h.rules[model] = rule
+}
+
+// addFlatPricedModel 通过控制台加一条**用扁平单价字段**定价的部署，返回它的公开名。
+//
+// 这是控制台真正写出来的形状：单价表单一个格子一个字段，提交的是
+// input_cost_per_token、output_cost_per_second 这样的键，而不是一个 rates 数组。
+// 所以计费路径上"部署自带价"这一支在真实部署里走的是扁平字段。
+//
+// 用扁平形式加模型而不是只用 rates，正是为了证明运维在界面上填的价真的被读到：
+// 只测 rates 的话，扁平分支断掉了测试也照样绿。
+//
+// 参数 t（*testing.T）：当前测试；h（*harness）：当前用例的网关；admin（string）：管理员的会话令牌；
+// public（string）：公开模型名；params（map[string]any）：要写进 litellm_params 的单价字段；mode（string）：调用方式。
+// 返回：无。
+func addFlatPricedModel(t *testing.T, h *harness, admin, public string, params map[string]any, mode string) {
+	t.Helper()
+	litellm := map[string]any{
+		"model":               "openai/" + public,
+		"api_key":             "sk-fake-upstream",
+		"api_base":            h.credentialAPIBase(),
+		"custom_llm_provider": "openai",
+	}
+	for k, v := range params {
+		litellm[k] = v
+	}
+	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
+		"model_name":     public,
+		"litellm_params": litellm,
+		"model_info":     map[string]any{"mode": mode},
+	})
 }
 
 // patchRates 改一条已登记部署的费率表，走控制台的模型更新接口。
@@ -709,11 +929,144 @@ func namesOf(rows []map[string]any, field string) []string {
 	return out
 }
 
-// liveKeys 是真实调用要用到的供应商密钥。
-// 只从环境变量读，绝不写进仓库。
-type liveKeys struct {
-	fenno string // fennoai 的密钥，来自 XHUB_REGRESSION_FENNO_KEY
-	qiniu string // qiniu 的密钥，来自 XHUB_REGRESSION_QINIU_KEY
+// liveVendor 是一家要真连的供应商，从环境变量发现，不写死在代码里。
+//
+// 为什么是环境变量而不是一张 Go 里的表：供应商会一直加，而且加一家不该需要改
+// 回归代码。每多一家，运维只要多设一组变量，套件自己就会把它带上跑。写死的表
+// 每加一家都要动代码，于是"没覆盖到"和"没人改代码"变成同一件事。
+//
+// 约定（<ID> 大写，非字母数字一律换成下划线）：
+//
+//	XHUB_REGRESSION_<ID>_KEY    必需。缺了这家就整组跳过，不静默当成通过
+//	XHUB_REGRESSION_<ID>_BASE   必需。chat 部署的根地址，OpenAI 兼容的带 /v1
+//	XHUB_REGRESSION_<ID>_MODELS 可选。逗号分隔的模型名，缺省用 DEFAULT_MODEL
+//	XHUB_REGRESSION_<ID>_PROTOCOL 可选。anthropic 或 openai，缺省 openai
+//	XHUB_REGRESSION_<ID>_BYPASS_BASE 可选。Bypass 端点要的裸主机名，缺省由 BASE 去掉 /v1
+//
+// 例：
+//
+//	XHUB_REGRESSION_FENNO_KEY=sk-...
+//	XHUB_REGRESSION_FENNO_BASE=https://api.fenno.ai
+//	XHUB_REGRESSION_FENNO_PROTOCOL=anthropic
+//	XHUB_REGRESSION_FENNO_MODELS=claude-haiku-4-5
+//	XHUB_REGRESSION_QINIU_KEY=sk-...
+//	XHUB_REGRESSION_QINIU_BASE=https://api.qnaigc.com/v1
+//	XHUB_REGRESSION_QINIU_MODELS=deepseek-v3,kimi-k2
+type liveVendor struct {
+	// ID is the variable-name stem, e.g. FENNO. It is also what the deployment's
+	// public model name is prefixed with, so a log row names its supplier.
+	ID string
+	// Key is the credential. Never read from a file, only from the environment.
+	Key string
+	// Base is the chat root. The protocol adapter appends the operation path.
+	Base string
+	// BypassBase is the bare host for bypass endpoints, which carry their own path.
+	BypassBase string
+	// Protocol is "anthropic" or "openai"; it decides which upstream path and which
+	// usage field names the vendor answers with.
+	Protocol string
+	// Models are the models to exercise against this vendor.
+	Models []string
+}
+
+// liveVendorEnvPrefix is the stem every variable shares.
+const liveVendorEnvPrefix = "XHUB_REGRESSION_"
+
+// liveVendors discovers the vendors to test against from the environment.
+//
+// A vendor with no key is left out rather than failing the run: the suite has to
+// be usable with one vendor configured. A key with no base is a configuration
+// mistake and fails loudly, because a half-configured vendor would otherwise
+// look like a vendor that passes.
+//
+// 参数 t（*testing.T）：当前测试。
+// 返回 []liveVendor（[]liveVendor）：配置完整的供应商，按 ID 排序。没有时为空。
+// 调用：本文件的 live 用例和 pricing_live_test.go。
+// 测试：由 live 那两条用例直接覆盖。
+func liveVendors(t *testing.T) []liveVendor {
+	t.Helper()
+	ids := liveVendorIDs()
+	vendors := make([]liveVendor, 0, len(ids))
+	for _, id := range ids {
+		key := strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_KEY"))
+		if key == "" {
+			continue
+		}
+		base := strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_BASE"))
+		if base == "" {
+			t.Fatalf("%s_KEY is set but %s_BASE is not; a vendor needs both its credential and its base URL",
+				liveVendorEnvPrefix+id, liveVendorEnvPrefix+id)
+		}
+		models := splitList(os.Getenv(liveVendorEnvPrefix + id + "_MODELS"))
+		if len(models) == 0 {
+			t.Fatalf("%s_KEY is set but %s_MODELS is empty; a live vendor needs at least one model to exercise",
+				liveVendorEnvPrefix+id, liveVendorEnvPrefix+id)
+		}
+		bypass := strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_BYPASS_BASE"))
+		if bypass == "" {
+			bypass = strings.TrimSuffix(strings.TrimSuffix(base, "/"), "/v1")
+		}
+		protocol := strings.ToLower(strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_PROTOCOL")))
+		if protocol == "" {
+			protocol = "openai"
+		}
+		vendors = append(vendors, liveVendor{
+			ID: id, Key: key, Base: base, BypassBase: bypass,
+			Protocol: protocol, Models: models,
+		})
+	}
+	if len(vendors) == 0 {
+		t.Fatalf("live mode is on but no vendor is configured; set %s<ID>_KEY, _BASE and _MODELS",
+			liveVendorEnvPrefix)
+	}
+	return vendors
+}
+
+// liveVendorIDs lists the vendor stems the environment mentions.
+//
+// It reads the *_KEY variables rather than the *_BASE ones, because the key is
+// what makes a vendor callable; discovering from the base would pick up a vendor
+// with no credential and then fail on a missing key.
+// 参数：无。
+// 返回 []string（[]string）：变量名里出现的供应商标识，排好序。
+// 调用：liveVendors。
+// 测试：由 live 那两条用例直接覆盖。
+func liveVendorIDs() []string {
+	suffix := "_KEY"
+	seen := map[string]bool{}
+	for _, entry := range os.Environ() {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(name, liveVendorEnvPrefix) || !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(name, liveVendorEnvPrefix), suffix)
+		if id == "" {
+			continue
+		}
+		seen[id] = true
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// splitList splits a comma-separated variable into trimmed, non-empty entries.
+// 参数 raw（string）：变量原文，例如 "deepseek-v3, kimi-k2"。
+// 返回 []string（[]string）：去掉空白和空项之后的条目。
+// 调用：liveVendors。
+// 测试：由 live 那两条用例直接覆盖。
+func splitList(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // liveEnabled 报告这次要不要调真实供应商。默认关着，理由有三个：花钱、受供应商
@@ -721,52 +1074,19 @@ type liveKeys struct {
 // 参数：无。返回 bool（bool）：环境变量打开时为真。
 func liveEnabled() bool { return liveModeEnabled() }
 
-// liveCredentials 读真实调用的密钥。开了 live 模式却没给密钥就直接失败，而不是
-// 悄悄跳过——静默跳过看起来和通过一模一样。
+// liveCredentials 是开着 live 模式时的一次前置检查。
+//
+// 供应商从环境里发现（见 liveVendor），所以这里不再逐个点名。它保留下来是因为
+// 现有的 live 用例需要一个"开了 live 却没配任何供应商就失败"的入口——静默跳过
+// 看起来和通过一模一样。
 // 参数 t（*testing.T）：当前测试。
-// 返回 liveKeys（liveKeys）：两个供应商的密钥。未开 live 模式时整个用例跳过。
-func liveCredentials(t *testing.T) liveKeys {
+// 返回 []liveVendor（[]liveVendor）：配置完整的供应商。未开 live 模式时整个用例跳过。
+func liveCredentials(t *testing.T) []liveVendor {
 	t.Helper()
-	keys := liveKeys{
-		fenno: strings.TrimSpace(os.Getenv("XHUB_REGRESSION_FENNO_KEY")),
-		qiniu: strings.TrimSpace(os.Getenv("XHUB_REGRESSION_QINIU_KEY")),
-	}
 	if !liveEnabled() {
 		t.Skip("live vendor calls are off; set XHUB_REGRESSION_LIVE=1 to enable")
 	}
-	if keys.fenno == "" || keys.qiniu == "" {
-		t.Fatal("live mode needs XHUB_REGRESSION_FENNO_KEY and XHUB_REGRESSION_QINIU_KEY")
-	}
-	return keys
-}
-
-// liveChatBase 给出 chat 部署要连的真实根地址。协议适配会把 "/chat/completions"
-// 接到这个地址后面，所以 OpenAI 兼容的供应商要自带 "/v1"。
-// Bypass 不一样：整条路径由端点类型自己给，所以另有一个 liveBypassBase。
-// 参数 provider（string）：供应商标识。返回 string（string）：该供应商的 chat 根地址。
-func liveChatBase(provider string) string {
-	switch provider {
-	case "fennoai":
-		return "https://api.fenno.ai/v1"
-	case "qiniu":
-		return "https://api.qnaigc.com/v1"
-	default:
-		return ""
-	}
-}
-
-// liveBypassBase 给出 Bypass 部署要连的真实根地址：光秃秃的主机名，因为剩下的
-// 路径由端点类型带。
-// 参数 provider（string）：供应商标识。返回 string（string）：该供应商的 Bypass 根地址。
-func liveBypassBase(provider string) string {
-	switch provider {
-	case "fennoai":
-		return "https://api.fenno.ai"
-	case "qiniu":
-		return "https://api.qnaigc.com"
-	default:
-		return ""
-	}
+	return liveVendors(t)
 }
 
 // recordSpendFor 直接写一条用量记录。额度测试用它把某个范围的花费预置到位，

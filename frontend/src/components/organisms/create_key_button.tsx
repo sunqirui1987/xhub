@@ -1,33 +1,21 @@
 "use client";
 import { keyKeys } from "@/app/(dashboard)/hooks/keys/useKeys";
-import { useProjects } from "@/app/(dashboard)/hooks/projects/useProjects";
-import { useTags } from "@/app/(dashboard)/hooks/tags/useTags";
-import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
 import { useSessionIdentity } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MultiSelect, type MultiSelectOption } from "@/components/shared/MultiSelect";
-import { TagsInput } from "@/app/(dashboard)/guardrails/_components/content_filter/TagsInput";
-import { ChevronDown, Info } from "lucide-react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { type Control, useForm, useWatch, type UseFormSetValue } from "react-hook-form";
+import { Info } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { rolesWithWriteAccess } from "../../utils/roles";
 import { t } from "@/i18n";
-import SkillSelector from "../skills/SkillSelector";
-import AccessGroupSelector from "../common_components/AccessGroupSelector";
 import BudgetDurationDropdown from "../common_components/budget_duration_dropdown";
-import SchemaFormFields from "../common_components/check_openapi_schema";
 import KeyLifecycleSettings from "../common_components/KeyLifecycleSettings";
-import ModelAliasManager from "../common_components/ModelAliasManager";
 import {
   MountedFormField,
   MountedFormProvider,
@@ -35,33 +23,18 @@ import {
   useMountRegistry,
   type MountedFormValues,
 } from "../common_components/MountedFormField";
-import PassThroughRoutesSelector from "../common_components/PassThroughRoutesSelector";
-import PremiumLoggingSettings from "../common_components/PremiumLoggingSettings";
-import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
-import RouterSettingsAccordion, {
-  RouterSettingsAccordionRef,
-  RouterSettingsAccordionValue,
-} from "../common_components/RouterSettingsAccordion";
-
-import { BudgetFallbacksEditor } from "../key_team_helpers/BudgetFallbacksEditor";
-import { BudgetWindowEntry, BudgetWindowsEditor } from "../key_team_helpers/BudgetWindowsEditor";
-import { ModelMaxBudget, ModelMaxBudgetEditor } from "../key_team_helpers/ModelMaxBudgetEditor";
-import { TagRateLimitEditor, TagRateLimitEntry } from "../key_team_helpers/TagRateLimitEditor";
+import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
 import {
   excludeProxyWideSentinel,
   getModelDisplayName,
   hasAllModelsSentinel,
 } from "../key_team_helpers/fetch_available_models_team_key";
 import { Team } from "../key_team_helpers/key_list";
-import MCPServerSelector from "../mcp_server_management/MCPServerSelector";
-import MCPToolPermissions from "../mcp_server_management/MCPToolPermissions";
 import { toast } from "@/lib/toast";
 import {
-  getGuardrailsList,
   keyCreateCall,
   keyCreateServiceAccountCall,
   modelAvailableCall,
-  proxyBaseUrl,
 } from "../networking";
 import CreatedKeyDisplay from "../shared/CreatedKeyDisplay";
 import NumericalInput from "../shared/numerical_input";
@@ -75,13 +48,7 @@ const KEY_TYPE_OPTIONS = [
   { value: "default", label: t("Full Access"), hint: t("Can call all routes (AI APIs, Management, and read-only)") },
 ];
 
-const SECTION_HEADER_CLASS = "group/section flex w-full items-center justify-between px-4 py-3 text-left";
-const SECTION_CHEVRON_CLASS =
-  "size-5 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/section:rotate-180";
-
 type FieldWrite = (value: unknown) => void;
-
-type McpSelectorValue = { servers: string[]; accessGroups: string[]; toolsets?: string[] };
 
 
 const isBlank = (value: unknown): boolean => value === undefined || value === null || value === "";
@@ -94,32 +61,6 @@ const ceilingRule = (ceiling: number | null | undefined, message: (limit: number
   validate: (value: unknown) =>
     value && ceiling !== null && ceiling !== undefined && (value as number) > ceiling ? message(ceiling) : true,
 });
-
-interface McpToolPermissionsFieldProps {
-  readonly accessToken: string;
-  readonly control: Control<MountedFormValues>;
-  readonly setValue: UseFormSetValue<MountedFormValues>;
-}
-
-const McpToolPermissionsField: React.FC<McpToolPermissionsFieldProps> = ({ accessToken, control, setValue }) => {
-  const selection = useWatch({ control, name: "allowed_mcp_servers_and_groups" }) as
-    | { servers?: string[]; accessGroups?: string[]; toolsets?: string[] }
-    | undefined;
-  const toolPermissions = useWatch({ control, name: "mcp_tool_permissions" }) as Record<string, string[]> | undefined;
-
-  return (
-    <div className="mt-6">
-      <MCPToolPermissions
-        accessToken={accessToken}
-        selectedServers={selection?.servers || []}
-        selectedAccessGroups={selection?.accessGroups || []}
-        selectedToolsets={selection?.toolsets || []}
-        toolPermissions={toolPermissions || {}}
-        onChange={(toolPerms) => setValue("mcp_tool_permissions", toolPerms)}
-      />
-    </div>
-  );
-};
 
 /**
  * Interface for pre-filling the create key form from URL parameters
@@ -193,21 +134,12 @@ export const fetchUserModels = async (
  * ─────────────────────────────────────────────────────────────────────────
  */
 const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOpenCreate, prefillData }) => {
-  const { accessToken, userId: userID, userRole, premiumUser } = useAuthorized();
-  const canEditGuardrails = premiumUser || (userRole != null && rolesWithWriteAccess.includes(userRole));
+  const { accessToken, userId: userID, userRole } = useAuthorized();
   const { data: identity } = useSessionIdentity();
-  const { data: projects } = useProjects();
-  const { data: uiSettingsData } = useUISettings();
-  const { data: tagsData } = useTags();
-  const disableCustomApiKeys = Boolean(uiSettingsData?.values?.disable_custom_api_keys);
-  const tagOptions = tagsData ? Object.values(tagsData).map((tag) => ({ value: tag.name, label: tag.name })) : [];
   const queryClient = useQueryClient();
   const [formDefaults] = useState<MountedFormValues>(() => ({
     team_id: team ? team.team_id : null,
     key_type: "llm_api",
-    tpm_limit_type: null,
-    rpm_limit_type: null,
-    mcp_tool_permissions: {},
     duration: "",
   }));
   const form = useForm<MountedFormValues>({
@@ -219,68 +151,26 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
   const mountedForm = useMemo(() => ({ control: form.control, registry }), [form.control, registry]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [apiKey, setApiKey] = useState(null);
-  const [userModels, setUserModels] = useState<string[]>([]);
   const [modelsToPick, setModelsToPick] = useState<string[]>([]);
   const keyOwner = "you";
   const [hasPrefilled, setHasPrefilled] = useState(false);
   const [pendingPrefillModels, setPendingPrefillModels] = useState<string[] | null>(null);
-  const [guardrailsList, setGuardrailsList] = useState<string[]>([]);
-  const [loggingSettings, setLoggingSettings] = useState<any[]>([]);
   const [selectedCreateKeyTeam, setSelectedCreateKeyTeam] = useState<Team | null>(team);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [disabledCallbacks, setDisabledCallbacks] = useState<string[]>([]);
   const [keyType, setKeyType] = useState<string>("llm_api");
-  const [modelAliases, setModelAliases] = useState<{ [key: string]: string }>({});
   const [autoRotationEnabled, setAutoRotationEnabled] = useState<boolean>(false);
   const [rotationInterval, setRotationInterval] = useState<string>("30d");
-  const [routerSettings, setRouterSettings] = useState<RouterSettingsAccordionValue | null>(null);
-  const routerSettingsRef = useRef<RouterSettingsAccordionRef>(null);
-  const [budgetLimits, setBudgetLimits] = useState<BudgetWindowEntry[]>([]);
-  const [modelMaxBudget, setModelMaxBudget] = useState<ModelMaxBudget>({});
-  const [tagRateLimits, setTagRateLimits] = useState<TagRateLimitEntry[]>([]);
-  const [budgetFallbacks, setBudgetFallbacks] = useState<Record<string, string[]>>({});
-  const [budgetFallbacksKey, setBudgetFallbacksKey] = useState<number>(0);
-  const [routerSettingsKey, setRouterSettingsKey] = useState<number>(0);
+  const [routeTemplateId, setRouteTemplateId] = useState("");
   const selectedModels: string[] = (useWatch({ control: form.control, name: "models" }) as string[] | undefined) ?? [];
   const handleCancel = () => {
     setIsModalVisible(false);
     setApiKey(null);
     setSelectedCreateKeyTeam(null);
     form.reset(formDefaults);
-    setLoggingSettings([]);
-    setDisabledCallbacks([]);
     setKeyType("llm_api");
-    setModelAliases({});
     setAutoRotationEnabled(false);
     setRotationInterval("30d");
-    setRouterSettings(null);
-    setRouterSettingsKey((prev) => prev + 1);
-    setSelectedProjectId(null);
-    setBudgetLimits([]);
-    setTagRateLimits([]);
-    setBudgetFallbacks({});
-    setBudgetFallbacksKey((k) => k + 1);
+    setRouteTemplateId("");
   };
-
-  useEffect(() => {
-    if (userID && userRole && accessToken) {
-      fetchUserModels(userID, userRole, accessToken, setUserModels);
-    }
-  }, [accessToken, userID, userRole]);
-
-  useEffect(() => {
-    const fetchGuardrails = async () => {
-      try {
-        const response = await getGuardrailsList(accessToken);
-        const guardrailNames = response.guardrails.map((g: { guardrail_name: string }) => g.guardrail_name);
-        setGuardrailsList(guardrailNames);
-      } catch (error) {
-        console.error("Failed to fetch guardrails:", error);
-      }
-    };
-
-    fetchGuardrails();
-  }, [accessToken]);
 
   // A key belongs to the signed-in user and one team they already belong to.
   // The account is not asked to pick an owner, an organization, or any team
@@ -353,16 +243,9 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
         keyOwner,
         userID,
         selectedAgentId: null,
-        loggingSettings,
-        disabledCallbacks,
         autoRotationEnabled,
         rotationInterval,
-        modelAliases,
-        routerSettings: routerSettingsRef.current?.getValue() ?? routerSettings,
-        budgetLimits,
-        modelMaxBudget,
-        tagRateLimits,
-        budgetFallbacks,
+        routeTemplateId,
       };
       const built = buildKeyCreatePayload(input);
       if (built.kind === "duplicate_alias") {
@@ -396,10 +279,6 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
       setApiKey(response["key"]);
       toast.success(t("Virtual Key Created"));
       form.reset(formDefaults);
-      setBudgetLimits([]);
-      setTagRateLimits([]);
-      setBudgetFallbacks({});
-      setBudgetFallbacksKey((k) => k + 1);
       localStorage.removeItem("userData" + userID);
     } catch (error) {
       const simplifiedError = simplifyKeyGenerateError(error);
@@ -414,14 +293,6 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
   // Note: Model prefill from URL params is handled by the useEffect below, which
   // watches for pendingPrefillModels + modelsToPick to both be populated.
   useEffect(() => {
-    if (selectedProjectId) {
-      // When a project is selected, use the project's models
-      const project = projects?.find((p) => p.project_id === selectedProjectId);
-      const projectModels = project?.models ?? [];
-      setModelsToPick(projectModels);
-      form.setValue("models", []);
-      return;
-    }
     if (userID && userRole && accessToken) {
       fetchTeamModels(userID, userRole, accessToken, selectedCreateKeyTeam?.team_id ?? null).then((models) => {
         const allModels = excludeProxyWideSentinel(
@@ -434,9 +305,7 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
     if (!pendingPrefillModels) {
       form.setValue("models", []);
     }
-    // Clear MCP server selection when team changes (available servers may differ)
-    form.setValue("allowed_mcp_servers_and_groups", { servers: [], accessGroups: [] });
-  }, [selectedCreateKeyTeam, selectedProjectId, accessToken, userID, userRole, form]);
+  }, [selectedCreateKeyTeam, accessToken, userID, userRole, form]);
 
   // Apply deferred model prefill once the available model list arrives.
   // This handles timing where prefill data arrives before or after models are fetched.
@@ -455,33 +324,17 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
     setPendingPrefillModels(null);
   }, [pendingPrefillModels, modelsToPick, form]);
 
-  // Sync team when project is selected but teams loaded later (race condition)
-  useEffect(() => {
-    if (!selectedProjectId || !teams) return;
-    const project = projects?.find((p) => p.project_id === selectedProjectId);
-    if (!project?.team_id) return;
-    // If team is already set correctly, skip
-    if (selectedCreateKeyTeam?.team_id === project.team_id) return;
-    const projectTeam = teams.find((t) => t.team_id === project.team_id) || null;
-    if (projectTeam) {
-      setSelectedCreateKeyTeam(projectTeam);
-      form.setValue("team_id", projectTeam.team_id);
-    }
-  }, [teams, selectedProjectId, projects]);
-
   const chooseMemberTeam = (teamId: string) => {
     const chosen = memberTeams.find((item) => item.team_id === teamId) ?? null;
     setSelectedCreateKeyTeam(chosen);
-    setSelectedProjectId(null);
     form.setValue("team_id", teamId);
-    form.setValue("project_id", null);
   };
 
   const modelOptions: MultiSelectOption[] = [
-    ...(selectedProjectId === null && selectedCreateKeyTeam
+    ...(selectedCreateKeyTeam
       ? [{ value: "all-team-models", label: t("All Team Models") }]
       : []),
-    ...(selectedProjectId === null && !selectedCreateKeyTeam
+    ...(!selectedCreateKeyTeam
       ? [{ value: "all-proxy-models", label: t("All Proxy Models") }]
       : []),
     ...modelsToPick.map((model) => ({
@@ -651,32 +504,37 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                 </div>
               )}
 
-              {/* Section 3: Optional Settings */}
+              {/* Key controls */}
               {!isFormDisabled && (
-                <div className="mb-8">
-                  <Collapsible className="mt-4 mb-4 overflow-hidden rounded-lg border">
-                    <h3 className="m-0 text-lg font-medium text-foreground">
-                      <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                        {t("Optional Settings")}
-                        <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                      </CollapsibleTrigger>
-                    </h3>
-                    <CollapsibleContent className="px-4 pb-3">
+                <div className="mb-8 space-y-6">
+                  <div>
+                    <h3 className="mb-4 text-lg font-medium text-foreground">{t("Budget and Routing")}</h3>
+                    <div className="grid gap-5 rounded-lg border p-4 sm:grid-cols-2">
                       <MountedFormField
-                        className="mt-4"
                         label={
                           <span>
                             {t("Max Budget (USD)")}{" "}
-                            <SimpleTooltip content={t("Maximum amount in USD this key can spend. When reached, the key will be blocked from making further requests")}>
+                            <SimpleTooltip
+                              content={t(
+                                "Maximum amount in USD this key can spend. When reached, the key will be blocked from making further requests",
+                              )}
+                            >
                               <Info className="ml-1 inline size-3.5 align-text-bottom" />
                             </SimpleTooltip>
                           </span>
                         }
                         name="max_budget"
-                        help={t("Budget cannot exceed team max budget: ${value0}", { value0: (team?.max_budget !== null && team?.max_budget !== undefined ? team?.max_budget : t("unlimited")) })}
-                        rules={ceilingRule(
-                          team?.max_budget,
-                          (limit) => t("Budget cannot exceed team max budget: ${value0}", { value0: (formatNumberWithCommas(limit, 4)) }),
+                        help={t("Budget cannot exceed team max budget: ${value0}", {
+                          value0:
+                            selectedCreateKeyTeam?.max_budget !== null &&
+                            selectedCreateKeyTeam?.max_budget !== undefined
+                              ? selectedCreateKeyTeam.max_budget
+                              : t("unlimited"),
+                        })}
+                        rules={ceilingRule(selectedCreateKeyTeam?.max_budget, (limit) =>
+                          t("Budget cannot exceed team max budget: ${value0}", {
+                            value0: formatNumberWithCommas(limit, 4),
+                          }),
                         )}
                       >
                         {(control) => (
@@ -689,18 +547,28 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                           />
                         )}
                       </MountedFormField>
+
                       <MountedFormField
-                        className="mt-4"
                         label={
                           <span>
                             {t("Reset Budget")}{" "}
-                            <SimpleTooltip content={t("How often the budget should reset. For example, setting 'daily' will reset the budget every 24 hours")}>
+                            <SimpleTooltip
+                              content={t(
+                                "How often the budget should reset. For example, setting 'daily' will reset the budget every 24 hours",
+                              )}
+                            >
                               <Info className="ml-1 inline size-3.5 align-text-bottom" />
                             </SimpleTooltip>
                           </span>
                         }
                         name="budget_duration"
-                        help={t("Team Reset Budget: {value0}", { value0: (team?.budget_duration !== null && team?.budget_duration !== undefined ? team?.budget_duration : t("None")) })}
+                        help={t("Team Reset Budget: {value0}", {
+                          value0:
+                            selectedCreateKeyTeam?.budget_duration !== null &&
+                            selectedCreateKeyTeam?.budget_duration !== undefined
+                              ? selectedCreateKeyTeam.budget_duration
+                              : t("None"),
+                        })}
                       >
                         {(control) => (
                           <BudgetDurationDropdown
@@ -712,497 +580,38 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                           />
                         )}
                       </MountedFormField>
-                      <Field className="mt-4">
-                        <FieldLabel>
-                          <span>
-                            {t("Budget Windows")}{" "}
-                            <SimpleTooltip content={t("Set multiple independent budget windows (e.g., hourly $10 AND monthly $200). Each window tracks spend separately and resets on its own schedule.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        </FieldLabel>
-                        <BudgetWindowsEditor value={budgetLimits} onChange={setBudgetLimits} />
-                      </Field>
-                      <Field className="mt-4">
-                        <FieldLabel>
-                          <span>
-                            {t("Per-Model Budgets")}{" "}
-                            <SimpleTooltip content={t("Cap spend on individual models, each with its own reset window. Enforced across every request this key makes; usage is reported on the key's info page.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        </FieldLabel>
-                        <ModelMaxBudgetEditor
-                          value={modelMaxBudget}
-                          onChange={setModelMaxBudget}
-                          availableModels={modelsToPick}
-                          premiumUser={premiumUser === true}
+
+                      <div className="sm:col-span-2">
+                        <p className="mb-2 text-sm font-medium">{t("pages.routeTemplates.title")}</p>
+                        <RouteTemplateSelect
+                          accessToken={accessToken}
+                          value={routeTemplateId}
+                          onChange={setRouteTemplateId}
+                          scope="key"
                         />
-                      </Field>
-                      <Field className="mt-4">
-                        <FieldLabel>
-                          <span>
-                            {t("Budget Fallbacks")}{" "}
-                            <SimpleTooltip content={t("When a model exceeds its per-model budget (model_max_budget), requests automatically reroute to fallback models instead of failing. Configure per-model budgets in Advanced Settings.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        </FieldLabel>
-                        <BudgetFallbacksEditor
-                          key={budgetFallbacksKey}
-                          value={budgetFallbacks}
-                          onChange={setBudgetFallbacks}
-                          availableModels={modelsToPick}
-                        />
-                      </Field>
-                      <MountedFormField
-                        className="mt-4"
-                        label={
-                          <span>
-                            {t("Tokens per minute Limit (TPM)")}{" "}
-                            <SimpleTooltip content={t("Maximum number of tokens this key can process per minute. Helps control usage and costs")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="tpm_limit"
-                        help={t("TPM cannot exceed team TPM limit: {value0}", {
-                          value0: team?.tpm_limit !== null && team?.tpm_limit !== undefined ? team.tpm_limit : t("unlimited"),
-                        })}
-                        rules={ceilingRule(team?.tpm_limit, (limit) =>
-                          t("TPM limit cannot exceed team TPM limit: {value0}", { value0: limit }),
-                        )}
-                      >
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="mb-4 text-lg font-medium text-foreground">{t("Key Lifecycle")}</h3>
+                    <div className="rounded-lg border p-4">
+                      <MountedFormField name="duration" bare>
                         {(control) => (
-                          <NumericalInput
-                            {...control}
-                            value={control.value as number | string | undefined}
-                            step={1}
-                            width={400}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField name="tpm_limit_type" bare>
-                        {(control) => (
-                          <RateLimitTypeFormItem
-                            type="tpm"
-                            name="tpm_limit_type"
-                            className="mt-4"
-                            showDetailedDescriptions
+                          <KeyLifecycleSettings
                             id={control.id}
-                            value={control.value as string | null | undefined}
+                            value={control.value as string | undefined}
                             onChange={control.onChange}
-                            aria-invalid={control["aria-invalid"] ? true : undefined}
-                            aria-describedby={control["aria-describedby"]}
+                            autoRotationEnabled={autoRotationEnabled}
+                            onAutoRotationChange={setAutoRotationEnabled}
+                            rotationInterval={rotationInterval}
+                            onRotationIntervalChange={setRotationInterval}
+                            isCreateMode
                           />
                         )}
                       </MountedFormField>
-                      <MountedFormField
-                        className="mt-4"
-                        label={
-                          <span>
-                            {t("Requests per minute Limit (RPM)")}{" "}
-                            <SimpleTooltip content={t("Maximum number of API requests this key can make per minute. Helps prevent abuse and manage load")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="rpm_limit"
-                        help={t("RPM cannot exceed team RPM limit: {value0}", {
-                          value0: team?.rpm_limit !== null && team?.rpm_limit !== undefined ? team.rpm_limit : t("unlimited"),
-                        })}
-                        rules={ceilingRule(team?.rpm_limit, (limit) =>
-                          t("RPM limit cannot exceed team RPM limit: {value0}", { value0: limit }),
-                        )}
-                      >
-                        {(control) => (
-                          <NumericalInput
-                            {...control}
-                            value={control.value as number | string | undefined}
-                            step={1}
-                            width={400}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField name="rpm_limit_type" bare>
-                        {(control) => (
-                          <RateLimitTypeFormItem
-                            type="rpm"
-                            name="rpm_limit_type"
-                            className="mt-4"
-                            showDetailedDescriptions
-                            id={control.id}
-                            value={control.value as string | null | undefined}
-                            onChange={control.onChange}
-                            aria-invalid={control["aria-invalid"] ? true : undefined}
-                            aria-describedby={control["aria-describedby"]}
-                          />
-                        )}
-                      </MountedFormField>
-                      <Field className="mt-4">
-                        <FieldLabel>
-                          <span>
-                            {t("Per-Tag Rate Limits")}{" "}
-                            <SimpleTooltip content={t("Scope rate limits to a request tag so each tag (e.g. a cell or group) gets its own RPM counter. Requests without a matching tag fall back to the key-level limit.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        </FieldLabel>
-                        <TagRateLimitEditor value={tagRateLimits} onChange={setTagRateLimits} />
-                      </Field>
-                      <MountedFormField
-                        className="mt-4"
-                        label={
-                          <span>
-                            {t("Throttle on budget exceeded")}{" "}
-                            <SimpleTooltip content={t("When this key exceeds its max budget, throttle its TPM/RPM to the globally configured percentage instead of blocking access entirely. Requires budget_exceeded_throttle_percentage in litellm_settings and a TPM/RPM limit on the key.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="throttle_on_budget_exceeded"
-                      >
-                        {(control) => (
-                          <Switch
-                            id={control.id}
-                            checked={control.value === true}
-                            onCheckedChange={control.onChange}
-                            aria-describedby={control["aria-describedby"]}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        className="mt-4"
-                        label={
-                          <span>
-                            {t("Enable Prompt Caching")}{" "}
-                            <SimpleTooltip content={t("Automatically add prompt caching breakpoints (cache_control markers) to requests made with this key, cutting input cost on repeated prompts. Applies to Anthropic and Bedrock Claude models; requests that already set their own cache_control markers are left untouched.")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="enable_prompt_caching"
-                      >
-                        {(control) => (
-                          <Switch
-                            id={control.id}
-                            checked={control.value === true}
-                            onCheckedChange={control.onChange}
-                            aria-describedby={control["aria-describedby"]}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Guardrails")}{" "}
-                            <SimpleTooltip content={t("Apply safety guardrails to this key to filter content or enforce policies")}>
-
-                              <span onClick={(e) => { e.stopPropagation(); }}>
-                                <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                              </span>
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="guardrails"
-                        className="mt-4"
-                        help={
-                          canEditGuardrails
-                            ? t("Select existing guardrails or enter new ones")
-                            : t("Premium feature - Upgrade to set guardrails by key")
-                        }
-                      >
-                        {(control) => (
-                          <TagsInput
-                            id={control.id}
-                            value={(control.value as string[] | undefined) ?? []}
-                            onValueChange={control.onChange}
-                            disabled={!canEditGuardrails}
-                            placeholder={
-                              !canEditGuardrails
-                                ? t("Premium feature - Upgrade to set guardrails by key")
-                                : t("Select or enter guardrails")
-                            }
-                            options={guardrailsList.map((name) => ({ value: name, label: name }))}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Disable Global Guardrails")}{" "}
-                            <SimpleTooltip content={t("When enabled, this key will bypass any guardrails configured to run on every request (global guardrails)")}>
-
-                              <span onClick={(e) => { e.stopPropagation(); }}>
-                                <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                              </span>
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="disable_global_guardrails"
-                        className="mt-4"
-                        help={
-                          canEditGuardrails
-                            ? t("Bypass global guardrails for this key")
-                            : t("Premium feature - Upgrade to disable global guardrails by key")
-                        }
-                      >
-                        {(control) => (
-                          <Switch
-                            id={control.id}
-                            checked={control.value === true}
-                            onCheckedChange={control.onChange}
-                            disabled={!canEditGuardrails}
-                            aria-describedby={control["aria-describedby"]}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Access Groups")}{" "}
-                            <SimpleTooltip content={t("Assign access groups to this key. Access groups control which models, MCP servers, and agents this key can use")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="access_group_ids"
-                        className="mt-4"
-                        help={t("Select access groups to assign to this key")}
-                      >
-                        {(control) => (
-                          <AccessGroupSelector
-                            value={control.value as string[] | undefined}
-                            onChange={control.onChange}
-                            placeholder={t("Select access groups (optional)")}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Allowed Pass Through Routes")}{" "}
-                            <SimpleTooltip content={t("Allow this key to use specific pass through routes")}>
-
-                              <span onClick={(e) => { e.stopPropagation(); }}>
-                                <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                              </span>
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="allowed_passthrough_routes"
-                        className="mt-4"
-                        help={
-                          premiumUser
-                            ? t("Select existing pass through routes or enter new ones")
-                            : t("Premium feature - Upgrade to set pass through routes by key")
-                        }
-                      >
-                        {(control) => (
-                          <PassThroughRoutesSelector
-                            value={control.value as string[] | undefined}
-                            onChange={control.onChange}
-                            accessToken={accessToken}
-                            placeholder={
-                              !premiumUser
-                                ? t("Premium feature - Upgrade to set pass through routes by key")
-                                : t("Select or enter pass through routes")
-                            }
-                            disabled={!premiumUser}
-                            teamId={selectedCreateKeyTeam ? selectedCreateKeyTeam.team_id : null}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Metadata")}{" "}
-                            <SimpleTooltip content={t("JSON object with additional information about this key. Used for tracking or custom logic")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="metadata"
-                        className="mt-4"
-                      >
-                        {(control) => (
-                          <Textarea
-                            {...control}
-                            value={(control.value as string | undefined) ?? ""}
-                            rows={4}
-                            placeholder={t("Enter metadata as JSON")}
-                          />
-                        )}
-                      </MountedFormField>
-                      <MountedFormField
-                        label={
-                          <span>
-                            {t("Tags")}{" "}
-                            <SimpleTooltip content={t("Tags for tracking spend and/or doing tag-based routing. Used for analytics and filtering")}>
-                              <Info className="ml-1 inline size-3.5 align-text-bottom" />
-                            </SimpleTooltip>
-                          </span>
-                        }
-                        name="tags"
-                        className="mt-4"
-                        help={t("Tags for tracking spend and/or doing tag-based routing.")}
-                      >
-                        {(control) => (
-                          <TagsInput
-                            id={control.id}
-                            value={(control.value as string[] | undefined) ?? []}
-                            onValueChange={control.onChange}
-                            placeholder={t("Select or enter tags")}
-                            tokenSeparators={[","]}
-                            options={tagOptions}
-                          />
-                        )}
-                      </MountedFormField>
-                      {premiumUser ? (
-                        <Collapsible className="mt-4 mb-4 overflow-hidden rounded-lg border">
-                          <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                            <b>{t("Logging Settings")}</b>
-                            <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="px-4 pb-3">
-                            <div className="mt-4">
-                              <PremiumLoggingSettings
-                                value={loggingSettings}
-                                onChange={setLoggingSettings}
-                                premiumUser={true}
-                                disabledCallbacks={disabledCallbacks}
-                                onDisabledCallbacksChange={setDisabledCallbacks}
-                              />
-                            </div>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      ) : (
-                        <SimpleTooltip
-                          className="w-full"
-                          content={
-                            <span>
-                              {t("Key-level logging settings is an enterprise feature, get in touch -")}
-                              
-                            </span>
-                          }
-                          side="top"
-                        >
-                          <div style={{ position: "relative" }}>
-                            <div style={{ opacity: 0.5 }}>
-                              <Collapsible className="mt-4 mb-4 overflow-hidden rounded-lg border">
-                                <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                                  <b>{t("Logging Settings")}</b>
-                                  <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                                </CollapsibleTrigger>
-                                <CollapsibleContent className="px-4 pb-3">
-                                  <div className="mt-4">
-                                    <PremiumLoggingSettings
-                                      value={loggingSettings}
-                                      onChange={setLoggingSettings}
-                                      premiumUser={false}
-                                      disabledCallbacks={disabledCallbacks}
-                                      onDisabledCallbacksChange={setDisabledCallbacks}
-                                    />
-                                  </div>
-                                </CollapsibleContent>
-                              </Collapsible>
-                            </div>
-                            <div style={{ position: "absolute", inset: 0, cursor: "not-allowed" }} />
-                          </div>
-                        </SimpleTooltip>
-                      )}
-
-                      <Collapsible
-                        key={`router-settings-accordion-${routerSettingsKey}`}
-                        className="mt-4 mb-4 overflow-hidden rounded-lg border"
-                      >
-                        <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                          <b>{t("Router Settings")}</b>
-                          <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="px-4 pb-3">
-                          <div className="mt-4 w-full">
-                            <RouterSettingsAccordion
-                              key={routerSettingsKey}
-                              ref={routerSettingsRef}
-                              accessToken={accessToken || ""}
-                              value={routerSettings || undefined}
-                              onChange={setRouterSettings}
-                              modelData={
-                                userModels.length > 0
-                                  ? { data: userModels.map((model) => ({ model_name: model })) }
-                                  : undefined
-                              }
-                            />
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-
-                      <Collapsible className="mt-4 mb-4 overflow-hidden rounded-lg border">
-                        <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                          <b>{t("Model Aliases")}</b>
-                          <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="px-4 pb-3">
-                          <div className="mt-4">
-                            <p className="text-sm text-muted-foreground mb-4">
-                              {t("Create custom aliases for models that can be used in API calls. This allows you to create shortcuts for specific models.")}
-                            </p>
-                            <ModelAliasManager
-                              accessToken={accessToken}
-                              initialModelAliases={modelAliases}
-                              onAliasUpdate={setModelAliases}
-                              showExampleConfig={false}
-                            />
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-
-                      <Collapsible className="mt-4 mb-4 overflow-hidden rounded-lg border">
-                        <CollapsibleTrigger className={SECTION_HEADER_CLASS}>
-                          <b>{t("Key Lifecycle")}</b>
-                          <ChevronDown className={SECTION_CHEVRON_CLASS} />
-                        </CollapsibleTrigger>
-                        <CollapsibleContent className="px-4 pb-3">
-                          <div className="mt-4">
-                            <MountedFormField name="duration" bare>
-                              {(control) => (
-                                <KeyLifecycleSettings
-                                  id={control.id}
-                                  value={control.value as string | undefined}
-                                  onChange={control.onChange}
-                                  autoRotationEnabled={autoRotationEnabled}
-                                  onAutoRotationChange={setAutoRotationEnabled}
-                                  rotationInterval={rotationInterval}
-                                  onRotationIntervalChange={setRotationInterval}
-                                  isCreateMode={true}
-                                />
-                              )}
-                            </MountedFormField>
-                          </div>
-                        </CollapsibleContent>
-                      </Collapsible>
-                      <SchemaFormFields
-                        schemaComponent="GenerateKeyRequest"
-                        setValue={form.setValue}
-                        excludedFields={[
-                          "key_alias",
-                          "team_id",
-                          "organization_id",
-                          "models",
-                          "duration",
-                          "metadata",
-                          "tags",
-                          "guardrails",
-                          "max_budget",
-                          "budget_duration",
-                          "tpm_limit",
-                          "rpm_limit",
-                          ...(disableCustomApiKeys ? ["key"] : []),
-                        ]}
-                      />
-                    </CollapsibleContent>
-                  </Collapsible>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -58,6 +58,15 @@ const (
 	ActionKeyDelete  Action = "key.delete"
 	ActionKeyInspect Action = "key.inspect"
 
+	// Router templates. Selecting one is deliberately its own action rather than
+	// reusing team.write: a member may choose which settings their own team
+	// routes by, which is a smaller thing than changing the team's budget or its
+	// model ceiling, and folding the two together would tie their tightness
+	// levels to each other.
+	ActionRouteTemplateRead   Action = "route_template.read"
+	ActionRouteTemplateWrite  Action = "route_template.write"
+	ActionRouteTemplateSelect Action = "route_template.select"
+
 	// Usage, logs and audit.
 	ActionUsageRead Action = "usage.read"
 	ActionLogRead   Action = "log.read"
@@ -530,6 +539,14 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 			return nil
 		}
 		return ErrNotFound
+
+	// ---------- router templates ----------
+	case ActionRouteTemplateRead:
+		return g.decideRouteTemplateRead(obj, admin)
+	case ActionRouteTemplateWrite:
+		return g.decideRouteTemplateWrite(obj, admin)
+	case ActionRouteTemplateSelect:
+		return g.decideRouteTemplateSelect(obj, admin)
 
 	// ---------- usage, logs, audit ----------
 	case ActionUsageRead:
@@ -1033,4 +1050,120 @@ func (g *Guard) assertLoaded(ctx context.Context) error {
 		return ErrUnauthenticated
 	}
 	return nil
+}
+
+// decideRouteTemplateRead governs seeing a router template.
+//
+// Visibility is derived from ownership, which is what makes a template usable by
+// the scopes below its owner without exposing it sideways. A platform template
+// has no owner and is visible to everyone; an organization's template is visible
+// within that organization; a team's template is visible to that team.
+//
+// An invisible template answers ErrNotFound rather than ErrForbidden. Answering
+// "exists but not yours" would confirm the existence of another tenant's
+// configuration, which is the same reason the team queries answer 404.
+// 参数 obj（Object）：要判定的对象，含类型、团队、组织和归属用户；admin（bool）：为真时操作者按管理员处理，可以越过普通成员的限制。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 decide.go 内使用
+// 测试：authz_test.go
+func (g *Guard) decideRouteTemplateRead(obj Object, admin bool) error {
+	if admin {
+		return nil
+	}
+	// Platform templates: no organization, no team. Everyone may read one, because
+	// everyone falls back to the platform default and a template is how a
+	// replacement for it is described.
+	if obj.OrgID == "" && obj.TeamID == "" {
+		return nil
+	}
+	if obj.TeamID != "" {
+		// A team template is read by that team's members. An organization
+		// administrator reads it too: they administer the team, so hiding the
+		// team's configuration from them would contradict that.
+		if g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
+			return nil
+		}
+		return ErrNotFound
+	}
+	// An organization template is read by anyone in the organization, which
+	// includes every team beneath it.
+	if g.InOrg(obj.OrgID) || g.OrgAdminOf(obj.OrgID) {
+		return nil
+	}
+	return ErrNotFound
+}
+
+// decideRouteTemplateWrite governs creating, editing and deleting a router
+// template. Only the owner may write.
+//
+// This is the half that keeps one tenant from editing another's configuration.
+// Reading it from a sibling team is allowed on purpose; editing it is not.
+// 参数 obj（Object）：要判定的对象，含类型、团队、组织和归属用户；admin（bool）：为真时操作者按管理员处理，可以越过普通成员的限制。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 decide.go 内使用
+// 测试：authz_test.go
+func (g *Guard) decideRouteTemplateWrite(obj Object, admin bool) error {
+	if admin {
+		return nil
+	}
+	// A team template belongs to its team's administrator, and to the
+	// organization administrator above it.
+	if obj.TeamID != "" {
+		if g.TeamAdminOf(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
+			return nil
+		}
+		return ErrForbidden
+	}
+	// An organization template, and a platform template, belong to the
+	// administrator of that level. A plain member of the organization does not
+	// get to author one: writing is where an unvetted configuration enters the
+	// pool that everyone below can select.
+	if g.OrgAdminOf(obj.OrgID) {
+		return nil
+	}
+	return ErrForbidden
+}
+
+// decideRouteTemplateSelect governs pointing a scope at a template.
+//
+// A member may select for their own team, their own organization and their own
+// personal key. Selection is narrower than writing: it picks among
+// configurations somebody already approved, and it applies to exactly the scopes
+// the caller already belongs to, so it grants no reach they did not have.
+//
+// A service key is the team's rather than a person's, so selecting for it takes
+// the team administrator, matching how service keys are created and rotated.
+// 参数 obj（Object）：要判定的对象，含类型、团队、组织和归属用户；admin（bool）：为真时操作者按管理员处理，可以越过普通成员的限制。
+// 返回 error（error）：失败原因，nil 表示这一步成功。
+// 调用：仅在 decide.go 内使用
+// 测试：authz_test.go
+func (g *Guard) decideRouteTemplateSelect(obj Object, admin bool) error {
+	if admin {
+		return nil
+	}
+	switch obj.Type {
+	case ObjectKey:
+		if obj.OwnerType == iam.OwnerPersonal {
+			if obj.OwnerUserID == g.actor.UserID {
+				return nil
+			}
+			return ErrNotFound
+		}
+		if g.TeamAdminOf(obj.TeamID) {
+			return nil
+		}
+		return ErrForbidden
+	case ObjectTeam:
+		if g.InTeam(obj.TeamID) || g.OrgAdminOf(obj.OrgID) {
+			return nil
+		}
+		return ErrNotFound
+	case ObjectOrg:
+		if g.InOrg(obj.OrgID) || g.OrgAdminOf(obj.OrgID) {
+			return nil
+		}
+		return ErrNotFound
+	default:
+		return ErrNotFound
+	}
 }

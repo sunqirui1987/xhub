@@ -2,7 +2,7 @@
 
 端到端回归测试。每个测试起一个真实网关，走真实 HTTP，用真实 PostgreSQL。上游默认是本地假服务器（`simulated`）。打开 live 之后，同一条业务链路可以再打一次真实供应商。
 
-最近一次 `go test ./internal/regression/ -count=1` 通过。没设 `XHUB_REGRESSION_LIVE` 时，live 子测试跳过，不算失败。没设 `XHUB_REGRESSION_REDIS_URL` 时，冷却那一条跳过。
+没设 `XHUB_REGRESSION_LIVE` 时，live 子测试跳过，不算失败。没设 `XHUB_REGRESSION_REDIS_URL` 时，依赖 Redis 的冷却测试跳过；验证完整冷却链路时必须配置这个变量。
 
 ## 怎么跑
 
@@ -10,6 +10,7 @@
 ./scripts/regression.sh            # simulated，假上游，不花钱
 ./scripts/regression.sh --live     # 再跑 live，会花钱
 ./scripts/regression.sh -v TestBudget
+./scripts/regression.sh -v 'Template|RouterSettings' # 路由模板和平台路由配置
 make regression
 make regression-live
 ```
@@ -20,7 +21,52 @@ make regression-live
 
 - PostgreSQL，默认 `localhost:5433`（`docker compose up -d postgres`）
 - 可选 Redis：`XHUB_REGRESSION_REDIS_URL`。配了才走真实热花费、限流和冷却
-- live 还要 `XHUB_REGRESSION_LIVE=1`、`XHUB_REGRESSION_FENNO_KEY`、`XHUB_REGRESSION_QINIU_KEY`。密钥只从环境变量读
+- live 要 `XHUB_REGRESSION_LIVE=1`，再加每家供应商的一组变量（见下一节）
+
+## live 供应商：从环境变量发现，不写死在代码里
+
+供应商会一直加，加一家不该需要改回归代码。所以每多一家，运维只要多设一组变量，套件自己就把它带上跑。写死的表每加一家都要动代码，于是"没覆盖到"和"没人改代码"变成同一件事。
+
+变量名用 `<ID>` 作词干，大写，非字母数字换成下划线：
+
+| 变量 | 必需 | 说明 |
+| --- | --- | --- |
+| `XHUB_REGRESSION_<ID>_KEY` | 是 | 密钥。缺了这家就跳过；有 KEY 没 BASE 直接失败，因为半配的供应商看起来和通过一样 |
+| `XHUB_REGRESSION_<ID>_BASE` | 是 | chat 根地址。OpenAI 兼容的供应商要自带 `/v1` |
+| `XHUB_REGRESSION_<ID>_MODELS` | 是 | 逗号分隔的模型名，供应商真正认的那个 |
+| `XHUB_REGRESSION_<ID>_PROTOCOL` | 否 | `openai`（缺省）或 `anthropic`。决定走哪条上游路径、以及上游用哪套用量字段回话 |
+| `XHUB_REGRESSION_<ID>_BYPASS_BASE` | 否 | Bypass 端点要的裸主机名，缺省由 BASE 去掉 `/v1` |
+| `XHUB_REGRESSION_<ID>_BYPASS_MODEL` | 否 | 配了才跑 Bypass 建任务那条。端点类型因供应商而异，所以由配置点名 |
+| `XHUB_REGRESSION_<ID>_BYPASS_ENDPOINT` | 否 | Bypass 部署的端点类型，缺省 `qiniu_contents_generation` |
+
+例：
+
+```bash
+export XHUB_REGRESSION_LIVE=1
+export XHUB_REGRESSION_QINIU_KEY=sk-...
+export XHUB_REGRESSION_QINIU_BASE=https://api.qnaigc.com/v1
+export XHUB_REGRESSION_QINIU_MODELS=deepseek-v3,kimi-k2
+export XHUB_REGRESSION_FENNO_KEY=sk-...
+export XHUB_REGRESSION_FENNO_BASE=https://api.fenno.ai
+export XHUB_REGRESSION_FENNO_PROTOCOL=anthropic
+export XHUB_REGRESSION_FENNO_MODELS=claude-haiku-4-5
+```
+
+密钥只从环境变量读，绝不写进仓库。供应商不可用（模型下线、网络抖动）会让用例红，这是有意的：一个连不上的 live 模型什么也证明不了，而静默跳过看起来和通过一模一样。模型被供应商下线时把它从 `<ID>_MODELS` 里去掉。
+
+## 假上游的字段名照抄真实上游
+
+本地假服务器回答的**字段名**是从在跑的供应商实际抓下来的，值仍然是构造的（`defaultReply` 固定，因为计费断言要拿它算钱）。
+
+为什么必须这样：计量出错的方式就是字段读错，而字段读错在套件里能不能发生，取决于假上游回的字段像不像真的。从前假上游对 `/v1/messages` 也回 OpenAI 形状，于是 Anthropic 那一整套（`input_tokens` 只含未命中、`cache_read_input_tokens` 另算一笔）在套件里根本无从出现——那正是"账单少了一半而回归全绿"的原因。
+
+| 上游 | 路径 | 用量字段 |
+| --- | --- | --- |
+| OpenAI 兼容 | `/v1/chat/completions` | `prompt_tokens`/`completion_tokens`/`total_tokens`，多两个 `*_details` 对象 |
+| Anthropic | `/v1/messages` | `input_tokens`（**只含未命中**）、`cache_read_input_tokens`（另算一笔）、`cache_creation_input_tokens`、`cache_creation{}`、`output_tokens_details{}`、`service_tier`、`inference_geo` |
+
+流式也分两套形状：Anthropic 是事件序列（`message_start` 把 usage 嵌在 `message` 里先报一次输入，`message_delta` 再平铺报最终输出），OpenAI 兼容是 `data:` 行、usage 只在最后一个 chunk 上。
+
 
 ## 两种模式
 
@@ -28,8 +74,8 @@ make regression-live
 
 | 子测试 | 什么时候跑 | 上游 |
 | --- | --- | --- |
-| `simulated` | 始终 | 本地假服务器。可以按模型注入 200 / 400 / 429 / 500，也可以卡住一条部署 |
-| `live` | `XHUB_REGRESSION_LIVE=1` | fennoai 的 `gpt-5.6-sol`。断言看状态码、费用、日志和五层花费，不看假上游的拨号记录 |
+| `simulated` | 始终 | 本地假服务器。可以按模型注入 200 / 400 / 429 / 500，也可以卡住一条部署。回答的字段名照抄真实上游 |
+| `live` | `XHUB_REGRESSION_LIVE=1` | 环境里配的供应商，第一条模型。断言看状态码、费用、日志和五层花费，不看假上游的拨号记录 |
 
 必须脚本化上游才能制造的故障（强制 500、429、卡住部署、未知策略）用 `runSimulated`。live 子测试仍会出现，但会跳过并写明原因。网关、数据库和记账在 simulated 里仍然是真的。
 
@@ -75,7 +121,7 @@ router-settings 里的 `fallbacks`、`context_window_fallbacks`、`content_polic
 
 ### `mode_test.go`
 
-没有 `Test*`。`runBoth` / `runSimulated` 挂 simulated 和 live 两个子测试。`openLiveChat` 用 fennoai 的 `gpt-5.6-sol` 建网关和五层租户。
+没有 `Test*`。`runBoth` / `runSimulated` 挂 simulated 和 live 两个子测试。`openLiveChat` 用环境里发现的第一家供应商的第一条模型建网关和五层租户——那些业务链路用例（额度、名单、密钥）要证明的是网关的记账和鉴权，与具体哪一家无关，所以不必每家都跑一遍；专门验计量的是 `pricing_live_test.go`。
 
 ### `chain_support_test.go`
 
@@ -238,6 +284,17 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 | `TestAnUnpricedCallIsNotRecordedAsFree` | 目录里没有的模型不发计费头（发了等于说这次零元，而实际是不知道），日志行仍然在，金额是零，但不编造任何一侧的明细 |
 | `TestACachedCallIsNotBilledAtTheInputRate` | 缓存读按缓存价收，不是输入价。日志里提示侧整体不小于缓存那一行，否则控制台减完会显示负数 |
 
+### `pricing_units_test.go`
+
+前面那个文件钉的是"这个数怎么来的"，用 `litellm_params.rates` 这一种写法。这里换角度看两件没覆盖的事：**控制台真正写出来的价格形状**，以及**目录里每一条模型、每一个它报价了的计费维度**。
+
+| 测试 | 证明 |
+| --- | --- |
+| `TestConsolePriceFormIsBilledForEveryDimension` | 逐维度覆盖控制台的单价形状（token、缓存读、按秒、按张、按次各一条真实的部署 + 真实的调用）。价格只写在扁平字段上，也就是从界面加模型时会写进去的那几个键。每条断言金额、`source=snapshot`、账单里出现该维度、以及明细加起来等于实际扣的钱 |
+| `TestTheFlatPeakFieldIsActuallyRead` | 控制台那两组单价格子里的高峰那一组真的被读了。改动前计费只读基础价，高峰时段按空闲价收——那一格填了不读，少收一半。断言"落在两档之一，且和账单说的那一档一致" |
+| `TestAnthropicShapedUsageIsBilledWhole` | 按 Anthropic 形状让上游改口（`input_tokens` 只含未命中、`cache_read_input_tokens` 另算一笔），断言收的钱 = 未命中 × 输入价 + 命中 × 缓存价，并且日志行的 `cached_tokens` 和收的钱说同一件事。走 `/v1/messages`，假上游按真实的 Anthropic 形状回 |
+| `TestTheCatalogPricesEveryMeasureItQuotes` | **守卫**：遍历内置价目表里每一条模型，对它报价过的每一个（计量，侧）按该计量试算一次，要求都能算出钱。改动前按秒的 146 条费率一条都取不到、44 个模型的联网搜索被归成按秒、22 个只有 thinking/text 变体的模型整个算不出钱，而当时套件全绿 |
+
 ### `split_test.go`
 
 一个对外名挂两条不同供应商的部署，按比例分流量。`proxy_models` 的 `model_name` 上没有唯一约束，所以这种部署本来就能建出来；缺的是"按比例选出第一条"。
@@ -260,6 +317,37 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 2. 管理员写成 `lowest-cost`，下一次立刻打到便宜部署并记账。
 3. `num_retries=2`，便宜部署回 500。上游先见到两次失败，再见到贵的那条并成功。五层花费只增加成功那一笔。
 4. `fallbacks` 写入后，`GET /router/settings` 能读回来。下一次调用仍打原来的部署池，不改打另一个对外模型。
+
+### `route_template_test.go`
+
+覆盖模板选择的基本链路：未选择时使用平台默认、团队覆盖组织、会话请求使用团队模板、控制台展示生效来源、引用中的模板拒绝删除，以及创建密钥时保存选择。全部走真实管理接口和推理请求，使用本地假上游。
+
+### `route_template_config_test.go`
+
+把整份路由模板配置的保存、范围绑定和请求效果连起来。平台默认是全局 `router_settings` 文档；新建模板时复制平台值，更新模板时整份替换。生效优先级是密钥 → 团队 → 组织 → 平台，选中模板后不再逐字段混入上层配置。
+
+| 测试 | 证明 |
+| --- | --- |
+| `TestRouteTemplateConfigurationRoundTrip` | 控制台字段目录中的每个字段都有读写样例，创建、详情、列表保留完整正文；更新整份替换，零、false、空数组和 null 不丢失。新增字段未补样例会失败 |
+| `TestRouteTemplateSeedsOnceFromPlatformDefaults` | 新建时继承平台快照；后续平台编辑不改变已选模板，清空选择后使用最新平台值 |
+| `TestRouteTemplatePrecedenceUsesOneWholeDocument` | 逐级选择和清空组织、团队、密钥模板，策略和重试次数一起生效；控制台来源与实际拨到的上游一致 |
+| `TestRouteTemplateEditsApplyOnlyToSelectedScopes` | 修改模板后下一次请求立即使用新正文，未选择该模板的租户不受影响 |
+| `TestRouteTemplateRetriesAndFailoverBillOnce` | 500/429 按模板次数重试后换部署，只扣成功一笔；400 不重试、不计费；全失败返回 502、不扣费 |
+| `TestRouteTemplateWeightsDriveTraffic` | 编辑器列表和映射两种权重形状均覆盖；模板 3:7 覆盖部署 9:1，十次请求准确分成 3 和 7，逐次核对计费；清空后恢复平台策略 |
+| `TestRouteTemplateTimeoutChangesWithoutRestart` | 平台或模板的请求超时修改立即生效；阻塞上游触发超时且不计费，抬高超时后恢复成功 |
+| `TestRouteTemplateCooldownUsesSelectedThresholds` | 使用真实 Redis 验证模板失败阈值和冷却 TTL，后续跳过冷却部署；清空选择后共享部署冷却仍有效 |
+| `TestRouteTemplateScopeFormsKeepAndClearSelections` | 组织、团队、密钥创建和更新接口都保存选择；省略字段保持，null/空串清空；实际请求同步恢复继承 |
+| `TestRouteTemplateUsageAndDeletionCoverEveryScope` | 三种范围均计入引用数，删除返回 409 和完整引用列表；逐级解绑后可删除，随后读取为 404 |
+| `TestRouteTemplatePermissionsRejectCrossOrganizationChanges` | 平台模板可见、其他组织模板不可见；跨组织选择和修改平台模板被拒绝，原配置与绑定保持 |
+
+这里区分“字段能保存”和“字段参与请求”。策略、权重、重试、请求超时和冷却有请求效果断言；模型级 `fallbacks`、流式超时、重试策略、别名等高级字段只验证保存和读取，不能据此认定请求期已实现。模型级回退当前只存储，全部署失败仍返回 502。
+
+这些测试不调用真实供应商。完整运行（含冷却）时，先准备专用 Redis，再执行：
+
+```bash
+XHUB_REGRESSION_REDIS_URL=redis://localhost:6379/0 \
+  ./scripts/regression.sh -v 'Template|RouterSettings'
+```
 
 ### `fallback_test.go`
 
@@ -342,13 +430,20 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 
 ### `live_test.go`
 
-`TestLiveFennoaiAndQiniuCallTheRealVendors`。没开 live 就整段跳过。开了之后三个子测试：
+`TestLiveConfiguredVendorsAnswer`：环境里配的每一家供应商、每一条模型各发一次真实调用，要求回正数用量、并且网关按内置价目表把这次调用算出了非零金额。没开 live 或没配供应商就整段跳过。
 
-- fennoai chat：`fennoai/gpt-5.6-sol` 回 usage，并且被网关定价
-- qiniu chat：`qiniu/deepseek-v3` 同样
-- qiniu Seedance：经 Bypass 建一个真实任务
+`TestLiveBypassCreatesAndPollsARealTask`：只有配了 `<ID>_BYPASS_MODEL` 的供应商跑。经网关建一个真实任务再查回来，证明供应商返回的 id 就是网关能再查回去的 id。
 
-这三条证明网关发出去的形状是供应商认的。假上游证明不了这一点。业务链路的 live 子测试在各自文件里，用的是 `openLiveChat`，不在这个文件。
+### `pricing_live_test.go`
+
+拿**真实模型和真实上游回答**验计量。假上游能证明网关自己的接线对，证明不了"网关读得懂供应商真正发回来的那个东西"——而计量出错恰恰在这里。
+
+| 测试 | 证明 |
+| --- | --- |
+| `TestLiveRealModelsAreBilledFromTheCatalog` | 每条真实模型：上游回了正数用量、网关按内置价目表算出非零金额、账单留下了用到的费率、**费率里的数量等于上游报的数量**、数量 × 单价 = 收到的那笔钱、用量行里的 token 数也是真实的。部署上不写单价，所以价只可能来自价目表 |
+| `TestLiveVendorUsageFieldsAreUnderstood` | 把真实回答里的用量字段名逐个列出来，要求网关的归一化认得它们，并把提示侧读成"整段提示"。新接一家用第三套拼法时会红在这里，而不是红在账单上 |
+| `TestLiveStreamingIsBilledFromTheRealUsage` | 流式也读得到真实用量。断言读日志行而不是响应头——流式开始写正文后就不能再补计费头，这是有意的 |
+| `TestLiveSameVendorViaEitherProtocolIsBilledAlike` | 同一家、同一个模型的两种协议被同等计费。两套字段名（`input_tokens` 与 `prompt_tokens`）指同一笔钱，单位价必须一致。只在同一 base 同一模型同时配了两种协议时跑 |
 
 ## 断言约定
 
@@ -386,6 +481,32 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 
 终局失败原来只留进程日志。现在和 400 一样记一条观测，状态在，token 和费用为 0。由 `TestFailedCallIsLoggedButNotCharged` 钉住。
 
+### 计费维度整体取不到价（按秒、按张、按次）
+
+由 `pricing_units_test.go` 的守卫挖出来，已经修好。三条都是同一种漏收：状态码 200、不报错、账单上是零或明显偏小。
+
+| 原来 | 根因 | 现在 |
+| --- | --- | --- |
+| 按秒的 146 条费率一条都取不到 | 市场把限定词写进了变体名（`1080p_v_duration`），而查找链只会退到空变体 | 一侧只有变体价时取其中最便宜的一档，并在 `applied` 上标 `fallback`，让"选出来的"和"量出来的"能分开 |
+| 44 个模型的联网搜索被归成按秒 | `web_search_req` 的单位名是 `second`，但计的是**次数** | 识别 `search` 限定词，按 `query` 计费；报秒数时不会误收搜索费 |
+| 22 个只有 thinking/text/wiv 变体的模型算不出钱，3 个静默丢掉输入侧 | 同上：整侧只有变体价 | 同上。`hunter-alpha` 这类本来就免费（价是 0）的不受影响 |
+
+守卫本身留在套件里：它遍历整张价目表，对每一个它报价了的（计量，侧）试算一次。价目表刷新后某个维度再次整体取不到价，它会红。
+
+### 控制台填的价被绕过
+
+控制台的单价表单一个格子一个字段，提交的是 `input_cost_per_token`、`output_cost_per_second` 这样的扁平键，不是一个 `rates` 数组。而计费路径对"部署自带价"走的是另一套算术，只读每 token 的两个字段。
+
+结果是三件事一起发生：高峰那一格填了不读（高峰按空闲价收，少收一半）、缓存读被算进 input 又加进 total（带缓存的调用多收一遍）、按秒按张按次的价一律不存在（记一行零费用）。
+
+现在扁平字段转成费率表之后走**同一段**计费算术（`catalog.RatesFromFlat`），没有第二份实现可以漂移。由 `TestConsolePriceFormIsBilledForEveryDimension`、`TestTheFlatPeakFieldIsActuallyRead` 钉住。
+
+### Anthropic 形状的用量被少算一半
+
+供应商对"输入 token"的定义不一致：OpenAI 的 `prompt_tokens` 是整段提示，Anthropic 的 `input_tokens` 只含未命中的那部分、缓存读另算一笔。用前者的读法读后者，800 个缓存 token 整个丢掉，而剩下的 200 个反而按缓存价收。
+
+这套回归一直没发现，因为假上游对 `/v1/messages` 也回 OpenAI 形状——那一整类解析错在套件里无从发生。现在假上游的两套形状都照抄真实上游，`catalog.NormalizeUsage` 按"缓存计数写在哪里"区分两种语义（顶层字段是第二笔，嵌套在提示计数下的是子集）。由 `TestAnthropicShapedUsageIsBilledWhole` 和 `TestLiveVendorUsageFieldsAreUnderstood` 钉住。
+
 ## 写新测试
 
 - 从 `newHarness(t, chatDeployment("名字"))` 开始。要五层花费就用 `openScope`。
@@ -393,4 +514,8 @@ live 用真实模型名和另一个不存在的名字，证明名单内成功、
 - 单价用 `testInputRate` / `testOutputRate`。
 - 看上游之前先 `h.resetUpstream()`，再用 `h.upstreamCalls()` 或 `h.upstreamSince`。
 - 从目录取数的接口用目录里确实存在的模型名，例如 `claude-4.1-opus`。
+- 假上游回答的字段名要照抄真实供应商。值随便构造，**字段名不能编**——字段形状错了，
+  用例就测不到真实路径上会发生的错。新加一种回答形状时先对着真供应商抓一次。
+- 要覆盖真实模型和真实上游回答的，放进 `pricing_live_test.go`，供应商从环境变量发现，
+  不要在代码里写死任何一家的名字或地址。
 - 注释写中文，写清为什么值得测。

@@ -14,6 +14,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
@@ -49,6 +50,10 @@ func (h *logHost) RequireLLMPrincipal(http.ResponseWriter, *http.Request) *auth.
 func (h *logHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
 	return &auth.Principal{Kind: "session"}, nil
 }
+func (h *logHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
+	return prefs.PlatformSettings(nil)
+}
+
 func (h *logHost) GatewayConfig() *config.Config   { return h.cfg }
 func (h *logHost) HTTPClient() *http.Client        { return h.client }
 func (h *logHost) ResponseCache() *cache.DualCache { return h.cache }
@@ -62,7 +67,7 @@ func (h *logHost) GuardrailBlocks(string, map[string]any) (bool, string) {
 func (h *logHost) AttachCredential(dep config.ModelEntry) (config.ModelEntry, error) { return dep, nil }
 func (h *logHost) IncBusy(string)                                                    {}
 func (h *logHost) DecBusy(string)                                                    {}
-func (h *logHost) NoteFailure(string)                                                {}
+func (h *logHost) NoteFailure(string, prefs.RouteSettings)                           {}
 func (h *logHost) NoteLatency(string, float64)                                       {}
 func (h *logHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, string) {
 }

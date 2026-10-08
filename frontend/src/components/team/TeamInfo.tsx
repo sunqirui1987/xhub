@@ -65,7 +65,7 @@ import { ModelSelect } from "../ModelSelect/ModelSelect";
 import { estimateChecks, estimateTooltips } from "../templates/estimatedOutputTokens";
 
 import NumericalInput from "../shared/numerical_input";
-import { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
+import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
 import MemberModal from "./EditMembership";
 
 import {
@@ -233,6 +233,7 @@ export interface TeamData {
     description?: string;
     team_id: string;
     organization_id: string | null;
+    route_template_id?: string | null;
     admins: string[];
     members: string[];
     members_with_roles: Member[];
@@ -305,6 +306,7 @@ const teamUpdateFieldsSchema = z.object({
   team_member_tpm_limit: numericInputSchema,
   team_member_rpm_limit: numericInputSchema,
   budget_duration: z.string().nullish(),
+  route_template_id: z.string().optional(),
   tpm_limit: numericInputSchema,
   rpm_limit: numericInputSchema,
   modelLimits: z
@@ -424,6 +426,7 @@ const computeEffectiveGuardrails = (info: TeamInfoRecord, globalGuardrailNames: 
 
 const toTeamFormValues = (info: TeamInfoRecord, effectiveGuardrails: string[]): TeamUpdateFormValues => ({
   team_alias: info.team_alias,
+  route_template_id: info.route_template_id ?? "",
   team_description: info.description ?? "",
   blocked: info.blocked === true,
   models: info.models,
@@ -540,7 +543,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [isTeamSaving, setIsTeamSaving] = useState(false);
   const [teamModelAliases, setTeamModelAliases] = useState<Record<string, string>>({});
-  const routerSettingsRef = React.useRef<RouterSettingsAccordionRef>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const { userRole, userId } = useAuthorized();
 
@@ -796,6 +798,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
         updateData.max_budget = sanitizeNumeric(values.max_budget);
         updateData.blocked = values.blocked === true;
       }
+      updateData.route_template_id = values.route_template_id ?? "";
 
       await teamUpdateCall(accessToken, updateData);
       queryClient.invalidateQueries({ queryKey: organizationKeys.all });
@@ -933,6 +936,18 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                 <FieldGroup>
                   <FormField control={form.control} name="team_alias" label={t("Team Name")}>
                     {({ ref, value, ...field }) => <UIInput {...field} ref={ref} value={value ?? ""} />}
+                  </FormField>
+
+                  <FormField control={form.control} name="route_template_id" label={t("pages.routeTemplates.title")}>
+                    {({ value, onChange }) => (
+                      <RouteTemplateSelect
+                        accessToken={accessToken}
+                        value={value ?? ""}
+                        onChange={onChange}
+                        scope="team"
+                        scopeId={teamId}
+                      />
+                    )}
                   </FormField>
 
                   <FormField control={form.control} name="team_description" label={t("Description")}>

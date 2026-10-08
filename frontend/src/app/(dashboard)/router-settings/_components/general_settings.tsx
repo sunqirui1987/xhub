@@ -20,10 +20,18 @@ const PROMPT_CACHING_TAB = "prompt_caching";
 const ENABLE_ANTHROPIC_PROMPT_CACHING = "enable_anthropic_prompt_caching";
 const ANTHROPIC_PROMPT_CACHING_TTL = "anthropic_prompt_caching_ttl";
 
+const SETTINGS_TABS = ["loadbalancing", "routing-groups", "fallbacks", "prompt-caching", "general"] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number];
+
+const visibleTabs = (omit: readonly string[] | undefined): SettingsTab[] =>
+  SETTINGS_TABS.filter((tab) => omit == null || !omit.includes(tab));
+
 interface GeneralSettingsPageProps {
   accessToken: string | null;
   userRole: string | null;
   userID: string | null;
+  /** Tabs this page should not show. The template library edits load balancing and fallbacks. */
+  omitTabs?: readonly string[];
 }
 
 export interface generalSettingsItem {
@@ -199,7 +207,7 @@ export const PromptCachingPanel: React.FC<{
   );
 };
 
-const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, userRole, userID }) => {
+const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, userRole, userID, omitTabs }) => {
   const [generalSettings, setGeneralSettings] = useState<generalSettingsItem[]>([]);
 
   useEffect(() => {
@@ -269,78 +277,104 @@ const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, user
     return null;
   }
 
+  const tabs = visibleTabs(omitTabs);
+  const show = (tab: SettingsTab) => tabs.includes(tab);
+  const tabsClass = omitTabs && omitTabs.length > 0 ? "w-full" : "h-[75vh] w-full";
+
   return (
     <div className="w-full">
-      <Tabs defaultValue="loadbalancing" className="h-[75vh] w-full">
+      <Tabs defaultValue={tabs[0] ?? "general"} className={tabsClass}>
         <TabsList variant="line">
-          <TabsTrigger value="loadbalancing">{t("pages.routerSettings.loadbalancing")}</TabsTrigger>
-          <TabsTrigger value="routing-groups">{t("pages.routerSettings.routingGroups")}</TabsTrigger>
-          <TabsTrigger value="fallbacks">{t("pages.routerSettings.fallbacks")}</TabsTrigger>
-          <TabsTrigger value="prompt-caching">{t("pages.routerSettings.promptCaching")}</TabsTrigger>
-          <TabsTrigger value="general">{t("pages.routerSettings.general")}</TabsTrigger>
+          {show("loadbalancing") && (
+            <TabsTrigger value="loadbalancing">{t("pages.routerSettings.loadbalancing")}</TabsTrigger>
+          )}
+          {show("routing-groups") && (
+            <TabsTrigger value="routing-groups">{t("pages.routerSettings.routingGroups")}</TabsTrigger>
+          )}
+          {show("fallbacks") && <TabsTrigger value="fallbacks">{t("pages.routerSettings.fallbacks")}</TabsTrigger>}
+          {show("prompt-caching") && (
+            <TabsTrigger value="prompt-caching">{t("pages.routerSettings.promptCaching")}</TabsTrigger>
+          )}
+          {show("general") && <TabsTrigger value="general">{t("pages.routerSettings.general")}</TabsTrigger>}
         </TabsList>
-        <TabsContent value="loadbalancing" className="pt-6" keepMounted>
-          <RouterSettings accessToken={accessToken} userRole={userRole} userID={userID} />
-        </TabsContent>
-        <TabsContent value="routing-groups" className="pt-6" keepMounted>
-          <RoutingGroups />
-        </TabsContent>
-        <TabsContent value="fallbacks" className="pt-6" keepMounted>
-          <Fallbacks accessToken={accessToken} userRole={userRole} userID={userID} />
-        </TabsContent>
-        <TabsContent value="prompt-caching" className="pt-6" keepMounted>
-          <PromptCachingPanel accessToken={accessToken} settings={generalSettings} onChange={handleInputChange} />
-        </TabsContent>
-        <TabsContent value="general" className="pt-6" keepMounted>
-          <Card>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("Setting")}</TableHead>
-                    <TableHead>{t("Value")}</TableHead>
-                    <TableHead>{t("Status")}</TableHead>
-                    <TableHead>{t("Action")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {generalSettings
-                    .filter((value) => value.field_type !== "TypedDictionary" && value.field_tab !== PROMPT_CACHING_TAB)
-                    .map((value, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="whitespace-normal">
-                          <p className="break-words font-medium">{fieldLabel(value.field_name)}</p>
-                          <p className="mt-0.5 break-all font-mono text-[0.65rem] text-muted-foreground">{value.field_name}</p>
-                          <p className="mt-1 break-words text-xs text-muted-foreground">{t(value.field_description)}</p>
-                        </TableCell>
-                        <TableCell>
-                          <SettingValueEditor setting={value} onChange={handleInputChange} />
-                        </TableCell>
-                        <TableCell>
-                          {value.stored_in_db == true ? (
-                            <StatusBadge tone="success" label={t("In DB")} />
-                          ) : value.stored_in_db == false ? (
-                            <StatusBadge tone="neutral" label={t("In Config")} />
-                          ) : (
-                            <StatusBadge tone="neutral" label={t("Not Set")} />
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Button onClick={() => handleUpdateField(value.field_name)}>{t("Update")}</Button>
-                          <span
-                            onClick={() => handleResetField(value.field_name)}
-                            className="inline-flex shrink-0 cursor-pointer items-center justify-center px-1.5 py-1.5 text-destructive"
-                          >
-                            <Trash2 className="h-5 w-5 shrink-0" />
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
+        {show("loadbalancing") && (
+          <TabsContent value="loadbalancing" className="pt-6" keepMounted>
+            <RouterSettings accessToken={accessToken} userRole={userRole} userID={userID} />
+          </TabsContent>
+        )}
+        {show("routing-groups") && (
+          <TabsContent value="routing-groups" className="pt-6" keepMounted>
+            <RoutingGroups />
+          </TabsContent>
+        )}
+        {show("fallbacks") && (
+          <TabsContent value="fallbacks" className="pt-6" keepMounted>
+            <Fallbacks accessToken={accessToken} userRole={userRole} userID={userID} />
+          </TabsContent>
+        )}
+        {show("prompt-caching") && (
+          <TabsContent value="prompt-caching" className="pt-6" keepMounted>
+            <PromptCachingPanel accessToken={accessToken} settings={generalSettings} onChange={handleInputChange} />
+          </TabsContent>
+        )}
+        {show("general") && (
+          <TabsContent value="general" className="pt-6" keepMounted>
+            <Card>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("Setting")}</TableHead>
+                      <TableHead>{t("Value")}</TableHead>
+                      <TableHead>{t("Status")}</TableHead>
+                      <TableHead>{t("Action")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {generalSettings
+                      .filter(
+                        (value) => value.field_type !== "TypedDictionary" && value.field_tab !== PROMPT_CACHING_TAB,
+                      )
+                      .map((value, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="whitespace-normal">
+                            <p className="break-words font-medium">{fieldLabel(value.field_name)}</p>
+                            <p className="mt-0.5 break-all font-mono text-[0.65rem] text-muted-foreground">
+                              {value.field_name}
+                            </p>
+                            <p className="mt-1 break-words text-xs text-muted-foreground">
+                              {t(value.field_description)}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            <SettingValueEditor setting={value} onChange={handleInputChange} />
+                          </TableCell>
+                          <TableCell>
+                            {value.stored_in_db == true ? (
+                              <StatusBadge tone="success" label={t("In DB")} />
+                            ) : value.stored_in_db == false ? (
+                              <StatusBadge tone="neutral" label={t("In Config")} />
+                            ) : (
+                              <StatusBadge tone="neutral" label={t("Not Set")} />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Button onClick={() => handleUpdateField(value.field_name)}>{t("Update")}</Button>
+                            <span
+                              onClick={() => handleResetField(value.field_name)}
+                              className="inline-flex shrink-0 cursor-pointer items-center justify-center px-1.5 py-1.5 text-destructive"
+                            >
+                              <Trash2 className="h-5 w-5 shrink-0" />
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

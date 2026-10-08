@@ -285,6 +285,7 @@ export interface Organization {
   users: any[] | null;
   members: any[] | null;
   object_permission?: ObjectPermission | null;
+  route_template_id?: string | null;
 }
 
 export interface CredentialItem {
@@ -3408,6 +3409,123 @@ export const getRouterSettingsCall = async (accessToken: string) => {
     console.error("Failed to get router settings:", error);
     throw error;
   }
+};
+
+/**
+ * Named router settings templates.
+ *
+ * A template is one whole router_settings document. An organization, a team and
+ * a key each select at most one, and the narrowest selection wins outright -
+ * nothing is merged field by field. Selecting no template means the platform
+ * default, which is the document /router/settings already edits.
+ *
+ * The body is sent and returned as an object rather than a JSON string: the
+ * backend stores it as text, but nothing above the route should have to know
+ * that, and a form that round-trips through a string round-trips through its own
+ * formatting bugs.
+ */
+export type RouteTemplate = {
+  id: string;
+  name: string;
+  body: Record<string, unknown>;
+  updated_at?: string;
+  /** How many organizations, teams and keys select this template. */
+  used_by?: number;
+  /**
+   * Whether the caller may edit this one. A sibling team's template is readable
+   * and selectable but not editable, and the console needs to know which is
+   * which rather than rendering an edit button that always fails.
+   */
+  writable?: boolean;
+  /** Ownership. Both absent is a platform template. */
+  organization_id?: string;
+  team_id?: string;
+};
+
+/** One scope that selects a template, as the delete refusal reports it. */
+export type RouteTemplateUsage = {
+  scope_type: "organization" | "team" | "key";
+  scope_id: string;
+  name: string;
+};
+
+/** What a scope will actually route by, and which level that came from. */
+export type EffectiveRouteTemplate = {
+  template_id?: string;
+  name?: string;
+  scope_type: "organization" | "team" | "key" | "platform";
+  scope_id?: string;
+};
+
+export const getRouteTemplatesCall = async (accessToken: string): Promise<RouteTemplate[]> => {
+  const data = await apiClient.get(`/route_template/list`, { accessToken });
+  return data?.data ?? [];
+};
+
+export const createRouteTemplateCall = async (
+  accessToken: string,
+  payload: { name: string; body: Record<string, unknown>; organization_id?: string; team_id?: string },
+) => {
+  return apiClient.post(`/route_template/new`, { accessToken, body: payload });
+};
+
+export const updateRouteTemplateCall = async (
+  accessToken: string,
+  id: string,
+  payload: { name: string; body: Record<string, unknown> },
+) => {
+  return apiClient.post(`/route_template/${encodeURIComponent(id)}/update`, { accessToken, body: payload });
+};
+
+export const getRouteTemplateUsageCall = async (accessToken: string, id: string): Promise<RouteTemplateUsage[]> => {
+  const data = await apiClient.get(`/route_template/${encodeURIComponent(id)}/usage`, { accessToken });
+  return data?.data ?? [];
+};
+
+/**
+ * Deletes a template. The backend refuses while any scope still selects it and
+ * answers 409 with the list, which the caller shows rather than swallowing: the
+ * difference between removing something nobody used and changing three teams'
+ * behaviour is the whole reason for the refusal.
+ */
+export const deleteRouteTemplateCall = async (accessToken: string, id: string) => {
+  return apiClient.post(`/route_template/${encodeURIComponent(id)}/delete`, { accessToken, body: {} });
+};
+
+/**
+ * Reads which template one scope selects, and what it will actually route by.
+ *
+ * The two differ: a scope that selects nothing inherits from the level above it,
+ * so `route_template_id` is what it chose and `effective` is what it uses. The
+ * console shows both, because otherwise a team that inherited looks identical to
+ * a team that selected the same template on purpose.
+ */
+export const getRouteTemplateBindingCall = async (
+  accessToken: string,
+  scope: "organization" | "team" | "key",
+  scopeId: string,
+): Promise<{ route_template_id: string; effective: EffectiveRouteTemplate }> => {
+  const data = await apiClient.get(
+    `/route_template/binding?scope=${encodeURIComponent(scope)}&scope_id=${encodeURIComponent(scopeId)}`,
+    { accessToken },
+  );
+  return {
+    route_template_id: data?.route_template_id ?? "",
+    effective: data?.effective ?? { scope_type: "platform" },
+  };
+};
+
+/** Points a scope at a template, or clears the selection when the id is empty. */
+export const setRouteTemplateBindingCall = async (
+  accessToken: string,
+  scope: "organization" | "team" | "key",
+  scopeId: string,
+  templateId: string,
+) => {
+  return apiClient.post(`/route_template/binding`, {
+    accessToken,
+    body: { scope, scope_id: scopeId, route_template_id: templateId },
+  });
 };
 
 export const getCacheSettingsCall = async (accessToken: string) => {

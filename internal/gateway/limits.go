@@ -130,6 +130,11 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 			httpx.WriteTypedError(w, path, 429, "budget_exceeded", "User budget has been exceeded")
 			return false
 		}
+		// A session has no key row, so the chain that resolves a template for a
+		// key does not run for it. The console's playground is a session caller,
+		// and it would otherwise always route by the platform default no matter
+		// what its team selected.
+		s.resolveSessionRouteTemplate(ctx, p)
 	}
 	if p.Key != nil {
 		if err := s.keyBudgetOK(ctx, p); err != nil {
@@ -144,7 +149,55 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	return p.Key == nil || s.enforceRateLimits(w, path, p, est)
 }
 
+// resolveSessionRouteTemplate records the router template a console session runs
+// under, on the same principal fields the key path fills.
+//
+// A session has memberships rather than one team. The rule for choosing is the
+// one the usage row already uses: a caller in exactly one team is filed there,
+// and a caller in several is left alone rather than guessed at. Applying a
+// template from an arbitrarily picked team would route one person's requests by
+// another team's settings, which is worse than falling back to the platform
+// default - the fallback is at least a setting somebody chose deliberately.
+//
+// The team row is read here rather than reusing the memberships list because the
+// memberships carry the organization but not the team's template column.
+// 参数 ctx（context.Context）：上下文，取消时停止；p（*auth.Principal）：已经解析的会话调用方。
+// 返回：无。写进 Principal 的 OrgID、RouteTemplateID 和 RouteTemplateSource。
+// 调用：enforceIdentityLimits。
+// 测试：route_settings_test.go
+func (s *Server) resolveSessionRouteTemplate(ctx context.Context, p *auth.Principal) {
+	memberships, err := s.IAM.MemberTeams(ctx, p.UserID)
+	if err != nil || len(memberships) != 1 {
+		return
+	}
+	team, err := s.IAM.GetTeam(ctx, memberships[0].TeamID)
+	if err != nil || team == nil {
+		return
+	}
+	p.TeamID = team.ID
+	p.OrgID = team.OrganizationID
+	if team.RouteTemplateID != nil {
+		p.RouteTemplateID = strings.TrimSpace(*team.RouteTemplateID)
+		p.RouteTemplateSource = "team"
+	}
+	if p.RouteTemplateID != "" {
+		return
+	}
+	org, err := s.IAM.GetOrg(ctx, team.OrganizationID)
+	if err != nil || org == nil || org.RouteTemplateID == nil {
+		return
+	}
+	p.RouteTemplateID = strings.TrimSpace(*org.RouteTemplateID)
+	p.RouteTemplateSource = "organization"
+}
+
 // keyBudgetOK walks the key's ownership chain and returns the first scope that is over budget. The key row is re-read so a spend or status change is visible immediately, and every ceiling above it is the live database value. A missing parent scope is an error rather than a skip: it means the row was deleted while the key still pointed at it.
+//
+// It also records the two things the rest of the request needs and would
+// otherwise have to fetch again: the organization above the team, and the router
+// settings template the first scope that selects one names. The template walk is
+// key, then team, then organization - the same order this function already visits
+// them in for the budget chain, so resolving it costs no extra read.
 // 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：仅在 limits.go 内使用
@@ -160,6 +213,12 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	}
 	if k.ExpiresAt != nil && !time.Now().Before(*k.ExpiresAt) {
 		return errKeyUnusable
+	}
+	// The key is the narrowest scope, so its selection is tried first and the
+	// levels below only fill in when it names none.
+	if k.RouteTemplateID != nil {
+		p.RouteTemplateID = strings.TrimSpace(*k.RouteTemplateID)
+		p.RouteTemplateSource = "key"
 	}
 	if k.UserID != nil {
 		owner, err := s.IAM.GetUser(ctx, *k.UserID)
@@ -192,12 +251,24 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	if overBudget(team.MaxBudget, team.Spend, s.hotSpendRef("team", team.ID)) {
 		return errBudget{scope: "Team"}
 	}
+	p.OrgID = team.OrganizationID
+	// The team is the next scope up. A key that named no template leaves the
+	// field empty, so this only takes effect when the key named none.
+	if p.RouteTemplateID == "" && team.RouteTemplateID != nil {
+		p.RouteTemplateID = strings.TrimSpace(*team.RouteTemplateID)
+		p.RouteTemplateSource = "team"
+	}
 	org, err := s.IAM.GetOrg(ctx, team.OrganizationID)
 	if err != nil {
 		return errKeyGone
 	}
 	if overBudget(org.MaxBudget, org.Spend, s.hotSpendRef("org", org.ID)) {
 		return errBudget{scope: "Organization"}
+	}
+	// And the organization is the widest scope in the chain.
+	if p.RouteTemplateID == "" && org.RouteTemplateID != nil {
+		p.RouteTemplateID = strings.TrimSpace(*org.RouteTemplateID)
+		p.RouteTemplateSource = "organization"
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ const STRATEGY_LABELS: Readonly<Record<string, string>> = {
   "usage-based-routing-v2": "Usage Based v2",
   "latency-based-routing": "Latency Based",
   "cost-based-routing": "Cost Based",
+  "weighted-split": "Weighted Split",
 };
 
 export const formatStrategyLabel = (strategy: string): string => STRATEGY_LABELS[strategy] ?? strategy;

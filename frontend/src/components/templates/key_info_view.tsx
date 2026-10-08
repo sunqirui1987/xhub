@@ -28,8 +28,7 @@ import {
 import { mapDisplayToInternalNames, mapInternalToDisplayNames } from "../callback_info_helpers";
 import AutoRotationView from "../common_components/AutoRotationView";
 import DeleteResourceModal from "../common_components/DeleteResourceModal";
-import RouterSettingsSummary from "../common_components/RouterSettingsSummary";
-import { hasRouterSettings } from "../common_components/routerSettingsPayload";
+import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
 import { extractLoggingSettings, formatMetadataForDisplay, stripTagsFromMetadata } from "../key_info_utils";
 import { KeyResponse } from "../key_team_helpers/key_list";
 import LoggingSettingsView from "../logging_settings_view";
@@ -889,14 +888,19 @@ export default function KeyInfoView({
                     </div>
                   )}
 
-                  {hasRouterSettings(currentKeyData.router_settings) && (
-                    <div>
-                      <p className="text-sm font-medium">{t("Router Settings")}</p>
-                      <div className="mt-1">
-                        <RouterSettingsSummary routerSettings={currentKeyData.router_settings} />
-                      </div>
+                  <div>
+                    <p className="text-sm font-medium">{t("pages.routeTemplates.title")}</p>
+                    <div className="mt-1">
+                      <RouteTemplateSelect
+                        accessToken={accessToken}
+                        value={currentKeyData.route_template_id ?? ""}
+                        onChange={() => undefined}
+                        scope="key"
+                        scopeId={currentKeyData.token_id || currentKeyData.token}
+                        disabled
+                      />
                     </div>
-                  )}
+                  </div>
 
                   <div>
                     <p className="text-sm font-medium">{t("Tags")}</p>

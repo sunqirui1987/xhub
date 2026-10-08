@@ -5,7 +5,9 @@ import type { components } from "@/lib/http/schema";
 
 import type { OrgSettingsFormValues } from "./schema";
 
-export type OrgPatchBody = components["schemas"]["OrganizationUpdateRequestV2"];
+export type OrgPatchBody = components["schemas"]["OrganizationUpdateRequestV2"] & {
+  route_template_id?: string;
+};
 
 const budgetSliceSchema = z.object({
   max_budget: z.number().nullish(),
@@ -27,6 +29,7 @@ export const orgToForm = (org: Organization): OrgSettingsFormValues => {
     tpm_limit: budget.tpm_limit?.toString() ?? "",
     rpm_limit: budget.rpm_limit?.toString() ?? "",
     metadata: org.metadata && Object.keys(org.metadata).length > 0 ? JSON.stringify(org.metadata, null, 2) : "",
+    route_template_id: org.route_template_id ?? "",
   };
 };
 
@@ -46,5 +49,6 @@ export const buildOrgPatch = (dirty: Partial<OrgSettingsFormValues>): OrgPatchBo
       budget_duration: dirty.budget_duration === "" ? null : dirty.budget_duration,
     }),
     ...(dirty.metadata !== undefined && { metadata: metadataOrNull(dirty.metadata) }),
+    ...(dirty.route_template_id !== undefined && { route_template_id: dirty.route_template_id }),
   };
 };

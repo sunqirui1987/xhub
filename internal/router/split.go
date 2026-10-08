@@ -89,7 +89,7 @@ func (s *SplitState) PickWeighted(ids []string, weights []float64, available []b
 
 	total := 0.0
 	for i, id := range ids {
-		if !available[i] || weights[i] <= 0 {
+		if !available[i] || weights[i] <= 0 || math.IsNaN(weights[i]) || math.IsInf(weights[i], 0) {
 			delete(s.current, id)
 			continue
 		}
@@ -102,7 +102,7 @@ func (s *SplitState) PickWeighted(ids []string, weights []float64, available []b
 	best := -1
 	bestScore := math.Inf(-1)
 	for i, id := range ids {
-		if !available[i] || weights[i] <= 0 {
+		if !available[i] || weights[i] <= 0 || math.IsNaN(weights[i]) || math.IsInf(weights[i], 0) {
 			continue
 		}
 		score := s.current[id] + weights[i]

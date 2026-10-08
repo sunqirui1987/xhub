@@ -79,6 +79,21 @@ func Module(h Gate) httpx.Module {
 		reg.Handle("POST /project/update", func(w http.ResponseWriter, r *http.Request) { ProjectUpdate(h, w, r) })
 		reg.Handle("POST /project/delete", func(w http.ResponseWriter, r *http.Request) { ProjectDelete(h, w, r) })
 
+		// Named router settings templates. Editing one is the platform
+		// administrator's; selecting one on an organization, a team or a key is
+		// that scope's own administrator's, decided per object inside the
+		// handler.
+		reg.Handle("GET /route_template/list", func(w http.ResponseWriter, r *http.Request) { RouteTemplateList(h, w, r) })
+		reg.Handle("POST /route_template/new", func(w http.ResponseWriter, r *http.Request) { RouteTemplateCreate(h, w, r) })
+		reg.Handle("GET /route_template/{template_id}", func(w http.ResponseWriter, r *http.Request) { RouteTemplateGet(h, w, r) })
+		reg.Handle("POST /route_template/{template_id}/update", func(w http.ResponseWriter, r *http.Request) { RouteTemplateUpdate(h, w, r) })
+		reg.Handle("POST /route_template/{template_id}/delete", func(w http.ResponseWriter, r *http.Request) { RouteTemplateDelete(h, w, r) })
+		reg.Handle("GET /route_template/{template_id}/usage", func(w http.ResponseWriter, r *http.Request) { RouteTemplateUsage(h, w, r) })
+		// One binding endpoint for all three scopes: the scope is in the body,
+		// because the difference between them is one name and one id.
+		reg.Handle("GET /route_template/binding", func(w http.ResponseWriter, r *http.Request) { RouteTemplateBinding(h, w, r) })
+		reg.Handle("POST /route_template/binding", func(w http.ResponseWriter, r *http.Request) { RouteTemplateBinding(h, w, r) })
+
 		// Audit.
 		reg.Handle("GET /audit/logs", func(w http.ResponseWriter, r *http.Request) { AuditLog(h, w, r) })
 	})

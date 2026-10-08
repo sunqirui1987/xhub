@@ -77,13 +77,16 @@ func (u *User) Admin() bool { return u.Active() && u.Role == RoleAdmin }
 
 // Organization groups teams. Only platform administrators manage it.
 type Organization struct {
-	ID        string    `xorm:"pk 'id'" json:"id"`
-	Name      string    `xorm:"'name'" json:"name"`
-	Status    string    `xorm:"'status'" json:"status"`
-	MaxBudget *float64  `xorm:"'max_budget'" json:"max_budget"`
-	Spend     float64   `xorm:"'spend'" json:"spend"`
-	CreatedAt time.Time `xorm:"created 'created_at'" json:"created_at"`
-	UpdatedAt time.Time `xorm:"updated 'updated_at'" json:"-"`
+	ID        string   `xorm:"pk 'id'" json:"id"`
+	Name      string   `xorm:"'name'" json:"name"`
+	Status    string   `xorm:"'status'" json:"status"`
+	MaxBudget *float64 `xorm:"'max_budget'" json:"max_budget"`
+	Spend     float64  `xorm:"'spend'" json:"spend"`
+	// RouteTemplateID is the named router settings this organization selects.
+	// Empty means it selects nothing and inherits from the platform default.
+	RouteTemplateID *string   `xorm:"'route_template_id'" json:"route_template_id,omitempty"`
+	CreatedAt       time.Time `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt       time.Time `xorm:"updated 'updated_at'" json:"-"`
 }
 
 // 告诉 xorm 这个结构体对应数据库表 organizations。
@@ -103,11 +106,14 @@ type Team struct {
 	// Models is the team's model set and the ceiling for everything under it.
 	// An empty list means no restriction, so a team created a moment ago can
 	// reach the deployment's models; a team that must reach nothing is blocked.
-	Models    []string  `xorm:"json 'models'" json:"models"`
-	MaxBudget *float64  `xorm:"'max_budget'" json:"max_budget"`
-	Spend     float64   `xorm:"'spend'" json:"spend"`
-	CreatedAt time.Time `xorm:"created 'created_at'" json:"created_at"`
-	UpdatedAt time.Time `xorm:"updated 'updated_at'" json:"-"`
+	Models    []string `xorm:"json 'models'" json:"models"`
+	MaxBudget *float64 `xorm:"'max_budget'" json:"max_budget"`
+	Spend     float64  `xorm:"'spend'" json:"spend"`
+	// RouteTemplateID is the named router settings this team selects. Empty means
+	// it selects nothing and inherits from its organization.
+	RouteTemplateID *string   `xorm:"'route_template_id'" json:"route_template_id,omitempty"`
+	CreatedAt       time.Time `xorm:"created 'created_at'" json:"created_at"`
+	UpdatedAt       time.Time `xorm:"updated 'updated_at'" json:"-"`
 }
 
 // 告诉 xorm 这个结构体对应数据库表 teams。

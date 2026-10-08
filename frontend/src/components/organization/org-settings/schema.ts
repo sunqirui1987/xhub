@@ -31,6 +31,7 @@ const orgSettingsShape = {
   tpm_limit: wholeNumberOrEmpty,
   rpm_limit: wholeNumberOrEmpty,
   metadata: z.string().refine((value) => isBlank(value) || isJsonObject(value), t("Metadata must be a valid JSON object")),
+  route_template_id: z.string(),
 };
 
 export const orgSettingsSchema = z.object(orgSettingsShape);

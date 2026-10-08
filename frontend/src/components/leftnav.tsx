@@ -35,7 +35,7 @@ import {
   Tags,
   PanelLeftOpen,
   PlayCircle,
-  Route,
+  Waypoints,
   Settings as SettingsIcon,
   Shield,
   User,
@@ -46,10 +46,7 @@ import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/cva.config";
 import { rolesWithCapability } from "../utils/capabilities";
-import {
-  useSessionIdentity,
-  CAPABILITIES,
-} from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
+import { useSessionIdentity, CAPABILITIES } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import BetaBadge from "./BetaBadge";
 import SidebarAccountMenu from "./SidebarAccountMenu/SidebarAccountMenu";
 import SidebarUsageCard from "./SidebarUsageCard";
@@ -174,7 +171,7 @@ const menuGroups: MenuGroup[] = [
     groupLabel: "nav.groups.settings",
     requiresPlatformAdmin: true,
     items: [
-      { key: "router-settings", page: "router-settings", label: "nav.routerSettings", icon: <Route {...ICON} /> },
+      { key: "route-templates", page: "route-templates", label: "nav.routeTemplates", icon: <Waypoints {...ICON} /> },
       { key: "admin-panel", page: "admin-panel", label: "nav.adminPanel", icon: <Lock {...ICON} /> },
     ],
   },

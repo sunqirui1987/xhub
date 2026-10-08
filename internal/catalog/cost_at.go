@@ -54,6 +54,13 @@ type AppliedRate struct {
 	USD       float64 `json:"usd"`
 	Quantity  float64 `json:"quantity"`
 	SourceKey string  `json:"source_key,omitempty"`
+	// Fallback marks a rate that was chosen for the model rather than for the
+	// call. Some models quote a side only in qualified variants - per second of
+	// 1080p versus 4K video, per picture made from text versus from an image -
+	// and the gateway is not told which one applies. Billing the cheapest is a
+	// decision, not a measurement, so the row says so instead of presenting a
+	// guess as the price of the call.
+	Fallback bool `json:"fallback,omitempty"`
 }
 
 // PriceSnapshot is the shape stored in usage_events.price_snapshot: which
@@ -124,6 +131,277 @@ func DecodeRates(raw any) ([]Rate, bool) {
 	}
 }
 
+// flatRateFields lists the flat price fields a deployment or an older price row
+// may carry, and the rate each one describes.
+//
+// The field names are LiteLLM's, which is the form an operator types and the
+// form the generated rows keep for readers that predate rates[]. They are
+// translated here so a deployment that typed its prices is billed by the same
+// rules as one the catalog priced - including the peak ladder and the non-token
+// measures, neither of which the old flat arithmetic understood.
+//
+// The window on each entry is the window the field describes:
+//
+//   - input_cost_per_token and output_cost_per_token are the base rate. They are
+//     the off-peak price on a model that also quotes a peak one, which is what
+//     the catalog's own flat fields hold and what the console labels them.
+//   - the _peak fields are the peak price.
+//
+// measureAllWindows is applied afterwards: a deployment that quotes no peak
+// price meant one price for every hour, so its base rate is promoted to "all".
+var flatRateFields = []struct {
+	field   string
+	measure string
+	side    string
+	variant string
+	window  string
+}{
+	{"input_cost_per_token", "token", "input", "uncached", "offpeak"},
+	{"input_cost_per_token_peak", "token", "input", "uncached", "peak"},
+	{"output_cost_per_token", "token", "output", "", "offpeak"},
+	{"output_cost_per_token_peak", "token", "output", "", "peak"},
+	{"cache_read_input_token_cost", "token", "cache_read", "", "all"},
+	{"cache_creation_input_token_cost", "token", "cache_write", "", "all"},
+	{"input_cost_per_image", "picture", "input", "", "all"},
+	{"output_cost_per_image", "picture", "output", "", "all"},
+	{"input_cost_per_second", "second", "input", "", "all"},
+	{"output_cost_per_second", "second", "output", "", "all"},
+	{"search_context_cost_per_query", "query", "output", "", "all"},
+}
+
+// RatesFromFlat builds a rate table from the flat price fields a deployment or
+// an older price row carries.
+//
+// The flat form cannot say what it does not have a field for - a picture price
+// per resolution, an input price per modality, a second of 4K video against a
+// second of 1080p - but the four fields it does have must be read by the same
+// biller as everything else. Routing them through here rather than through a
+// second arithmetic path is what keeps a peak rate, a cache read and a per-image
+// price from being dropped on the way to the usage row.
+//
+// read is called once per known field and returns ok false for one the source
+// does not carry; a field present as zero is a real price of zero.
+//
+// 参数 read（func(string) (float64, bool)）：按字段名读一个小数，第二个返回值为假表示这一项没有。
+// 返回 []Rate（[]Rate）：拼出来的费率表。一个字段都没有时为空。
+// 调用：gateway/deploymentCost、catalog/CostAt 的旧行兜底。
+// 测试：cost_at_test.go
+func RatesFromFlat(read func(string) (float64, bool)) []Rate {
+	out := make([]Rate, 0, len(flatRateFields))
+	hasPeak := map[string]bool{}
+	for _, f := range flatRateFields {
+		if _, ok := read(f.field); ok && f.window == "peak" {
+			hasPeak[f.measure+"\x00"+f.side] = true
+		}
+	}
+	for _, f := range flatRateFields {
+		usd, ok := read(f.field)
+		if !ok {
+			continue
+		}
+		window := f.window
+		// A base rate on a side that quotes no peak price applies at every hour.
+		// Leaving it as offpeak would make a peak call on such a deployment
+		// unpriced, which is a worse answer than the one price the operator gave.
+		if window == "offpeak" && !hasPeak[f.measure+"\x00"+f.side] {
+			window = "all"
+		}
+		out = append(out, Rate{
+			Measure:   f.measure,
+			UnitSize:  1,
+			Side:      f.side,
+			Variant:   f.variant,
+			Window:    window,
+			SourceKey: f.field,
+			USD:       usd,
+		})
+	}
+	return out
+}
+
+// CostFromFlatOrRates prices a call against flat price fields, read through the
+// callback, or reports that the source carries no price at all.
+//
+// It exists so a caller holding the flat form does not have to build a table and
+// remember to keep the two paths in step.
+// 参数 read（func(string) (float64, bool)）：按字段名读一个小数；usage（Usage）：这一次调用报出来的用量；
+// startedAt（time.Time）：调用开始的时刻。
+// 返回 Charge（Charge）：账单；bool（bool）：读到了价、并且有某一侧被计费时为真。
+// 调用：gateway/deploymentCost。
+// 测试：cost_at_test.go
+func CostFromFlatOrRates(read func(string) (float64, bool), usage Usage, startedAt time.Time) (Charge, bool) {
+	return CostFromRates(RatesFromFlat(read), usage, startedAt)
+}
+
+// NormalizeUsage reads the quantities the gateway bills on out of the usage
+// object an upstream returned, resolving the field names providers spell
+// differently into one set of counts.
+//
+// It exists because the providers do not agree on what "input tokens" contains,
+// and the disagreement runs through several field names at once.
+//
+//	OpenAI      prompt_tokens is the whole prompt; the cached part is repeated
+//	            under prompt_tokens_details.cached_tokens as a subset of it.
+//	Anthropic   input_tokens is *only* the part that missed the cache, and
+//	            cache_read_input_tokens is a separate count beside it.
+//	Responses   input_tokens is the whole prompt, with the cached part nested
+//	            under input_tokens_details the way OpenAI spells it.
+//
+// So the discriminator is *where the cache count lives*, not the field name of
+// the prompt count: a cache count in its own top-level field is a second
+// quantity that must be added back, and one nested under the prompt count's
+// details is a subset that must not be. Reading the Anthropic shape with the
+// OpenAI rule loses the whole cache read and bills the rest at the cache price,
+// which is roughly half the money on a cached call.
+//
+// Every shape comes out with prompt tokens being the whole prompt and cache
+// reads being a subset of it - the one reading the cache split has to have to
+// bill each token exactly once.
+//
+// The gateway's own response normalization copies input_tokens onto prompt_tokens
+// before billing sees it, so this cannot rely on the prompt field being absent:
+// what marks the Anthropic shape here is the separate cache count, and adding it
+// when it exceeds the prompt count is what recovers the lost half.
+//
+// A count the upstream did not report stays zero, and an absent key stays absent
+// rather than becoming a zero: "this model reported no images" and "this model
+// reported zero images" are the same for billing, but the first is also what a
+// text model says, and nothing downstream should read it as a picture count.
+//
+// 参数 usage（map[string]any）：上游返回的 usage 对象。
+// 返回 Usage（Usage）：可以交给 CostAt 的用量。上游没报的量为零。
+// 调用：gateway/usageOf。
+// 测试：cost_at_test.go
+func NormalizeUsage(usage map[string]any) Usage {
+	var out Usage
+	if usage == nil {
+		return out
+	}
+	out.PromptTokens = intField(usage, "prompt_tokens")
+	if out.PromptTokens == 0 {
+		out.PromptTokens = intField(usage, "input_tokens")
+	}
+	out.CompletionTokens = intField(usage, "completion_tokens")
+	if out.CompletionTokens == 0 {
+		out.CompletionTokens = intField(usage, "output_tokens")
+	}
+
+	// A cache read in its own top-level field is a second count, so the prompt
+	// count beside it excludes it and both have to be added up. The nested
+	// spellings are subsets and are read as such below.
+	separate := intField(usage, "cache_read_input_tokens")
+	if separate == 0 {
+		separate = intField(usage, "cache_read_tokens")
+	}
+	if separate > 0 {
+		out.CachedTokens = separate
+		out.PromptTokens += separate
+	} else {
+		out.CachedTokens = cachedTokensIn(usage)
+	}
+	out.CacheWriteTokens = intField(usage, "cache_creation_input_tokens")
+	if out.CacheWriteTokens == 0 {
+		out.CacheWriteTokens = intField(usage, "cache_write_tokens")
+	}
+	out.Images = firstIntField(usage, "images", "image_count", "num_images", "output_images")
+	out.Seconds = firstFloatField(usage, "seconds", "duration_seconds", "video_seconds", "audio_seconds")
+	out.Searches = firstIntField(usage, "searches", "search_count", "web_search_requests")
+	return out
+}
+
+// cachedTokensIn reads the cached prompt count from the nested places providers
+// put it. These are subsets of the prompt count, never additions to it.
+// 参数 usage（map[string]any）：上游返回的 usage 对象。
+// 返回 int（int）：命中缓存的提示 token 数。没有报这个数时为 0。
+// 调用：NormalizeUsage。
+// 测试：cost_at_test.go
+func cachedTokensIn(usage map[string]any) int {
+	if n := intField(usage, "cached_tokens"); n != 0 {
+		return n
+	}
+	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+		if details, ok := usage[key].(map[string]any); ok {
+			if n := intField(details, "cached_tokens"); n != 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// intField reads a whole number by key, reading 0 for a key that is absent or is
+// not a number.
+// 参数 m（map[string]any）：要读的对象；key（string）：字段名。
+// 返回 int（int）：读到的整数。缺失或类型不符时为 0。
+// 调用：NormalizeUsage 和 cachedTokensIn。
+// 测试：cost_at_test.go
+func intField(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	switch n := m[key].(type) {
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case json.Number:
+		if v, err := n.Int64(); err == nil {
+			return int(v)
+		}
+	}
+	return 0
+}
+
+// firstIntField reads a whole number from the first of several spellings the
+// object carries with a non-nil value.
+// 参数 m（map[string]any）：要读的对象；keys（...string）：按优先顺序给出的字段名。
+// 返回 int（int）：第一个有值的键对应的整数。一个都没有时为 0。
+// 调用：NormalizeUsage。
+// 测试：cost_at_test.go
+func firstIntField(m map[string]any, keys ...string) int {
+	for _, key := range keys {
+		if v, ok := m[key]; ok && v != nil {
+			return intField(m, key)
+		}
+	}
+	return 0
+}
+
+// firstFloatField reads a fraction from the first of several spellings the object
+// carries with a non-nil value. Durations are fractional - an upstream reports
+// 8.5 seconds - so they are not read through the integer path.
+// 参数 m（map[string]any）：要读的对象；keys（...string）：按优先顺序给出的字段名。
+// 返回 float64（float64）：第一个有值的键对应的小数。一个都没有时为 0。
+// 调用：NormalizeUsage。
+// 测试：cost_at_test.go
+func firstFloatField(m map[string]any, keys ...string) float64 {
+	for _, key := range keys {
+		v, ok := m[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch n := v.(type) {
+		case float64:
+			return n
+		case float32:
+			return float64(n)
+		case int:
+			return float64(n)
+		case int64:
+			return float64(n)
+		case json.Number:
+			if f, err := n.Float64(); err == nil {
+				return f
+			}
+		}
+	}
+	return 0
+}
+
 // CostFromRates prices a call against a rate table handed in by the caller
 // rather than one looked up from the catalog. A deployment that typed its own
 // rates goes through here, so both sources are billed by the same rules.
@@ -160,8 +438,16 @@ func Snapshot(c Charge) string {
 
 // rateLookup indexes one model's rates by the four dimensions, so a billed
 // quantity can find its rate without scanning.
+//
+// byKey answers "what did this model quote for exactly this combination".
+// fallback answers "this model quoted only qualified variants of this side, so
+// what should a call that was not told which variant apply". The two are kept
+// apart so an exact hit is never displaced by the fallback.
 type rateLookup struct {
 	byKey map[string]Rate
+	// fallback is keyed by (measure, side, window) and holds the variant-chosen
+	// rate for a side that has no unqualified entry at all.
+	fallback map[string]Rate
 }
 
 // rateKey is the lookup key for one rate. The variant is folded in because two
@@ -175,33 +461,149 @@ func rateKey(measure, side, variant, window string) string {
 	return measure + "\x00" + side + "\x00" + variant + "\x00" + window
 }
 
+// sideKey is the lookup key for the variant-free index of one side in one
+// window: everything except the qualifier.
+// 参数 measure（string）：token、second、picture 或 query；side（string）：input 或 output；
+// window（string）：这次调用落在哪个时段。
+// 返回 string（string）：三个维度拼成的查找键。
+// 调用：newLookup 和 rateLookup.find。
+// 测试：cost_at_test.go
+func sideKey(measure, side, window string) string {
+	return measure + "\x00" + side + "\x00" + window
+}
+
+// searchVariant is the qualifier the feed puts on the per-query price, under a
+// unit it calls a second. It names a count of searches, not a length of media.
+const searchVariant = "search"
+
 // newLookup indexes a model's rates. When the same four dimensions appear twice
 // the first one wins, which keeps pricing deterministic rather than dependent on
 // map iteration order.
+//
+// Two normalizations happen here, both because the feed's spelling and the
+// gateway's billable quantity are not one-to-one:
+//
+//   - A per-query price arrives spelled as a second (web_search_req has
+//     unit_name "second" and a "search" qualifier). It is indexed under the
+//     query measure too, so a call that reported searches is billed for them
+//     rather than for a duration it never reported.
+//   - A side quoted only in variants gets a fallback rate, chosen once here
+//     rather than per lookup, so the same model always bills the same way. The
+//     cheapest variant wins, and ties break on the key name; see cheapestFallback.
+//
 // 参数 rates（[]Rate）：价格行里的费率表。
-// 返回 rateLookup（rateLookup）：按四个维度建好的索引。
-// 调用：CostAt。
+// 返回 rateLookup（rateLookup）：按四个维度和按侧建好的索引。
+// 调用：CostAt 和 CostFromRates。
 // 测试：cost_at_test.go
 func newLookup(rates []Rate) rateLookup {
-	l := rateLookup{byKey: make(map[string]Rate, len(rates))}
+	l := rateLookup{
+		byKey:    make(map[string]Rate, len(rates)),
+		fallback: map[string]Rate{},
+	}
+	variants := map[string]map[string]Rate{}
 	for _, r := range rates {
 		if r.Measure == "" {
 			continue
+		}
+		// A search price is a query count. File it under both spellings so the
+		// call's own quantity decides which one is read.
+		if r.Measure == "second" && r.Variant == searchVariant {
+			asQuery := r
+			asQuery.Measure = "query"
+			asQuery.Variant = ""
+			asQuery.SourceKey = r.SourceKey
+			if key := rateKey("query", r.Side, "", r.Window); l.byKey[key].Measure == "" {
+				l.byKey[key] = asQuery
+			}
 		}
 		key := rateKey(r.Measure, r.Side, r.Variant, r.Window)
 		if _, exists := l.byKey[key]; !exists {
 			l.byKey[key] = r
 		}
+		if r.Variant == "" {
+			continue
+		}
+		// Only a duration may be billed as a duration. The search qualifier is
+		// excluded here as well as being indexed as a query above, so a model
+		// that quotes searches is not charged for them twice under two measures.
+		if r.Measure == "second" && r.Variant == searchVariant {
+			continue
+		}
+		side := sideKey(r.Measure, r.Side, r.Window)
+		group := variants[side]
+		if group == nil {
+			group = map[string]Rate{}
+			variants[side] = group
+		}
+		if _, exists := group[r.Variant]; !exists {
+			group[r.Variant] = r
+		}
+	}
+	for side, group := range variants {
+		if _, exact := l.byKey[side+"\x00"]; exact {
+			// The side has an unqualified price. Qualified ones are variants of
+			// it, not substitutes for it, so there is nothing to fall back to.
+			continue
+		}
+		if r, ok := cheapestFallback(group); ok {
+			l.fallback[side] = r
+		}
 	}
 	return l
 }
 
+// cheapestFallback picks the rate to use for a side the model quoted only in
+// variants.
+//
+// Choosing is unavoidable: the gateway is not told whether a video came out at
+// 1080p or 4K, or whether a picture was made from text or from another picture.
+// The cheapest variant is the deliberate choice, matching the flat fallback
+// fields the generator already writes, because charging for a variant the caller
+// did not ask for is worse than charging for the cheapest one. The choice is
+// recorded with Fallback set, so a bill built on it can be told apart from one
+// built on the price of the call.
+//
+// 参数 group（map[string]Rate）：同一侧同一时段下的各个变体费率，键是变体名。
+// 返回 Rate（Rate）：选中的费率；bool（bool）：这一组非空时为真。
+// 调用：newLookup。
+// 测试：cost_at_test.go
+func cheapestFallback(group map[string]Rate) (Rate, bool) {
+	names := make([]string, 0, len(group))
+	for name := range group {
+		names = append(names, name)
+	}
+	// Deterministic order, so two runs over the same table cannot disagree.
+	sortStrings(names)
+	var best Rate
+	found := false
+	for _, name := range names {
+		r := group[name]
+		if !found || r.USD < best.USD {
+			best = r
+			found = true
+		}
+	}
+	if found {
+		best.Variant = ""
+		best.Fallback = true
+	}
+	return best, found
+}
+
 // find resolves one side of one measure.
 //
-// The preference chain is ordered by specificity, and it never picks by price.
-// Picking the cheapest rate is what made a peak-hour call bill at the offpeak
-// rate: both entries exist, and the cheaper one won. Here the window decides
-// first, and only the *variant* degrades.
+// The preference chain is ordered by specificity, and it never picks by price
+// across windows. Picking the cheapest rate is what made a peak-hour call bill
+// at the offpeak rate: both entries exist, and the cheaper one won. Here the
+// window decides first, and only the *variant* degrades.
+//
+// What the variant may degrade to is the unqualified rate for the same side, and
+// - when the side has none - the single variant chosen for that side. It never
+// degrades to a *different* variant: "uncached" is not a reading of "cached", and
+// a cache read billed at the input price is off by two orders of magnitude. That
+// is why the fallback is offered only on the probe that named no variant. A probe
+// that asked for "cached" is asking a question about that variant, and the answer
+// to it is "this model does not price it", not the side's generic rate.
 //
 // 参数 measure（string）：token、second、picture 或 query；side（string）：input 或 output；
 // variant（string）：调用事实带来的限定词，例如 cached。空串表示没有限定词；
@@ -215,18 +617,27 @@ func (l rateLookup) find(measure, side, variant, window string) (Rate, bool) {
 	// that is not window-priced carries "all" instead, so both spellings are
 	// tried in that order - the call's own window first, then "all".
 	windows := []string{window, "all"}
-	// The variant from the call is the most specific, then the unqualified rate
-	// on the same side. Never another variant: "thinking" is not a substitute
-	// for "non_thinking".
-	variants := []string{variant, ""}
-	if variant == "" {
-		variants = []string{""}
-	}
 	for _, w := range windows {
-		for _, v := range variants {
-			if r, ok := l.byKey[rateKey(measure, side, v, w)]; ok {
+		if variant != "" {
+			if r, ok := l.byKey[rateKey(measure, side, variant, w)]; ok {
 				return r, true
 			}
+		}
+		if r, ok := l.byKey[rateKey(measure, side, "", w)]; ok {
+			return r, true
+		}
+		if variant != "" {
+			// This probe named a variant and the model does not price it. The
+			// next candidate in the caller's chain is the unqualified spelling
+			// of the side, which is where the fallback belongs.
+			continue
+		}
+		// The call named no variant and the side has no unqualified price: the
+		// model quotes this side only in variants. Take the chosen one rather
+		// than reporting the side as unpriced, which would record the call as
+		// costing nothing. The rate comes back marked, so the guess is visible.
+		if r, ok := l.fallback[sideKey(measure, side, w)]; ok {
+			return r, true
 		}
 	}
 	return Rate{}, false
@@ -255,11 +666,18 @@ func CostAt(model string, usage Usage, startedAt time.Time) (Charge, bool) {
 	if !found {
 		return Charge{}, false
 	}
-	rates, ok := rateTableOf(row)
-	if !ok || len(rates) == 0 {
-		return Charge{}, false
+	if rates, ok := rateTableOf(row); ok && len(rates) > 0 {
+		return price(newLookup(rates), usage, windowOf(startedAt))
 	}
-	return price(newLookup(rates), usage, windowOf(startedAt))
+	// A row with no rate table predates rates[]. Its flat fields carry one price
+	// per side and cannot express a window, so the price they hold is the base
+	// one - the same value the console shows as the off-peak rate. Billing it at
+	// every hour is the honest reading of a row that never declared a peak; the
+	// alternative, reporting the model as unpriced, turns a documented price into
+	// a row of zero spend.
+	return CostFromFlatOrRates(func(field string) (float64, bool) {
+		return floatField(row[field])
+	}, usage, startedAt)
 }
 
 // price bills one usage against one indexed rate table. CostAt and CostFromRates
@@ -405,6 +823,7 @@ func chargeRate(charge *Charge, rate Rate, quantity float64) {
 		USD:       rate.USD,
 		Quantity:  quantity,
 		SourceKey: rate.SourceKey,
+		Fallback:  rate.Fallback,
 	})
 }
 
@@ -478,6 +897,16 @@ func decodeRate(item any) (Rate, bool) {
 func priceRowFor(model string) (map[string]any, bool) {
 	modelCostMu.RLock()
 	defer modelCostMu.RUnlock()
+	return priceRowForLocked(model)
+}
+
+// priceRowForLocked 是 priceRowFor 的已持锁版本。TokenRates 自己拿着读锁，
+// 再调 priceRowFor 会死锁。
+// 参数 model（string）：对外模型名。
+// 返回 map[string]any（map[string]any）：这一条模型的价格行；bool（bool）：找到时为真。
+// 调用：priceRowFor、TokenRates。
+// 测试：cost_at_test.go
+func priceRowForLocked(model string) (map[string]any, bool) {
 	raw, isMap := modelCostMapValue.(map[string]any)
 	if !isMap {
 		return nil, false
@@ -486,27 +915,97 @@ func priceRowFor(model string) (map[string]any, bool) {
 	if model == "" {
 		return nil, false
 	}
+	var shell map[string]any
 	for _, key := range priceKeysForLocked(model) {
-		if row, ok := priceRow(raw, key); ok {
+		row, ok := priceRow(raw, key)
+		if !ok {
+			continue
+		}
+		// 没有费率的空壳不能赢。供应商登记时常把「网关名 → 官方 id」写成一条
+		// 没有单价的行，它和价目表里那条真正报价的行同名不同键。先撞上的空壳
+		// 会让后面的报价变成看不见，调用就被记成没有价格。
+		if rowHasPrice(row) {
 			return row, true
 		}
+		if shell == nil {
+			shell = row
+		}
+	}
+	if shell != nil {
+		return shell, true
 	}
 	return nil, false
 }
 
+// rowHasPrice 报告这一行带了任何可计费的价。费率为空、扁平字段也一个都没有，
+// 就是一条还没报价的壳。
+// 参数 row（map[string]any）：价格表里这一条模型的字段。
+// 返回 bool（bool）：有费率表或任一扁平单价时为真。
+// 调用：priceRowFor。
+// 测试：cost_at_test.go
+func rowHasPrice(row map[string]any) bool {
+	if rates, ok := rateTableOf(row); ok && len(rates) > 0 {
+		return true
+	}
+	for _, f := range flatRateFields {
+		if _, ok := floatField(row[f.field]); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // priceKeysForLocked lists the keys to try for one model name, most specific
 // first. The caller must already hold at least a read lock.
+//
+// Three spellings are tried for a prefixed name, and the alias is looked up for
+// each: the name as written, the name without its provider prefix, and the alias
+// the feed declares for either. Looking up the alias of only the full name misses
+// the common case - a deployment is named after the vendor ("fenno/<model>")
+// while the catalog keys the row by the vendor's own model id, and the alias
+// table is keyed by that id. Without this a prefixed deployment bills from the
+// catalog only when the row happens to already carry the vendor's id verbatim.
+//
 // 参数 model（string）：对外模型名。
 // 返回 []string（[]string）：按优先顺序排列的候选键。
 // 调用：priceRowFor。
-// 测试：无直接单测
+// 测试：cost_at_test.go
 func priceKeysForLocked(model string) []string {
 	keys := []string{model}
 	if i := strings.Index(model, "/"); i > 0 {
 		keys = append(keys, model[i+1:])
 	}
-	if id, found := aliasKeyLocked(model); found {
-		keys = append(keys, id)
+	// Resolve the alias of every spelling collected so far. The loop is over the
+	// slice as it grows so an alias is itself offered without a prefix too.
+	for _, candidate := range keys {
+		if id, found := aliasKeyLocked(candidate); found {
+			keys = append(keys, id)
+			if i := strings.Index(id, "/"); i > 0 {
+				keys = append(keys, id[i+1:])
+			}
+		}
 	}
-	return keys
+	return dedupeStrings(keys)
+}
+
+// dedupeStrings removes repeats while keeping the first occurrence, so the
+// preference order is unchanged.
+// 参数 keys（[]string）：候选键，可能含重复。
+// 返回 []string（[]string）：去重后的候选键，原顺序保留。
+// 调用：priceKeysForLocked。
+// 测试：cost_at_test.go
+func dedupeStrings(keys []string) []string {
+	seen := make(map[string]struct{}, len(keys))
+	out := keys[:0]
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }

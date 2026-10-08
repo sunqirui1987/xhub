@@ -29,6 +29,13 @@ var (
 	ErrLastAdmin         = errors.New("team must keep at least one team_admin")
 	ErrLastPlatformAdmin = errors.New("platform must keep at least one active admin")
 	ErrInactive          = errors.New("inactive")
+	// ErrRouteTemplateMissing is a template id that names no row. It is separate
+	// from ErrNotFound because the handler has to tell "the template is gone"
+	// from "the scope is gone" and answer differently.
+	ErrRouteTemplateMissing = errors.New("route template not found")
+	// ErrUnknownScope is a scope name outside the three the inheritance chain
+	// knows. The name reaches SQL, so it is rejected rather than interpolated.
+	ErrUnknownScope = errors.New("unknown scope")
 )
 
 // DB wraps the xorm engine. No query cache is installed: authorization must

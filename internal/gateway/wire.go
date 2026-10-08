@@ -142,7 +142,9 @@ func (s *Server) DecBusy(id string) { s.decBusy(id) }
 // 返回：无。这个部署的一次失败已记下。allowed_fails 小于 1 时不写 Redis。
 // 调用：dataplane/host.go、dataplane/serve.go
 // 测试：bypass_logic_test.go、failure_log_test.go
-func (s *Server) NoteFailure(id string) { s.noteFailure(id) }
+func (s *Server) NoteFailure(id string, settings prefs.RouteSettings) {
+	s.noteFailure(id, settings)
+}
 
 // NoteLatency records the milliseconds of one successful call. Zero is recorded too, and it means the call finished.
 // 参数 id（string）：记下延迟使用的主键。空串表示调用方没有指定记录；ms（float64）：记下延迟使用的小数。0 表示没有费用或尚未计价。
@@ -320,11 +322,13 @@ func (s *Server) BusyMap() map[string]int { return s.Busy }
 func (s *Server) routerState() router.State { return dataplane.State(s) }
 
 // noteFailure records a deployment failure and may start cooldown.
-// 参数 id（string）：记下失败使用的主键。空串表示调用方没有指定记录。
+// 参数 id（string）：记下失败使用的主键。空串表示调用方没有指定记录；settings（prefs.RouteSettings）：这次请求生效的路由设置，冷却阈值从它来。
 // 返回：无。这个部署的失败已记下，并可能开始冷却。
 // 调用：仅在 wire.go 内使用
 // 测试：无直接单测
-func (s *Server) noteFailure(id string) { dataplane.RecordFailure(s, id) }
+func (s *Server) noteFailure(id string, settings prefs.RouteSettings) {
+	dataplane.RecordFailure(s, id, settings)
+}
 
 // noteLatency records the latency of a successful call.
 // 参数 id（string）：记下延迟使用的主键。空串表示调用方没有指定记录；ms（float64）：记下延迟使用的小数。0 表示没有费用或尚未计价。

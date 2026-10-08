@@ -74,8 +74,19 @@ func fallbackSimulated(t *testing.T) {
 	h.scriptStatus("fail-a", http.StatusInternalServerError)
 	h.scriptStatus("fail-b", 0)
 	h.onUpstream("fail-a", func() {
-		spent := h.moneyOf(t, c).project
+		money := h.moneyOf(t, c)
+		spent := money.project
 		h.setProjectBudget(t, admin, c.projectID, spent)
+		project, err := h.db.GetProject(t.Context(), c.projectID)
+		if err != nil {
+			t.Errorf("read project after setting boundary: %v", err)
+			return
+		}
+		hot := 0.0
+		if h.redisClient() != nil {
+			hot = h.redisClient().HotSpend(live.SpendRef("project", c.projectID))
+		}
+		t.Logf("project budget boundary: spend=%.17g hot=%.17g ceiling=%.17g", project.Spend, hot, *project.MaxBudget)
 	})
 	mark = len(h.upstreamCalls())
 	stopped := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(public, "budget between deployments"))

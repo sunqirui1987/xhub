@@ -14,6 +14,7 @@ package dataplane
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -123,6 +124,15 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 
 	cfg := h.GatewayConfig()
+	// The settings this request runs under, resolved once. Its scope was already
+	// picked out by the identity chain during the budget check, so this reads
+	// one template row rather than walking anything.
+	//
+	// Every read below - the strategy, the retry count, the cooldown thresholds -
+	// goes through this value rather than through cfg.RouterSettings, which is
+	// the process-global document. That is what makes a scope that selected a
+	// template and one that did not run the same code with different inputs.
+	routeCfg := h.RouteSettingsFor(p)
 	tenant := ""
 	if p.Key != nil {
 		tenant = p.Hash
@@ -144,12 +154,20 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		logx.Trace("process path=%s step=cache hit=false model=%s", r.URL.Path, alias)
 	}
 
-	if err := router.ValidateStrategy(cfg.RouterSettings.RoutingStrategy); err != nil {
+	if err := router.ValidateStrategy(routeCfg.Strategy()); err != nil {
 		logx.Error("process path=%s step=strategy model=%s", r.URL.Path, alias)
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
 		return
 	}
-	pool := router.Order(cfg.ModelList, alias, cfg.RouterSettings.RoutingStrategy, h.RouteState())
+	// Shares in the resolved document override the weight stored on a deployment,
+	// and only for a weighted split. simple-shuffle still reads the deployment's
+	// own weight and picks the heaviest one; applying the document here would
+	// change that.
+	models := cfg.ModelList
+	if router.IsSplitStrategy(routeCfg.Strategy()) {
+		models = router.ApplyWeights(models, routeCfg.WeightOverrides())
+	}
+	pool := router.Order(models, alias, routeCfg.Strategy(), h.RouteState())
 	pool = preferDeployment(pool, plan.Pinned)
 	pool, paused := dropPaused(pool)
 	// 能力门。适配路径原来完全不过滤端点类型，一条标成 embedding 的部署
@@ -167,10 +185,9 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
 	}
-	attempts := cfg.RouterSettings.NumRetries
-	if attempts < 1 {
-		attempts = 1
-	}
+	// Retries already clamps to at least one, so a template that leaves the key
+	// out cannot turn a request into one that is never attempted.
+	attempts := routeCfg.Retries()
 
 	var lastErr error
 	var lastStatus int
@@ -251,8 +268,14 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			triedHTTP = true
 			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, provider, realModel, baseHost(apiBase))
 			h.IncBusy(did)
-			req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, built.URL, bytes.NewReader(built.Body))
+			// The timeout belongs to this request's document, not to the process
+			// client. The shared client is copied so its Timeout of 0 lets the
+			// context be the only deadline; otherwise a template that says 10
+			// seconds still waits for the timeout frozen at startup.
+			attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), time.Duration(routeCfg.TimeoutSeconds()*float64(time.Second)))
+			req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, built.URL, bytes.NewReader(built.Body))
 			if err != nil {
+				cancelAttempt()
 				h.DecBusy(did)
 				lastErr = err
 				logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
@@ -261,8 +284,11 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			for key, values := range built.Header {
 				req.Header[key] = values
 			}
-			resp, err := h.HTTPClient().Do(req)
+			client := *h.HTTPClient()
+			client.Timeout = 0
+			resp, err := client.Do(req)
 			if err != nil {
+				cancelAttempt()
 				h.DecBusy(did)
 				lastErr = err
 				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
@@ -271,8 +297,9 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
 				_, _ = io.ReadAll(resp.Body)
 				resp.Body.Close()
+				cancelAttempt()
 				h.DecBusy(did)
-				h.NoteFailure(router.DeploymentID(rawDep))
+			h.NoteFailure(router.CooldownID(rawDep), routeCfg)
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
 				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
@@ -294,6 +321,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 					wrote, usage, ttft, streamed = pipeStream(w, resp, start)
 				}
 				h.DecBusy(did)
+				cancelAttempt()
 				if wrote {
 					usage = completeUsage(usage, body, streamed)
 					pt, ct := usageCounts(usage)
@@ -314,6 +342,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			}
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			cancelAttempt()
 			h.DecBusy(did)
 			if asChat {
 				respBody = llm.ResponsesToChat(respBody, alias)

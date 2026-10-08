@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import { fetchClient } from "@/lib/http/api";
 import { t } from "@/i18n";
+import RouteTemplateSelect from "@/components/route_templates/RouteTemplateSelect";
 
 import { BUDGET_DURATION_OPTIONS, NO_RESET } from "../org-settings/OrgSettingsForm";
 import { orgSettingsSchema } from "../org-settings/schema";
@@ -92,6 +93,12 @@ export const OrgCreateDialog = ({
                   context="organization"
                   options={{ includeSpecialOptions: true, showAllProxyModelsOverride: true }}
                 />
+              )}
+            </FormField>
+
+            <FormField control={form.control} name="route_template_id" label={t("pages.routeTemplates.title")}>
+              {({ value, onChange }) => (
+                <RouteTemplateSelect accessToken={accessToken} value={value} onChange={onChange} scope="organization" />
               )}
             </FormField>
 

@@ -30,9 +30,10 @@ type fixture struct {
 	solo  *iam.User // active account in no team at all
 
 	orgA, orgB                          *iam.Organization
-	teamA1, teamB1                      string
+	teamA1, teamA2, teamB1              string
 	projA1, projB1                      *iam.Project
 	aliceKey, aliceServiceKey, carolKey *iam.Key
+	plainKey                            *iam.Key
 }
 
 // sys is the fixture's acting identity for writes made by the test itself. It is
@@ -93,7 +94,7 @@ func newFixture(t *testing.T) *fixture {
 		return tm.ID
 	}
 	f.teamA1 = team(f.orgA.ID, "Team A1", f.alice.ID)
-	_ = team(f.orgA.ID, "Team A2", f.dave.ID)
+	f.teamA2 = team(f.orgA.ID, "Team A2", f.dave.ID)
 	// B1 belongs to carol outright. Leaving alice in it would have made her a
 	// member of orgB, which is exactly the cross-organization reach the matrix
 	// says she must not have.
@@ -129,6 +130,7 @@ func newFixture(t *testing.T) *fixture {
 	f.aliceKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.alice.ID, TeamID: f.teamA1, Name: "alice-personal"})
 	f.aliceServiceKey = key(iam.KeyInput{OwnerType: iam.OwnerService, TeamID: f.teamA1, Name: "a1-service"})
 	f.carolKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.carol.ID, TeamID: f.teamA1, Name: "carol-personal"})
+	f.plainKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.plain.ID, TeamID: f.teamA1, Name: "plain-personal"})
 
 	if _, err := db.AdminUpdateUser(ctx, sys, f.gone.ID, iam.UserUpdate{Status: ptr(iam.StatusDisabled)}); err != nil {
 		t.Fatalf("disable gone: %v", err)
@@ -276,6 +278,57 @@ func TestSessionMatrix(t *testing.T) {
 		{"team admin creates a service key", session(f.alice), ActionKeyCreate,
 			Object{Type: ObjectKey, TeamID: f.teamA1, OwnerType: iam.OwnerService}, "allow"},
 		{"team admin rotates the team's service key", session(f.alice), ActionKeyWrite, Object{Type: ObjectKey, ID: f.aliceServiceKey.ID}, "allow"},
+
+		// ---- router templates ----
+		//
+		// Visibility comes from ownership. A platform template has no owner and
+		// everyone reads it; an organization's template is read inside that
+		// organization; a team's template is read by that team.
+		{"member reads a platform template", session(f.plain), ActionRouteTemplateRead, Object{Type: ObjectRouteTemplate}, "allow"},
+		{"member reads their organization's template", session(f.plain), ActionRouteTemplateRead,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID}, "allow"},
+		{"member reads their team's template", session(f.plain), ActionRouteTemplateRead,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID, TeamID: f.teamA1}, "allow"},
+		{"member cannot read another tenant's organization template", session(f.plain), ActionRouteTemplateRead,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID}, "notfound"},
+		{"member cannot read another team's template", session(f.plain), ActionRouteTemplateRead,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID, TeamID: f.teamB1}, "notfound"},
+		{"carol reads both organizations' templates", session(f.carol), ActionRouteTemplateRead,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID}, "allow"},
+
+		// Writing is the owner's alone: reading a sibling team's configuration is
+		// allowed, editing it is not.
+		{"member cannot write a template", session(f.plain), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID, TeamID: f.teamA1}, "forbidden"},
+		{"team admin writes their team's template", session(f.alice), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID, TeamID: f.teamA1}, "allow"},
+		{"team admin cannot write a sibling team's template", session(f.alice), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID, TeamID: f.teamA2}, "forbidden"},
+		{"team admin cannot write another organization's template", session(f.alice), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID, TeamID: f.teamB1}, "forbidden"},
+		{"org admin writes a template of a team beneath it", session(f.carol), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID, TeamID: f.teamB1}, "allow"},
+		{"member cannot write an organization template", session(f.plain), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgA.ID}, "forbidden"},
+		{"admin writes any template", session(f.admin), ActionRouteTemplateWrite,
+			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID, TeamID: f.teamB1}, "allow"},
+
+		// Selecting is narrower than writing: it picks among configurations that
+		// already exist, on scopes the caller already belongs to.
+		{"member selects for their own team", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectTeam, ID: f.teamA1, TeamID: f.teamA1, OrgID: f.orgA.ID}, "allow"},
+		{"member selects for their own organization", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectOrg, ID: f.orgA.ID, OrgID: f.orgA.ID}, "allow"},
+		{"member cannot select for a foreign team", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectTeam, ID: f.teamB1, TeamID: f.teamB1, OrgID: f.orgB.ID}, "notfound"},
+		{"member selects for their own personal key", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectKey, ID: f.plainKey.ID}, "allow"},
+		{"member cannot select for a colleague's key", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectKey, ID: f.aliceKey.ID}, "notfound"},
+		{"member cannot select for a service key", session(f.plain), ActionRouteTemplateSelect,
+			Object{Type: ObjectKey, ID: f.aliceServiceKey.ID}, "forbidden"},
+		{"team admin selects for the team's service key", session(f.alice), ActionRouteTemplateSelect,
+			Object{Type: ObjectKey, ID: f.aliceServiceKey.ID}, "allow"},
 
 		// ---- usage ----
 		{"member reads own usage", session(f.plain), ActionUsageRead, Object{Type: ObjectUsage, OwnerUserID: f.plain.ID}, "allow"},
@@ -569,8 +622,8 @@ func TestScopeFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("count all: %v", err)
 	}
-	if total != 3 {
-		t.Fatalf("fixture holds %d keys, want 3", total)
+	if total != 4 {
+		t.Fatalf("fixture holds %d keys, want 4", total)
 	}
 	// A member of no team at all: zero, and emphatically not the whole table.
 	if n := count(f.guard(t, session(f.solo)).KeysScope(ctx)); n != 0 {

@@ -12,6 +12,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
@@ -84,12 +85,23 @@ type Adapted interface {
 	// 调用：Serve，且只在 op 为 chat 或空时。测试：gateway/guardrail_block_test.go。
 	GuardrailBlocks(callID string, body map[string]any) (bool, string)
 
-	// GatewayConfig 返回进程配置。Serve 用它的模型表、路由策略、重试次数和缓存开关。
+	// GatewayConfig 返回进程配置。Serve 用它的模型表；路由策略和重试次数改读 RouteSettingsFor。
 	// 参数：无。
 	// 返回 *config.Config（*config.Config）：当前进程配置，含模型表和路由策略，不会复制。
 	// 调用：dataplane/official.go、dataplane/serve.go、gateway/wire.go
 	// 测试：bypass_logic_test.go、failure_log_test.go
 	GatewayConfig() *config.Config
+
+	// RouteSettingsFor 返回这一次请求生效的路由设置：策略、重试次数、超时和冷却阈值。
+	//
+	// 调用方选中的模板由身份链在预算检查时解析出来，所以这里不遍历、不额外查询。
+	// 没有任何一层选中模板时返回平台默认那一份，行为和这个功能存在之前一样。
+	//
+	// 参数 p（*auth.Principal）：已经解析的调用方，含预算链填入的模板选择。
+	// 返回 prefs.RouteSettings（prefs.RouteSettings）：这次请求生效的设置和来源。
+	// 调用：dataplane/serve.go
+	// 测试：route_settings_test.go
+	RouteSettingsFor(p *auth.Principal) prefs.RouteSettings
 
 	// RouteState 返回这一刻的冷却、延迟、用量和正在处理的请求数。没有 Redis 时只有 Busy。
 	// 参数：无。
@@ -158,10 +170,14 @@ type Adapted interface {
 	DecBusy(id string)
 
 	// NoteFailure 记下这个部署的一次失败，供下次路由决定是否冷却。
-	// 参数 id：部署 id。返回：无。
+	//
+	// 阈值跟着这次请求的设置走，所以调用方把那设置一并传进来：一个租户把
+	// allowed_fails 调低之后，它的失败按它自己的阈值计数，而不是按全局的值。
+	//
+	// 参数 id：部署 id。settings：这次请求生效的路由设置。返回：无。
 	// 调用：Serve 在 5xx 或 429 之后。实现转到 dataplane.RecordFailure。
 	// 测试：无直接单测
-	NoteFailure(id string)
+	NoteFailure(id string, settings prefs.RouteSettings)
 
 	// NoteLatency 记下从这个请求开始到响应头的毫秒数。
 	// 参数 id：部署 id。ms：从请求开始到响应头的毫秒数。返回：无。
@@ -200,6 +216,10 @@ type Adapted interface {
 // 网关在 bypass.go 的 serveBypass 里，路径已经匹配到端点类型之后调用 ServeBypass。
 // 和 Adapted 同名的方法语义相同，这里再写一遍，读这个接口时不用跳回去。
 type Bypass interface {
+	RouteSettingsFor(p *auth.Principal) prefs.RouteSettings
+	NoteFailure(id string, settings prefs.RouteSettings)
+	ResolveRequest(r *http.Request) (*auth.Principal, error)
+
 	// RequireLLMPrincipal 解析可以发起官方接口调用的身份。失败时响应已经写成 401，并返回 nil。
 	// 参数 w：写 401。r：入站请求。
 	// 返回：调用方。nil 表示停止。

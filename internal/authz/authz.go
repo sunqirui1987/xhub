@@ -111,11 +111,16 @@ const (
 	ObjectMember  ObjectType = "team_member"
 	ObjectProject ObjectType = "project"
 	ObjectKey     ObjectType = "key"
-	ObjectUsage   ObjectType = "usage"
-	ObjectLog     ObjectType = "log"
-	ObjectAudit   ObjectType = "audit"
-	ObjectBudget  ObjectType = "budget"
-	ObjectModel   ObjectType = "model"
+	// ObjectRouteTemplate is one named router settings document. Its OrgID and
+	// TeamID are the template's ownership, not a requester's scope: both empty
+	// means a platform template, which everyone may read and only a platform
+	// administrator may write.
+	ObjectRouteTemplate ObjectType = "route_template"
+	ObjectUsage         ObjectType = "usage"
+	ObjectLog           ObjectType = "log"
+	ObjectAudit         ObjectType = "audit"
+	ObjectBudget        ObjectType = "budget"
+	ObjectModel         ObjectType = "model"
 )
 
 // Object names the target of an action. Callers fill in what they know and the
@@ -169,7 +174,13 @@ func (o Object) inactive() bool {
 // 测试：无直接单测
 func (o Object) resolvable() bool {
 	return o.ID != "" && o.Type != ObjectUsage && o.Type != ObjectLog &&
-		o.Type != ObjectAudit && o.Type != ObjectModel
+		o.Type != ObjectAudit && o.Type != ObjectModel &&
+		// A route template carries its ownership on the object already: the
+		// handler reads the row to get it, because the caller named a template id
+		// and the ownership is the thing being decided. Re-resolving it here
+		// would mean a second read of the same row and a second place the
+		// mapping from columns to object fields is written.
+		o.Type != ObjectRouteTemplate
 }
 
 // Authorizer holds the database the decisions read from.

@@ -9,6 +9,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -31,31 +32,35 @@ func State(h Runtime) router.State {
 		return st
 	}
 	ids := make([]string, 0, len(h.Models()))
+	cooldownIDs := make([]string, 0, len(h.Models()))
 	for _, m := range h.Models() {
 		ids = append(ids, router.DeploymentID(m))
+		cooldownIDs = append(cooldownIDs, router.CooldownID(m))
 	}
-	st.Cooldown = redis.Cooled(ids)
+	st.Cooldown = redis.Cooled(cooldownIDs)
 	st.Latency = redis.Latencies(ids)
 	st.Usage = redis.Usages(ids)
 	return st
 }
 
-// RecordFailure 按当前路由设置记一次失败。allowed_fails 小于 1 时不写 Redis。
+// RecordFailure 按这一次请求生效的路由设置记一次失败。allowed_fails 小于 1 时不写 Redis。
 // cooldown_time 为 0 或缺失时冷却一分钟。
-// 参数 h：Runtime。id：部署 id。空 id 直接返回。
+//
+// 阈值来自 RouteSettingsFor 解析出来的那一份，而不是全局文档：一个团队把
+// allowed_fails 调低之后，它的失败要按它自己的阈值计数。
+// 参数 h：Runtime。id：部署 id。空 id 直接返回。settings：这一次请求生效的路由设置。
 // 返回：无。
 // 调用：gateway noteFailure，由 Serve 的 NoteFailure 转来。无单独测试。
-func RecordFailure(h Runtime, id string) {
+func RecordFailure(h Runtime, id string, settings prefs.RouteSettings) {
 	redis := h.Redis()
 	if redis == nil || id == "" {
 		return
 	}
-	m := h.RouterDocument()
-	allowed := asInt(m["allowed_fails"])
+	allowed := settings.AllowedFails()
 	if allowed < 1 {
 		return
 	}
-	cd := time.Duration(asFloat(m["cooldown_time"]) * float64(time.Second))
+	cd := time.Duration(settings.CooldownSeconds() * float64(time.Second))
 	if cd <= 0 {
 		cd = time.Minute
 	}

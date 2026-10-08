@@ -33,7 +33,7 @@ import TeamsPage from "./teams/page";
 import ProjectsPage from "./projects/page";
 import UsersPage from "./users/page";
 import OrganizationsPage from "./organizations/page";
-import RouterSettingsPage from "./router-settings/page";
+import RouteTemplatesPage from "./route-templates/page";
 import AdminPanelPage from "./admin-panel/page";
 import { dashboardAppPath } from "@/middleware";
 
@@ -50,7 +50,7 @@ const livePages = [
   ["projects", "/projects", ProjectsPage],
   ["users", "/users", UsersPage],
   ["organizations", "/organizations", OrganizationsPage],
-  ["router-settings", "/router-settings", RouterSettingsPage],
+  ["route-templates", "/route-templates", RouteTemplatesPage],
   ["admin-panel", "/admin-panel", AdminPanelPage],
 ] as const;
 

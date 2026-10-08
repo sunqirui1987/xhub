@@ -10,7 +10,13 @@ export function watchGateway(page: Page) {
   page.on("response", (res) => {
     const u = res.url();
     if (u.includes("/_next/")) return;
-    if (!u.includes("/gw/") && !u.includes(":4000/") && !u.includes("127.0.0.1:3000/") && !u.includes("localhost:3000/")) return;
+    if (
+      !u.includes("/gw/") &&
+      !u.includes(":4000/") &&
+      !u.includes("127.0.0.1:3000/") &&
+      !u.includes("localhost:3000/")
+    )
+      return;
     if (res.status() >= 500) {
       bad.push(`${res.status()} ${res.request().method()} ${u}`);
     }
@@ -119,5 +125,6 @@ export const DASHBOARD_PAGES = [
   "/projects",
   "/users",
   "/organizations",
+  "/route-templates",
   "/router-settings",
 ];

@@ -4,7 +4,9 @@ import type { components } from "@/lib/http/schema";
 
 import type { OrgSettingsFormValues } from "../org-settings/schema";
 
-export type OrgCreateBody = components["schemas"]["NewOrganizationRequest"];
+export type OrgCreateBody = components["schemas"]["NewOrganizationRequest"] & {
+  route_template_id?: string;
+};
 
 export const emptyOrgFormValues: OrgSettingsFormValues = {
   organization_alias: "",
@@ -14,6 +16,7 @@ export const emptyOrgFormValues: OrgSettingsFormValues = {
   tpm_limit: "",
   rpm_limit: "",
   metadata: "",
+  route_template_id: "",
 };
 
 const metadataRecordSchema = z.record(z.string(), z.unknown());
@@ -27,5 +30,6 @@ export const buildOrgCreateBody = (values: OrgSettingsFormValues): OrgCreateBody
     ...(values.rpm_limit.trim() !== "" && { rpm_limit: Number(values.rpm_limit) }),
     ...(values.budget_duration !== "" && { budget_duration: values.budget_duration }),
     ...(values.metadata.trim() !== "" && { metadata: metadataRecordSchema.parse(JSON.parse(values.metadata)) }),
+    ...((values.route_template_id ?? "").trim() !== "" && { route_template_id: values.route_template_id }),
   };
 };

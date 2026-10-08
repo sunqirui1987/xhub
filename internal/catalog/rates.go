@@ -31,6 +31,11 @@ type Rate struct {
 	SourceKey string  `json:"source_key"`
 	Label     string  `json:"label,omitempty"`
 	USD       float64 `json:"usd"`
+	// Fallback marks a rate the lookup had to choose for the model rather than
+	// read for the call, because the side is quoted only in variants. It is set
+	// by rateLookup, never by the feed, and it travels into the price snapshot so
+	// a bill built on a chosen variant can be told from one built on a fact.
+	Fallback bool `json:"fallback,omitempty"`
 }
 
 // rateSpec is the static classification of a known feed key.

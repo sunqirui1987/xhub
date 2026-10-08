@@ -34,14 +34,21 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   await page.getByRole("button", { name: t("Edit Settings") }).click();
   await page.getByRole("textbox", { name: t("Key Alias") }).fill(renamed);
   const saved = page.waitForResponse((res) => res.url().includes("/key/update") && res.request().method() === "POST");
-  await page.getByRole("button", { name: t("Save Changes") }).last().click();
+  await page
+    .getByRole("button", { name: t("Save Changes") })
+    .last()
+    .click();
   expect((await saved).ok()).toBeTruthy();
   await expect(page.getByText(renamed).first()).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: t("Regenerate Key") }).click();
   await page.getByRole("button", { name: t("Regenerate"), exact: true }).click();
   await expect(page.getByRole("dialog").getByText(/sk-/).first()).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("dialog").getByRole("button", { name: t("Close"), exact: true }).first().click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: t("Close"), exact: true })
+    .first()
+    .click();
 
   await page.getByRole("button", { name: t("More key actions") }).click();
   await page.getByRole("menuitem", { name: t("Block Key") }).click();
@@ -80,11 +87,18 @@ test("model update, test connection, and delete", async ({ page }) => {
   }
   await page.getByRole("tab", { name: t("pages.models.all") }).click();
   await expect(page.getByText("e2e-model-ops").first()).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("row", { name: /e2e-model-ops/ }).getByRole("button").first().click();
+  await page
+    .getByRole("row", { name: /e2e-model-ops/ })
+    .getByRole("button")
+    .first()
+    .click();
   await expect(page.getByTestId("test-connection-button")).toBeVisible({ timeout: 15_000 });
   await page.getByTestId("test-connection-button").click();
   await expect(
-    page.getByText(t("Connection test successful!")).or(page.getByText(t("Error testing connection: "))).first(),
+    page
+      .getByText(t("Connection test successful!"))
+      .or(page.getByText(t("Error testing connection: ")))
+      .first(),
   ).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: t("Edit Settings") }).click();
   await page.getByRole("textbox", { name: t("Enter model name") }).fill("e2e-model-renamed");
@@ -92,7 +106,10 @@ test("model update, test connection, and delete", async ({ page }) => {
   await expect(page.getByText(t("Model settings updated successfully"))).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("e2e-model-renamed").first()).toBeVisible();
   await page.getByTestId("delete-model-button").click();
-  await page.getByRole("dialog").getByRole("button", { name: t("common.delete") }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: t("common.delete") })
+    .click();
   await expect(page.getByText(t("Model deleted successfully"))).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("cell", { name: "e2e-model-renamed" })).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "e2e-model-ops" })).toHaveCount(0);
@@ -143,24 +160,24 @@ test("router fallback update lists the mapping", async ({ page }) => {
     },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
-  await stableGoto(page, "/router-settings");
+  await stableGoto(page, "/route-templates");
   if (page.url().includes("/login")) {
     await loginAdmin(page);
-    await stableGoto(page, "/router-settings");
+    await stableGoto(page, "/route-templates");
   }
-  await page.getByRole("tab", { name: t("pages.routerSettings.fallbacks") }).click();
-  await page.getByRole("button", { name: t("Add Fallbacks") }).click();
-  await page.getByPlaceholder(t("Select primary model")).click();
+  const platformRow = page.getByRole("row", { name: new RegExp(t("pages.routeTemplates.platformDefault")) });
+  await platformRow.getByRole("button", { name: t("pages.routeTemplates.edit") }).click();
+  await page.getByRole("tab", { name: t("pages.routeTemplates.fallbacksTab") }).click();
+  await page.getByPlaceholder(t("Select primary model")).first().click();
   await pickOption(page, "gpt-4o-mini");
-  await page.getByPlaceholder(t("Select fallback models to add...")).click();
+  await page.getByPlaceholder(t("Select fallback models to add...")).first().click();
   await page.getByRole("option", { name: "e2e-fallback-model" }).click();
   await page.keyboard.press("Escape");
-  await page.getByRole("dialog").getByRole("button", { name: t("Save All Configurations") }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByText(/已成功添加 1 条回退配置|Failed to update router settings/).first()).toBeVisible({
-    timeout: 15_000,
-  });
-  await expect(page.getByRole("row", { name: /gpt-4o-mini/ }).filter({ hasText: "e2e-fallback-model" })).toBeVisible();
+  await page.getByRole("button", { name: t("Save"), exact: true }).click();
+  await expect(page.getByText(t("pages.routeTemplates.platformSaved"))).toBeVisible({ timeout: 15_000 });
+  await platformRow.getByRole("button", { name: t("pages.routeTemplates.edit") }).click();
+  await page.getByRole("tab", { name: t("pages.routeTemplates.fallbacksTab") }).click();
+  await expect(page.getByText("e2e-fallback-model")).toBeVisible();
   guard.assertOk();
 });
 
@@ -181,5 +198,3 @@ test("admin panel saves prompt storage and hides the unused settings", async ({ 
   await expect(page.getByText(t("Spend logs settings updated successfully"))).toBeVisible({ timeout: 15_000 });
   guard.assertOk();
 });
-
-

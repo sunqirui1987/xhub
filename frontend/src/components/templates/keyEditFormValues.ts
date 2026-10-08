@@ -117,6 +117,7 @@ export const toKeyEditFormValues = (keyData: KeyResponse): KeyEditFormValues => 
     : [],
   auto_rotate: keyData.auto_rotate || false,
   rotation_interval: keyData.rotation_interval,
+  route_template_id: keyData.route_template_id ?? "",
 });
 
 export const keyEditFormSchema = z.object({
@@ -163,6 +164,7 @@ export const keyEditFormSchema = z.object({
   disabled_callbacks: z.custom<string[] | undefined>(),
   auto_rotate: z.custom<boolean | undefined>(),
   rotation_interval: z.custom<string | undefined>(),
+  route_template_id: z.custom<string | undefined>(),
 });
 
 export interface MountedFieldGates {
@@ -205,4 +207,5 @@ export const toSubmittedValues = (
   disabled_callbacks: values.disabled_callbacks,
   auto_rotate: values.auto_rotate,
   rotation_interval: values.rotation_interval,
+  route_template_id: values.route_template_id ?? "",
 });

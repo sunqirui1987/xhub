@@ -12,6 +12,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
@@ -230,6 +231,10 @@ func (h *logicHost) RequireLLMPrincipal(http.ResponseWriter, *http.Request) *aut
 func (h *logicHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
 	return &auth.Principal{Kind: "session"}, nil
 }
+func (h *logicHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
+	return prefs.PlatformSettings(nil)
+}
+
 func (h *logicHost) GatewayConfig() *config.Config   { return h.cfg }
 func (h *logicHost) HTTPClient() *http.Client        { return h.client }
 func (h *logicHost) ResponseCache() *cache.DualCache { return cache.New() }
@@ -245,7 +250,7 @@ func (h *logicHost) AttachCredential(dep config.ModelEntry) (config.ModelEntry, 
 }
 func (h *logicHost) IncBusy(string)                                                      {}
 func (h *logicHost) DecBusy(string)                                                      {}
-func (h *logicHost) NoteFailure(string)                                                  {}
+func (h *logicHost) NoteFailure(string, prefs.RouteSettings)                             {}
 func (h *logicHost) NoteLatency(string, float64)                                         {}
 func (h *logicHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, string) {}
 func (h *logicHost) RecordSpend(_ http.ResponseWriter, _ *auth.Principal, _, _, op string, usage map[string]any, _ time.Time, _ bool, _ int, depID string) {

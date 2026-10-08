@@ -383,6 +383,7 @@ func breakdownOf(t *testing.T, h *harness, admin, callID string) map[string]any 
 	if callID == "" {
 		t.Fatal("the response carried no call id")
 	}
+	h.flushSpend()
 	detail := h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil).json()
 	meta, _ := detail["metadata"].(map[string]any)
 	bill, _ := meta["cost_breakdown"].(map[string]any)

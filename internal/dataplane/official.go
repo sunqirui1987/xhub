@@ -11,6 +11,7 @@ package dataplane
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -82,39 +83,75 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) {
 		return
 	}
-	dep, ok := pickDeployment(h, hit, alias)
-	if !ok {
+	settings := h.RouteSettingsFor(principal)
+	list := eligible(h, hit)
+	if router.IsSplitStrategy(settings.Strategy()) {
+		list = router.ApplyWeights(list, settings.WeightOverrides())
+	}
+	pool := router.Order(list, alias, settings.Strategy(), h.RouteState())
+	pool, _ = dropPaused(pool)
+	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
 	}
-	hit = provider.ApplyOverride(dep, hit)
-	dep, err := h.AttachCredential(dep)
-	if err != nil {
+	var dep config.ModelEntry
+	var respBody []byte
+	var status int
+	tried := false
+	for _, rawDep := range pool {
+		candidate, err := h.AttachCredential(rawDep)
+		if err != nil { continue }
+		candidateHit := provider.ApplyOverride(candidate, hit)
+		base, key := bypassAuth(candidateHit, candidate)
+		if base == "" || key == "" { continue }
+		body[field] = provider.OfficialID(candidateHit.Transport.StripPrefix, candidate.ParamString("model", alias))
+		payload, err := json.Marshal(body)
+		if err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid json")
+			return
+		}
+		url := withQuery(base+provider.Expand(candidateHit.Action.UpstreamPath, nil), r)
+		for attempt := 0; attempt < settings.Retries(); attempt++ {
+			if tried {
+				fresh, err := h.ResolveRequest(r)
+				if err != nil || fresh == nil {
+					httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
+					return
+				}
+				principal = fresh
+				if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) { return }
+			}
+			tried = true
+			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.TimeoutSeconds()*float64(time.Second)))
+			respBody, status, err = forwardOfficial(h, r.WithContext(ctx), http.MethodPost, url, key, payload, r.Header)
+			cancel()
+			dep, candidateHit = candidate, candidateHit
+			if err != nil {
+				logx.Error("bypass forward path=%s err=%s", r.URL.Path, safeErr(err))
+				h.NoteFailure(router.CooldownID(rawDep), settings)
+				// A lost create response may already have created a task. Do not
+				// replay an ambiguous non-idempotent request.
+				httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
+				return
+			}
+			if status >= 500 || status == http.StatusTooManyRequests {
+				h.NoteFailure(router.CooldownID(rawDep), settings)
+				if r.Context().Err() != nil { return }
+				continue
+			}
+			hit = candidateHit
+			goto forwarded
+		}
+	}
+	if !tried {
 		httpx.WriteTypedError(w, r.URL.Path, 401, "upstream_auth", "This model has no upstream API key configured.")
 		return
 	}
-	base, key := bypassAuth(hit, dep)
-	if base == "" || key == "" {
-		httpx.WriteTypedError(w, r.URL.Path, 401, "upstream_auth", "This model has no upstream API key configured.")
-		return
-	}
-	body[field] = provider.OfficialID(hit.Transport.StripPrefix, dep.ParamString("model", alias))
-	payload, err := json.Marshal(body)
-	if err != nil {
-		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid json")
-		return
-	}
-	url := withQuery(base+provider.Expand(hit.Action.UpstreamPath, nil), r)
-	respBody, status, err := forwardOfficial(h, r, http.MethodPost, url, key, payload, r.Header)
-	if err != nil {
-		logx.Error("bypass forward path=%s err=%s", r.URL.Path, safeErr(err))
-		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
-		return
-	}
+forwarded:
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
 	depID := router.DeploymentID(dep)
-	if taskID := provider.ReadTaskID(doc, hit.Transport.TaskID); taskID != "" {
+	if taskID := provider.ReadTaskID(doc, hit.Transport.TaskID); taskID != "" && status < 400 {
 		h.PinOfficial(taskID, depID)
 	}
 	plan := h.PlanRoute(r, alias, body, principal)
@@ -344,7 +381,9 @@ func forwardOfficial(h Bypass, r *http.Request, method, url, apiKey string, body
 	if body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := h.HTTPClient().Do(req)
+	client := *h.HTTPClient()
+	if _, deadline := r.Context().Deadline(); deadline { client.Timeout = 0 }
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

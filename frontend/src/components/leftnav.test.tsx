@@ -168,7 +168,7 @@ describe("Sidebar (leftnav)", () => {
       expect(text).toContain("Organizations");
       expect(text).toContain("Users");
       expect(text).toContain("Models + Endpoints");
-      expect(text).toContain("Router Settings");
+      expect(text).toContain("Routing & Load Balancing");
     });
 
     it("keeps platform administration away from a plain member", () => {
@@ -182,7 +182,7 @@ describe("Sidebar (leftnav)", () => {
       expect(text).not.toContain("Users");
       expect(text).not.toContain("Internal Users");
       expect(text).not.toContain("Models + Endpoints");
-      expect(text).not.toContain("Router Settings");
+      expect(text).not.toContain("Routing & Load Balancing");
       expect(text).not.toContain("Price data");
     });
 
@@ -209,9 +209,10 @@ describe("Sidebar (leftnav)", () => {
     });
 
     it("shows a team administrator the team pages but not platform administration", () => {
-      setIdentity(["profile.self", "keys.personal", "teams.read", "teams.manage", "projects.manage"], [
-        { team_id: "t1", role: "team_admin" },
-      ]);
+      setIdentity(
+        ["profile.self", "keys.personal", "teams.read", "teams.manage", "projects.manage"],
+        [{ team_id: "t1", role: "team_admin" }],
+      );
       renderWithProviders(<Sidebar {...defaultProps} />);
       const text = labels().join(" | ");
       expect(text).toContain("Teams");

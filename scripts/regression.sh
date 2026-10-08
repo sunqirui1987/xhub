@@ -12,9 +12,9 @@
 # behind it. Nothing is faked at the gateway boundary: HTTP routes, the identity
 # store, spend recording, budgets and guardrails are all the real ones.
 #
-# Live mode also needs the vendor keys, which are never stored in the repository:
+# Live mode also needs at least one vendor, configured without storing keys in the repository:
 #
-#   XHUB_REGRESSION_FENNO_KEY, XHUB_REGRESSION_QINIU_KEY
+#   XHUB_REGRESSION_<ID>_KEY, _BASE, _MODELS
 
 set -euo pipefail
 
@@ -39,7 +39,18 @@ done
 # The suite skips instead of failing when the database is unreachable, which is
 # right for `go test ./...` and wrong here: a run that silently skipped every
 # database test would report success while proving nothing.
-if ! command -v psql >/dev/null 2>&1; then
+if command -v psql >/dev/null 2>&1; then
+  if [[ -n "${XHUB_TEST_DATABASE_URL:-}" ]]; then
+    if ! psql "$XHUB_TEST_DATABASE_URL" -X -qAt -c 'select 1' >/dev/null 2>&1; then
+      echo "the configured XHUB_TEST_DATABASE_URL is not reachable." >&2
+      exit 1
+    fi
+  elif ! psql 'postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable' -X -qAt -c 'select 1' >/dev/null 2>&1; then
+    echo "no PostgreSQL reachable at the regression default (127.0.0.1:5433)." >&2
+    echo "start it with: docker compose up -d postgres" >&2
+    exit 1
+  fi
+else
   if ! docker exec xhub-postgres psql -U xhub -d xhub -c 'select 1' >/dev/null 2>&1; then
     echo "no PostgreSQL reachable." >&2
     echo "start it with: docker compose up -d postgres" >&2
@@ -56,8 +67,6 @@ if [[ -n "$PATTERN" ]]; then
 fi
 
 if [[ "$LIVE" == 1 ]]; then
-  : "${XHUB_REGRESSION_FENNO_KEY:?--live needs XHUB_REGRESSION_FENNO_KEY}"
-  : "${XHUB_REGRESSION_QINIU_KEY:?--live needs XHUB_REGRESSION_QINIU_KEY}"
   export XHUB_REGRESSION_LIVE=1
   echo "running with live vendor calls: this spends real money"
 else

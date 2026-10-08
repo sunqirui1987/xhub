@@ -20,6 +20,7 @@ import { fetchClient } from "@/lib/http/api";
 import { buildOrgPatch, orgToForm, type OrgPatchBody } from "./mapper";
 import { orgSettingsSchema } from "./schema";
 import { t } from "@/i18n";
+import RouteTemplateSelect from "@/components/route_templates/RouteTemplateSelect";
 
 export const NO_RESET = "never";
 
@@ -102,6 +103,18 @@ export const OrgSettingsForm = ({
               onChange={field.onChange}
               context="organization"
               options={{ includeSpecialOptions: true, showAllProxyModelsOverride: true }}
+            />
+          )}
+        </FormField>
+
+        <FormField control={form.control} name="route_template_id" label={t("pages.routeTemplates.title")}>
+          {({ value, onChange }) => (
+            <RouteTemplateSelect
+              accessToken={accessToken}
+              value={value}
+              onChange={onChange}
+              scope="organization"
+              scopeId={organizationId}
             />
           )}
         </FormField>

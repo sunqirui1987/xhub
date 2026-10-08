@@ -104,6 +104,7 @@ export interface KeyResponse {
   access_group_ids?: string[];
   budget_fallbacks?: Record<string, string[]>;
   router_settings?: Record<string, unknown> | null;
+  route_template_id?: string | null;
   budget_limits?: Array<{ budget_duration: string; max_budget: number; reset_at?: string }>;
   auto_rotate?: boolean;
   rotation_interval?: string;

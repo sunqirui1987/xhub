@@ -28,12 +28,21 @@ func runSimulated(t *testing.T, simulated func(t *testing.T)) {
 	runBoth(t, simulated, nil)
 }
 
-// openLiveChat 起一个指着 fennoai 便宜模型的网关，并建好五层租户。
+// openLiveChat 起一个指着真实供应商便宜模型的网关，并建好五层租户。
+//
+// 供应商从环境里发现，取第一家的第一个模型：这些业务链路用例（额度、名单、密钥）
+// 要证明的是网关的记账和鉴权，与具体是哪一家无关，所以不需要把每家都跑一遍。
+// 要专门验计量走 pricing_live_test.go，那边会遍历配置里的全部供应商和模型。
+//
+// 参数 t（*testing.T）：当前测试；name（string）：租户名字前缀。
+// 返回 *harness（*harness）：网关；string（string）：管理员会话；chained（chained）：五层租户；
+// string（string）：对外模型名。未开 live 或没配供应商时整个用例跳过。
 func openLiveChat(t *testing.T, name string) (*harness, string, chained, string) {
 	t.Helper()
-	keys := liveCredentials(t)
-	const model = "fennoai/gpt-5.6-sol"
-	h := newHarness(t, liveChatDeployment(model, "fennoai", "openai", liveChatBase("fennoai"), keys.fenno))
+	vendors := liveCredentials(t)
+	vendor := vendors[0]
+	model := vendor.ID + "/" + vendor.Models[0]
+	h := newHarness(t, liveModelDeployment(vendor, model))
 	h.live = true
 	admin := h.adminSession()
 	return h, admin, h.openScope(t, admin, name), model

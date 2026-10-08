@@ -1,9 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import GeneralSettings from "./_components/general_settings";
-import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-
+/** The old address. Load balancing and fallbacks now live on the template library. */
 export default function RouterSettingsPage() {
-  const { accessToken, userRole, userId } = useAuthorized();
-  return <GeneralSettings userID={userId} userRole={userRole} accessToken={accessToken} />;
+  redirect("/route-templates");
 }
