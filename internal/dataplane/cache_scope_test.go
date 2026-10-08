@@ -28,7 +28,7 @@ func (h *cacheScopeHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, str
 }
 
 func TestCacheScopeChangesWithConfigurationSessionAndQuery(t *testing.T) {
-	for _, change := range []string{"unchanged", "paused", "price", "session", "query"} {
+	for _, change := range []string{"unchanged", "disabled", "price", "session", "query"} {
 		t.Run(change, func(t *testing.T) {
 			attempts := 0
 			client := &http.Client{Transport: auditRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -46,8 +46,8 @@ func TestCacheScopeChangesWithConfigurationSessionAndQuery(t *testing.T) {
 			h.cache.Set(cache.Key("user:log-user", "chat", "audit", string(raw), string(scope)), []byte(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
 			request.Body = io.NopCloser(strings.NewReader(string(raw)))
 			switch change {
-			case "paused":
-				cfg.ModelList[0].ModelInfo["blocked"] = true
+			case "disabled":
+				cfg.ModelList[0].ModelInfo["disabled"] = true
 			case "price":
 				cfg.ModelList[0].ModelInfo["input_cost_per_token"] = 0.25
 			case "session":
@@ -63,7 +63,7 @@ func TestCacheScopeChangesWithConfigurationSessionAndQuery(t *testing.T) {
 				}
 			} else if h.hits != 0 {
 				t.Fatalf("stale cache hit after %s", change)
-			} else if change == "paused" {
+			} else if change == "disabled" {
 				if attempts != 0 || rec.Code != 400 {
 					t.Fatalf("status=%d attempts=%d", rec.Code, attempts)
 				}

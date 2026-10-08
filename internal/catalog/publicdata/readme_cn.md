@@ -1,20 +1,29 @@
-# catalog/publicdata
+# 内置公开数据资源
 
-由 `internal/catalog` 嵌进网关二进制的静态 JSON。进程启动时不从磁盘读这些文件。写入方是测试和 `./cmd/pricedata`。
+[English](readme.md) · [全功能实现说明](../../../docs/development/implementation.md)
 
-这个目录只有两个 JSON 文件：`pricedata.json` 和 `autorouter_presets.json`。这里没有 `routes.json`，也没有供应商或字段 JSON。
+## 职责与实现契约
 
-| 文件 | 是什么 |
-| --- | --- |
-| `pricedata.json` | 从 Modelink 市场接口 `https://api.modelink.ai/v1/market/models` 生成的模型价格行。每个键都是真实模型 id。没有 LiteLLM 的样例行，也没有 `sample_spec`。`catalog/embed.go` 用 `//go:embed publicdata/pricedata.json` 嵌进二进制。`loadPriceDocument` 在启动时把这些字节解析一次。 |
-| `autorouter_presets.json` | 路径含 `/public/autorouter_presets` 的公开 GET 用的预设文档。同一份 `embed.go` 用 `//go:embed publicdata/autorouter_presets.json` 嵌入。`PublicBody` 解析它。解析失败时返回 `{"presets": []}`。 |
+本目录有 pricedata.json、cn_holidays.json、autorouter_presets.json，由父包 embed.go 嵌入到可执行文件。pricedata 是默认价格目录；cn_holidays 为时段价格计算提供日历；autorouter_presets 是保留的数据资源，不代表已移除的自动路由功能重新生效。
+资源没有自己的 Go 包或 HTTP handler。读取、校验、覆盖和公开展示由 catalog 与 gateway/models 完成。修改 JSON 后必须校验语法、模型标识、计价单位和明确零价；价格单价的展示尺度与后端基础单位要一致。
+文件内容进入构建产物，编辑源文件不会自动改变已经运行的二进制。运行时覆盖和价格源刷新是另一条链路。日历改变需验证边界日期；价格改变需验证 CostAt 和历史快照隔离。
 
-`routes.json` 是 `internal/catalog/routes.json`，由 `catalog/embed.go` 的 `//go:embed routes.json` 嵌入。`catalog.Load` 返回这些行。模块、这份目录、bypass 端点都没对上的路径，是 Gin `NoRoute` 的 JSON 404。
+## 源码职责与入口
 
-`catalog.loadPriceDocument` 把 `pricedata.json` 解析一次。解析失败时留下空表，进程仍能启动；此时 `Cost` 返回 ok 为 false，调用方不能把这次调用记成免费。
+此目录由资源、子包或测试文件组成，没有独立生产 Go 实现。
 
-`LITELLM_LOCAL_MODEL_COST_MAP=true`（忽略大小写，并去掉两端空白）时 `catalog.EnvForced` 返回 true。`gateway/models.CostMapSource` 把这个布尔值抄进 GET `/model/cost_map/source` 的 `is_env_forced`。`gateway/catalog.go` 还把 `EnvForced` 包成 `localCostMapForced`，没有任何调用方走到这个包装。这个变量不会把正在用的价格表换回嵌入文件，也不会跳过远程抓取。`models.ReloadCostMap` 和 `models.scheduledReloadLoop` 不读它。两者都调用 `reloadNow`，而 `reloadNow` 总会调用 `catalog.ReloadFromMarket`。
+资源与持久化定义：[autorouter_presets.json](autorouter_presets.json), [cn_holidays.json](cn_holidays.json), [pricedata.json](pricedata.json).
 
-手改的价格不会重写这个文件。`catalog/price_write.go` 留一份基线快照，再把数据库里的覆盖盖在上面。清掉覆盖就恢复基线那一行。
+## 对外 HTTP 边界
 
-English notes are in `readme.md` in this directory.
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 验证与维护入口
+
+当前目录没有直接测试文件；上层集成测试仅证明被执行的链路，不代表所有内部失败分支均已覆盖。
+
+```bash
+go test ./internal/catalog -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

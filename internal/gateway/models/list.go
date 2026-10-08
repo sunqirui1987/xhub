@@ -19,8 +19,6 @@ import (
 const defaultModelCreatedAt int64 = 1677610602
 
 const (
-	allProxyModels  = "all-proxy-models"
-	allTeamModels   = "all-team-models"
 	noDefaultModels = "no-default-models"
 )
 
@@ -59,14 +57,13 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": data})
 }
 
-// availableNames computes visible model names from the caller's permitted set. A platform administrator with scope=expand sees every deployment that is not fully blocked. only_model_access_groups keepsonly access-group names.
+// availableNames computes visible model names from the caller's permitted set. A platform administrator with scope=expand sees every enabled deployment. only_model_access_groups returns an empty list because model-owned access groups no longer exist.
 // 参数 s（Host）：可用名称使用的数据面宿主；r（*http.Request）：入站 HTTP 请求；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名。
 // 返回 []string（[]string）：可用名称。没有匹配时为 nil 或空切片，调用方按长度判断。
 // 调用：仅在 list.go 内使用
 // 测试：无直接单测
 func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	q := r.URL.Query()
-	includeGroups := queryBool(q.Get("include_model_access_groups"))
 	onlyGroups := queryBool(q.Get("only_model_access_groups"))
 	returnWild := queryBool(q.Get("return_wildcard_routes"))
 	scope := q.Get("scope")
@@ -80,8 +77,6 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	s.UnlockModels()
 
 	proxyNames := proxyModelNames(list)
-	groups := modelAccessGroups(list)
-
 	adminExpand := scope == "expand" && hasAdminModelView(p)
 	var base []string
 	if adminExpand {
@@ -90,16 +85,6 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 		for _, name := range proxyNames {
 			if AllowsModel(s, ctx, p, teamID, name) {
 				base = append(base, name)
-			}
-		}
-		if includeGroups {
-			for group, members := range groups {
-				for _, member := range members {
-					if AllowsModel(s, ctx, p, teamID, member) {
-						base = append(base, group)
-						break
-					}
-				}
 			}
 		}
 	}
@@ -118,13 +103,7 @@ func availableNames(s Host, r *http.Request, p *auth.Principal) []string {
 	}
 	base = dedupeModels(base)
 	if onlyGroups {
-		var out []string
-		for _, model := range base {
-			if _, ok := groups[model]; ok {
-				out = append(out, model)
-			}
-		}
-		return out
+		return []string{}
 	}
 	return dedupeModels(expandWildcardNames(base, list, returnWild))
 }
@@ -165,14 +144,14 @@ func queryBool(v string) bool {
 	}
 }
 
-// proxyModelNames returns public model names in config order. A name whose deployments are all blocked is omitted.
+// proxyModelNames returns public model names in config order. A name whose deployments are all disabled is omitted.
 // 参数 list（[]config.ModelEntry）：候选部署列表，后面按策略挑一条。
 // 返回 []string（[]string）：proxy模型名称。没有匹配时为空切片。
 // 调用：仅在 list.go 内使用
 // 测试：list_test.go
 func proxyModelNames(list []config.ModelEntry) []string {
 	total := map[string]int{}
-	blocked := map[string]int{}
+	disabled := map[string]int{}
 	var order []string
 	seen := map[string]struct{}{}
 	for _, m := range list {
@@ -187,13 +166,13 @@ func proxyModelNames(list []config.ModelEntry) []string {
 			continue
 		}
 		total[m.ModelName]++
-		if modelBlocked(m) {
-			blocked[m.ModelName]++
+		if m.Disabled() {
+			disabled[m.ModelName]++
 		}
 	}
 	var out []string
 	for _, name := range order {
-		if total[name] > 0 && blocked[name] == total[name] {
+		if total[name] > 0 && disabled[name] == total[name] {
 			continue
 		}
 		out = append(out, name)
@@ -240,132 +219,15 @@ func providerShell(info map[string]any) bool {
 	return role == "provider"
 }
 
-// modelBlocked reads model_info.blocked. A missing or non-boolean field counts as not blocked and does not change the config.
-// 参数 m（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖。
-// 返回 bool（bool）：这条部署在模型信息里被标成封禁时返回真。缺这个字段或不是布尔时视为未封禁，配置保持原样。
-// 调用：gateway/models/available.go
-// 测试：无直接单测
-func modelBlocked(m config.ModelEntry) bool {
-	if m.ModelInfo == nil {
-		return false
+// stripModelOwnership removes obsolete deployment ownership fields. Team model allowlists live in the identity module.
+// 参数 info（map[string]any）：要清理的 model_info；nil 可安全处理。
+// 返回：无。直接删除模型上的用户、团队、组织和访问组字段。
+// 调用：模型创建、更新、读取和数据库加载路径。
+// 测试：admin_test.go、list_test.go。
+func stripModelOwnership(info map[string]any) {
+	for _, key := range []string{"team_id", "teamId", "organization_id", "organizationId", "org_id", "orgId", "user_id", "userId", "access_groups", "model_access_group"} {
+		delete(info, key)
 	}
-	b, _ := m.ModelInfo["blocked"].(bool)
-	return b
-}
-
-// modelAccessGroups maps access-group names to model names from each deployment's model_info.access_groups. A deployment without that field is skipped.
-// 参数 list（[]config.ModelEntry）：候选部署列表，后面按策略挑一条。
-// 返回 map[string][]string（map[string][]string）：模型AccessGroups的字段表。缺键表示上游或库里没有这个字段。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func modelAccessGroups(list []config.ModelEntry) map[string][]string {
-	groups := map[string][]string{}
-	for _, m := range list {
-		if m.ModelInfo == nil {
-			continue
-		}
-		for _, g := range stringList(m.ModelInfo["access_groups"]) {
-			groups[g] = append(groups[g], m.ModelName)
-		}
-	}
-	return groups
-}
-
-// groupKeys returns the access-group names. Map iteration order is not stable, so a caller that needs a stable order must sort.
-// 参数 groups（map[string][]string）：分组密钥使用的map[string][]string。
-// 返回 []string（[]string）：分组密钥。没有匹配时为空切片。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func groupKeys(groups map[string][]string) []string {
-	out := make([]string, 0, len(groups))
-	for k := range groups {
-		out = append(out, k)
-	}
-	return out
-}
-
-// stringList turns a []string or []any into a string list. Non-string elements and empty strings are dropped. Any other type returns nil.
-// 参数 v（any）：JSON 里读出的动态值。数字、字符串和对象都要接住，类型不符时按零值而不是 panic。
-// 返回 []string（[]string）：字符串列表。没有匹配时为 nil 或空切片，调用方按长度判断。
-// 调用：仅在 list.go 内使用。
-// 测试：无直接单测
-func stringList(v any) []string {
-	switch t := v.(type) {
-	case []string:
-		return t
-	case []any:
-		var out []string
-		for _, x := range t {
-			if s, ok := x.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-// expandGrantedModels expands all-proxy-models and all-team-models. Only all-team-models on a key falls through to the team list and then to every deployment. An empty grant returns nil, which tells the
-//
-//	caller to use every proxy model. expandGrantedModels mirrors get_key_models / get_team_models. keyPass distinguishes the all-team-models sentinel, which only keys honor before falling through to theproxy list.
-//
-// 参数 granted（[]string）：granted列表。空切片表示没有可处理的项；teamModels（[]string）：团队模型列表。空切片表示没有可处理的项；proxy（[]string）：proxy列表。空切片表示没有可处理的项；groups（map[string][]string）：展开Granted模型使用的map[string][]string；include（bool）：为真时响应里带上明文密钥。明文只在创建或轮换时出现；keyPass（bool）：为真时走密钥Pass这一支。为假时保持原来的路径。
-// 返回 []string（[]string）：展开Granted模型。没有匹配时为 nil 或空切片，调用方按长度判断。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func expandGrantedModels(granted, teamModels, proxy []string, groups map[string][]string, include, keyPass bool) []string {
-	if len(granted) == 0 {
-		return nil
-	}
-	all := append([]string{}, granted...)
-	if keyPass && containsStr(all, allTeamModels) {
-		all = append([]string{}, teamModels...)
-		if len(all) == 0 {
-			all = append(all, proxy...)
-		}
-		if containsStr(all, allTeamModels) {
-			all = removeStr(all, allTeamModels)
-			all = append(all, proxy...)
-			if include {
-				all = append(all, groupKeys(groups)...)
-			}
-		}
-	}
-	if containsStr(all, allProxyModels) {
-		all = append([]string{}, proxy...)
-		if include {
-			all = append(all, groupKeys(groups)...)
-		}
-	}
-	return modelsFromAccessGroups(all, groups, include, proxy)
-}
-
-// modelsFromAccessGroups expands access groups in a grant into member model names. When include is false, an undeployed group name itself is dropped, but member models are still added.
-// 参数 all（[]string）：全部列表。空切片表示没有可处理的项；groups（map[string][]string）：模型来源AccessGroups使用的map[string][]string；include（bool）：为真时响应里带上明文密钥。明文只在创建或轮换时出现；proxy（[]string）：proxy列表。空切片表示没有可处理的项。
-// 返回 []string（[]string）：模型来源AccessGroups。没有匹配时为空切片。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func modelsFromAccessGroups(all []string, groups map[string][]string, include bool, proxy []string) []string {
-	deployed := map[string]struct{}{}
-	for _, name := range proxy {
-		deployed[name] = struct{}{}
-	}
-	var kept []string
-	for _, model := range all {
-		_, isGroup := groups[model]
-		_, isDeployed := deployed[model]
-		if !isGroup || include || isDeployed {
-			kept = append(kept, model)
-		}
-	}
-	var members []string
-	for _, model := range all {
-		if ms, ok := groups[model]; ok {
-			members = append(members, ms...)
-		}
-	}
-	return append(kept, members...)
 }
 
 // expandWildcardNames expands model names that contain * into concrete models from the price map. When returnWild is true the wildcard text is kept. With no matching deployment it looks up the built-intable by provider prefix.
@@ -499,35 +361,6 @@ func dedupeModels(in []string) []string {
 	return out
 }
 
-// containsStr reports whether the list has a string that is exactly equal. Case is not ignored.
-// 参数 list（[]string）：列出列表。空切片表示没有可处理的项；want（string）：包含Str使用的want。空串表示调用方没有提供这项。
-// 返回 bool（bool）：列表里有完全相同的字符串时返回真。不忽略大小写。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func containsStr(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
-}
-
-// removeStr removes every item equal to drop and keeps the order of the rest.
-// 参数 list（[]string）：列出列表。空切片表示没有可处理的项；drop（string）：去掉Str使用的丢掉。空串表示调用方没有提供这项。
-// 返回 []string（[]string）：去掉Str。没有匹配时为空切片。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func removeStr(list []string, drop string) []string {
-	out := make([]string, 0, len(list))
-	for _, s := range list {
-		if s != drop {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // Info serves GET /v2/model/info, the deployment list behind the console's Models and Endpoints page and its auto-router lookups. The page reads this route and nothing else, so without a handler it fell
 //
 //	through to the catalog's generic key-value store and answered an empty list — a page that looked like an empty deployment table rather than a missing endpoint. Each row is the deployment JSON the page renders, filtered to the models the caller may actually use so the table never offers a model the gateway would refuse. A platform administrator sees every deployment, matching the list route, where
@@ -551,18 +384,25 @@ func Info(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := r.URL.Query().Get("team_id")
-
 	s.LockModels()
 	list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
 	s.UnlockModels()
 
+	modelID := strings.TrimSpace(r.URL.Query().Get("modelId"))
+	search := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
 	rows := make([]map[string]any, 0, len(list))
 	for _, m := range list {
 		if m.ModelName == "" || providerShell(m.ModelInfo) {
 			continue
 		}
-		if !AllowsModel(s, r.Context(), p, teamID, m.ModelName) {
+		id := str(m.ModelInfo["id"])
+		if id == "" {
+			id = m.ModelName
+		}
+		if modelID != "" && id != modelID {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(id+" "+m.ModelName+" "+m.ParamString("model", "")+" "+m.ParamString("litellm_credential_name", "")+" "+m.ParamString("custom_llm_provider", "")), search) {
 			continue
 		}
 		row := Public(m)

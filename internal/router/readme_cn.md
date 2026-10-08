@@ -1,34 +1,63 @@
-# router
+# 部署过滤、排序与加权分流
 
-给同一个对外模型名下的多条部署排序。它不发 HTTP，自己也不读 Redis。调用方传入一份 `State` 快照。
+[English](readme.md) · [全功能实现说明](../../docs/development/implementation.md)
 
-## 身份
+## 职责与实现契约
 
-`DeploymentID` 是 `api_base|model`。两段都来自 `ModelEntry.ParamString`。`model` 参数为空时退回对外的 `ModelName`。两段都空时得到字符串 `"|"`。Redis 的冷却、延迟、路由 TPM 和花费用这个 id（`xhub:cooldown:`、`xhub:latency:`、`xhub:routetpm:`、`xhub:spend:`）。密钥的 RPM/TPM 不用它，那些用 `Principal.Hash`。
+router.go 选择同公开模型名的部署并按策略排序，adapter.go 适配运行状态读取，split.go 实现平滑加权分流。禁用部署被过滤；冷却状态优先用扩展标识，兼容旧标识。
+DeploymentID 是 api_base|model，用于模板权重；CooldownID 再加入 pricing/deployment ID 与命名凭据，不能放原始秘密。ApplyWeights 复制参数后覆盖份额，不能修改共享配置。simple-shuffle 当前偏向最大权重，weighted-split 才按比例累计调度；未提供权重等份，明确零排除。
+router 只排序已授权候选，不授予模型访问。普通策略全冷却时仍尝试，split 没正权重开放候选则为空。成本策略比较当前输入 token 单价，不是全请求费用预测。粘性只能调整入选列表顺序，不能恢复被过滤部署。
 
-## 一次选择的顺序
+## 源码职责与入口
 
-`matchDeployments` 留下对外名或通配模式对上 `alias` 的行。`Order` 先用 `Pick` 取出第一条还能用的，再把池子里其余的接在后面，所以上游失败时还能试下一条。
+### adapter.go
 
-`Pick` 在 `State.Cooldown` 里的部署，只要还有别的部署开着，就不会排进去。如果每条都在冷却，冷却中的那些会留下来，照样去试。
+- [`func EncodeRequest(op, provider string, body map[string]any, realModel string) ([]byte, error)`](adapter.go) — EncodeRequest turns the public JSON body into the upstream request body. The protocol details live in internal/llm. This wrapper keeps the old name so callers do not each import that package.
+- [`func DecodeResponse(op, provider, alias string, raw []byte) []byte`](adapter.go) — DecodeResponse turns an upstream response into the public shape and puts the caller's model alias back into the model field.
 
-`strategyKind` 映射配置里的名字。先把连字符换成下划线。不认识的名字返回 ok 为 false。`ValidateStrategy` 把这种情况变成错误 `unknown routing strategy`。`Serve` 把它写成 HTTP 400，不会改成 `simple-shuffle`。
+### router.go
 
-| 配置名 | 内部种类 | 谁先被选 |
-| --- | --- | --- |
-| 空、`simple-shuffle`、`simple_shuffle`、`base_routing_strategy`、`adaptive_router`、`auto_router`、`complexity_router`、`quality_router` | `weight` | 权重最高 |
-| `least-busy`、`least_busy` | `busy` | `State.Busy` 最低 |
-| `lowest-cost`、`budget_limiter`、`savings_baseline` | `cost` | 成本参数最低 |
-| `lowest-latency`、`lar1_routing`、`latency_based_routing` | `latency` | `State.Latency` 最低 |
+公开类型：`State`.
 
-`State` 的零值没有冷却也没有延迟。配了 Redis 时网关用 `dataplane.State` 填它，`Busy` 则始终来自进程内的表。
+- [`func All(list []config.ModelEntry, alias string) []config.ModelEntry`](router.go) — All returns every deployment under one public model name, before a strategy orders them.
+- [`func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry`](router.go) — Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
+- [`func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry`](router.go) — Pick returns the first deployment from Order. It returns nil when no deployment is usable.
+- [`func DeploymentID(e config.ModelEntry) string`](router.go) — DeploymentID is the physical deployment identity, shaped as api_base|model. Weight overrides use this stable frontend-facing id.
+- [`func CooldownID(e config.ModelEntry) string`](router.go) — CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
+- [`func IsSplitStrategy(strategy string) bool`](router.go) — IsSplitStrategy reports whether strategy divides traffic by weight. Hyphens and underscores are the same name. Anything else, including simple-shuffle, is not a split: simple-shuffle still picks the heaviest deployment, and treating it as a split would change that.
+- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — ApplyWeights copies list and sets weight on the deployments named in overrides. The key is DeploymentID (api_base|model). A deployment that is not in the map keeps the weight already on it, which defaults to 1 inside the split. An empty map returns the same slice, so a document that does not configure shares does not allocate or change the pool. The copy matters: ModelList is the process config, and writing weight onto it would leak one request's template into the next request.
+- [`func AdapterURL(provider, apiBase, realModel string) string`](router.go) — AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
+- [`func AdapterURLOp(op, provider, apiBase, realModel string) string`](router.go) — AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
+- [`func ValidateStrategy(strategy string) error`](router.go) — ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses. An unknown name returns an error and is not treated as simple-shuffle.
 
-`AdapterURL` 和 `AdapterURLOp` 转到 `llm.Endpoint`。`/chat/completions`、`/v1/messages` 这些路径表在那边，不在这里。
+### split.go
 
-`adapter.go` 里的 `EncodeRequest` / `DecodeResponse` 是 `llm.Encode` 和 `llm.Decode` 的旧名字。
+公开类型：`SplitState`.
 
-## 这个包不做什么
+- [`func NewSplitState() *SplitState`](split.go) — NewSplitState returns an empty split state. One instance is shared by a process. The counters are per-process, so several replicas each converge on the configured ratio independently rather than coordinating one global schedule; the aggregate ratio is right either way.
+- [`func SharedSplit() *SplitState`](split.go) — SharedSplit returns the process-wide split cursors. The router State is rebuilt for every request, so the cursors cannot live on it - a split that forgot where it was would send every request to the same deployment. One shared instance is what makes the ratio hold across requests.
+- [`func (s *SplitState) PickWeighted(ids []string, weights []float64, available []bool) int`](split.go) — PickWeighted chooses the deployment that is furthest behind its share. This is smooth weighted round-robin: each turn every candidate's score grows by its weight, the highest score wins, and the winner's score drops by the total. Over any ten draws a 3:7 split lands exactly 3 and 7 rather than merely averaging that over a long run, which matters because a caller that watches ten consecutive requests should see the ratio they configured. A candidate that is not available has its score forgotten, so it re-enters at zero rather than immediately claiming the share it accrued while it was cooling down. That would otherwise send the first requests after a recovery all to the deployment that just came back. available（[]bool）：每条候选此刻是否可以接流量。
+- [`func (s *SplitState) Forget(id string)`](split.go) — Forget drops a deployment's cursor. A deployment that is removed or renamed would otherwise leave its score behind forever, which is a slow leak in a process that runs for weeks.
 
-它不钉会话。聊天钉（`deployment_affinity:v1:`，一小时）和官方任务钉（`official_task:v1:`，七天）是数据面在 `Order` 之后用 `preferDeployment` 贴上去的。它也不丢掉暂停的部署；`serve.go` 的 `dropPaused` 做这件事，池子空了就返回 400 `model_paused`。
+## 对外 HTTP 边界
 
-English notes are in `readme.md` in this directory.
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/catalog](../catalog/readme_cn.md), [internal/config](../config/readme_cn.md), [internal/llm](../llm/readme_cn.md), [internal/logx](../logx/readme_cn.md).
+
+## 验证与维护入口
+
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [cost_regression_test.go](cost_regression_test.go) | `TestCostRoutingUsesSettlementRatePrecedenceAndWindow`, `TestCostRoutingAcceptsValidNumericRates` |
+| [disabled_test.go](disabled_test.go) | `TestAllExcludesDisabledExactAndWildcardDeployments` |
+| [split_test.go](split_test.go) | `TestWeightedSplitFollowsTheConfiguredRatio`, `TestWeightedSplitDoesNotRequireHundred`, `TestSplitWithoutWeightsIsEven`, `TestSplitSkipsACoolingDeployment`, `TestSplitIsEvenAfterACoolingDeploymentReturns`, `TestSplitWithOneDeploymentDoesNotDisturbIt`, `TestSplitWithoutStateFallsBackToHighestWeight`, `TestApplyWeightsUsesTheDocumentWithoutTouchingThePool`, `TestWeightedSplitIsItsOwnStrategy`, `TestSplitKeepsRatioAcrossManyDraws`, `TestCostStrategyDoesNotLetAnUnpricedDeploymentWin` |
+| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsAcceptLegacyPhysicalID` |
+
+```bash
+go test ./internal/router -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

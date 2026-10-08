@@ -96,11 +96,20 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
+	settings = settings.ForModel(alias)
+	if settings.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
+		return
+	}
+	if err := router.ValidateStrategy(settings.Strategy()); err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
+		return
+	}
 	list := eligible(h, hit)
 	if router.IsSplitStrategy(settings.Strategy()) {
 		list = router.ApplyWeights(list, settings.WeightOverrides())
 	}
-	list, _ = dropPaused(list)
+	list, _ = dropDisabled(list)
 	pool := router.Order(list, alias, settings.Strategy(), h.RouteState())
 	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
@@ -333,7 +342,7 @@ func eligible(h Bypass, hit provider.Hit) []config.ModelEntry {
 // 调用：仅在 official.go 内使用
 // 测试：无直接单测
 func oneUpstream(h Bypass, hit provider.Hit) (config.ModelEntry, []string, bool) {
-	list, _ := dropPaused(eligible(h, hit))
+	list, _ := dropDisabled(eligible(h, hit))
 	seen := map[string]config.ModelEntry{}
 	var names []string
 	for _, m := range list {

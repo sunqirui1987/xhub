@@ -1402,7 +1402,27 @@ func AuditLog(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := queryInt(r, "page_size", 100)
-	rows, err := g.Identity().ListAudit(r.Context(), limit, pageOffset(r, limit))
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	page := queryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	q := r.URL.Query()
+	objectType := q.Get("table_name")
+	if mapped, ok := map[string]string{
+		"LiteLLM_VerificationToken": "key", "LiteLLM_TeamTable": "team",
+		"LiteLLM_UserTable": "user", "LiteLLM_OrganizationTable": "organization",
+		"LiteLLM_ProxyModelTable": "model",
+	}[objectType]; ok {
+		objectType = mapped
+	}
+	rows, total, err := g.Identity().QueryAudit(r.Context(), iam.AuditFilter{
+		Search: q.Get("search"), ObjectID: q.Get("object_id"), ActorID: q.Get("changed_by"),
+		ActorKey: q.Get("changed_by_api_key"), TeamID: q.Get("object_team_id"),
+		KeyID: q.Get("object_key_hash"), Action: q.Get("action"), ObjectType: objectType,
+	}, limit, pageOffset(r, limit))
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
@@ -1414,6 +1434,9 @@ func AuditLog(g Gate, w http.ResponseWriter, r *http.Request) {
 			"ts":          rows[i].TS.UTC().Format(time.RFC3339),
 			"actor_id":    rows[i].ActorID,
 			"actor_kind":  rows[i].ActorKind,
+			"actor_name":  rows[i].ActorName,
+			"actor_email": rows[i].ActorEmail,
+			"object_name": rows[i].ObjectName,
 			"action":      rows[i].Action,
 			"object_type": rows[i].ObjectType,
 			"object_id":   rows[i].ObjectID,
@@ -1421,7 +1444,10 @@ func AuditLog(g Gate, w http.ResponseWriter, r *http.Request) {
 			"detail":      rows[i].Detail,
 		})
 	}
-	httpx.WriteJSON(w, 200, map[string]any{"audit_logs": out})
+	httpx.WriteJSON(w, 200, map[string]any{
+		"audit_logs": out, "total": total, "page": page,
+		"page_size": limit, "total_pages": (total + int64(limit) - 1) / int64(limit),
+	})
 }
 
 // ---------- public shapes ----------

@@ -3,11 +3,15 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { useAuthorizedMock } = vi.hoisted(() => ({ useAuthorizedMock: vi.fn() }));
+const { useAuthorizedMock, useCanMock } = vi.hoisted(() => ({
+  useAuthorizedMock: vi.fn(),
+  useCanMock: vi.fn(),
+}));
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: useAuthorizedMock,
 }));
+vi.mock("@/app/(dashboard)/hooks/useCan", () => ({ default: useCanMock }));
 
 vi.mock("@/components/networking", () => ({
   organizationListCall: vi.fn().mockResolvedValue([]),
@@ -22,15 +26,12 @@ vi.mock("@/components/networking", () => ({
 vi.mock("./UsageTab", () => ({ __esModule: true, default: () => <div data-testid="usage-tab" /> }));
 vi.mock("./PromptCompressionTab", () => ({ __esModule: true, default: () => <div data-testid="compression-tab" /> }));
 vi.mock("./PromptCachingTab", () => ({ __esModule: true, default: () => <div data-testid="caching-tab" /> }));
-vi.mock("./AutoRouterBenchmarksTab", () => ({
-  __esModule: true,
-  default: () => <div data-testid="autorouter-benchmarks-tab" />,
-}));
 
 import CostOptimizationView from "./CostOptimizationView";
 
 const renderView = (userRole = "Admin") => {
   useAuthorizedMock.mockReturnValue({ accessToken: "test-token", userId: "u1", userRole });
+  useCanMock.mockReturnValue(!["Internal User", "Internal Viewer", "Org Admin"].includes(userRole));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -42,6 +43,7 @@ const renderView = (userRole = "Admin") => {
 describe("CostOptimizationView", () => {
   beforeEach(() => {
     useAuthorizedMock.mockReturnValue({ accessToken: "test-token", userId: "u1", userRole: "Admin" });
+    useCanMock.mockReturnValue(true);
   });
 
   it("renders the standard page header with the sidebar's Cost Optimization icon", () => {
@@ -52,13 +54,12 @@ describe("CostOptimizationView", () => {
     expect(container.querySelector(".lucide-piggy-bank")).not.toBeNull();
   });
 
-  it("renders the four cost-optimization tabs", () => {
+  it("renders the cost-optimization tabs", () => {
     renderView();
 
     expect(screen.getByText("Overall")).toBeInTheDocument();
     expect(screen.getByText("Prompt Compression")).toBeInTheDocument();
     expect(screen.getByText("Prompt Caching")).toBeInTheDocument();
-    expect(screen.getByText("Auto-Router")).toBeInTheDocument();
   });
 
   it("defaults to the Overall tab and switches the active tab on click", () => {
@@ -76,7 +77,7 @@ describe("CostOptimizationView", () => {
   // Unlike the other three pages in this cleanup, Cost Optimization keeps its
   // nav entry for internal users: the Overall tab runs on /user/daily/activity,
   // which every role may call. Only the tabs reading proxy-wide config and
-  // telemetry (/config/list, /auto_router/benchmarks, guardrail management)
+  // telemetry (/config/list and guardrail management)
   // are proxy-admin-only, so those are what disappear.
   describe("proxy-admin-only tabs", () => {
     it.each(["Internal User", "Internal Viewer", "Org Admin"])("shows %s the Overall tab only", (userRole) => {
@@ -85,7 +86,6 @@ describe("CostOptimizationView", () => {
       expect(screen.getByRole("tab", { name: "Overall" })).toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Prompt Compression" })).not.toBeInTheDocument();
       expect(screen.queryByRole("tab", { name: "Prompt Caching" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: "Auto-Router" })).not.toBeInTheDocument();
     });
 
     it("never mounts the panels behind the admin-only endpoints for an internal user", () => {
@@ -94,7 +94,6 @@ describe("CostOptimizationView", () => {
       expect(screen.getByTestId("usage-tab")).toBeInTheDocument();
       expect(screen.queryByTestId("compression-tab")).not.toBeInTheDocument();
       expect(screen.queryByTestId("caching-tab")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("autorouter-benchmarks-tab")).not.toBeInTheDocument();
     });
   });
 });

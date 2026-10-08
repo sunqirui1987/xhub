@@ -1,3 +1,4 @@
+import { GATEWAY } from "./helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { login, loginAdmin, stableGoto, t, watchGateway } from "./helpers";
 
@@ -16,7 +17,7 @@ import { login, loginAdmin, stableGoto, t, watchGateway } from "./helpers";
  * and a UI that shows everything anyway is still a leak.
  */
 
-const GW = "http://127.0.0.1:4000";
+const GW = GATEWAY;
 const PASSWORD = "chain-password-1";
 
 let seq = 0;

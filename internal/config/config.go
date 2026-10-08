@@ -30,6 +30,16 @@ type ModelEntry struct {
 	ModelInfo     map[string]any `yaml:"model_info"`
 }
 
+// Disabled reports whether this deployment is excluded from model discovery and runtime routing.
+// 参数：接收者包含部署的 model_info。
+// 返回 bool：model_info.disabled 明确为 true 时返回真，缺失或类型不符时返回假。
+// 调用：模型发现、路由和数据面在挑选候选部署时调用。
+// 测试：router/disabled_test.go、dataplane/disabled_test.go、gateway/models/list_test.go。
+func (m ModelEntry) Disabled() bool {
+	disabled, _ := m.ModelInfo["disabled"].(bool)
+	return disabled
+}
+
 // RouterSettings holds the routing strategy, retry count, and timeout. Other router keys from YAML stay in Config.RouterRaw.
 type RouterSettings struct {
 	RoutingStrategy string  `yaml:"routing_strategy"`

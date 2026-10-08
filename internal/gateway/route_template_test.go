@@ -450,6 +450,22 @@ func TestASuppliedBodyIsNotSecondGuessed(t *testing.T) {
 	}
 }
 
+func TestRouteTemplateWritesValidateModelRouting(t *testing.T) {
+	f := newPermFixture(t)
+	invalid := "{\"name\":\"invalid-model-policy\",\"body\":{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"not-a-strategy\"}]}}"
+	if code, _ := f.call(f.admin, http.MethodPost, "/route_template/new", []byte(invalid)); code != http.StatusBadRequest {
+		t.Fatalf("invalid model routing create returned %d, want 400", code)
+	}
+	id := templateID(t, f, "valid-model-policy", "{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"least-busy\",\"custom\":true}],\"custom_root\":{\"kept\":true}}")
+	if body := f.templateBody(t, id); body["custom_root"] == nil || body["model_routing"] == nil {
+		t.Fatalf("valid model policy or custom fields were dropped: %#v", body)
+	}
+	badUpdate := "{\"name\":\"valid-model-policy\",\"body\":{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"least-busy\"},{\"model_name\":\"chat\",\"routing_strategy\":\"weighted-split\"}]}}"
+	if code, _ := f.call(f.admin, http.MethodPost, "/route_template/"+id+"/update", []byte(badUpdate)); code != http.StatusBadRequest {
+		t.Fatalf("duplicate model routing update returned %d, want 400", code)
+	}
+}
+
 // TestASingleTeamSessionPicksUpItsTeamsTemplate 覆盖一个真实缺口。
 //
 // 预算链只在有密钥行时才走，而控制台的演练场是**会话**调用。如果不给会话单独

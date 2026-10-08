@@ -1,3 +1,4 @@
+import { chooseKeyTeam, chooseOrganization } from "./helpers";
 import { expect, test } from "@playwright/test";
 import { loginAdmin, t, uiPath } from "./helpers";
 
@@ -10,6 +11,7 @@ test("Virtual Keys shows named table and Create Key", async ({ page }) => {
 test("Create New Key issues a secret and lists the alias", async ({ page }) => {
   await loginAdmin(page);
   await page.getByTestId("create-key-button").click();
+  await chooseKeyTeam(page);
   await expect(page.getByRole("heading", { name: t("pages.apiKeys.create") })).toBeVisible();
   await page.getByLabel(t("Key Name")).fill("e2e-virtual-key");
   await page.getByRole("button", { name: t("pages.apiKeys.createSubmit"), exact: true }).click();
@@ -41,6 +43,7 @@ test("Create Team lists the new alias", async ({ page }) => {
   await loginAdmin(page);
   await page.goto(uiPath("/teams"));
   await page.getByTestId("create-team-button").click();
+  await chooseOrganization(page);
   await expect(page.getByRole("heading", { name: t("pages.teams.create") })).toBeVisible();
   await page.getByTestId("team-name-input").fill("e2e-team");
   await page.getByTestId("create-team-submit").click();

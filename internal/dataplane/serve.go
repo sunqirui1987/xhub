@@ -38,23 +38,22 @@ var (
 	errEmptyUpstream  = errors.New("empty upstream stream")
 )
 
-// dropPaused removes deployments the dashboard has paused. A paused model mustnot keep serving while the switch says it is stopped.
+// dropDisabled removes deployments the dashboard has disabled.
 // 参数 pool：已经按模型名匹配过的部署。
-// 返回 active：model_info.blocked 不为 true 的部署。paused：被拿掉的个数。
-// 调用：Serve、pickDeployment。测试没有单独用例，失败日志夹具里的模型都未暂停。
-func dropPaused(pool []config.ModelEntry) ([]config.ModelEntry, int) {
+// 返回 active：model_info.disabled 不为 true 的部署。disabled：被拿掉的个数。
+// 调用：Serve、pickDeployment。
+// 测试：disabled_test.go。
+func dropDisabled(pool []config.ModelEntry) ([]config.ModelEntry, int) {
 	active := make([]config.ModelEntry, 0, len(pool))
-	paused := 0
+	disabled := 0
 	for _, dep := range pool {
-		if dep.ModelInfo != nil {
-			if blocked, _ := dep.ModelInfo["blocked"].(bool); blocked {
-				paused++
-				continue
-			}
+		if dep.Disabled() {
+			disabled++
+			continue
 		}
 		active = append(active, dep)
 	}
-	return active, paused
+	return active, disabled
 }
 
 // Serve runs one inference. It picks deployments with the routing strategy, encodes the upstream request, and tries the next deployment after a failure.
@@ -144,6 +143,11 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
+	routeCfg = routeCfg.ForModel(alias)
+	if routeCfg.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", routeCfg.Err.Error())
+		return
+	}
 	tenant := p.Hash
 	if tenant == "" {
 		tenant = "user:" + p.UserID
@@ -186,7 +190,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	if router.IsSplitStrategy(routeCfg.Strategy()) {
 		models = router.ApplyWeights(models, routeCfg.WeightOverrides())
 	}
-	models, paused := dropPaused(models)
+	models, disabled := dropDisabled(models)
 	// 能力门。适配路径原来完全不过滤端点类型，一条标成 embedding 的部署
 	// 仍能被 /v1/chat/completions 打到。Bypass 部署在这里被丢掉：它们的入口是
 	// 供应商自己的路径，由 gateway 的 serveBypass 先一步接走，落到这里只会打错地址。
@@ -195,9 +199,9 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	pool = preferDeployment(pool, plan.Pinned)
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
-		if paused > 0 {
-			logx.Error("process path=%s step=route model=%s reason=paused", r.URL.Path, alias)
-			httpx.WriteTypedError(w, r.URL.Path, 400, "model_paused", "model is paused")
+		if disabled > 0 {
+			logx.Error("process path=%s step=route model=%s reason=disabled", r.URL.Path, alias)
+			httpx.WriteTypedError(w, r.URL.Path, 400, "model_disabled", "model is disabled")
 			return
 		}
 		logx.Error("model %s %s model not found: %s", r.Method, r.URL.Path, alias)

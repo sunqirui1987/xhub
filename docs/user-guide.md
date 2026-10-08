@@ -67,7 +67,7 @@ Budgets check recorded spend plus available hot spend. They do not reserve the c
 | Personal key | An individual developer's scripts and experiments | Owned by that person within a team, optionally a project. Secret access is restricted to the owner and platform administrators. Removing the team membership revokes personal keys for that team. |
 | Service key | A shared application, backend, or scheduled job | Owned by a team or project, managed by team/platform administrators. It remains active when a member leaves; rotate it if that member knew its secret. |
 
-Give each application a recognizable key name. Set its team/project, allowed models, budget, RPM (requests per minute), TPM (tokens per minute), expiry, and route template as needed. Keep its secret in an environment variable or secret store.
+Give each application a recognizable key name. The create dialog keeps its optional policy settings to a budget, budget reset period, and route template; key lifecycle settings remain available for expiry and rotation. Team, key type, and model access are basic access choices. RPM/TPM limits remain available when editing an existing key where the account is authorized to use them. Keep the secret in an environment variable or secret store.
 
 Use XHub virtual keys in applications. Provider secrets connect XHub to upstreams; master credentials are for bootstrap/emergency administration; session tokens serve console sessions. Virtual keys do not grant console administration.
 

@@ -1,33 +1,38 @@
-# hooks
+# In-flight request accounting
 
-`hooks` counts how many calls one virtual key has in flight inside this gateway process. It does not decide whether the call is allowed.
+[简体中文](readme_cn.md) · [Feature implementation reference](../../docs/development/implementation.md)
 
-## Entry
+## Responsibilities and behavior
 
-`gateway/server.go` calls `hooks.New()` while assembling the process and stores the engine on `Server.Hooks`. The data plane never constructs its own engine. `Serve` reaches the shared one through `Host.HookEngine`.
+Engine tracks process-local in-flight calls for routing hints such as least-busy. New creates the engine; Begin increments a key's count and returns a release function protected by sync.Once. Empty identifiers are no-ops.
+The gateway must defer release across normal completion, timeout, send errors, and stream interruption. These counters are routing hints, not authorization, rate enforcement, or accounting records.
+There are no HTTP or storage interfaces here. Counts are not automatically aggregated across instances. Tests cover concurrent starts, repeated release, empty identifiers, and return to zero.
 
-`New` always returns a non-nil `*Engine`. The only state is `inflight map[string]int` behind a mutex. The map key is `Principal.KeyID`, the account id of the virtual key, not `Principal.Hash` and not the deployment id `api_base|model`.
+## Source responsibilities and entry points
 
-## What Begin does
+### hooks.go
 
-`dataplane.Serve` calls `Begin` only after `EnforceIdentityLimits` has already accepted the request:
+Exported types: `Engine`.
 
-```text
-done := h.HookEngine().Begin(p.KeyID)
-defer done()
+- [`func New() *Engine`](hooks.go) — New returns an empty gate. In-flight calls are counted by key id.
+- [`func (e *Engine) Begin(keyID string) func()`](hooks.go) — Begin reserves one in-flight slot and returns the release function. An empty key id is not counted, so a caller without a key still gets a release.
+
+## External HTTP boundary
+
+This directory registers no direct HTTP route. Higher layers call its Go API; trace catalog dispatch or host calls through the dependency chain.
+
+## Dependencies
+
+[internal/logx](../logx/readme.md).
+
+## Verification and maintenance
+
+| Test file | Scenario entry points |
+| --- | --- |
+| [hooks_test.go](hooks_test.go) | `TestReleaseIsIdempotentWithOtherCallsInFlight` |
+
+```bash
+go test ./internal/hooks -count=1
 ```
 
-- An empty `keyID` returns a no-op function and does not touch the map. A session with no key still gets a release function.
-- Any other id increments `inflight[keyID]` and returns a function that decrements it. When the count falls to 0 or below, the id is deleted.
-
-`Begin` returns one function. It does not return a reason string, an error, or a boolean. It never looks at `max_budget`, RPM, TPM, or Redis. There is no `"budget"` result and no `"parallel"` result. A full map does not refuse the call; this package does not even expose a way to read the count.
-
-The deferred release runs when `Serve` returns, including the paths that later fail at the upstream. `ServeBypass` does not call `Begin`. An official task create or poll does not take a slot here.
-
-## What this package does not do
-
-Budget for the key, the team, the project, and the organization is checked earlier, in `gateway/limits.go` (`EnforceIdentityLimits`) using rows from `internal/iam`. RPM and TPM against Redis are also there: `enforceRedisRateLimits` calls `live.Client.HitRPM` and `HitTPM` with `Principal.Hash`, the token hash, on keys `xhub:rpm:` and `xhub:tpm:`.
-
-The in-flight count is per process. A second gateway has its own map. Spend, cooldown, and the spend queue live in `internal/live`.
-
-中文说明见同目录 `readme_cn.md`。
+Use XHUB_REGRESSION_STRICT=1 for database acceptance and inspect skips. Redis and live providers require separate configuration. Update this reference and feature documentation after contract changes.

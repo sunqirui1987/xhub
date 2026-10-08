@@ -17,6 +17,41 @@ func TestRemovedColumnsStayUnregistered(t *testing.T) {
 	}
 }
 
+func TestRetiredMoreToolsRoutesAreRemoved(t *testing.T) {
+	removed := []string{
+		"/access_group/example/budget",
+		"/adaptive_router/state",
+		"/auto_router/benchmarks",
+		"/auto_router/classifier/default_prompt",
+		"/auto_router/session",
+		"/auto_router/shadow_eval/job-1",
+		"/config/pass_through_endpoint",
+		"/config/pass_through_endpoint/team/team-1",
+		"/config/pass_through_endpoints/settings",
+		"/health/latest",
+	}
+	for _, path := range removed {
+		if !IsRemovedColumn(path) {
+			t.Errorf("%s must stay removed", path)
+		}
+	}
+
+	kept := []string{
+		"/access_group/list",
+		"/access_group/example/info",
+		"/health",
+		"/health/liveness",
+		"/health/readiness",
+		"/health/readiness/details",
+		"/health/test_connection",
+	}
+	for _, path := range kept {
+		if IsRemovedColumn(path) {
+			t.Errorf("%s is still supported", path)
+		}
+	}
+}
+
 // TestRetiredPathsAreRefused pins the third state a catalog path can be in.
 //
 // A removed column answers 404 because the route is gone. A retired path is

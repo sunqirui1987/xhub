@@ -437,60 +437,6 @@ describe("UI config and public endpoints", () => {
   });
 });
 
-describe("individualModelHealthCheckCall", () => {
-  const originalFetch = global.fetch;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it("should call /health with model_id query param so health checks run by deployment id", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        healthy_count: 1,
-        unhealthy_count: 0,
-        healthy_endpoints: [],
-        unhealthy_endpoints: [],
-      }),
-    } as any);
-    global.fetch = mockFetch as any;
-
-    await Networking.individualModelHealthCheckCall("token-123", "deployment-abc-456");
-
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url] = mockFetch.mock.calls[0];
-    const urlStr = typeof url === "string" ? url : (url as Request).url;
-    expect(urlStr).toContain("health");
-    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
-    expect(parsed.searchParams.get("model_id")).toBe("deployment-abc-456");
-    expect(parsed.searchParams.has("model")).toBe(false);
-  });
-
-  it("should encode model_id in URL", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        healthy_count: 0,
-        unhealthy_count: 0,
-        healthy_endpoints: [],
-        unhealthy_endpoints: [],
-      }),
-    } as any);
-    global.fetch = mockFetch as any;
-
-    await Networking.individualModelHealthCheckCall("token", "id/with/slashes");
-
-    const [url] = mockFetch.mock.calls[0];
-    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
-    expect(parsed.searchParams.get("model_id")).toBe("id/with/slashes");
-  });
-});
-
 describe("teamInfoCall", () => {
   const originalFetch = global.fetch;
 
@@ -676,31 +622,6 @@ describe("sessionSpendLogsCall", () => {
   });
 });
 
-describe("buildModelGroupTestRequest", () => {
-  it("builds a chat completion request with NO max_tokens (reasoning models 400 on a tiny cap)", () => {
-    const { path, body } = Networking.buildModelGroupTestRequest("o3", "chat");
-    expect(path).toBe("/v1/chat/completions");
-    expect(body).toEqual({ model: "o3", messages: [{ role: "user", content: "test from litellm" }] });
-    expect(body).not.toHaveProperty("max_tokens");
-    expect(body).not.toHaveProperty("max_completion_tokens");
-  });
-
-  it("builds an embeddings request for embedding mode", () => {
-    const { path, body } = Networking.buildModelGroupTestRequest("text-embedding-3-small", "embedding");
-    expect(path).toBe("/v1/embeddings");
-    expect(body).toEqual({ model: "text-embedding-3-small", input: "test from litellm" });
-  });
-
-  it("adds classifier request parameters to a chat probe", () => {
-    const { body } = Networking.buildModelGroupTestRequest("gpt-5-mini", "chat", { reasoning_effort: "low" });
-    expect(body).toEqual({
-      model: "gpt-5-mini",
-      messages: [{ role: "user", content: "test from litellm" }],
-      reasoning_effort: "low",
-    });
-  });
-});
-
 describe("testMCPToolsListRequest auth headers", () => {
   const originalFetch = global.fetch;
 
@@ -762,48 +683,6 @@ describe("testMCPToolsListRequest auth headers", () => {
 
     const headers = sentHeaders(mockFetch);
     expect(headers["Authorization"]).toBe("Bearer sk-key");
-  });
-});
-
-describe("getAutoRouterClassifierDefaultPromptCall", () => {
-  const originalFetch = global.fetch;
-
-  const captureFetch = () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: { get: () => "application/json" },
-      json: vi.fn().mockResolvedValue({ system_prompt: "rubric" }),
-      text: vi.fn().mockResolvedValue(JSON.stringify({ system_prompt: "rubric" })),
-    } as any);
-    global.fetch = mockFetch as any;
-    return mockFetch;
-  };
-
-  const requestedUrl = (mockFetch: ReturnType<typeof vi.fn>): string => String(mockFetch.mock.calls[0][0]);
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it("sends renamed tiers as a JSON object so the rubric names them", async () => {
-    const mockFetch = captureFetch();
-
-    await Networking.getAutoRouterClassifierDefaultPromptCall("sk-key", 5, { SIMPLE: "Cheap" });
-
-    const url = requestedUrl(mockFetch);
-    expect(url).toContain("context_window_size=5");
-    expect(decodeURIComponent(url)).toContain('tier_labels={"SIMPLE":"Cheap"}');
-  });
-
-  it("omits tier_labels entirely when nothing was renamed", async () => {
-    const mockFetch = captureFetch();
-
-    await Networking.getAutoRouterClassifierDefaultPromptCall("sk-key", 5);
-    await Networking.getAutoRouterClassifierDefaultPromptCall("sk-key", 5, {});
-
-    expect(requestedUrl(mockFetch)).not.toContain("tier_labels");
-    expect(String(mockFetch.mock.calls[1][0])).not.toContain("tier_labels");
   });
 });
 

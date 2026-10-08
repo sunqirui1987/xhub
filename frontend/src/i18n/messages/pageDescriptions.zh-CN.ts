@@ -36,5 +36,6 @@ export const pageDescriptionsZhCN = {
   usage: "查看旧版用量控制台",
   "router-settings": "配置路由与负载均衡",
   "logging-and-alerts": "配置日志与告警",
+  "audit-logs": "查看平台管理操作、资源变更和操作人",
   "admin-panel": "打开管理员面板与设置",
 } as const;

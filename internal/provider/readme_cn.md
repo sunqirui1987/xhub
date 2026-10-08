@@ -1,32 +1,77 @@
-# provider
+# 供应商能力与传输登记
 
-端点类型的目录。一个供应商一个子目录，在 `init` 里调用这里的登记函数。网关通过 `internal/provider/all` 的空白导入把子目录拉进来。这个包不监听端口，也不发出上游请求。
+[English](readme.md) · [全功能实现说明](../../docs/development/implementation.md)
 
-## 登记
+## 职责与实现契约
 
-- `RegisterSupplier` 记下显示名、slug、默认 API 根，以及添加模型时要填的凭据字段。slug 为空则忽略。
-- `RegisterType` 记下一种端点。`KindAdapted` 走 `dataplane.Serve`。`KindBypass` 走 `dataplane.ServeBypass`。id 为空或没有动作则忽略。
-- `RegisterModel` 记下添加模型表单里的一行。选中这个模型 id 时，表单带上 `EndpointType`。
+capability.go 把入口能力与发送方式拆开；registry.go 注册 Transport、供应商默认地址和模型贡献；type.go 定义 Capability、Transport 及路径动作结构。RegisterTransport 校验 ID、动作和大写 HTTP 方法。
+SelectedCapabilities 优先 endpoint_types，再识别历史 mode，未明确配置默认 chat；明确未知能力不能默默变 chat。Ops 用于实际入口匹配，Paths 用于展示。官方 bypass 只匹配登记路径，部署自定义文档不能凭空新增公共路由。
+配置 api_base 覆盖供应商默认。OfficialID 只去掉一层供应商前缀并保留模型名后续斜杠；ReadTaskID 支持点路径，Expand 替换路径参数。ApplyOverride 当前是兼容无操作。登记新供应商必须检验能力、协议、路径、usage 和任务结算，RegisterModel 只贡献目录，不证明真实调用可用。
 
-自定义 bypass 不必再写 Go。部署的 `litellm_params.endpoint` 是一个对象：种类 `bypass`，加上 `model_field`、`task_id`、`strip_prefix`、`api_base` 和 `actions`（每项有 `name`、`method`、`public_path`、`upstream_path`、`task_query`）。`overrideType` 在匹配之后把这些字段盖到命中的类型上。公开路径仍以类型登记的为准，上游路径和模型字段以部署为准。Suno（`docs.sunoapi.org`）和 Tripo 就是这样填的，不在子目录里。
+## 子目录与协作边界
 
-## 匹配
-
-`Match(method, path)` 只匹配 bypass 动作。适配类型的 `/v1/chat/completions` 等仍由网关目录和 Gin 处理，不从这里返回。
-
-`OfficialID` 只去掉一层供应商标前缀。`qiniu/bytedance/doubao-…` 发给上游时是 `bytedance/doubao-…`。`volcengine/doubao-seedance-2-0-260128` 发给上游时是 `doubao-seedance-2-0-260128`。
-
-`SelectedTypes` 读 `model_info.endpoint_types`。这个数组非空时盖过 `model_info.mode`。都空则是 `chat`。`Includes` 判断一次请求的端点是否在部署选中的类型里。`BoundTypes` 把选中的 id 收成已登记的动作；选了 `custom` 时把部署上的自定义 bypass 算进去。
-
-`ModeOf` 是选中类型的第一个，给还在用单个 `mode` 字段的旧调用方。
-
-## 子目录
-
-| 目录 | 登记了什么 |
+| 目录 | 职责 |
 | --- | --- |
-| `openai` | 七种适配类型：chat、completion、embedding、image、audio、rerank、videos |
-| `qiniu` | bypass `qiniu_contents_generation`，路径 `/v3/contents/generations/tasks`，没有 `/api` |
-| `volcengine` | bypass `ark_contents_generation`，路径 `/api/v3/contents/generations/tasks` |
-| `all` | 只有空白导入，没有自己的类型 |
+| [all](all/readme_cn.md) | 内置供应商装配 |
+| [openai](openai/readme_cn.md) | OpenAI 供应商占位边界 |
+| [qiniu](qiniu/readme_cn.md) | 七牛官方视频任务传输 |
+| [volcengine](volcengine/readme_cn.md) | 火山方舟官方视频任务传输 |
 
-七牛和方舟的 URL、模型 id 和有没有 list 动作都不相同。任务钉不能跨这两条路径用。
+## 源码职责与入口
+
+### capability.go
+
+- [`func Capabilities() []Capability`](capability.go) — Capabilities 返回全部入口能力。
+- [`func CapabilityForOp(op string) (string, bool)`](capability.go) — CapabilityForOp 返回应答这个数据面 op 的能力 id。认不出 op 时返回假。 适配路径用它过滤部署：一条只标了 embedding 的部署不该应答 /v1/chat/completions。
+
+### registry.go
+
+公开类型：`Model`, `ProviderField`, `Supplier`.
+
+- [`func RegisterTransport(t Transport)`](registry.go) — RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
+- [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型。选中这个模型 id 时，表单会带上它的端点类型。
+- [`func RegisterSupplier(s Supplier)`](registry.go) — RegisterSupplier 记下默认 API 根；名字是新的时，连添加模型的凭据字段一起记下。
+- [`func APIBase(slug, configured string) string`](registry.go) — APIBase 返回部署上的根地址；部署没填时用供应商登记的默认根。
+- [`func Transports() []Transport`](registry.go) — Transports 返回已登记的内置转发方式。
+- [`func ModelEndpoints() map[string]string`](registry.go) — ModelEndpoints 把价目表模型 id 映射到表单要预选的端点类型。
+- [`func PublicBody() map[string]any`](registry.go) — PublicBody 是添加模型的载荷：能力表、转发方式表和模型默认值。 形状从 {types, models} 改成了 {capabilities, transports, models}， 因为原来的 types 正是这次要拆掉的那件东西。调用方只有添加模型表单。
+- [`func Match(method, path string, models []config.ModelEntry) (Hit, bool)`](registry.go) — Match 找出这个方法和路径命中的 bypass 动作，只在已登记的转发方式里找。 它刻意不读部署上的自定义文档：bypass 是后台登记的形状，不是运维在界面上 随手填的一份路径表。一份填错的路径表发不出请求，也就拿不到上游的返回值， 预选、日志和用量都无从谈起。 models（[]config.ModelEntry）：候选部署列表，当前不参与匹配，保留给调用方复用签名。
+- [`func ApplyOverride(m config.ModelEntry, hit Hit) Hit`](registry.go) — ApplyOverride 当前是恒等函数。部署上不再支持自带 bypass 文档， 保留这个签名让 dataplane 的调用点不必改。
+- [`func SelectedCapabilities(m config.ModelEntry) []string`](registry.go) — SelectedCapabilities 返回一条部署应答的能力 id 列表。 读顺序： 1. model_info.endpoint_types：新写入是这个字段，里面是能力 id。 2. model_info.mode：旧行只有这个字符串，按存量 id 映射成能力。 3. 都没有：chat。老的部署和不带端点信息的部署都是这个意思。 认不出的 id（realtime、batch、ocr）被忽略，不放进任何能力。一项都认不出时 realtime 的部署意外应答所有对话请求。
+- [`func SelectedTransport(m config.ModelEntry) string`](registry.go) — SelectedTransport 返回一条部署的转发方式 id。 判定顺序： 1. model_info.transport 是登记过的内置 id → 那个 id。 2. endpoint_types 或 mode 里出现内置 Bypass id → 那个 id。旧行只写了这个。 3. 其余 → adapted。 内置 Bypass 之外的 bypass 形状不存在：后台没登记过的转发方式，运维在界面上 也选不到、存不进。
+- [`func IsAdapted(m config.ModelEntry) bool`](registry.go) — IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径： 方舟内容生成的入口是 /api/v3/contents/generations/tasks，不是 /v1/videos， 把它放进适配池会让 /v1/videos 选中它然后打错地址。
+- [`func AdaptedPool(models []config.ModelEntry, op string) []config.ModelEntry`](registry.go) — AdaptedPool 把适配路径的候选收敛到能应答这个 op 的部署。 两件事都做：丢掉不是协议适配的，丢掉能力不含这个 op 的。这是新行为， 不是把现有比较换个写法——原来适配路径完全不过滤端点类型，一条标成 embedding 的部署现在仍能被 /v1/chat/completions 打到。
+- [`func IncludesCapability(m config.ModelEntry, capability string) bool`](registry.go) — IncludesCapability 报告这条部署是否应答这个能力。
+- [`func Includes(m config.ModelEntry, typeID string) bool`](registry.go) — Includes 报告这条部署是否选中了这个转发方式 id。Bypass 选部署用它： 路径先命中转发方式，再按转发方式 id 挑部署，能力不参与。
+- [`func SelectedTypes(m config.ModelEntry) []string`](registry.go) — SelectedTypes 返回一条部署声明的原始端点 id 列表。它只服务 Bypass 选部署： 能力那一路走 SelectedCapabilities。endpoint_types 优先，其次 mode，都没有则 chat。
+- [`func BoundTransports(m config.ModelEntry) []Transport`](registry.go) — BoundTransports 把这条部署声明的转发方式解析成登记好的条目。
+
+### type.go
+
+公开类型：`Action`, `Capability`, `Transport`, `Kind`, `Hit`.
+
+- [`func OfficialID(prefix, stored string) string`](type.go) — OfficialID 从存储的模型 id 上剥掉一层 "<前缀>/"。后面的斜杠保留， 所以 qiniu/bytedance/doubao-... 会变成 bytedance/doubao-...
+- [`func ReadTaskID(doc map[string]any, path string) string`](type.go) — ReadTaskID 从 JSON 对象里读一个点分字段，例如 "data.task_id"。
+- [`func Expand(pattern string, names map[string]string) string`](type.go) — Expand 把上游路径里的 {name} 占位符填上。
+
+## 对外 HTTP 边界
+
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/catalog](../catalog/readme_cn.md), [internal/config](../config/readme_cn.md), [internal/logx](../logx/readme_cn.md).
+
+## 验证与维护入口
+
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [capability_test.go](capability_test.go) | `TestEveryDeclaredPathBelongsToItsOwnCapability`, `TestChatCoversThreeSpellings`, `TestCompletionIsNotPartOfChat`, `TestUnregisteredOpsAreNotCapabilities`, `TestImageCoversGenerationAndEdit`, `TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp` |
+| [match_test.go](match_test.go) | `TestBypassPathsStayOnTheirProviders`, `TestRegisteredTransportsAreTheOnlyBypassSource`, `TestReadTaskID` |
+| [registry_test.go](registry_test.go) | `TestSelectedCapabilitiesReadsBothSpellings`, `TestOneModelCanAnswerSeveralCapabilities`, `TestBypassTypesStayWithTheirProvider`, `TestABypassIsNeverTakenFromADeploymentDocument` |
+
+```bash
+go test ./internal/provider -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

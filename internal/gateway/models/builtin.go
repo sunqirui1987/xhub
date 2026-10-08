@@ -95,14 +95,47 @@ func ParseCatalog(body []byte) []CatalogModel {
 			continue
 		}
 		seen[id] = true
-		items = append(items, CatalogModel{
-			ID:          id,
-			Category:    catalogCategory(id, row),
-			InputPrice:  catalogPrice(row, "input_price", "input_cost_per_token", "input", "prompt"),
-			OutputPrice: catalogPrice(row, "output_price", "output_cost_per_token", "output", "completion"),
-		})
+		category := catalogCategory(id, row)
+		item := CatalogModel{ID: id, Category: category}
+		if tokenPricedCategory(category) {
+			item.InputPrice = catalogTokenPrice(row, "input_price", "input_cost_per_token", "input", "prompt")
+			item.OutputPrice = catalogTokenPrice(row, "output_price", "output_cost_per_token", "output", "completion")
+		}
+		items = append(items, item)
 	}
 	return items
+}
+
+// tokenPricedCategory reports whether catalog prices for this category use token units.
+// 参数 category（string）：供应商目录返回的模型类别。
+// 返回 bool（bool）：前端可按每百万 token 展示输入输出价格时为真。
+// 调用：ParseCatalog、fillFromCostMap。
+// 测试：builtin_test.go。
+func tokenPricedCategory(category string) bool {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "llm", "chat", "vision", "embedding":
+		return true
+	default:
+		return false
+	}
+}
+
+// catalogTokenPrice returns USD per million tokens. Provider catalogs commonly
+// expose input_price/output_price in that display unit, while normalized API
+// fields are USD per token and must be scaled before reaching the frontend.
+// 参数 row（map[string]any）：供应商目录中的一行；displayKey（string）：已按每百万 token 表示的字段；normalizedKeys（...string）：按单 token 表示的候选字段。
+// 返回 *float64（*float64）：每百万 token 的美元价格，缺失时为 nil。
+// 调用：ParseCatalog。
+// 测试：builtin_test.go。
+func catalogTokenPrice(row map[string]any, displayKey string, normalizedKeys ...string) *float64 {
+	if price := catalogPrice(row, displayKey); price != nil {
+		return price
+	}
+	if price := catalogPrice(row, normalizedKeys...); price != nil {
+		scaled := *price * 1_000_000
+		return &scaled
+	}
+	return nil
 }
 
 // 从目录响应里取出模型数组。既接受 data 包裹，也接受裸数组。
@@ -281,20 +314,25 @@ func RefreshBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	ListBuiltin(s, w, r)
 }
 
-// ListBuiltin returns the provider catalog and which names are already saved. It does not write.
+// ListBuiltin returns the specialized builtin catalog or model IDs discovered
+// through a saved OpenAI-compatible credential. It does not write.
 // 参数 s（Host）：列出内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/models/mount.go
 // 测试：无直接单测
 func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
-	spec, rows, key, _, ok := openBuiltin(s, w, r)
+	source, ok := openCatalog(s, w, r)
 	if !ok {
 		return
 	}
-	already := savedNames(rows, spec.ID)
+	already := savedNames(source.rows, source.spec.ID)
 	var available []CatalogModel
 	var fetchErr string
-	items, err := fetchCatalog(ModelsURL(spec.ID, spec.Base), key)
+	urlProvider := ""
+	if source.specialized {
+		urlProvider = source.spec.ID
+	}
+	items, err := fetchCatalog(ModelsURL(urlProvider, source.spec.Base), source.key)
 	if err != nil {
 		fetchErr = err.Error()
 	} else {
@@ -303,67 +341,43 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	if available == nil {
 		available = []CatalogModel{}
 	}
-	seen := map[string]bool{}
 	models := []map[string]any{}
+	modelIDs := []string{}
 	for _, item := range available {
-		seen[item.ID] = true
-		fillFromCostMap(&item)
-		item.Added = already[item.ID]
-		models = append(models, catalogJSON(item))
-	}
-	for id := range already {
-		if seen[id] {
-			continue
+		modelIDs = append(modelIDs, item.ID)
+		if source.specialized {
+			fillFromCostMap(&item)
+			item.Added = already[item.ID]
+			models = append(models, catalogJSON(item))
+		} else {
+			models = append(models, map[string]any{"id": item.ID})
 		}
-		models = append(models, catalogJSON(CatalogModel{ID: id, Category: catalogCategory(id, nil), Added: true}))
 	}
-	out := map[string]any{"provider": spec.ID, "api_base": spec.Base, "models": models}
+	out := map[string]any{
+		"provider":        source.spec.ID,
+		"credential_name": source.credentialName,
+		"api_base":        source.spec.Base,
+		"models":          models,
+		"model_ids":       modelIDs,
+	}
 	if fetchErr != "" {
 		out["error"] = fetchErr
 	}
 	httpx.WriteJSON(w, 200, out)
 }
 
-// AddBuiltinModels saves each selected name the same way the model form does. The row stores the model name and the provider credential. The address and key stay on the credential.
+// AddBuiltinModels is the retired catalog-to-deployment shortcut. Catalog rows
+// now enter /price/model and deployments are created through /model/new, so a
+// caller cannot bypass the unified pricing editor.
 // 参数 s（Host）：累加内置模型使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/models/mount.go
 // 测试：无直接单测
 func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request) {
-	spec, rows, _, body, ok := openBuiltin(s, w, r)
-	if !ok {
+	if s.RequireManage(w, r) == nil {
 		return
 	}
-	var ids []string
-	switch listed := body["model_ids"].(type) {
-	case []any:
-		for _, item := range listed {
-			if id := strings.TrimSpace(str(item)); id != "" {
-				ids = append(ids, id)
-			}
-		}
-	}
-	if len(ids) == 0 {
-		httpx.WriteJSON(w, 200, map[string]any{"provider": spec.ID, "updated": false, "api_base": spec.Base, "model_ids": ids})
-		return
-	}
-	already := savedNames(rows, spec.ID)
-	s.LockModels()
-	defer s.UnlockModels()
-	saved := []string{}
-	for _, id := range ids {
-		if already[id] {
-			continue
-		}
-		entry := addedModel(spec.ID, id)
-		if err := s.RecordStore().UpsertProxyModel(proxyModel(entry)); err != nil {
-			httpx.WriteError(w, 500, "internal", err.Error())
-			return
-		}
-		*s.ModelTable() = append(*s.ModelTable(), entry)
-		saved = append(saved, id)
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"provider": spec.ID, "updated": len(saved) > 0, "api_base": spec.Base, "model_ids": saved})
+	httpx.WriteError(w, http.StatusGone, "gone", "catalog deployment import moved to /price/model followed by /model/new")
 }
 
 // addedModel 判断这个目录模型是否已经在当前部署表里。
@@ -387,27 +401,116 @@ func addedModel(provider, name string) config.ModelEntry {
 	}
 }
 
-// 打开一次内置供应商操作。没有管理权限或找不到供应商时最后一个布尔值为假。
-// 参数 s（Host）：打开内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回 Builtin（Builtin）：找到的内置供应商。没有管理权限或找不到时是零值；ProxyModel（[]store.ProxyModel）：已经保存的代理模型。没有时为空切片；string（string）：这次操作要使用的上游密钥。没有可用密钥时为空串；map[string]any（map[string]any）：请求正文解析出的字段。空正文时是空映射；bool（bool）：管理权限通过且找到了这个内置供应商时返回真。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func openBuiltin(s Host, w http.ResponseWriter, r *http.Request) (Builtin, []store.ProxyModel, string, map[string]any, bool) {
+type catalogSource struct {
+	spec           Builtin
+	rows           []store.ProxyModel
+	key            string
+	credentialName string
+	specialized    bool
+}
+
+// openCatalog resolves either a specialized builtin catalog or a generic saved
+// OpenAI-compatible credential. Generic discovery always takes its base URL and
+// secret from the saved credential, never from request fields.
+// 参数 s（Host）：目录发现使用的数据面宿主；w（http.ResponseWriter）：错误响应写入这里；r（*http.Request）：包含 provider 或 credential_name 的管理请求。
+// 返回 catalogSource（catalogSource）：已解析的目录连接和现有部署；bool（bool）：请求有效且可以发起目录请求时为真。
+// 调用：ListBuiltin。
+// 测试：builtin_providers_test.go。
+func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource, bool) {
 	if s.RequireManage(w, r) == nil {
-		return Builtin{}, nil, "", nil, false
+		return catalogSource{}, false
 	}
 	body := readBody(r)
-	spec, found := builtinByID(strings.TrimSpace(str(body["provider"])))
-	if !found {
-		httpx.WriteError(w, 400, "invalid_request", "provider must be fennoai or qiniu")
-		return Builtin{}, nil, "", nil, false
-	}
 	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
-		return Builtin{}, nil, "", nil, false
+		return catalogSource{}, false
 	}
-	return spec, rows, providerKey(s, spec, str(body["api_key"])), body, true
+	provider := strings.TrimSpace(str(body["provider"]))
+	name := strings.TrimSpace(str(body["credential_name"]))
+	if spec, found := builtinByID(provider); found && name == "" {
+		key := providerKey(s, spec, str(body["api_key"]))
+		return catalogSource{spec: spec, rows: rows, key: key, credentialName: name, specialized: true}, true
+	}
+	if name == "" {
+		httpx.WriteError(w, 400, "invalid_request", "credential_name is required for generic model discovery")
+		return catalogSource{}, false
+	}
+	record, ok := openAICompatibleCredential(s, w, name)
+	if !ok {
+		return catalogSource{}, false
+	}
+	info, _ := record["credential_info"].(map[string]any)
+	values, _ := record["credential_values"].(map[string]any)
+	base := credentialText(values, "api_base")
+	if base == "" {
+		base = credentialText(info, "api_base")
+	}
+	if base == "" {
+		base = "https://api.openai.com/v1"
+	}
+	// Default builtin connections have their own discovery endpoint. A custom
+	// saved address must still be used directly instead of that default.
+	if builtin, found := builtinByID(str(info["builtin"])); found && strings.TrimRight(base, "/") == builtin.Base {
+		return catalogSource{
+			spec: builtin, rows: rows, key: credentialSecret(record, "api_key"), credentialName: name, specialized: true,
+		}, true
+	}
+	// Saved credentials always determine the discovery URL, even when the
+	// request includes a builtin provider hint or the credential has that name.
+	spec := Builtin{ID: name, Base: base}
+	return catalogSource{
+		spec: spec, rows: rows, key: credentialSecret(record, "api_key"), credentialName: name,
+	}, true
+}
+
+// openAICompatibleCredential reads one saved credential and verifies that its
+// declared wire protocol can use an OpenAI /models endpoint.
+// 参数 s（Host）：凭据存储宿主；w（http.ResponseWriter）：错误响应写入这里；name（string）：保存的凭据名称。
+// 返回 map[string]any（map[string]any）：未脱敏的服务端凭据；bool（bool）：凭据存在且协议兼容时为真。
+// 调用：openCatalog。
+// 测试：builtin_providers_test.go。
+func openAICompatibleCredential(s Host, w http.ResponseWriter, name string) (map[string]any, bool) {
+	record, err := s.RecordStore().GetKV("credentials", name)
+	if err != nil || record == nil {
+		httpx.WriteError(w, 400, "invalid_request", "model provider is not configured")
+		return nil, false
+	}
+	info, _ := record["credential_info"].(map[string]any)
+	values, _ := record["credential_values"].(map[string]any)
+	protocol := credentialText(info, "custom_llm_provider")
+	if protocol == "" {
+		protocol = credentialText(values, "custom_llm_provider")
+	}
+	if protocol != "" && !strings.EqualFold(protocol, "openai") {
+		httpx.WriteError(w, 400, "invalid_request", "credential protocol is not compatible with OpenAI model discovery")
+		return nil, false
+	}
+	return record, true
+}
+
+// credentialSecret returns a credential value after resolving the supported
+// os.environ/NAME indirection. It is used only for the outbound request.
+// 参数 record（map[string]any）：服务端凭据对象；key（string）：要读取的秘密字段。
+// 返回 string（string）：解析后的秘密，缺失时为空串。
+// 调用：openCatalog。
+// 测试：builtin_providers_test.go。
+func credentialSecret(record map[string]any, key string) string {
+	values, _ := record["credential_values"].(map[string]any)
+	return credentialText(values, key)
+}
+
+// credentialText trims a saved credential string and resolves os.environ/NAME.
+// 参数 fields（map[string]any）：credential_info 或 credential_values；key（string）：要读取的字段。
+// 返回 string（string）：解析后的文本，缺失时为空串。
+// 调用：openCatalog、openAICompatibleCredential、credentialSecret。
+// 测试：builtin_providers_test.go。
+func credentialText(fields map[string]any, key string) string {
+	value := strings.TrimSpace(str(fields[key]))
+	if strings.HasPrefix(value, "os.environ/") {
+		return strings.TrimSpace(os.Getenv(strings.TrimPrefix(value, "os.environ/")))
+	}
+	return value
 }
 
 // 读完请求正文并解析成对象。空正文得到空对象，不返回 nil。
@@ -505,6 +608,9 @@ func fetchCatalog(rawURL, key string) ([]CatalogModel, error) {
 // 调用：仅在 builtin.go 内使用
 // 测试：builtin_test.go
 func fillFromCostMap(item *CatalogModel) {
+	if item == nil || !tokenPricedCategory(item.Category) {
+		return
+	}
 	if item.InputPrice != nil && item.OutputPrice != nil {
 		return
 	}

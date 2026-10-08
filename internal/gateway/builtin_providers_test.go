@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,8 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-fenno"},{"id":"codex-mini"}]}`)
 		case "api.qnaigc.com":
 			_, _ = io.WriteString(w, `{"data":[{"id":"qwen-turbo"},{"id":"deepseek/deepseek-v3.2-exp"}]}`)
+		case "relay.example":
+			_, _ = io.WriteString(w, `{"data":[{"id":"relay-chat"},{"id":"relay/embed"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -86,32 +89,86 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 	gw := httptest.NewServer(New(cfg, st, db).Handler())
 	defer gw.Close()
 	sess := adminSession(t, gw.URL, db)
-	status, body := authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/add", []byte(`{"provider":"qiniu","model_ids":["extra/id"]}`))
+	if err := st.PutKV("credentials", "anthropic-only", `{"credential_info":{"custom_llm_provider":"anthropic"},"credential_values":{"api_key":"wrong-protocol"}}`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteKV("credentials", "anthropic-only") })
+	status, body := authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/models", []byte(`{"provider":"qiniu","credential_name":"anthropic-only"}`))
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "protocol") {
+		t.Fatalf("incompatible credential %d %s", status, trim(body))
+	}
+	if len(hits) != 0 {
+		t.Fatalf("incompatible credential reached provider %#v", hits)
+	}
+	if err := st.PutKV("credentials", "saved-relay", `{"credential_info":{"custom_llm_provider":"openai"},"credential_values":{"api_key":"server-secret","api_base":"https://relay.example/v1"}}`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteKV("credentials", "saved-relay") })
+	status, body = authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/models", []byte(`{"credential_name":"saved-relay","api_key":"request-must-not-win","api_base":"https://attacker.invalid"}`))
 	if status != http.StatusOK {
-		t.Fatalf("add %d %s", status, trim(body))
+		t.Fatalf("generic discovery %d %s", status, trim(body))
+	}
+	var discovered struct {
+		CredentialName string           `json:"credential_name"`
+		APIBase        string           `json:"api_base"`
+		Models         []map[string]any `json:"models"`
+		ModelIDs       []string         `json:"model_ids"`
+	}
+	if err := json.Unmarshal(body, &discovered); err != nil {
+		t.Fatal(err)
+	}
+	if discovered.CredentialName != "saved-relay" || discovered.APIBase != "https://relay.example/v1" {
+		t.Fatalf("generic source %#v", discovered)
+	}
+	if !contains(discovered.ModelIDs, "relay-chat") || !contains(discovered.ModelIDs, "relay/embed") || len(discovered.Models) != 2 {
+		t.Fatalf("generic model ids %#v models=%#v", discovered.ModelIDs, discovered.Models)
+	}
+	if strings.Contains(string(body), "server-secret") || strings.Contains(string(body), "request-must-not-win") {
+		t.Fatalf("generic discovery exposed a secret: %s", trim(body))
+	}
+	if len(hits) != 1 || hits[0] != "relay.example/v1/models auth" {
+		t.Fatalf("generic discovery request %#v", hits)
+	}
+	status, body = authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/models", []byte(`{"provider":"fennoai","credential_name":"saved-relay"}`))
+	if status != http.StatusOK {
+		t.Fatalf("saved provider with builtin hint %d %s", status, trim(body))
+	}
+	if err := json.Unmarshal(body, &discovered); err != nil {
+		t.Fatal(err)
+	}
+	if len(discovered.Models) != 2 || !contains(discovered.ModelIDs, "relay-chat") || contains(discovered.ModelIDs, "gpt-fenno") {
+		t.Fatalf("builtin hint mixed providers: %#v", discovered)
+	}
+	if len(hits) != 2 || hits[1] != "relay.example/v1/models auth" {
+		t.Fatalf("builtin hint ignored saved provider address %#v", hits)
+	}
+	orphan := store.ProxyModel{ID: "provider-list-orphan", ModelName: "orphan-model", Params: map[string]any{"litellm_credential_name": "qiniu"}}
+	if err := st.UpsertProxyModel(orphan); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.DeleteProxyModel(orphan.ID) })
+	status, body = authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/add", []byte(`{"provider":"qiniu","model_ids":["extra/id"]}`))
+	if status != http.StatusGone || !strings.Contains(string(body), "/price/model") {
+		t.Fatalf("retired add %d %s", status, trim(body))
 	}
 	rows, err = st.ListProxyModels()
 	if err != nil {
 		t.Fatal(err)
 	}
-	added := findModelRow(rows, "extra/id")
-	if added == nil {
-		t.Fatalf("add missed model %#v", names(rows))
-	}
-	if added.Params["model"] != "extra/id" || added.Params["custom_llm_provider"] != "openai" || added.Params["litellm_credential_name"] != "qiniu" {
-		t.Fatalf("params %#v", added.Params)
-	}
-	if _, ok := added.Params["api_base"]; ok || added.Info["mode"] != nil || added.Info["role"] != nil {
-		t.Fatalf("row is not a plain model params=%#v info=%#v", added.Params, added.Info)
+	if added := findModelRow(rows, "extra/id"); added != nil {
+		t.Fatalf("retired endpoint still added model %#v", added)
 	}
 
 	status, body = authed(t, gw.URL, sess, http.MethodPost, "/model/builtin/refresh", []byte(`{"provider":"qiniu"}`))
 	if status != http.StatusOK {
 		t.Fatalf("refresh %d %s", status, trim(body))
 	}
+	if strings.Contains(string(body), "orphan-model") {
+		t.Fatalf("discovery appended a saved deployment absent from the provider: %s", trim(body))
+	}
 	rows, _ = st.ListProxyModels()
-	if findModelRow(rows, "extra/id") == nil {
-		t.Fatal("refresh deleted the added model")
+	if findModelRow(rows, "extra/id") != nil {
+		t.Fatal("refresh created a model after the retired add endpoint")
 	}
 }
 

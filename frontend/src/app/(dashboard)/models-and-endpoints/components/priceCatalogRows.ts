@@ -33,7 +33,7 @@ export type CatalogRate = {
 /**
  * 一条模型的费率表，按计费维度分好组。
  *
- * 分组是渲染需要的形状：一个维度一行标题（"按 token（每 1000）"），组内按
+ * 分组是渲染需要的形状：一个维度一行标题（"按 token"），组内按
  * 侧和变体成行、按时段成列。分时价并排显示——它们是一件事的两面，折起来
  * 看不出差一倍。
  */
@@ -117,15 +117,72 @@ const CAPABILITIES = [
 export const EDITABLE_TOKEN_RATES = [
   { field: "input_cost_per_token", labelKey: "Input" },
   { field: "output_cost_per_token", labelKey: "Output" },
+  { field: "input_cost_per_token_peak", labelKey: "priceCatalog.inputPeak" },
+  { field: "output_cost_per_token_peak", labelKey: "priceCatalog.outputPeak" },
   { field: "cache_read_input_token_cost", labelKey: "priceCatalog.cacheRead" },
   { field: "cache_creation_input_token_cost", labelKey: "priceCatalog.cacheWrite" },
 ] as const;
 
 /** The per-unit rates the edit form writes back. */
 export const EDITABLE_UNIT_RATES = [
+  { field: "input_cost_per_image", labelKey: "priceCatalog.imageInput" },
   { field: "output_cost_per_image", labelKey: "priceCatalog.imageOutput" },
+  { field: "input_cost_per_second", labelKey: "priceCatalog.secondInput" },
   { field: "output_cost_per_second", labelKey: "priceCatalog.secondOutput" },
+  { field: "search_context_cost_per_query", labelKey: "priceCatalog.query" },
 ] as const;
+
+export const EDITABLE_RATE_FIELDS = [...EDITABLE_TOKEN_RATES, ...EDITABLE_UNIT_RATES] as const;
+
+type EditableRateField = (typeof EDITABLE_RATE_FIELDS)[number]["field"];
+
+/**
+ * The unqualified rates[] entry that can stand in for each legacy flat field.
+ * Variant rates are deliberately excluded: editing a flat price must not turn
+ * an uncached, thinking, resolution, or other qualified price into the base
+ * price.
+ */
+const CATALOG_FIELD_RATE_SPECS: Record<
+  EditableRateField,
+  { measure: string; side: string; windows: readonly string[] }
+> = {
+  input_cost_per_token: { measure: "token", side: "input", windows: ["all", "offpeak"] },
+  output_cost_per_token: { measure: "token", side: "output", windows: ["all", "offpeak"] },
+  input_cost_per_token_peak: { measure: "token", side: "input", windows: ["peak"] },
+  output_cost_per_token_peak: { measure: "token", side: "output", windows: ["peak"] },
+  cache_read_input_token_cost: { measure: "token", side: "cache_read", windows: ["all"] },
+  cache_creation_input_token_cost: { measure: "token", side: "cache_write", windows: ["all"] },
+  input_cost_per_image: { measure: "picture", side: "input", windows: ["all"] },
+  output_cost_per_image: { measure: "picture", side: "output", windows: ["all"] },
+  input_cost_per_second: { measure: "second", side: "input", windows: ["all"] },
+  output_cost_per_second: { measure: "second", side: "output", windows: ["all"] },
+  search_context_cost_per_query: { measure: "query", side: "output", windows: ["all"] },
+};
+
+/**
+ * Reads an editable flat catalog field, falling back to its matching base rate
+ * in rates[]. A valid flat value always wins, including zero. Only an
+ * unqualified rate is eligible so a no-op edit cannot flatten rate variants.
+ */
+export function catalogFieldValue(raw: Record<string, unknown>, field: EditableRateField): number | null {
+  const flat = nonnegativeNumber(raw[field]);
+  if (flat != null) return flat;
+
+  const spec = CATALOG_FIELD_RATE_SPECS[field];
+  if (!Array.isArray(raw.rates)) return null;
+  for (const window of spec.windows) {
+    for (const candidate of raw.rates) {
+      if (!isObject(candidate)) continue;
+      if ((stringValue(candidate.measure) ?? "") !== spec.measure) continue;
+      if ((stringValue(candidate.side) ?? "") !== spec.side) continue;
+      if ((stringValue(candidate.variant) ?? "") !== "") continue;
+      if ((stringValue(candidate.window) ?? "all") !== window) continue;
+      const value = nonnegativeNumber(candidate.usd);
+      if (value != null) return value;
+    }
+  }
+  return null;
+}
 
 /**
  * Reads the models half of the catalog document. A malformed document yields an
@@ -207,6 +264,8 @@ export function priceModelPayload(input: {
   endpointType?: string;
   tokenRates: Record<string, string>;
   unitRates: Record<string, string>;
+  /** Existing API row. When present, unchanged rates are omitted from the patch. */
+  original?: Record<string, unknown>;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     id: input.id.trim(),
@@ -216,13 +275,37 @@ export function priceModelPayload(input: {
   if (input.mode?.trim()) body.mode = input.mode.trim();
   if (input.endpointType?.trim()) body.endpoint_type = input.endpointType.trim();
   for (const [field, raw] of Object.entries(input.tokenRates)) {
+    if (
+      input.original &&
+      rateInputUnchanged(raw, rateToInputValue(catalogFieldValue(input.original, field as EditableRateField)))
+    )
+      continue;
     const value = parseRate(raw);
     body[field] = value == null ? null : value / 1_000_000;
   }
   for (const [field, raw] of Object.entries(input.unitRates)) {
+    if (
+      input.original &&
+      rateInputUnchanged(raw, unitRateToInputValue(catalogFieldValue(input.original, field as EditableRateField)))
+    )
+      continue;
     body[field] = parseRate(raw);
   }
   return body;
+}
+
+/** Returns API field names whose nonblank values are not finite non-negative numbers. */
+export function invalidRateFields(rates: Record<string, string>): string[] {
+  return Object.entries(rates)
+    .filter(([, raw]) => raw.trim() !== "" && parseRate(raw) == null)
+    .map(([field]) => field);
+}
+
+function rateInputUnchanged(current: string, original: string): boolean {
+  const left = current.trim();
+  const right = original.trim();
+  if (left === "" || right === "") return left === right;
+  return Number(left) === Number(right);
 }
 
 /**

@@ -88,31 +88,18 @@ func TestProviderSetupAddsFennoaiAndQiniu(t *testing.T) {
 		}
 	})
 
-	// 从目录加进来的模型能用：这是"配供应商"这件事真正要证明的终点。
-	t.Run("a model added from the catalog becomes callable", func(t *testing.T) {
-		// 凭据指向假供应商，所以下面这次调用考的是接线，不是供应商。
-		h.seedCredential("fennoai")
-		added := h.ok(http.MethodPost, "/model/builtin/add", admin, map[string]any{
+	// 旧入口已经退役；目录导入后统一走 /price/model 和 /model/new。
+	t.Run("the old builtin add endpoint is gone", func(t *testing.T) {
+		r := h.do(http.MethodPost, "/model/builtin/add", admin, map[string]any{
 			"provider":  "fennoai",
 			"model_ids": []string{"regression-fenno-model"},
 		})
-		if !boolField(added.json(), "updated") {
-			t.Fatalf("add reported no change: %s", added.describe())
+		if r.status != http.StatusGone {
+			t.Fatalf("retired add endpoint -> %s", r.describe())
 		}
-		tn := h.provision(t, admin, "setup-fenno")
-		h.resetUpstream()
-		r := h.ok(http.MethodPost, "/v1/chat/completions", tn.key,
-			map[string]any{"model": "regression-fenno-model", "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
-		if got := stringField(r.json(), "model"); got == "" {
-			t.Fatalf("completion carried no model: %s", r.describe())
-		}
-		calls := h.upstreamCalls()
-		if len(calls) == 0 {
-			t.Fatal("the added deployment never reached the upstream")
-		}
-		// 内置供应商把模型名原样转发，不加工。
-		if got := stringField(calls[0].Body, "model"); got != "regression-fenno-model" {
-			t.Fatalf("upstream saw model=%q, want regression-fenno-model", got)
+		message := errorMessage(r)
+		if !strings.Contains(message, "/price/model") || !strings.Contains(message, "/model/new") {
+			t.Fatalf("retirement does not direct the caller to the unified flow: %q", message)
 		}
 	})
 

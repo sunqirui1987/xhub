@@ -99,6 +99,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { mode } = usePluginMode();
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 767px)");
+    const update = () => setSidebarCollapsed(narrow.matches);
+    update();
+    narrow.addEventListener("change", update);
+    return () => narrow.removeEventListener("change", update);
+  }, []);
 
   const isGateway = mode === "ai-gateway";
 
@@ -131,7 +138,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
         <NoRedisWarningBanner accessToken={accessToken} />
         <EnvCredentialLoginWarningBanner accessToken={accessToken} />
         <UserBanner accessToken={accessToken} />
-        <main data-testid="admin-content" className="min-w-0 flex-1 overflow-y-auto bg-canvas p-6">
+        <main data-testid="admin-content" className="min-w-0 flex-1 overflow-y-auto bg-canvas p-3 sm:p-6">
           {children}
         </main>
       </div>

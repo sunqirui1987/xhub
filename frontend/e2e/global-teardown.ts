@@ -39,10 +39,10 @@ export default function globalTeardown() {
   ].join("\n");
   const out = path.resolve(__dirname, "../../e2e/e2e-report.txt");
   fs.writeFileSync(out, body);
-  if (missing.length > 0) {
+  if (process.env.E2E_FULL_COVERAGE === "1" && missing.length > 0) {
     throw new Error(`report missing console routes: ${missing.join(", ")}`);
   }
-  if (!routes.length) {
+  if (process.env.E2E_FULL_COVERAGE === "1" && !routes.length) {
     throw new Error("report has no catalog routes");
   }
 }

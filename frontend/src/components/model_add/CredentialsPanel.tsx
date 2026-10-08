@@ -19,21 +19,7 @@ import DeleteResourceModal from "../common_components/DeleteResourceModal";
 import { toast } from "@/lib/toast";
 import CredentialModal from "./CredentialModal";
 import CredentialsTable from "./CredentialsTable";
-import { ProviderModelDialog } from "./ProviderModelDialog";
 import { t } from "@/i18n";
-
-const DEFAULT_PROVIDERS: CredentialItem[] = [
-  {
-    credential_name: "fennoai",
-    credential_values: { api_base: "https://api.fenno.ai" },
-    credential_info: { custom_llm_provider: "openai", builtin: "fennoai", api_base: "https://api.fenno.ai", wire_api: "responses" },
-  },
-  {
-    credential_name: "qiniu",
-    credential_values: { api_base: "https://api.qnaigc.com/bypass/openai/v1" },
-    credential_info: { custom_llm_provider: "openai", builtin: "qiniu", api_base: "https://api.qnaigc.com/bypass/openai/v1", wire_api: "responses" },
-  },
-];
 
 const restrictedFields = ["credential_name", "custom_llm_provider"];
 
@@ -49,19 +35,13 @@ const withoutRestrictedFields = (values: Record<string, unknown>): Record<string
   Object.fromEntries(Object.entries(values).filter(([key]) => !restrictedFields.includes(key)));
 
 export default function CredentialsPanel() {
-  const { accessToken, userRole } = useAuthorized();
+  const { accessToken, userRole, isViewOnly } = useAuthorized();
   // Admin Viewer follows the read-parity rule: see credentials, do not modify.
-  const canModifyCredentials = isProxyAdminRole(userRole ?? "");
+  const canModifyCredentials = !isViewOnly && isProxyAdminRole(userRole ?? "");
   const { data: credentialsResponse, isLoading, refetch: refetchCredentials } = useCredentials();
-  const credentialList = [
-    ...DEFAULT_PROVIDERS.filter(
-      (item) => !(credentialsResponse?.credentials || []).some((row) => row.credential_name === item.credential_name),
-    ),
-    ...(credentialsResponse?.credentials || []),
-  ];
+  const credentialList = credentialsResponse?.credentials ?? [];
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [listingProvider, setListingProvider] = useState<{ provider: "fennoai" | "qiniu"; credentialName: string } | null>(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
   const [selectedCredential, setSelectedCredential] = useState<CredentialItem | null>(null);
   const [credentialToDelete, setCredentialToDelete] = useState<CredentialItem | null>(null);
@@ -135,15 +115,13 @@ export default function CredentialsPanel() {
     <div className="mx-auto flex w-full flex-auto flex-col gap-4 overflow-y-auto p-2">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">{t("pages.models.llmCredentials")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("Configured credentials for different AI providers. Add and manage your API credentials.")}
-          </p>
+          <h2 className="text-lg font-semibold text-foreground">模型提供商</h2>
+          <p className="text-sm text-muted-foreground">统一管理连接地址与 API 凭据，添加模型时先选择这里的提供商。</p>
         </div>
         {canModifyCredentials && (
           <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="size-4" />
-            {t("Add Credential")}
+            添加提供商
           </Button>
         )}
       </div>
@@ -153,12 +131,6 @@ export default function CredentialsPanel() {
         canModifyCredentials={canModifyCredentials}
         onEdit={openEditModal}
         onDelete={openDeleteModal}
-        onListModels={(credential) => {
-          const builtin = credential.credential_info?.builtin || credential.credential_name;
-          if (builtin === "fennoai" || builtin === "qiniu") {
-            setListingProvider({ provider: builtin, credentialName: credential.credential_name });
-          }
-        }}
         isLoading={isLoading}
       />
 
@@ -170,18 +142,6 @@ export default function CredentialsPanel() {
           onCancel={() => setIsAddModalOpen(false)}
         />
       )}
-      {listingProvider && accessToken ? (
-        <ProviderModelDialog
-          provider={listingProvider.provider}
-          initialCredentialName={listingProvider.credentialName}
-          credentials={credentialList}
-          accessToken={accessToken}
-          onClose={() => setListingProvider(null)}
-          onAdded={() => {
-            void refetchCredentials();
-          }}
-        />
-      ) : null}
 
       {isUpdateModalOpen && (
         <CredentialModal
@@ -198,7 +158,9 @@ export default function CredentialsPanel() {
         onCancel={closeDeleteModal}
         onOk={handleDeleteCredential}
         title={t("Delete Credential?")}
-        message={t("Are you sure you want to delete this credential? This action cannot be undone and may break existing integrations.")}
+        message={t(
+          "Are you sure you want to delete this credential? This action cannot be undone and may break existing integrations.",
+        )}
         resourceInformationTitle="Credential Information"
         resourceInformation={[
           { label: t("Credential Name"), value: credentialToDelete?.credential_name },

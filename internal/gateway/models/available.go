@@ -30,7 +30,7 @@ func Available(s Host, w http.ResponseWriter, r *http.Request) {
 	data := make([]map[string]any, 0)
 	seen := map[string]struct{}{}
 	for _, entry := range list {
-		if nonModelEntry(entry) || modelBlocked(entry) || !AllowsModel(s, ctx, p, teamID, entry.ModelName) {
+		if nonModelEntry(entry) || entry.Disabled() || !AllowsModel(s, ctx, p, teamID, entry.ModelName) {
 			continue
 		}
 		if _, ok := seen[entry.ModelName]; ok {

@@ -238,26 +238,29 @@ func activityQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	}
 }
 
-// eventsToActivity flattens the stored events into the rows the rollup folds. Provider comes from the price map, falling back to the model name so an unknown model is still attributed rather than dropped.
+// eventsToActivity flattens every stored event, including free, cached and
+// failed calls. Recorded provider attribution takes precedence over today's
+// price map, which remains a fallback for older events without a provider.
 // 参数 events（[]iam.UsageEvent）：events到活动使用的用量事件；tzMinutes（int）：调用方时区相对 UTC 的分钟偏移，用来把日期切到本地日。
-// 返回 []activityRow（[]activityRow）：用量事件收成的扁平行，费用为 0 的事件不进入。供应商先查价格表，没有时退回模型名里的前缀。
+// 返回 []activityRow（[]activityRow）：全部用量事件收成的扁平行，包括零费用事件。供应商优先使用历史记录，旧记录没有供应商时查价格表并退回模型名前缀。
 // 调用：仅在 activity.go 内使用
-// 测试：无直接单测
+// 测试：activity_test.go
 func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 	prices := catalog.CostMap()
 	out := make([]activityRow, 0, len(events))
 	for _, e := range events {
-		if e.Cost == 0 {
-			continue
-		}
 		model := e.Model
 		if model == "" {
 			model = "unknown"
 		}
+		provider := e.Provider
+		if provider == "" {
+			provider = providerName(model, prices)
+		}
 		out = append(out, activityRow{
 			day:            activityDay(e.TS, tzMinutes),
 			model:          model,
-			provider:       providerName(model, prices),
+			provider:       provider,
 			apiKey:         e.KeyID,
 			keyAlias:       e.KeyAlias,
 			teamID:         e.TeamID,

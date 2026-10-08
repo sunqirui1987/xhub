@@ -783,12 +783,17 @@ func (h *harness) doHeaders(method, path, token string, body any, headers map[st
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := h.server.Client().Do(req)
+	client := *h.server.Client()
+	client.Timeout = 60 * time.Second
+	resp, err := client.Do(req)
 	if err != nil {
 		h.t.Fatalf("%s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.t.Fatalf("read response %s %s: %v", method, path, err)
+	}
 	return reply{status: resp.StatusCode, body: raw, headers: resp.Header.Clone()}
 }
 

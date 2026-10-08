@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 下面这些用例补上请求链上还没单独走完的分叉。
@@ -61,10 +62,25 @@ func TestStreamSkipsIdempotency(t *testing.T) {
 		body := chatRequest(model, "stream")
 		body["stream"] = true
 		headers := map[string]string{"Idempotency-Key": "stream-key"}
-		h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
-		h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
+		first := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
+		second := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
+		for _, r := range []reply{first, second} {
+			if r.status != http.StatusOK || !strings.Contains(r.text(), "data:") {
+				t.Fatalf("stream with idempotency key failed: %s", r.describe())
+			}
+		}
 		if got := len(h.upstreamCalls()); got != 2 {
 			t.Fatalf("streaming reused an idempotency buffer, upstream calls=%d, want 2", got)
+		}
+		if first.header("x-litellm-call-id") == "" || first.header("x-litellm-call-id") == second.header("x-litellm-call-id") {
+			t.Fatalf("independent streams need distinct call ids: %q, %q", first.header("x-litellm-call-id"), second.header("x-litellm-call-id"))
+		}
+		h.flushSpend()
+		for _, r := range []reply{first, second} {
+			row := logDetail(t, h, admin, r.header("x-litellm-call-id"))
+			if numberOrZero(row["spend"]) <= 0 {
+				t.Fatalf("stream call was not billed: %s", truncate(string(mustJSON(row)), 300))
+			}
 		}
 	})
 }
@@ -215,8 +231,8 @@ func TestEachInferenceFamilyReachesItsOwnUpstreamPath(t *testing.T) {
 		for _, tc := range cases {
 			h.resetUpstream()
 			r := h.do(http.MethodPost, tc.path, c.key, tc.body)
-			if r.status >= 500 {
-				t.Fatalf("%s -> %d: %s", tc.path, r.status, r.text())
+			if r.status < 200 || r.status >= 300 {
+				t.Fatalf("%s should succeed, got %d: %s", tc.path, r.status, r.text())
 			}
 			calls := h.upstreamCalls()
 			if len(calls) != 1 || !strings.Contains(calls[0].Path, tc.fragment) {
@@ -239,11 +255,15 @@ func (h *harness) doRaw(method, path, token, contentType, body string) reply {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := h.server.Client().Do(req)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		h.t.Fatalf("%s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.t.Fatalf("read raw response %s %s: %v", method, path, err)
+	}
 	return reply{status: resp.StatusCode, body: raw, headers: resp.Header.Clone()}
 }

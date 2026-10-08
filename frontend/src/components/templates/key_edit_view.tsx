@@ -19,7 +19,6 @@ import AccessGroupSelector from "../common_components/AccessGroupSelector";
 import BudgetDurationDropdown from "../common_components/budget_duration_dropdown";
 import { mapInternalToDisplayNames } from "../callback_info_helpers";
 import KeyLifecycleSettings from "../common_components/KeyLifecycleSettings";
-import PassThroughRoutesSelector from "../common_components/PassThroughRoutesSelector";
 import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
 import OrganizationDropdown from "../common_components/OrganizationDropdown";
 import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
@@ -640,34 +639,6 @@ export function KeyEditView({
                 value={value as string[] | undefined}
                 onChange={onChange}
                 placeholder={t("Select access groups (optional)")}
-              />
-            )}
-          </FormField>
-
-          <FormField
-            control={form.control}
-            name="allowed_passthrough_routes"
-            label={
-              premiumUser
-                ? t("Allowed Pass Through Routes")
-                : labelWithHint(
-                    t("Allowed Pass Through Routes"),
-                    t("Setting allowed pass through routes by key is a premium feature"),
-                  )
-            }
-          >
-            {({ value, onChange }) => (
-              <PassThroughRoutesSelector
-                value={value as string[] | undefined}
-                onChange={onChange}
-                accessToken={accessToken || ""}
-                placeholder={currentValuePlaceholder(
-                  premiumUser,
-                  keyData.metadata?.allowed_passthrough_routes,
-                  t("Premium feature - Upgrade to set allowed pass through routes by key"),
-                  t("Select or enter allowed pass through routes"),
-                )}
-                disabled={!premiumUser}
               />
             )}
           </FormField>

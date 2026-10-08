@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { useDebouncedValue } from "@tanstack/react-pacer/debouncer";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ColumnFiltersState, OnChangeFn, PaginationState } from "@tanstack/react-table";
-import { resolveLogoSrc } from "@/lib/assetPaths";
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
 import { uiAuditLogsCall } from "../networking";
 import { AuditLogEntry } from "./AuditLogsTableColumns";
@@ -16,11 +15,7 @@ interface AuditLogsProps {
   userRole: string | null;
   userID: string | null;
   isActive: boolean;
-  premiumUser: boolean;
 }
-
-const asset_logos_folder = "/ui/assets/";
-const auditLogsPreviewImg = `${asset_logos_folder}audit-logs-preview.png`;
 
 const PAGE_SIZE = 50;
 
@@ -32,14 +27,7 @@ interface AuditLogsResponse {
   total_pages: number;
 }
 
-export default function AuditLogsPanel({
-  userID,
-  userRole,
-  token,
-  accessToken,
-  isActive,
-  premiumUser,
-}: AuditLogsProps) {
+export default function AuditLogsPanel({ userID, userRole, token, accessToken, isActive }: AuditLogsProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [searchInput, setSearchInput] = useState("");
@@ -54,10 +42,10 @@ export default function AuditLogsPanel({
     return typeof entry?.value === "string" && entry.value.trim() ? entry.value.trim() : undefined;
   };
 
-  const canQueryAuditLogs = !!accessToken && !!token && !!userRole && !!userID && isActive && premiumUser;
+  const canQueryAuditLogs = !!accessToken && !!token && !!userRole && !!userID && isActive;
 
   const query = useQuery<AuditLogsResponse>({
-    queryKey: ["audit_logs", pagination.pageIndex, pagination.pageSize, columnFilters, searchTerm],
+    queryKey: ["audit_logs", accessToken, pagination.pageIndex, pagination.pageSize, columnFilters, searchTerm],
     queryFn: async () => {
       if (!accessToken) {
         return { audit_logs: [], total: 0, page: 1, page_size: pagination.pageSize, total_pages: 0 };
@@ -98,39 +86,20 @@ export default function AuditLogsPanel({
     setDrawerOpen(true);
   }, []);
 
-  if (!premiumUser) {
-    return (
-      <div style={{ textAlign: "center", marginTop: "20px" }}>
-        <h1 style={{ display: "block", marginBottom: "10px" }}>{t("✨ Enterprise Feature.")}</h1>
-        <p style={{ display: "block", marginBottom: "10px" }}>
-          {t("This is a LiteLLM Enterprise feature, and requires a valid key to use.")}
-        </p>
-        <p style={{ display: "block", marginBottom: "20px", fontStyle: "italic" }}>
-          {t("Here's a preview of what Audit Logs offer:")}
-        </p>
-        <img
-          src={resolveLogoSrc(auditLogsPreviewImg)}
-          alt={t("Audit Logs Preview")}
-          style={{
-            maxWidth: "100%",
-            maxHeight: "700px",
-            borderRadius: "8px",
-            boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-            margin: "0 auto",
-          }}
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none";
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">{t("pages.logs.audit")}</h1>
+        <div>
+          <h1 className="text-xl font-semibold">{t("pages.logs.audit")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("audit.localTime")}</p>
+        </div>
       </div>
+
+      {query.isError && (
+        <div role="alert" className="mb-4 rounded-lg border border-destructive/30 p-4 text-sm text-destructive">
+          {t("audit.loadError")}
+        </div>
+      )}
 
       <AuditLogsTable
         data={query.data?.audit_logs ?? []}

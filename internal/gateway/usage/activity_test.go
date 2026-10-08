@@ -73,6 +73,45 @@ func TestDailyActivityResponseFoldsOneDay(t *testing.T) {
 	}
 }
 
+func TestActivityCountsZeroCostCallsAndPreservesRecordedProvider(t *testing.T) {
+	start := time.Date(2026, 9, 27, 8, 0, 0, 0, time.UTC)
+	cached := 3
+	events := []iam.UsageEvent{
+		{RequestID: "paid", TS: start, Model: "gpt-activity-model", Provider: "historical-provider", KeyID: "key-a", Cost: 1.5, Status: "success", PromptTokens: 10, CompletionTokens: 4},
+		{RequestID: "free", TS: start, Model: "free-model", KeyID: "key-a", Cost: 0, Status: "success", PromptTokens: 2, CompletionTokens: 1},
+		{RequestID: "cache", TS: start, Model: "gpt-activity-model", Provider: "historical-provider", KeyID: "key-a", Cost: 0, Status: "success", CacheHit: true, PromptTokens: 3, CompletionTokens: 2, CachedTokens: &cached},
+		{RequestID: "failed", TS: start, Model: "gpt-activity-model", Provider: "historical-provider", KeyID: "key-a", Cost: 0, Status: "error", PromptTokens: 7},
+	}
+	rows := eventsToActivity(events, 0)
+	if len(rows) != len(events) {
+		t.Fatalf("activity dropped zero-cost calls: got %d rows, want %d", len(rows), len(events))
+	}
+	body := dailyActivityResponse(rows, 1, true)
+	meta := body["metadata"].(map[string]any)
+	if meta["total_api_requests"] != 4 || meta["total_successful_requests"] != 3 || meta["total_failed_requests"] != 1 {
+		t.Fatalf("paid, free, cached and failed calls were not all counted: %#v", meta)
+	}
+	if meta["total_spend"] != 1.5 || meta["total_prompt_tokens"] != 22 || meta["total_completion_tokens"] != 7 || meta["total_tokens"] != 29 {
+		t.Fatalf("activity totals changed stored usage or spend: %#v", meta)
+	}
+	if meta["total_cache_read_input_tokens"] != 3 {
+		t.Fatalf("zero-cost cached usage was dropped: %#v", meta)
+	}
+	day := body["results"].([]any)[0].(map[string]any)
+	providers := day["breakdown"].(map[string]any)["providers"].(map[string]any)
+	historical, ok := providers["historical-provider"].(map[string]any)
+	if !ok || historical["metrics"].(map[string]any)["api_requests"] != 3 {
+		t.Fatalf("historical provider was replaced by a current-model guess: %#v", providers)
+	}
+	if _, ok := providers["openai"]; ok {
+		t.Fatalf("model name overrode recorded provider: %#v", providers)
+	}
+	gateway := gatewayActivityBody(rows)
+	if gateway["total_successful_requests"] != 3 || gateway["total_failed_requests"] != 1 {
+		t.Fatalf("gateway activity dropped zero-cost outcomes: %#v", gateway)
+	}
+}
+
 func TestDailyActivityReportsKnownCacheReadsAndOmitsUnknownCacheFields(t *testing.T) {
 	cached := 7
 	rows := rollupRows()

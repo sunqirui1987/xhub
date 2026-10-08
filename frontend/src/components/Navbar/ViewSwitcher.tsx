@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import {
   DropdownMenu,
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Check, ChevronsUpDown, LayoutGrid } from "lucide-react";
 import { usePluginMode } from "@/contexts/PluginModeContext";
-import { uiHref } from "@/utils/uiHref";
+import { uiHref, routeSegmentForPathname } from "@/utils/uiHref";
 import { t } from "@/i18n";
 
 const GATEWAY = "ai-gateway";
@@ -25,9 +25,10 @@ export default function ViewSwitcher() {
   const { mode, setMode, plugins } = usePluginMode();
   const pathname = usePathname();
 
-  const chatHref = uiHref(CHAT);
-  const normalizedPathname = (pathname ?? "").replace(/\/+$/, "");
-  const isChatRoute = normalizedPathname === chatHref || normalizedPathname.startsWith(`${chatHref}/`);
+  // A /ui rewrite may expose a different pathname during server rendering.
+  // Keep the first client label identical to the server, then read the route.
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const isChatRoute = hydrated && routeSegmentForPathname(pathname ?? "") === CHAT;
 
   const activeLabel = isChatRoute ? t("header.viewChat") : plugins.find((p) => p.name === mode)?.display_name ?? t("header.viewGateway");
 

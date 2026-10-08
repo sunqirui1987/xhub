@@ -1,47 +1,61 @@
-# live
+# Redis hot state and usage queue
 
-`live` is the Redis client for the hot path. A request updates counters here. It does not insert a PostgreSQL row. `dataplane/live.go` reads this client for routing state, and `dataplane.Flush` drains the spend queue into `iam.DB`.
+[简体中文](readme_cn.md) · [Feature implementation reference](../../docs/development/implementation.md)
 
-`Open(url)` parses a Redis URL and pings it. Ping failure closes the client and returns the error. `gateway` leaves `Server.Redis` nil when `redis_url` is empty. A nil `*Client` makes the methods below no-ops or empty maps; the request then writes spend straight to PostgreSQL inside the request.
+## Responsibilities and behavior
 
-## Two different ids
+redis.go stores failures, cooldowns, latency, RPM/TPM, hot spend, affinity, and pending logs. Methods have explicit behavior when Redis is absent; degraded operation does not retain distributed guarantees.
+Hot spend supports immediate budget checks, while PostgreSQL owns durable accounting. Queue peeking and acknowledgment are separate; consumers acknowledge after commit, and IAM request_id deduplicates redelivery. Queue pressure and Redis failure need observable behavior.
+Cooldown read failures yield no cooled entries; that policy must not be copied to identity database errors. Shared state uses deployment-specific identifiers. Real Redis tests verify counters, expiry, queue order, and acknowledgment; skipped Redis cases are unverified.
 
-Do not mix these.
+## Source responsibilities and entry points
 
-| Caller | Value passed as `id` | Key shape |
-| --- | --- | --- |
-| Router cooldown, latency, route TPM, spend | deployment id `api_base\|model` from `router.DeploymentID` | `xhub:fails:`, `xhub:cooldown:`, `xhub:latency:`, `xhub:routetpm:`, `xhub:spend:` |
-| Key RPM / TPM | virtual-key token hash `Principal.Hash` (`auth.go`, field comment on `Principal.Hash`) | `xhub:rpm:<hash>:<unixMinute>`, `xhub:tpm:<hash>:<unixMinute>` |
+### redis.go
 
-`limits.go` `enforceRedisRateLimits` calls `HitRPM(p.Hash)` and `HitTPM(p.Hash, est)`. It does not pass `api_base|model`.
+Exported types: `Client`, `SpendLog`.
 
-## Routing counters (deployment id)
+- [`func SpendRef(kind, id string) string`](redis.go) — SpendRef 拼出热花费计数的 Redis 键，按密钥、团队、用户、组织或项目分开。
+- [`func Open(url string) (*Client, error)`](redis.go) — Open parses the Redis URL and pings it. On failure it closes the client and returns the error.
+- [`func (c *Client) Close() error`](redis.go) — Close closes Redis. A nil client is not an error.
+- [`func (c *Client) RecordFailure(id string, allowed int, cooldown time.Duration) error`](redis.go) — RecordFailure increments the failure count. After allowed failures it writes the cooldown key. An allowed below 1 does nothing.
+- [`func (c *Client) Cooled(ids []string) map[string]bool`](redis.go) — Cooled reports which deployment ids are still cooling down. If Redis is unavailable it returns an empty map and the caller treats that as no cooldown.
+- [`func (c *Client) AddLatency(id string, ms float64) error`](redis.go) — AddLatency pushes one latency onto the left of the list, keeps the latest 20, and expires the key after one hour.
+- [`func (c *Client) Latencies(ids []string) map[string]float64`](redis.go) — Latencies returns the average of recent latencies for each deployment. An id with no sample is omitted.
+- [`func (c *Client) AddUsage(id string, tokens int) error`](redis.go) — AddUsage adds tokens to the current minute bucket.
+- [`func (c *Client) Usages(ids []string) map[string]float64`](redis.go) — Usages returns each deployment's token usage for the current minute.
+- [`func (c *Client) HitRPM(id string) (int64, error)`](redis.go) — HitRPM increments the current minute's request count and returns the new value.
+- [`func (c *Client) HitTPM(id string, tokens int) (int64, error)`](redis.go) — HitTPM adds tokens to the current minute and returns the new value.
+- [`func (c *Client) ChargeSpend(id string, usd float64) error`](redis.go) — ChargeSpend adds a dollar delta to hot spend and puts the id in the set waiting to be flushed.
+- [`func (c *Client) HotSpend(id string) float64`](redis.go) — HotSpend is the spend delta not yet flushed to PostgreSQL. A missing id returns 0.
+- [`func (c *Client) PeekSpend() map[string]float64`](redis.go) — PeekSpend reads hot spend with GET and does not subtract or delete it. After a failed flush the same deltas can still be read.
+- [`func (c *Client) AckSpend(deltas map[string]float64) error`](redis.go) — AckSpend subtracts a delta only after PostgreSQL has committed it. It decrements the Redis counters for the map it is given and does not read the database itself.
+- [`func (c *Client) ClearSpendQueue() error`](redis.go) — ClearSpendQueue drops spend waiting to be flushed. Use it only from a test or an explicit reset.
+- [`func (c *Client) TakeSpend() map[string]float64`](redis.go) — TakeSpend reads and clears spend waiting to be flushed. Unlike Peek, a later failure no longer finds the delta in Redis.
+- [`func (c *Client) EnqueueSpend(row SpendLog) error`](redis.go) — EnqueueSpend publishes a log and its hot budget deltas atomically. RequestID must identify one immutable event globally (including the tenant namespace). Replays are successful no-ops, even after AckFlushed; the first payload wins. Dedup identities have no TTL. Redis persistence/retention is required until PostgreSQL commits; this method does not wait for an fsync or replica quorum.
+- [`func (c *Client) EnqueueLog(row SpendLog) error`](redis.go) — 把一条花费日志放进 Redis 队列，等刷写进 PostgreSQL。客户端为空时直接返回。
+- [`func (c *Client) PeekLogs(n int) (rows []SpendLog, raw []string)`](redis.go) — PeekLogs 查看花费队列头部的若干条，不删除。客户端为空或没有日志时两个返回值都是 nil。
+- [`func (c *Client) AckFlushed(deltas map[string]float64, n int, head string) error`](redis.go) — AckFlushed acknowledges spend deltas and the written log prefix together after the database transaction succeeds. AckFlushed subtracts hot spend and trims the log prefix in one Redis script. If the queue head is no longer the batch that was peeked, it does nothing, so a retry cannot subtract twice after a successful ack and cannot drop the logs first.
+- [`func (c *Client) AckLogs(n int) error`](redis.go) — AckLogs 从花费队列头部丢掉已经刷进数据库的 n 条。
+- [`func (c *Client) DrainLogs(n int) []SpendLog`](redis.go) — DrainLogs 从队列头部弹出最多 n 条花费日志。弹出后队列里不再保留它们。
+- [`func (c *Client) GetString(ctx context.Context, key string) (string, bool)`](redis.go) — GetString reads one Redis string. A missing key returns ok false.
+- [`func (c *Client) SetString(ctx context.Context, key, value string, ttl time.Duration)`](redis.go) — SetString stores one Redis string with a TTL. A nil client does nothing.
 
-- `RecordFailure(id, allowed, cooldown)` increments `xhub:fails:<id>`. `allowed < 1` returns immediately and writes nothing. Once the count exceeds `allowed`, it sets `xhub:cooldown:<id>` to `"1"` for `cooldown`. `RecordFailure` is reached from `dataplane.RecordFailure` after a 5xx or 429. `allowed_fails` and `cooldown_time` come from the router settings document; the code default cooldown is one minute when the document has no duration.
-- `Cooled(ids)` returns which of those ids still have `xhub:cooldown:`. Redis down means an empty map, and the router treats that as no cooldown.
-- `AddLatency` pushes milliseconds onto the left of `xhub:latency:<id>`, keeps 20 samples, and expires the key after one hour. `Latencies` returns the average. An id with no sample is omitted.
-- `AddUsage` adds tokens to `xhub:routetpm:<id>` for the current minute. This is the router's usage signal (`router.State.Usage`). It is not the key TPM limit.
+## External HTTP boundary
 
-## Key rate limits (token hash)
+This directory registers no direct HTTP route. Higher layers call its Go API; trace catalog dispatch or host calls through the dependency chain.
 
-`minuteBucket` is `time.Now().Unix()/60`. It cannot fail.
+## Dependencies
 
-`HitRPM(id)` calls `bump("xhub:rpm:"+id, 1)`. With the hash from `limits.go` the stem is `xhub:rpm:<tokenHash>`. `bump` then stores `xhub:rpm:<tokenHash>:<minute>` and sets a two-minute expiry, so the next minute starts at zero.
+[internal/logx](../logx/readme.md).
 
-`HitTPM(id, tokens)` uses the stem `xhub:tpm:<tokenHash>` and adds `tokens` (the estimate `limits.go` already computed).
+## Verification and maintenance
 
-`bump` returns the new counter. A nil client returns `0, nil`. A Redis `INCRBY` error returns `0` and the error. `limits.go` turns that error into HTTP 503 `rate_limit_unavailable`. A limit of 0, or a count above the key's RPM/TPM limit, is HTTP 429.
+| Test file | Scenario entry points |
+| --- | --- |
+| [redis_test.go](redis_test.go) | `TestEnqueueSpendConcurrentDedupAndAck`, `TestEnqueueSpendRequiresIdentity`, `TestEnqueueSpendRejectsInvalidStateWithoutPartialWrites`, `TestPeekLogsStopsAtCorruptEvent`, `TestConcurrentTokenCounterHasExpiry` |
 
-## Spend queue
+```bash
+go test ./internal/live -count=1
+```
 
-`ChargeSpend` / `EnqueueSpend` add a dollar delta to `xhub:spend:<id>` and the id to the set `xhub:spend:ids`. Spend log rows are pushed on the list `xhub:spendlog`.
-
-`PeekSpend` and `PeekLogs` read without deleting. `TakeSpend` reads and clears. `AckSpend` and `AckFlushed` subtract a delta only after PostgreSQL has committed it, so a failed flush can be retried from the same Redis values. `DrainLogs` pops from the head; `n < 1` returns nil.
-
-`GetString` / `SetString` are the generic string used by chat affinity and official task pins (`deployment_affinity:v1:…`, `official_task:v1:…`, `official_billed:v1:…`). Those key names are chosen by `gateway/affinity.go`, not by this package.
-
-## What this package does not do
-
-It does not check a budget and it does not write `usage_events`. The flush that turns a queued row into a billed event is `dataplane.Flush` calling `iam.DB.RecordUsage`. In-process in-flight counts are `internal/hooks`, keyed by key id, not by these Redis keys.
-
-中文说明见同目录 `readme_cn.md`。
+Use XHUB_REGRESSION_STRICT=1 for database acceptance and inspect skips. Redis and live providers require separate configuration. Update this reference and feature documentation after contract changes.

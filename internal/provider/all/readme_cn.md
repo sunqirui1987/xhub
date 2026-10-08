@@ -1,13 +1,33 @@
-# provider/all
+# 内置供应商装配
 
-这个目录没有端点，也没有 `init` 里的业务登记。它只空白导入已经写好的供应商包，让那些包的 `init` 在进程启动时跑起来：
+[English](readme.md) · [全功能实现说明](../../../docs/development/implementation.md)
 
-- `github.com/sunqirui1987/xhub/internal/provider/openai`
-- `github.com/sunqirui1987/xhub/internal/provider/qiniu`
-- `github.com/sunqirui1987/xhub/internal/provider/volcengine`
+## 职责与实现契约
 
-网关的 `main` 或组装进程的文件导入 `all` 一次即可。再加一个供应商时，新建 `internal/provider/<名字>/`，在那里 `RegisterSupplier` / `RegisterType` / `RegisterModel`，然后在本目录加一行空白导入。不要在 `all` 里写路由。
+all.go 通过空白导入 openai、qiniu、volcengine 触发需要的 init 登记。生产启动只需导入此聚合包，避免不同入口漏掉供应商 transport 或内置模型。
+目录没有独立导出函数和 HTTP 路由，行为来自被导入包的初始化。openai 当前占位无 init，实际适配在 llm；qiniu/volcengine 登记官方任务 transport 和目录模型。
+新增供应商实现后还要加入这里并核对启动方导入。测试分别落在供应商和 provider 注册用例；聚合包本身没有直接测试，不应把导入成功理解为真实供应商认证成功。
 
-测试如果自己导入某一个供应商包，就只会看到那一个包的类型。`provider.Types()` 为空通常是测试二进制没导入 `all`。
+## 源码职责与入口
 
-不在子目录里的官方接口（例如按 Suno、Tripo 文档填的自定义 bypass）不经过这里。它们写在部署的 `litellm_params.endpoint` 上，由 `provider.overrideType` 在匹配时盖上去。
+### all.go
+
+内部实现和协议边界见 [all.go](all.go)。
+
+## 对外 HTTP 边界
+
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/logx](../../logx/readme_cn.md), [internal/provider/openai](../openai/readme_cn.md), [internal/provider/qiniu](../qiniu/readme_cn.md), [internal/provider/volcengine](../volcengine/readme_cn.md).
+
+## 验证与维护入口
+
+当前目录没有直接测试文件；上层集成测试仅证明被执行的链路，不代表所有内部失败分支均已覆盖。
+
+```bash
+go test ./internal/provider/all -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

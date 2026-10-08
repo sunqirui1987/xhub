@@ -388,21 +388,21 @@ func TestConfigModelCannotBeDeletedFromTheConsole(t *testing.T) {
 	}
 }
 
-// TestBlockedModelIsRefused 证明被停用的模型调不动，但还在表里。
+// TestDisabledModelIsRefused 证明被停用的模型调不动，但还在表里。
 //
 // 停用和删除是两件事：停用是"暂时别用"，运维还要能看见它、把它恢复回来。
 // 与删除一样，停用只对控制台加进来的库模型开放。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
-func TestBlockedModelIsRefused(t *testing.T) {
+func TestDisabledModelIsRefused(t *testing.T) {
 	h := newHarness(t)
 	admin := h.adminSession()
 	tn := h.provision(t, admin, "blockmodel")
 
 	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
-		"model_name": "regression-blocked",
+		"model_name": "regression-disabled",
 		"litellm_params": map[string]any{
-			"model":               "openai/regression-blocked",
+			"model":               "openai/regression-disabled",
 			"api_key":             "sk-fake-upstream",
 			"api_base":            h.prices.URL + "/v1",
 			"custom_llm_provider": "openai",
@@ -411,28 +411,28 @@ func TestBlockedModelIsRefused(t *testing.T) {
 	})
 	// 停用之前能调，这样后面"调不动"才说明是停用起的效。
 	h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
-		"model": "regression-blocked", "messages": []any{map[string]any{"role": "user", "content": "before"}},
+		"model": "regression-disabled", "messages": []any{map[string]any{"role": "user", "content": "before"}},
 	})
 
-	h.ok(http.MethodPost, "/model/block", admin, map[string]any{"model_name": "regression-blocked"})
+	h.ok(http.MethodPost, "/model/disable", admin, map[string]any{"model_name": "regression-disabled"})
 
 	r := h.do(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
-		"model": "regression-blocked", "messages": []any{map[string]any{"role": "user", "content": "blocked"}},
+		"model": "regression-disabled", "messages": []any{map[string]any{"role": "user", "content": "disabled"}},
 	})
 	if r.status < 300 {
-		t.Fatalf("a blocked model still answered: %s", r.describe())
+		t.Fatalf("a disabled model still answered: %s", r.describe())
 	}
 
 	// 停用的模型仍然在表里：这是它和删除的区别。
 	rows := rowsOf(h.ok(http.MethodGet, "/v2/model/info", admin, nil), "data", "models")
-	if findBy(rows, "model_name", "regression-blocked") == nil {
-		t.Fatalf("a blocked model disappeared from the model table: %v", namesOf(rows, "model_name"))
+	if findBy(rows, "model_name", "regression-disabled") == nil {
+		t.Fatalf("a disabled model disappeared from the model table: %v", namesOf(rows, "model_name"))
 	}
 
 	// 恢复之后又能用：证明刚才挡住它的是停用状态，不是别的。
-	h.ok(http.MethodPost, "/model/unblock", admin, map[string]any{"model_name": "regression-blocked"})
+	h.ok(http.MethodPost, "/model/enable", admin, map[string]any{"model_name": "regression-disabled"})
 	h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
-		"model": "regression-blocked", "messages": []any{map[string]any{"role": "user", "content": "unblocked"}},
+		"model": "regression-disabled", "messages": []any{map[string]any{"role": "user", "content": "enabled"}},
 	})
 }
 

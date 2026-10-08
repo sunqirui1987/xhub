@@ -3,18 +3,21 @@
 import { clearTokenCookies, getCookie } from "@/utils/cookieUtils";
 import { checkTokenValidity, decodeToken } from "@/utils/jwtUtils";
 import { buildLoginUrlWithReturn, getLoginUrl, storeReturnUrl } from "@/utils/returnUrlUtils";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { effectiveSessionRole, formatUserRole, isViewOnlySessionRole } from "@/utils/roles";
 import { useUIConfig } from "./uiConfig/useUIConfig";
 
 const useAuthorized = () => {
   const { data: uiConfig, isLoading: isUIConfigLoading } = useUIConfig();
 
-  const token = typeof document !== "undefined" ? getCookie("token") : null;
+  // Browser cookies cannot be read during SSR. Use the same anonymous snapshot
+  // during hydration before resolving the actual signed-in identity.
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const token = hydrated ? getCookie("token") : null;
 
   const decoded = useMemo(() => decodeToken(token), [token]);
   const isTokenValid = useMemo(() => checkTokenValidity(token), [token]);
-  const isLoading = isUIConfigLoading;
+  const isLoading = !hydrated || isUIConfigLoading;
   const isAuthorized = isTokenValid && !uiConfig?.admin_ui_disabled;
 
   // Helper function to redirect to login while preserving the current URL

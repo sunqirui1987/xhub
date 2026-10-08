@@ -11,6 +11,9 @@ const ROWS: AuditLogEntry[] = [
     id: "log-1",
     updated_at: "2026-07-20T12:00:00Z",
     changed_by: "default_user_id",
+    actor_name: "Alice",
+    actor_email: "alice@example.com",
+    object_name: "Support team",
     changed_by_api_key: "sk-hash-abc",
     action: "created",
     table_name: "LiteLLM_TeamTable",
@@ -52,28 +55,23 @@ function renderTable(overrides: Partial<React.ComponentProps<typeof AuditLogsTab
 }
 
 describe("AuditLogsTable", () => {
-  it("renders each audit column with the migrated shared cells", () => {
+  it("shows readable actions, resource names and operators with four columns", () => {
     renderTable();
-
-    // Action -> StatusBadge with a capitalized label
-    expect(screen.getByText("Created")).toBeInTheDocument();
-    expect(screen.getByText("Deleted")).toBeInTheDocument();
-    // Table name -> display mapping
-    expect(screen.getByText("Teams")).toBeInTheDocument();
-    expect(screen.getByText("Users")).toBeInTheDocument();
-    // Changed By -> DefaultProxyAdminTag (default_user_id becomes a labeled tag; other ids stay raw)
-    expect(screen.getByText("Default Proxy Admin")).toBeInTheDocument();
-    expect(screen.getByText("user-42")).toBeInTheDocument();
-    // Object ID + API key hash
-    expect(screen.getByText("team-obj-123")).toBeInTheDocument();
-    expect(screen.getByText("sk-hash-abc")).toBeInTheDocument();
+    expect(screen.getByText("Create Team")).toBeInTheDocument();
+    expect(screen.getByText("Delete User")).toBeInTheDocument();
+    expect(screen.getByText("Support team")).toBeInTheDocument();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader")).toHaveLength(4);
+    expect(screen.queryByText("API Key (Hash)")).not.toBeInTheDocument();
+    expect(screen.queryByText("sk-hash-abc")).not.toBeInTheDocument();
   });
 
   it("opens the detail drawer from the Object ID identity cell with the full row", async () => {
     const user = userEvent.setup();
     const props = renderTable();
 
-    await user.click(screen.getByText("team-obj-123"));
+    await user.click(screen.getByText("Support team"));
 
     expect(props.onViewLog).toHaveBeenCalledTimes(1);
     expect(props.onViewLog).toHaveBeenCalledWith(ROWS[0]);
@@ -124,7 +122,7 @@ describe("AuditLogsTable", () => {
     const onSearchChange = vi.fn();
     renderTable({ searchValue: "team-", onSearchChange });
 
-    const input = screen.getByPlaceholderText("Search audit logs by ID…");
+    const input = screen.getByPlaceholderText("Search names, emails, IDs or event codes…");
     expect(input).toHaveValue("team-");
 
     fireEvent.change(input, { target: { value: "team-7" } });
@@ -170,7 +168,7 @@ describe("AuditLogsTable", () => {
     const [action, table] = await screen.findAllByRole("combobox");
 
     expect(action).toHaveTextContent("All Actions");
-    expect(table).toHaveTextContent("All Tables");
+    expect(table).toHaveTextContent("All resource types");
   });
 
   it("shows the human label on the filter triggers for an applied filter", async () => {
@@ -186,6 +184,6 @@ describe("AuditLogsTable", () => {
     const [action, table] = await screen.findAllByRole("combobox");
 
     expect(action).toHaveTextContent("Created");
-    expect(table).toHaveTextContent("Teams");
+    expect(table).toHaveTextContent("Team");
   });
 });

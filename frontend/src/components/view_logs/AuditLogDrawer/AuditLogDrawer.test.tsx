@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import moment from "moment";
+import { auditDate } from "../auditPresentation";
 import { AuditLogDrawer } from "./AuditLogDrawer";
 import { AuditLogEntry } from "../AuditLogsTableColumns";
 
@@ -41,33 +41,46 @@ describe("AuditLogDrawer", () => {
     expect(screen.queryByText("Details")).not.toBeInTheDocument();
   });
 
+  it("renders gateway event details without before/after values", () => {
+    render(
+      <AuditLogDrawer
+        {...defaultProps}
+        log={{ ...baseLog, table_name: "team", action: "team.move", detail: { organization_id: "org-2" } }}
+      />,
+    );
+    expect(screen.getByText("Team")).toBeInTheDocument();
+    expect(screen.getByText(/"organization_id": "org-2"/)).toBeInTheDocument();
+    expect(screen.queryByText("Before")).not.toBeInTheDocument();
+    expect(screen.queryByText("After")).not.toBeInTheDocument();
+  });
+
   it("should show the action and the local timestamp in the header", () => {
     render(<AuditLogDrawer {...defaultProps} />);
-    expect(screen.getByText("updated")).toBeInTheDocument();
-    expect(screen.getByText(moment.utc(baseLog.updated_at).local().format("MMM D, YYYY HH:mm:ss"))).toBeInTheDocument();
+    expect(screen.getAllByText("Update Team")[0]).toBeInTheDocument();
+    expect(screen.getByText(auditDate(baseLog.updated_at))).toBeInTheDocument();
   });
 
   it("should show the friendly table name for a known table", () => {
     render(<AuditLogDrawer {...defaultProps} />);
-    expect(screen.getByText("Table")).toBeInTheDocument();
-    expect(screen.getByText("Teams")).toBeInTheDocument();
+    expect(screen.getByText("Resource type")).toBeInTheDocument();
+    expect(screen.getByText("Team")).toBeInTheDocument();
   });
 
   it("should fall back to the raw table name when it is not mapped", () => {
     render(<AuditLogDrawer {...defaultProps} log={{ ...baseLog, table_name: "LiteLLM_SomethingElse" }} />);
-    expect(screen.getByText("LiteLLM_SomethingElse")).toBeInTheDocument();
+    expect(screen.getByText("Other resource")).toBeInTheDocument();
   });
 
   it("should show the object id, the actor and the api key hash", () => {
     render(<AuditLogDrawer {...defaultProps} />);
     expect(screen.getByText("team-42")).toBeInTheDocument();
-    expect(screen.getByText("user-1")).toBeInTheDocument();
+    expect(screen.getByText("User (name not recorded)")).toBeInTheDocument();
     expect(screen.getByText("hashed-key-abc")).toBeInTheDocument();
   });
 
   it("should show a placeholder when the log has no api key hash", () => {
     render(<AuditLogDrawer {...defaultProps} log={{ ...baseLog, changed_by_api_key: "" }} />);
-    expect(screen.getByText("API Key (Hash)")).toBeInTheDocument();
+    expect(screen.queryByText("API key ID")).not.toBeInTheDocument();
     expect(screen.queryByText("hashed-key-abc")).not.toBeInTheDocument();
   });
 

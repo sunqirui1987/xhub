@@ -48,8 +48,8 @@ func Module(h Host) httpx.Module {
 		reg.Handle("POST /model/update", func(w http.ResponseWriter, r *http.Request) { Update(h, w, r) })
 		reg.Handle("PATCH /model/{model_id}/update", func(w http.ResponseWriter, r *http.Request) { Update(h, w, r) })
 		reg.Handle("POST /model/delete", func(w http.ResponseWriter, r *http.Request) { Delete(h, w, r) })
-		reg.Handle("POST /model/block", func(w http.ResponseWriter, r *http.Request) { Block(h, w, r) })
-		reg.Handle("POST /model/unblock", func(w http.ResponseWriter, r *http.Request) { Unblock(h, w, r) })
+		reg.Handle("POST /model/disable", func(w http.ResponseWriter, r *http.Request) { Disable(h, w, r) })
+		reg.Handle("POST /model/enable", func(w http.ResponseWriter, r *http.Request) { Enable(h, w, r) })
 		reg.Handle("GET /model_group/info", func(w http.ResponseWriter, r *http.Request) { GroupInfo(h, w, r) })
 	})
 }

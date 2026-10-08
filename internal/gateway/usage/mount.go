@@ -65,6 +65,5 @@ func Module(h mountHost) httpx.Module {
 		reg.Handle("POST /health/test_connection", func(w http.ResponseWriter, r *http.Request) { HealthTestConnection(h, w, r) })
 		reg.Handle("GET /health/services", func(w http.ResponseWriter, r *http.Request) { HealthServices(h, w, r) })
 		reg.Handle("GET /test", func(w http.ResponseWriter, r *http.Request) { HealthTest(h, w, r) })
-		reg.Handle("GET /auto_router/benchmarks", func(w http.ResponseWriter, r *http.Request) { Benchmarks(h, w, r) })
 	})
 }

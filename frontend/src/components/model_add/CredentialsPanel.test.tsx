@@ -93,13 +93,13 @@ describe("CredentialsPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the Add Credential button for an admin", () => {
+  it("renders the add-provider button for an admin", () => {
     mockUseAuthorized.mockReturnValue({ accessToken: "test-token", userRole: "Admin" });
     mockUseCredentials.mockReturnValue({ data: { credentials: [] }, isLoading: false, refetch: vi.fn() });
 
     renderPanel();
 
-    expect(screen.getByRole("button", { name: /add credential/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加提供商" })).toBeInTheDocument();
   });
 
   it("displays the credential rows", () => {
@@ -111,14 +111,25 @@ describe("CredentialsPanel", () => {
     expect(screen.getByText("openai-key")).toBeInTheDocument();
   });
 
+  it("does not expose add-model actions from supplier rows", async () => {
+    const user = userEvent.setup();
+    mockUseAuthorized.mockReturnValue({ accessToken: "test-token", userRole: "Admin", isViewOnly: false });
+    mockUseCredentials.mockReturnValue({ data: { credentials }, isLoading: false, refetch: vi.fn() });
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "添加模型" })).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("credential-actions-openai-key"));
+    expect(screen.queryByTestId("credential-action-models")).not.toBeInTheDocument();
+  });
+
   it("shows the empty state when there are no credentials", () => {
     mockUseAuthorized.mockReturnValue({ accessToken: "test-token", userRole: "Admin" });
     mockUseCredentials.mockReturnValue({ data: { credentials: [] }, isLoading: false, refetch: vi.fn() });
 
     renderPanel();
 
-    expect(screen.getByText("fennoai")).toBeInTheDocument();
-    expect(screen.getByText("qiniu")).toBeInTheDocument();
+    expect(screen.getByText("No credentials configured")).toBeInTheDocument();
   });
 
   it("shows the loading skeleton instead of the empty state while credentials load", () => {
@@ -139,7 +150,7 @@ describe("CredentialsPanel", () => {
     renderPanel();
 
     expect(screen.queryByTestId("credential-modal-add-submit")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /add credential/i }));
+    await user.click(screen.getByRole("button", { name: "添加提供商" }));
     expect(screen.getByTestId("credential-modal-add-submit")).toBeInTheDocument();
   });
 
@@ -152,7 +163,7 @@ describe("CredentialsPanel", () => {
 
     renderPanel();
 
-    await user.click(screen.getByRole("button", { name: /add credential/i }));
+    await user.click(screen.getByRole("button", { name: "添加提供商" }));
     await user.click(screen.getByTestId("credential-modal-add-submit"));
 
     await waitFor(() => {
@@ -170,7 +181,7 @@ describe("CredentialsPanel", () => {
 
     renderPanel();
 
-    await user.click(screen.getByRole("button", { name: /add credential/i }));
+    await user.click(screen.getByRole("button", { name: "添加提供商" }));
     await user.click(screen.getByTestId("credential-modal-add-submit"));
 
     await waitFor(() => {
@@ -210,7 +221,7 @@ describe("CredentialsPanel", () => {
       renderPanel();
 
       expect(screen.getByText("openai-key")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /add credential/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "添加提供商" })).not.toBeInTheDocument();
     });
 
     it("does not render the per-row actions menu for Admin Viewer", () => {

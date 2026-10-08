@@ -17,6 +17,8 @@ import { Label } from "@/components/ui/label";
 import {
   EDITABLE_TOKEN_RATES,
   EDITABLE_UNIT_RATES,
+  catalogFieldValue,
+  invalidRateFields,
   priceModelPayload,
   rateToInputValue,
   unitRateToInputValue,
@@ -58,14 +60,22 @@ export function PriceModelDialog({
   const [mode, setMode] = useState(typeof draft.mode === "string" ? draft.mode : "");
   const [endpointType, setEndpointType] = useState(typeof draft.endpoint_type === "string" ? draft.endpoint_type : "");
   const [tokenRates, setTokenRates] = useState<Record<string, string>>(() =>
-    Object.fromEntries(EDITABLE_TOKEN_RATES.map(({ field }) => [field, rateToInputValue(draft[field])])),
+    Object.fromEntries(
+      EDITABLE_TOKEN_RATES.map(({ field }) => [field, rateToInputValue(catalogFieldValue(draft, field))]),
+    ),
   );
   const [unitRates, setUnitRates] = useState<Record<string, string>>(() =>
-    Object.fromEntries(EDITABLE_UNIT_RATES.map(({ field }) => [field, unitRateToInputValue(draft[field])])),
+    Object.fromEntries(
+      EDITABLE_UNIT_RATES.map(({ field }) => [field, unitRateToInputValue(catalogFieldValue(draft, field))]),
+    ),
   );
 
   const isEdit = Boolean(editing);
-  const canSave = id.trim() !== "" && provider.trim() !== "" && !isSaving;
+  const invalidRates = useMemo(
+    () => new Set([...invalidRateFields(tokenRates), ...invalidRateFields(unitRates)]),
+    [tokenRates, unitRates],
+  );
+  const canSave = id.trim() !== "" && provider.trim() !== "" && invalidRates.size === 0 && !isSaving;
   const knownProviders = useMemo(() => providers.map((p) => p.slug), [providers]);
 
   function submit() {
@@ -79,6 +89,7 @@ export function PriceModelDialog({
         endpointType,
         tokenRates,
         unitRates,
+        original: editing?.raw,
       }),
     );
   }
@@ -126,7 +137,12 @@ export function PriceModelDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="price-model-mode">{t("priceData.endpointMode")}</Label>
-              <Input id="price-model-mode" value={mode} placeholder="chat" onChange={(event) => setMode(event.target.value)} />
+              <Input
+                id="price-model-mode"
+                value={mode}
+                placeholder="chat"
+                onChange={(event) => setMode(event.target.value)}
+              />
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="price-model-endpoint">{t("priceData.endpointType")}</Label>
@@ -151,8 +167,10 @@ export function PriceModelDialog({
                     id={`price-rate-${field}`}
                     inputMode="decimal"
                     value={tokenRates[field] ?? ""}
+                    aria-invalid={invalidRates.has(field)}
                     onChange={(event) => setTokenRates((prev) => ({ ...prev, [field]: event.target.value }))}
                   />
+                  {invalidRates.has(field) && <p className="text-xs text-destructive">{t("priceData.invalidRate")}</p>}
                 </div>
               ))}
             </div>
@@ -169,8 +187,10 @@ export function PriceModelDialog({
                     id={`price-rate-${field}`}
                     inputMode="decimal"
                     value={unitRates[field] ?? ""}
+                    aria-invalid={invalidRates.has(field)}
                     onChange={(event) => setUnitRates((prev) => ({ ...prev, [field]: event.target.value }))}
                   />
+                  {invalidRates.has(field) && <p className="text-xs text-destructive">{t("priceData.invalidRate")}</p>}
                 </div>
               ))}
             </div>

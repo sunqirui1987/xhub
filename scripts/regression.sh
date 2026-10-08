@@ -50,7 +50,7 @@ if command -v psql >/dev/null 2>&1; then
     echo "start it with: docker compose up -d postgres" >&2
     exit 1
   fi
-else
+elif [[ -z "${XHUB_TEST_DATABASE_URL:-}" ]]; then
   if ! docker exec xhub-postgres psql -U xhub -d xhub -c 'select 1' >/dev/null 2>&1; then
     echo "no PostgreSQL reachable." >&2
     echo "start it with: docker compose up -d postgres" >&2
@@ -64,7 +64,9 @@ if [[ "$VERBOSE" == 1 ]]; then
   ARGS+=(-v)
 fi
 if [[ -n "$PATTERN" ]]; then
-  if ! go test ./internal/regression/ -list "$PATTERN" | rg -q '^Test'; then
+  # -list only matches top-level names. Capture first to avoid SIGPIPE with pipefail.
+  TEST_NAMES="$(go test ./internal/regression/ -list "${PATTERN%%/*}")"
+  if ! rg -q '^Test' <<< "$TEST_NAMES"; then
     echo "no regression tests matched: $PATTERN" >&2
     exit 1
   fi

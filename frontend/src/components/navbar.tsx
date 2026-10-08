@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import Link from "next/link";
 import React from "react";
-import { NotificationsBell } from "./Navbar/NotificationsBell/NotificationsBell";
 import UserDropdown from "./Navbar/UserDropdown/UserDropdown";
 import ThemeToggle from "./ThemeToggle/ThemeToggle";
 import ViewSwitcher from "./Navbar/ViewSwitcher";
@@ -109,8 +108,6 @@ const Navbar: React.FC<NavbarProps> = ({
               <div className="flex shrink-0 items-center border-l border-border pl-4">
                 <div className="flex items-center gap-0.5 rounded-lg bg-muted px-1 py-0 transition-colors hover:bg-accent">
                   <ThemeToggle />
-                  <span className="mx-0.5 h-6 w-px shrink-0 bg-border" aria-hidden />
-                  <NotificationsBell />
                   <span className="mx-0.5 h-6 w-px shrink-0 bg-border" aria-hidden />
                   <UserDropdown onLogout={handleLogout} />
                 </div>

@@ -1,23 +1,45 @@
-# httpx
+# HTTP 错误与模块协议
 
-网关和数据面共用的一小套 HTTP 工具。这里没有路由。
+[English](readme.md) · [全功能实现说明](../../docs/development/implementation.md)
 
-`CallID` 读 16 个随机字节再编成十六进制。`SetCallID` 写响应头 `x-litellm-call-id`，不写正文。`WriteTypedError` 在这个头还空着时补上，在 `x-litellm-version` 还空着时写成 `xhub-dev`，并设置 `Content-Type: application/json`。状态 429 还会设置 `Retry-After: 1`。
+## 职责与实现契约
 
-JSON 形状看路径，先转成小写：
+httpx.go 提供协议错误写入、JSON 辅助和调用 ID；module.go 定义 Registrar、Module、Bind。Registrar.Handle 是模块唯一登记边界；Module.Name/Mount 使子模块通过宿主接口安装。
+CallID 生成 32 位十六进制调用标识，SetCallID 写入响应头，用于连接响应、日志、费用和失败排查。WriteTypedError 按调用协议输出错误，429 带 Retry-After: 1；不要把 Anthropic/Gemini 的错误体机械写成 OpenAI 形式。
+这里不识别用户身份或决定权限，只负责把已决定的错误和模块操作表达成 HTTP。响应已经写出后不能再替换状态码；流中断的业务结果要另外记日志。
 
-- 路径含 `/messages`，并且不含 `chat`、不含 `/threads` 时，用 Anthropic 包络（`{"type":"error","error":{"type","message"}}`）。
-- 路径含 `generatecontent` 或 `streamgeneratecontent`，或者含 `counttokens` 且不含 `/messages` 时，用 Gemini 原生包络（`error.code`、`error.message`、`error.status` 为 Google RPC 名字）。
-- 其他情况用 OpenAI 对象：`error.message`、`error.type`、`error.param` 为 null、`error.code` 是状态码的字符串。
+## 源码职责与入口
 
-`WriteError` 就是路径为空的 `WriteTypedError`，所以永远是 OpenAI 对象。推理路径应把真实路径传给 `WriteTypedError`。
+### httpx.go
 
-`WriteJSON` 给管理接口的成功响应写状态码和 JSON 正文。
+- [`func CallID() string`](httpx.go) — CallID returns a new 32-character hexadecimal call identifier.
+- [`func SetCallID(w http.ResponseWriter, id string)`](httpx.go) — SetCallID writes x-litellm-call-id. If a value is already set, the caller decides whether to overwrite it.
+- [`func WriteError(w http.ResponseWriter, status int, typ, msg string)`](httpx.go) — WriteError writes the gateway JSON error. Inference paths should call WriteTypedError so the provider envelope is used instead.
+- [`func WriteTypedError(w http.ResponseWriter, path string, status int, typ, msg string)`](httpx.go) — WriteTypedError picks the error envelope from the request path. Status 429 also sets Retry-After to 1. A missing call ID is filled in.
+- [`func WriteJSON(w http.ResponseWriter, status int, v any)`](httpx.go) — WriteJSON sets the status code and writes JSON. A later encoding failure does not change the status that was already sent.
 
-`Bind` / `Module` / `Registrar` 让网关子包不用导入 `gateway` 就能挂路由。`Mount` 在登记口或挂载函数是 nil 时什么都不做。`gateway/routes.go` 在安装模块时调用 `Name` 和 `Mount`。先登记的方法和路径赢；后面的模块不会替换它。
+### module.go
 
-## 这个包不做什么
+公开类型：`Registrar`, `Module`.
 
-它不记用量，不选部署，也不做身份认证。只调用了 `SetCallID` 的处理函数还没有回答客户端。
+- [`func Bind(name string, mount func(Registrar)) Module`](module.go) — Bind builds a module from a name and a mount function. An empty name stays empty, and the process refuses to register it.
 
-English notes are in `readme.md` in this directory.
+## 对外 HTTP 边界
+
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/logx](../logx/readme_cn.md).
+
+## 验证与维护入口
+
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [httpx_test.go](httpx_test.go) | `TestWriteTypedErrorUsesProviderEnvelope`, `TestWriteJSONPreservesExistingHeaders` |
+
+```bash
+go test ./internal/httpx -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

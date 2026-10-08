@@ -73,6 +73,9 @@ describe("PriceDataManagementTab", () => {
     await user.clear(screen.getByRole("textbox", { name: "Search" }));
     await user.type(screen.getByRole("textbox", { name: "Search" }), "embed-one");
     expect(within(screen.getByTestId("price-row-embed-one")).getByText("$2.5")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("price-row-embed-one")).getByRole("link", { name: "Deploy model" }),
+    ).toHaveAttribute("href", "/models-and-endpoints?catalog=embed-one");
   });
 
   it("hides the models past the first page until asked", async () => {
@@ -126,7 +129,7 @@ describe("PriceCatalog filtering", () => {
   it("combines provider, category and search filters and clears an empty result", async () => {
     const user = userEvent.setup();
     render(<PriceCatalog rows={rows} />);
-    await user.click(screen.getByRole("button", { name: "Filters" }));
+    await user.click(screen.getByRole("button", { name: "More filters" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "alpha");
     await user.click(screen.getByRole("button", { name: "chat" }));
     expect(screen.getAllByRole("article")).toHaveLength(1);
@@ -145,5 +148,65 @@ describe("PriceCatalog filtering", () => {
     expect(order()).toEqual(["alpha-chat", "alpha-embed", "beta-chat", "gamma-chat"]);
     await user.selectOptions(screen.getByRole("combobox", { name: "Sort models" }), "output");
     expect(order()).toEqual(["alpha-chat", "gamma-chat", "alpha-embed", "beta-chat"]);
+  });
+
+  it("filters from the always-visible manufacturer, modality, and capability controls", async () => {
+    const user = userEvent.setup();
+    const filterRows = rows.map((row) =>
+      row.id === "beta-chat"
+        ? {
+            ...row,
+            maxInput: 200_000,
+            capabilities: ["reasoning"],
+            rateGroups: [{ measure: "token", unitSize: 1, rates: [], windows: [] }],
+          }
+        : row,
+    );
+    render(<PriceCatalog rows={filterRows} />);
+    await user.click(screen.getByRole("button", { name: "beta" }));
+    await user.click(within(screen.getByRole("group", { name: "Modalities" })).getByRole("button", { name: "Text" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Context & capabilities" })).getByRole("button", {
+        name: "128K+ context",
+      }),
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByText("beta-chat")).toBeInTheDocument();
+  });
+
+  it("URL-encodes the catalog id in the deploy link", () => {
+    render(<PriceCatalog rows={[{ ...rows[0], id: "supplier/model one" }]} />);
+    expect(screen.getByRole("link", { name: "Deploy model" })).toHaveAttribute(
+      "href",
+      "/models-and-endpoints?catalog=supplier%2Fmodel%20one",
+    );
+  });
+
+  it("labels normalized token rates per 1M without showing source unit_size", () => {
+    const tokenRow = {
+      ...rows[0],
+      rateGroups: [
+        {
+          measure: "token",
+          unitSize: 1000,
+          windows: ["all"],
+          rates: [
+            {
+              measure: "token",
+              unitSize: 1000,
+              side: "input",
+              variant: "",
+              window: "all",
+              sourceKey: "input",
+              label: "",
+              usd: 0.000005,
+            },
+          ],
+        },
+      ],
+    };
+    render(<PriceCatalog rows={[tokenRow]} />);
+    expect(screen.getByText("$5 /1M")).toBeInTheDocument();
+    expect(screen.queryByText("per 1000")).not.toBeInTheDocument();
   });
 });

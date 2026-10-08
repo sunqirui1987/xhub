@@ -383,7 +383,7 @@ describe("provider_info_helpers", () => {
       expect(result).not.toContain("vertex_ai/openai-something");
     });
 
-    // Note on the next three tests: in production, AddModelForm passes the
+    // Note on the next three tests: in production, the model editor passes the
     // backend `provider` field (the provider_map *key*, e.g. "Vertex_AI",
     // "Bedrock", "FireworksAI") into getProviderModels, not the Providers
     // enum value. The `as Providers` cast in callers is misleading. We mirror

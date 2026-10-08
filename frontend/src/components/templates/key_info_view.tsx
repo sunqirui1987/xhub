@@ -16,15 +16,9 @@ import { modelGroupHref, teamDetailHref } from "@/utils/entityLinks";
 import { BadgeLink } from "@/components/shared/BadgeLink";
 import { KeyInfoHeader } from "./KeyInfoHeader";
 import KeySavingsTab from "./KeySavingsTab";
-import KeyAutoRouterUsageTab from "./KeyAutoRouterUsageTab";
 import { useActivityDateRange } from "@/app/(dashboard)/cost-optimization/_components/useDailyActivityRange";
 import { useEffect, useState } from "react";
-import {
-  hasProxyWideSpendView,
-  isProxyAdminRole,
-  isUserTeamAdminForSingleTeam,
-  rolesWithWriteAccess,
-} from "../../utils/roles";
+import { isProxyAdminRole, isUserTeamAdminForSingleTeam, rolesWithWriteAccess } from "../../utils/roles";
 import { mapDisplayToInternalNames, mapInternalToDisplayNames } from "../callback_info_helpers";
 import AutoRotationView from "../common_components/AutoRotationView";
 import DeleteResourceModal from "../common_components/DeleteResourceModal";
@@ -372,10 +366,10 @@ export default function KeyInfoView({
     isProxyAdminRole(userRole || "") ||
     Boolean(
       teamsData &&
-        isUserTeamAdminForSingleTeam(
-          teamsData?.filter((team) => team.team_id === currentKeyData.team_id)[0]?.members_with_roles,
-          userID || "",
-        ),
+      isUserTeamAdminForSingleTeam(
+        teamsData?.filter((team) => team.team_id === currentKeyData.team_id)[0]?.members_with_roles,
+        userID || "",
+      ),
     );
 
   const canResetSpend = isKeyAdmin;
@@ -573,11 +567,6 @@ export default function KeyInfoView({
           <TabsTrigger value="savings" className="flex-none rounded-none px-4 py-2">
             {t("Savings")}
           </TabsTrigger>
-          {hasProxyWideSpendView(userRole) && (
-            <TabsTrigger value="auto-router-usage" className="flex-none rounded-none px-4 py-2">
-              {t("Auto-router usage")}
-            </TabsTrigger>
-          )}
           <TabsTrigger value="settings" className="flex-none rounded-none px-4 py-2">
             {t("Settings")}
           </TabsTrigger>
@@ -724,16 +713,6 @@ export default function KeyInfoView({
               activity={activityDateRange}
             />
           </TabsContent>
-
-          {hasProxyWideSpendView(userRole) && (
-            <TabsContent value="auto-router-usage">
-              <KeyAutoRouterUsageTab
-                accessToken={accessToken}
-                keyToken={currentKeyData.token}
-                activity={activityDateRange}
-              />
-            </TabsContent>
-          )}
 
           {/* Settings Panel */}
           <TabsContent value="settings" keepMounted>

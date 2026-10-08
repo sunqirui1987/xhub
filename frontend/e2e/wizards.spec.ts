@@ -1,5 +1,7 @@
+import { chooseKeyTeam, chooseOrganization } from "./helpers";
+import { GATEWAY, UPSTREAM } from "./helpers";
 import { expect, test, type Page } from "@playwright/test";
-import { loginAdmin, stableGoto, t, uiPath } from "./helpers";
+import { sessionBearer, loginAdmin, stableGoto, t, uiPath } from "./helpers";
 
 async function pickOption(page: Page, option: string | RegExp) {
   const loc = page.getByRole("option", { name: option });
@@ -20,22 +22,25 @@ test.describe("write wizards create then list", () => {
       await stableGoto(page, "/models-and-endpoints");
     }
     await page.getByRole("button", { name: t("pages.models.add") }).click();
-    const add = page.locator("form").filter({ has: page.getByTestId("add-model-btn") });
-    const provider = add.getByRole("combobox", { name: t("Provider") });
-    await provider.click();
-    await provider.fill("OpenAI");
-    await page.getByRole("option", { name: "OpenAI 标志 OpenAI" }).click();
-    await add.locator("#model").click();
-    await add.locator("#model").fill("自定义");
-    await page.getByRole("option", { name: t("Custom Model Name (Enter below)") }).click();
-    await page.keyboard.press("Escape");
-    await add.locator("#custom_model_name").fill("openai/gpt-4o-mini");
-    const publicName = add.getByTestId("public-model-name-input");
-    await expect(publicName).toBeVisible({ timeout: 15_000 });
-    await publicName.fill("e2e-added-model");
-    await add.locator("#api_key").fill("sk-fake");
-    await add.locator("#api_base").fill("http://127.0.0.1:4010");
-    await add.getByTestId("add-model-btn").click();
+    const bearer = await sessionBearer(page);
+    const supplier = await page.request.post(GATEWAY + "/credentials", {
+      headers: { Authorization: "Bearer " + bearer },
+      data: { credential_name: "e2e-wizard-provider", credential_info: { custom_llm_provider: "openai" },
+        credential_values: { custom_llm_provider: "openai", api_key: "sk-fake", api_base: UPSTREAM } },
+    });
+    expect(supplier.ok(), await supplier.text()).toBeTruthy();
+    await page.reload();
+    await page.getByRole("button", { name: t("pages.models.add") }).click();
+    const add = page.locator("form").filter({ has: page.getByLabel("模型提供商 *") });
+    await add.getByLabel("模型提供商 *").selectOption("e2e-wizard-provider");
+    await add.getByLabel("上游模型 *").fill("gpt-4o-mini");
+    await add.getByLabel("对外模型名称 *").fill("e2e-added-model");
+    await add.getByLabel("价格来源").selectOption("manual");
+    await add.locator("#editor-input_cost_per_token").fill("0.15");
+    await add.locator("#editor-output_cost_per_token").fill("0.60");
+    const submitted = page.waitForResponse((res) => res.url().includes("/model/new") && res.request().method() === "POST");
+    await add.getByRole("button", { name: "添加模型", exact: true }).click();
+    expect((await submitted).ok()).toBeTruthy();
     await page.getByRole("tab", { name: t("pages.models.all") }).click();
     await expect(page.getByText("e2e-added-model").first()).toBeVisible({ timeout: 15_000 });
   });
@@ -44,6 +49,7 @@ test.describe("write wizards create then list", () => {
     await loginAdmin(page);
     await page.goto(uiPath("/teams"));
     await page.getByTestId("create-team-button").click();
+  await chooseOrganization(page);
     await page.getByTestId("team-name-input").fill("e2e-proj-team");
     await page.getByTestId("create-team-submit").click();
     await expect(page.getByText("e2e-proj-team").first()).toBeVisible({ timeout: 15_000 });
@@ -56,16 +62,6 @@ test.describe("write wizards create then list", () => {
     await pickOption(page, /e2e-proj-team/);
     await page.getByRole("dialog").getByRole("button", { name: t("Create Project"), exact: true }).click();
     await expect(page.getByText("e2e-project").first()).toBeVisible({ timeout: 15_000 });
-  });
-
-  test("Create Access Group lists the group", async ({ page }) => {
-    await loginAdmin(page);
-    await page.goto(uiPath("/access-groups"));
-    await page.getByRole("button", { name: t("pages.accessGroups.create") }).click();
-    await expect(page.getByRole("heading", { name: t("pages.accessGroups.create") })).toBeVisible();
-    await page.getByLabel(t("Group Name")).fill("e2e-ag");
-    await page.getByRole("dialog").getByRole("button", { name: "创建组" }).click();
-    await expect(page.getByText("e2e-ag").first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("Add Guardrail lists the guardrail", async ({ page }) => {

@@ -1,4 +1,4 @@
-// onboarding.go finishes a local connect flow and lists shadow-eval tasks.
+// onboarding.go finishes a local connect flow.
 // These handlers do not call an external identity provider. It is not part
 // of inference.
 //
@@ -23,23 +23,14 @@ import (
 
 var logTraceOnceOnboarding sync.Once
 
-// shadowEvalList returns the task array. An object envelope makes the shadow-eval page crash when it filters.
-// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
-// 调用：仅在 onboarding.go 内使用
-// 测试：无直接单测
-// 返回：无。状态码和正文写进调用方的响应。
-func (s *Server) shadowEvalList(w http.ResponseWriter, r *http.Request) {
-	logTraceOnceOnboarding.Do(func() { logx.Trace("enter gateway.shadowEvalList") })
-
-	httpx.WriteJSON(w, 200, []any{})
-}
-
 // authorizeFlow describes one connect attempt from a local fixture and does not call an external identity provider.
 // 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 调用：仅在 onboarding.go 内使用
 // 测试：无直接单测
 // 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) authorizeFlow(w http.ResponseWriter, r *http.Request) {
+	logTraceOnceOnboarding.Do(func() { logx.Trace("enter gateway.authorizeFlow") })
+
 	flow := r.URL.Query().Get("flow")
 	body := map[string]any{
 		"state":         "unscoped",

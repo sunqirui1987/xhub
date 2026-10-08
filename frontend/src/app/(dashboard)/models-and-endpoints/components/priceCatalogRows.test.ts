@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  EDITABLE_RATE_FIELDS,
+  catalogFieldValue,
+  invalidRateFields,
   parseRate,
   priceCatalogProviders,
   priceCatalogRows,
@@ -133,7 +136,14 @@ describe("priceCatalogProviders", () => {
       ],
     });
     expect(providers).toEqual([
-      { slug: "acme", name: "Acme", apiBase: "https://api.acme.test", modelCount: 4, baseline: false, overridden: false },
+      {
+        slug: "acme",
+        name: "Acme",
+        apiBase: "https://api.acme.test",
+        modelCount: 4,
+        baseline: false,
+        overridden: false,
+      },
     ]);
   });
 
@@ -145,6 +155,22 @@ describe("priceCatalogProviders", () => {
 });
 
 describe("priceModelPayload", () => {
+  it("offers every price field accepted by the catalog editor API", () => {
+    expect(EDITABLE_RATE_FIELDS.map(({ field }) => field)).toEqual([
+      "input_cost_per_token",
+      "output_cost_per_token",
+      "input_cost_per_token_peak",
+      "output_cost_per_token_peak",
+      "cache_read_input_token_cost",
+      "cache_creation_input_token_cost",
+      "input_cost_per_image",
+      "output_cost_per_image",
+      "input_cost_per_second",
+      "output_cost_per_second",
+      "search_context_cost_per_query",
+    ]);
+  });
+
   it("divides token rates back to per-token and leaves unit rates alone", () => {
     const body = priceModelPayload({
       id: " acme-one ",
@@ -193,6 +219,115 @@ describe("priceModelPayload", () => {
     expect(body).not.toHaveProperty("mode");
     expect(body).not.toHaveProperty("endpoint_type");
   });
+
+  it("sends only rates changed while editing, including an intentional clear", () => {
+    const body = priceModelPayload({
+      id: "acme-one",
+      provider: "acme",
+      tokenRates: { input_cost_per_token: "3.000", output_cost_per_token: "" },
+      unitRates: { output_cost_per_image: "0.05" },
+      original: { input_cost_per_token: 0.000003, output_cost_per_token: 0.000015, output_cost_per_image: 0.05 },
+    });
+    expect(body).not.toHaveProperty("input_cost_per_token");
+    expect(body).not.toHaveProperty("output_cost_per_image");
+    expect(body.output_cost_per_token).toBeNull();
+  });
+
+  it("omits rates seeded unchanged from unqualified rates[] entries", () => {
+    const original = {
+      rates: [
+        { measure: "token", side: "input", variant: "", window: "offpeak", usd: 0.000003 },
+        { measure: "token", side: "input", variant: "", window: "peak", usd: 0.000006 },
+        { measure: "picture", side: "output", variant: "", window: "all", usd: 0.04 },
+        { measure: "picture", side: "output", variant: "1080p", window: "all", usd: 0.08 },
+      ],
+    };
+    const body = priceModelPayload({
+      id: "acme-one",
+      provider: "acme",
+      tokenRates: { input_cost_per_token: "3", input_cost_per_token_peak: "6" },
+      unitRates: { output_cost_per_image: "0.04" },
+      original,
+    });
+    expect(body).toEqual({ id: "acme-one", litellm_provider: "acme" });
+  });
+
+  it("sends only a changed seeded rate and can intentionally clear one", () => {
+    const original = {
+      rates: [
+        { measure: "token", side: "output", variant: "", window: "all", usd: 0.000015 },
+        { measure: "second", side: "output", variant: "", window: "all", usd: 0.12 },
+        { measure: "second", side: "output", variant: "video", window: "all", usd: 0.2 },
+      ],
+    };
+    const body = priceModelPayload({
+      id: "acme-one",
+      provider: "acme",
+      tokenRates: { output_cost_per_token: "18" },
+      unitRates: { output_cost_per_second: "" },
+      original,
+    });
+    expect(body).toEqual({
+      id: "acme-one",
+      litellm_provider: "acme",
+      output_cost_per_token: 0.000018,
+      output_cost_per_second: null,
+    });
+  });
+});
+
+describe("catalogFieldValue", () => {
+  it("prefers a valid flat value, including zero, over rates[]", () => {
+    const raw = {
+      input_cost_per_token: 0,
+      rates: [{ measure: "token", side: "input", variant: "", window: "all", usd: 0.000003 }],
+    };
+    expect(catalogFieldValue(raw, "input_cost_per_token")).toBe(0);
+  });
+
+  it("seeds token, peak and unit fields from matching unqualified base rates", () => {
+    const raw = {
+      rates: [
+        { measure: "token", side: "input", window: "offpeak", usd: 0.000003 },
+        { measure: "token", side: "input", variant: "", window: "peak", usd: 0.000006 },
+        { measure: "token", side: "cache_read", variant: "", window: "all", usd: 0.0000003 },
+        { measure: "picture", side: "output", variant: "", window: "all", usd: 0.04 },
+        { measure: "query", side: "output", variant: "", window: "all", usd: 0.01 },
+      ],
+    };
+    expect(catalogFieldValue(raw, "input_cost_per_token")).toBe(0.000003);
+    expect(catalogFieldValue(raw, "input_cost_per_token_peak")).toBe(0.000006);
+    expect(catalogFieldValue(raw, "cache_read_input_token_cost")).toBe(0.0000003);
+    expect(catalogFieldValue(raw, "output_cost_per_image")).toBe(0.04);
+    expect(catalogFieldValue(raw, "search_context_cost_per_query")).toBe(0.01);
+  });
+
+  it("prefers an all-window base rate over offpeak for an ordinary token field", () => {
+    const raw = {
+      rates: [
+        { measure: "token", side: "output", variant: "", window: "offpeak", usd: 0.00001 },
+        { measure: "token", side: "output", variant: "", window: "all", usd: 0.000015 },
+      ],
+    };
+    expect(catalogFieldValue(raw, "output_cost_per_token")).toBe(0.000015);
+  });
+
+  it("does not seed from variant-specific, malformed, or negative rates", () => {
+    const raw = {
+      rates: [
+        { measure: "token", side: "input", variant: "uncached", window: "all", usd: 0.000003 },
+        { measure: "token", side: "output", variant: "thinking", window: "peak", usd: 0.000006 },
+        { measure: "picture", side: "output", variant: "1080p", window: "all", usd: 0.08 },
+        { measure: "second", side: "output", variant: "", window: "all", usd: -1 },
+        { measure: "query", side: "output", variant: "", window: "all", usd: "0.01" },
+      ],
+    };
+    expect(catalogFieldValue(raw, "input_cost_per_token")).toBeNull();
+    expect(catalogFieldValue(raw, "output_cost_per_token_peak")).toBeNull();
+    expect(catalogFieldValue(raw, "output_cost_per_image")).toBeNull();
+    expect(catalogFieldValue(raw, "output_cost_per_second")).toBeNull();
+    expect(catalogFieldValue(raw, "search_context_cost_per_query")).toBeNull();
+  });
 });
 
 describe("parseRate", () => {
@@ -204,6 +339,16 @@ describe("parseRate", () => {
     expect(parseRate("-1")).toBeNull();
     expect(parseRate("abc")).toBeNull();
     expect(parseRate(null)).toBeNull();
+  });
+});
+
+describe("invalidRateFields", () => {
+  it("allows blanks and zero but identifies negative and invalid rates", () => {
+    expect(invalidRateFields({ blank: " ", free: "0", negative: "-0.1", text: "nope", infinite: "Infinity" })).toEqual([
+      "negative",
+      "text",
+      "infinite",
+    ]);
   });
 });
 
@@ -234,7 +379,14 @@ describe("rateGroupsOf", () => {
   it("keeps both the off-peak and peak rate of one side, off-peak first", () => {
     const groups = rateGroupsOf([
       { measure: "token", unit_size: 1, side: "output", window: "peak", source_key: "output_peak", usd: 0.0000039 },
-      { measure: "token", unit_size: 1, side: "output", window: "offpeak", source_key: "output_offpeak", usd: 0.00000195 },
+      {
+        measure: "token",
+        unit_size: 1,
+        side: "output",
+        window: "offpeak",
+        source_key: "output_offpeak",
+        usd: 0.00000195,
+      },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].rates.map((rate) => rate.window)).toEqual(["offpeak", "peak"]);
@@ -291,7 +443,7 @@ describe("rateGroupsOf", () => {
     expect(windowed[0].windowed).toBe(true);
 
     const flat = priceCatalogRows(
-      doc({ "plain": { rates: [{ measure: "token", side: "input", window: "all", usd: 0.000003 }] } }),
+      doc({ plain: { rates: [{ measure: "token", side: "input", window: "all", usd: 0.000003 }] } }),
     );
     expect(flat[0].windowed).toBe(false);
   });

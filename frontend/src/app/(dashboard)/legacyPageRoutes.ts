@@ -12,6 +12,7 @@ const LEGACY_PAGE_ROUTES: ReadonlyMap<string, string> = new Map(
     "guardrails-monitor": "guardrails-monitor",
     guardrails: "guardrails",
     logs: "logs",
+    "audit-logs": "audit-logs",
     new_usage: "usage",
     "route-templates": "route-templates",
     "router-settings": "route-templates",

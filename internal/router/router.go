@@ -396,6 +396,9 @@ func openCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
 func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntry {
 	var exact []config.ModelEntry
 	for _, e := range list {
+		if e.Disabled() {
+			continue
+		}
 		if e.ModelName == alias {
 			exact = append(exact, e)
 		}
@@ -406,6 +409,9 @@ func matchDeployments(list []config.ModelEntry, alias string) []config.ModelEntr
 	byPattern := map[string][]config.ModelEntry{}
 	var patterns []string
 	for _, e := range list {
+		if e.Disabled() {
+			continue
+		}
 		if !llm.IsWildcardModel(e.ModelName) {
 			continue
 		}
@@ -500,6 +506,19 @@ func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 }
 
+// WeightID is the preferred template-weight identity. Stable catalog IDs let
+// two rows sharing an endpoint and upstream model receive independent shares.
+// Rows without one retain the legacy api_base|model identity.
+func WeightID(e config.ModelEntry) string {
+	if id := e.ParamString("pricing_id", ""); id != "" {
+		return "pricing:" + id
+	}
+	if id := e.ParamString("deployment_id", ""); id != "" {
+		return "deployment:" + id
+	}
+	return DeploymentID(e)
+}
+
 // CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
 // 参数 e（config.ModelEntry）：一条部署；命名凭证从 litellm_credential_name 读取；稳定计费身份可从 pricing_id 或 deployment_id 读取。
 // 返回 string（string）：运行时部署 id；没有稳定计费身份时为 api_base|model，并在有命名凭证时追加 |credential:<name>。
@@ -590,7 +609,12 @@ func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []conf
 	}
 	out := make([]config.ModelEntry, len(list))
 	for i, entry := range list {
-		weight, ok := overrides[DeploymentID(entry)]
+		weight, ok := overrides[WeightID(entry)]
+		if !ok && WeightID(entry) != DeploymentID(entry) {
+			// Existing templates continue to apply their physical endpoint key. A
+			// stable key wins when both forms are present.
+			weight, ok = overrides[DeploymentID(entry)]
+		}
 		if !ok {
 			out[i] = entry
 			continue

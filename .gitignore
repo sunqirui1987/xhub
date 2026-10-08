@@ -23,4 +23,6 @@ playwright-report/
 .e2e/
 e2e/__pycache__
 frontend/.e2e-report
+frontend/.next-e2e/
+frontend/tsconfig.e2e.json
 e2e-report.txt

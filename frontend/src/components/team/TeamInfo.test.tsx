@@ -46,7 +46,6 @@ vi.mock("@/components/networking", () => ({
   getTeamPermissionsCall: vi.fn(),
   organizationInfoCall: vi.fn(),
   getRouterSettingsCall: vi.fn().mockResolvedValue({ fields: [] }),
-  getPassThroughEndpointsCall: vi.fn().mockResolvedValue({ endpoints: [] }),
   fetchMCPServers: vi.fn().mockResolvedValue([]),
   fetchMCPToolsets: vi.fn().mockResolvedValue([]),
   listMCPTools: vi.fn().mockResolvedValue({ tools: [] }),

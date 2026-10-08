@@ -38,6 +38,7 @@ import {
   Waypoints,
   Settings as SettingsIcon,
   Shield,
+  ScrollText,
   User,
   Users,
 } from "lucide-react";
@@ -163,6 +164,7 @@ const menuGroups: MenuGroup[] = [
         label: "nav.models",
         icon: <Network {...ICON} />,
       },
+      { key: "audit-logs", page: "audit-logs", label: "nav.auditLogs", icon: <ScrollText {...ICON} /> },
       { key: "price-data", page: "price-data", label: "nav.priceData", icon: <Tags {...ICON} /> },
       { key: "guardrails", page: "guardrails", label: "nav.guardrails", icon: <Shield {...ICON} /> },
     ],

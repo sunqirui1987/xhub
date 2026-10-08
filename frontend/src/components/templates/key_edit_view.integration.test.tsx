@@ -5,7 +5,6 @@ import { chooseSelectOption, renderWithProviders, testQueryClient } from "../../
 import { KeyResponse } from "../key_team_helpers/key_list";
 import { MODEL_MAX_BUDGET_PREMIUM_HINT } from "../key_team_helpers/ModelMaxBudgetEditor";
 import {
-  getPassThroughEndpointsCall,
   getPoliciesList,
   getUiSettings,
   getPromptsList,
@@ -39,9 +38,6 @@ vi.mock("../networking", async () => {
     }),
     getPoliciesList: vi.fn().mockResolvedValue({
       policies: [{ policy_name: "policy-1" }],
-    }),
-    getPassThroughEndpointsCall: vi.fn().mockResolvedValue({
-      endpoints: [],
     }),
     vectorStoreListCall: vi.fn().mockResolvedValue({
       data: [],
@@ -2222,23 +2218,6 @@ describe("KeyEditView", () => {
       expect(screen.queryByLabelText("Select vector stores")).not.toBeInTheDocument();
       expect(vectorStoreListCall).not.toHaveBeenCalled();
       expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("vector_stores");
-    });
-
-    it("carries a picked pass through route into the payload", async () => {
-      vi.mocked(getPassThroughEndpointsCall).mockResolvedValueOnce({
-        endpoints: [{ path: "/bria", methods: ["POST"] }],
-      });
-      const onSubmitMock = vi.fn().mockResolvedValue(undefined);
-      renderForPayload(onSubmitMock);
-      await screen.findByRole("button", { name: /save changes/i });
-
-      await pickFromCombobox(/allowed pass through routes/, /\/bria/);
-      await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
-
-      await waitFor(() => {
-        expect(onSubmitMock).toHaveBeenCalled();
-      });
-      expect(onSubmitMock.mock.calls[0][0].allowed_passthrough_routes).toEqual(["/bria"]);
     });
 
     it("carries a picked team into the payload", async () => {

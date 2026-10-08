@@ -1,21 +1,35 @@
-# provider/openai
+# OpenAI 供应商占位边界
 
-这个目录登记的是适配端点，不是官方内容生成。`init` 只调用 `RegisterType`，不登记供应商，也不登记带价格的模型行。旧部署的 `model_info.mode` 为空时，网关仍把它当成 `chat`。
+[English](readme.md) · [全功能实现说明](../../../docs/development/implementation.md)
 
-每一种类型的种类都是 `adapted`，模型字段都是 `model`。`dataplane.Serve` 按 `Operation` 选编码，不走 `ServeBypass`。
+## 职责与实现契约
 
-| id | 标签 | Operation | 公开路径 | 上游路径 |
-| --- | --- | --- | --- | --- |
-| `chat` | Chat - /chat/completions | `chat` | POST `/v1/chat/completions` | `/chat/completions` |
-| `completion` | Completion - /completions | `completion` | POST `/v1/completions` | `/completions` |
-| `embedding` | Embedding - /embeddings | `embedding` | POST `/v1/embeddings` | `/embeddings` |
-| `image_generation` | Image Generation - /images/generations | `image` | POST `/v1/images/generations` | `/images/generations` |
-| `audio_speech` | Audio Speech - /audio/speech | `audio_speech` | POST `/v1/audio/speech` | `/audio/speech` |
-| `rerank` | Rerank - /rerank | `rerank` | POST `/v1/rerank` | `/rerank` |
-| `video_generation` | Video Generation - /videos | `videos` | POST `/v1/videos` | `/videos` |
+chat.go 保留 OpenAI 供应商包边界，当前不通过 init 注册一组端点类型。OpenAI 的适配请求、usage 和流处理在 llm 与 dataplane，模型能力来自 provider 能力表。
+这个目录没有独立管理 API，也不能按历史说明宣称登记七种类型。chat_test 验证当前边界。若以后增加供应商登记，应明确哪些是能力、哪些是传输，并由 provider/all 装配。
+阅读聊天实现时应从 gateway ingress → dataplane Serve → llm Build/Endpoint 跟踪，而不是在这个占位目录寻找完整 HTTP 客户端。
 
-`video_generation` 仍是适配循环里的 `/v1/videos`。火山和七牛的内容生成不在这张表里，它们是 `provider/volcengine` 和 `provider/qiniu` 的 bypass。
+## 源码职责与入口
 
-添加模型时这些 id 出现在端点类型多选里（`model_info.endpoint_types`）。一个模型可以同时选多种。没选时回退到 `mode`，再没有就是 `chat`。见 `provider.SelectedTypes`。
+### chat.go
 
-`internal/provider/all` 空白导入这个包。单独测试某个供应商包时，如果没导入 `all` 或本包，这些类型不会出现在 `provider.Types()` 里。
+内部实现和协议边界见 [chat.go](chat.go)。
+
+## 对外 HTTP 边界
+
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/logx](../../logx/readme_cn.md).
+
+## 验证与维护入口
+
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [chat_test.go](chat_test.go) | `TestAdaptedTypesAreNotRegistered`, `TestCapabilityTableDescribesTheAdaptedEntrypoints`, `TestRegisterTransportRejectsAnEntryWithNoActions` |
+
+```bash
+go test ./internal/provider/openai -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

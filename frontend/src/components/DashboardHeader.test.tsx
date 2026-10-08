@@ -28,7 +28,6 @@ vi.mock("@/components/Navbar/BlogDropdown/BlogDropdown", () => ({ BlogDropdown: 
 vi.mock("@/components/Navbar/CommunityEngagementButtons/CommunityEngagementButtons", () => ({
   CommunityEngagementButtons: () => null,
 }));
-vi.mock("@/components/Navbar/NotificationsBell/NotificationsBell", () => ({ NotificationsBell: () => null }));
 vi.mock("@/components/Navbar/WorkerDropdown/WorkerDropdown", () => ({ default: () => null }));
 
 describe("DashboardHeader breadcrumb", () => {

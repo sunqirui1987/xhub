@@ -49,14 +49,24 @@ func main() {
 		famPaths[f.ID] = f.HTTPPaths
 	}
 	client := &http.Client{Timeout: 20 * time.Second}
-	sk := mint(client, base, master)
+	code, _, loginBody := call(client, base, http.MethodPost, "/v2/login", "", map[string]any{"username": "admin", "password": master})
+	var login map[string]any
+	_ = json.Unmarshal([]byte(loginBody), &login)
+	admin, _ := login["key"].(string)
+	if admin == "" {
+		admin, _ = login["token"].(string)
+	}
+	if code != 200 || admin == "" {
+		fail(fmt.Errorf("sweep login %d", code))
+	}
+	sk := mint(client, base, admin)
 	var bad []string
 	var lines []string
 	checked := 0
 	for _, rt := range doc.Routes {
 		method := rt.Method
 		path := fillPath(rt.Path)
-		tok := master
+		tok := admin
 		if catalog.IsPublicPath(method, path) {
 			tok = ""
 		} else if catalog.IsDataPlanePath(path) {
@@ -90,7 +100,7 @@ func main() {
 			record()
 			continue
 		}
-		if code == 404 || code >= 500 {
+		if code == 0 || code == 404 || code >= 500 {
 			bad = append(bad, fmt.Sprintf("%s %s -> %d %s", method, path, code, truncate(resp, 180)))
 			record()
 			continue
@@ -139,7 +149,31 @@ func main() {
 }
 
 func mint(client *http.Client, base, master string) string {
-	code, _, body := call(client, base, http.MethodPost, "/key/generate", master, map[string]any{"key_type": "llm_api"})
+	orgCode, _, orgBody := call(client, base, http.MethodPost, "/organization/new", master, map[string]any{"organization_alias": "e2e-sweep-org"})
+	var org map[string]any
+	_ = json.Unmarshal([]byte(orgBody), &org)
+	if orgCode != 200 {
+		fail(fmt.Errorf("sweep organization %d", orgCode))
+	}
+	// Master has no user identity, so create a first team administrator explicitly.
+	adminCode, _, _ := call(client, base, http.MethodPost, "/user/new", master, map[string]any{"user_id": "e2e-sweep-admin", "user_email": "e2e-sweep-admin@example.com", "user_role": "user"})
+	if adminCode != 200 {
+		fail(fmt.Errorf("sweep administrator %d", adminCode))
+	}
+	teamCode, _, teamBody := call(client, base, http.MethodPost, "/team/new", master, map[string]any{"organization_id": org["organization_id"], "team_alias": "e2e-sweep-team", "admin_user_id": "e2e-sweep-admin"})
+	var team map[string]any
+	_ = json.Unmarshal([]byte(teamBody), &team)
+	if teamCode != 200 {
+		fail(fmt.Errorf("sweep team %d %s", teamCode, truncate(teamBody, 200)))
+	}
+	ownerCode, _, ownerBody := call(client, base, http.MethodPost, "/user/new", master, map[string]any{
+		"user_id": "e2e-sweep-owner", "user_email": "e2e-sweep@example.com",
+		"password": "e2e-sweep-password", "user_role": "user", "team_id": team["team_id"], "team_role": "user",
+	})
+	if ownerCode != 200 {
+		fail(fmt.Errorf("create sweep owner %d %s", ownerCode, truncate(ownerBody, 200)))
+	}
+	code, _, body := call(client, base, http.MethodPost, "/key/generate", master, map[string]any{"key_type": "llm_api", "user_id": "e2e-sweep-owner", "team_id": team["team_id"]})
 	var g map[string]any
 	_ = json.Unmarshal([]byte(body), &g)
 	sk, _ := g["key"].(string)

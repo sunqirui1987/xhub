@@ -144,7 +144,7 @@ func (db *DB) CreateRouteTemplate(ctx context.Context, by Actor, owner TemplateO
 			return err
 		}
 		out = &row
-		return writeAudit(s, by, Audit{Action: "route_template.create", ObjectType: "route_template", ObjectID: row.ID})
+		return writeAudit(s, by, Audit{Action: "route_template.create", ObjectType: "route_template", ObjectID: row.ID, Detail: map[string]any{"object_name": row.Name}})
 	})
 	return out, err
 }
@@ -165,6 +165,8 @@ func (db *DB) UpdateRouteTemplate(ctx context.Context, by Actor, id, name, body 
 		if !ok {
 			return nil
 		}
+		previousName := row.Name
+		settingsChanged := row.Body != body
 		row.Body = body
 		if trimmed := strings.TrimSpace(name); trimmed != "" {
 			row.Name = trimmed
@@ -173,7 +175,7 @@ func (db *DB) UpdateRouteTemplate(ctx context.Context, by Actor, id, name, body 
 			return err
 		}
 		out = &row
-		return writeAudit(s, by, Audit{Action: "route_template.update", ObjectType: "route_template", ObjectID: id})
+		return writeAudit(s, by, Audit{Action: "route_template.update", ObjectType: "route_template", ObjectID: id, Detail: map[string]any{"object_name": row.Name, "previous_name": previousName, "settings_changed": settingsChanged}})
 	})
 	return out, err
 }
@@ -200,7 +202,7 @@ func (db *DB) DeleteRouteTemplate(ctx context.Context, by Actor, id string) erro
 		if _, err := s.ID(id).Delete(&RouteTemplate{}); err != nil {
 			return err
 		}
-		return writeAudit(s, by, Audit{Action: "route_template.delete", ObjectType: "route_template", ObjectID: id})
+		return writeAudit(s, by, Audit{Action: "route_template.delete", ObjectType: "route_template", ObjectID: id, Detail: map[string]any{"object_name": row.Name}})
 	})
 }
 

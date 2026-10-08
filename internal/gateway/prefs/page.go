@@ -86,8 +86,6 @@ func Fields(s Host, rs map[string]any) []map[string]any {
 		{"allowed_fails", "Integer", "Number of times a deployment can fail before being added to cooldown", "Allowed Fails", 3, nil},
 		{"cooldown_time", "Float", "Time in seconds to cooldown a deployment after failure", "Cooldown Time", nil, nil},
 		{"retry_after", "Integer", "Minimum time to wait before retrying a failed request in seconds", "Retry After", 0, nil},
-		{"retry_policy", "Dictionary", "Custom retry policy for different exception types", "Retry Policy", nil, nil},
-		{"model_group_alias", "Dictionary", "Aliases for model groups", "Model Group Alias", map[string]any{}, nil},
 		{"enable_pre_call_checks", "Boolean", "Enable pre-call checks before routing requests", "Enable Pre-call Checks", false, nil},
 		{"enable_tag_filtering", "Boolean", "Enable tag-based routing", "Enable Tag Filtering", false, nil},
 	}

@@ -18,71 +18,6 @@ export const getCallbackConfigsCall = async (accessToken: string) => {
   }
 };
 
-export const getAutoRouterClassifierDefaultPromptCall = async (
-  accessToken: string,
-  contextWindowSize: number,
-  tierLabels?: Record<string, string>,
-  classificationRubric?: string,
-): Promise<string> => {
-  /**
-   * Get the built-in system prompt an auto-router's LLM classifier uses when none is configured,
-   * so the prompt editor prefills what the proxy actually sends rather than a frontend copy.
-   *
-   * tierLabels names the rubric's tier bullets, so a router that renamed its tiers prefills the
-   * rubric it sends rather than one using the canonical names. rubric selects which calibration
-   * examples it carries, for the same reason.
-   */
-  try {
-    const response = await apiClient.get<{ system_prompt: string }>(`/auto_router/classifier/default_prompt`, {
-      accessToken,
-      query: {
-        context_window_size: contextWindowSize,
-        ...(tierLabels && Object.keys(tierLabels).length > 0 ? { tier_labels: JSON.stringify(tierLabels) } : {}),
-        ...(classificationRubric ? { classification_rubric: classificationRubric } : {}),
-      },
-    });
-    return response.system_prompt;
-  } catch (error) {
-    console.error("Failed to get the default classifier prompt:", error);
-    throw error;
-  }
-};
-
-export type AssembledPromptTierSource =
-  | { tierDefinitions: { name: string; description?: string }[] }
-  | { tierLabels?: Record<string, string>; classificationRubric?: string };
-
-export const getAutoRouterAssembledPromptCall = async (
-  accessToken: string,
-  contextWindowSize: number,
-  source: AssembledPromptTierSource,
-  sections: { classificationPrompt?: string; classificationExamples?: string } = {},
-): Promise<string> => {
-  const { classificationPrompt, classificationExamples } = sections;
-  /**
-   * Assembled by the proxy, because tier criteria live only in the backend: a built-in tier name
-   * with no description inherits them, and the built-in rubric derives its bullets from them.
-   * POSTed so the operator's prompt does not reach access logs through a URL.
-   */
-  const response = await apiClient.post<{ system_prompt: string }>(`/auto_router/classifier/default_prompt`, {
-    accessToken,
-    body: {
-      context_window_size: contextWindowSize,
-      ...("tierDefinitions" in source
-        ? { tier_definitions: source.tierDefinitions }
-        : {
-            ...(source.tierLabels && Object.keys(source.tierLabels).length > 0
-              ? { tier_labels: source.tierLabels }
-              : {}),
-            ...(source.classificationRubric ? { classification_rubric: source.classificationRubric } : {}),
-          }),
-      ...(classificationPrompt?.trim() ? { classification_prompt: classificationPrompt } : {}),
-      ...(classificationExamples?.trim() ? { classification_examples: classificationExamples } : {}),
-    },
-  });
-  return response.system_prompt;
-};
-
 /**
  * Helper file for calls being made to proxy
  */
@@ -103,15 +38,11 @@ import type {
   CoordinationRedisTestResponse,
 } from "@/app/(dashboard)/caching/_components/coordination_redis_settings/types";
 import { MCP_TOOLS_PREVIEW_FORBIDDEN_MESSAGE } from "./mcp_tools/constants";
-import type { ComplexityRouterConfigPayload } from "./add_model/build_complexity_router_config";
-import type { AutoRouterPresetsResponse } from "@/lib/autorouter_presets";
 import type { PriceCatalogDocument } from "@/app/(dashboard)/models-and-endpoints/components/priceCatalogRows";
 import type { VectorStoreIndex } from "@/app/(dashboard)/vector-stores/_components/IndexesTab";
-import type { RoutingDecision } from "./view_logs/LogDetailsDrawer/RoutingDecisionCard";
 import {
   createApiClient,
   deriveErrorMessage,
-  extractProxyErrorMessage,
   isQuietAccessDenial,
   unwrapProxyErrorMessage,
 } from "@/lib/http/client";
@@ -419,30 +350,6 @@ export const getProviderCreateMetadata = async (): Promise<ProviderCreateInfo[]>
   return jsonData;
 };
 
-export interface ComplexityScorerDefaults {
-  tier_boundaries: Record<string, number>;
-  token_thresholds: Record<string, number>;
-  dimension_weights: Record<string, number>;
-}
-
-export const getComplexityScorerDefaults = async (): Promise<ComplexityScorerDefaults> => {
-  /**
-   * Fetch the complexity router's shipped heuristic scorer defaults from the proxy's public endpoint.
-   * The Advanced scoring controls prefill from these rather than from a copy in the dashboard, so a
-   * recalibration of the defaults cannot leave the form reporting numbers the router no longer uses.
-   */
-  return await apiClient.get(`/public/complexity_router/scorer_defaults`);
-};
-
-export const getAutoRouterPresets = async (): Promise<AutoRouterPresetsResponse> => {
-  /**
-   * Fetch the auto-router preset catalog from the proxy's public endpoint. The template picker
-   * renders from this rather than from a copy in the dashboard, so a catalog update propagates
-   * without a dashboard release.
-   */
-  return await apiClient.get(`/public/autorouter_presets`);
-};
-
 export const getAgentCreateMetadata = async (): Promise<AgentCreateInfo[]> => {
   /**
    * Fetch agent type metadata from the proxy's public endpoint.
@@ -698,7 +605,7 @@ export const modelCreateCall = async (accessToken: string, formValues: Model) =>
     toast.dismiss();
 
     // Sequential success messages
-    toast.success(t("Model {value0} created successfully", { value0: (formValues.model_name) }));
+    toast.success(t("Model {value0} created successfully", { value0: formValues.model_name }));
 
     return data;
   } catch (error) {
@@ -2083,8 +1990,20 @@ export const userFilterUICall = async (accessToken: string, params: URLSearchPar
     const email = (params.get("user_email") || "").trim().toLowerCase();
     const userId = (params.get("user_id") || "").trim().toLowerCase();
     return users.filter((user: { user_email?: string | null; user_id?: string | null }) => {
-      if (email && !String(user.user_email ?? "").toLowerCase().includes(email)) return false;
-      if (userId && !String(user.user_id ?? "").toLowerCase().includes(userId)) return false;
+      if (
+        email &&
+        !String(user.user_email ?? "")
+          .toLowerCase()
+          .includes(email)
+      )
+        return false;
+      if (
+        userId &&
+        !String(user.user_id ?? "")
+          .toLowerCase()
+          .includes(userId)
+      )
+        return false;
       return true;
     });
   } catch (error) {
@@ -2427,105 +2346,6 @@ export const testConnectionRequest = async (
     console.error("Model connection test error:", error);
     // For network errors or other exceptions, still throw
     throw error;
-  }
-};
-
-export type ModelGroupConnectionResult = { status: "success" } | { status: "error"; error: string };
-
-/**
- * Test an existing model group by routing a minimal request through the proxy
- * exactly as production would (by public model_group name). Unlike
- * /health/test_connection, this needs no litellm_params resolution: the router
- * resolves the group, credentials, and provider. Used by the auto-router Test
- * Connection to probe each tier's model group and the embedding model.
- */
-/**
- * Build the minimal request that probes a model group by public name. No
- * max_tokens: reasoning models (o1/o3/...) reject a tiny cap with "max_tokens
- * reached" because reasoning tokens count against it, which would show a false
- * failure for a reachable tier.
- */
-export const buildModelGroupTestRequest = (
-  modelGroup: string,
-  mode: "chat" | "embedding",
-  requestParams: Record<string, unknown> = {},
-): { path: string; body: Record<string, unknown> } =>
-  mode === "embedding"
-    ? { path: "/v1/embeddings", body: { model: modelGroup, input: "test from litellm" } }
-    : {
-        path: "/v1/chat/completions",
-        body: { ...requestParams, model: modelGroup, messages: [{ role: "user", content: "test from litellm" }] },
-      };
-
-export const testModelGroupConnection = async (
-  accessToken: string,
-  modelGroup: string,
-  mode: "chat" | "embedding",
-  requestParams?: Record<string, unknown>,
-): Promise<ModelGroupConnectionResult> => {
-  const { path, body } = buildModelGroupTestRequest(modelGroup, mode, requestParams);
-  try {
-    await apiClient.post(path, { accessToken, body });
-    return { status: "success" };
-  } catch (error) {
-    return { status: "error", error: error instanceof Error ? error.message : String(error) };
-  }
-};
-
-export interface AutoRouterRoutingTestRequest {
-  prompt: string;
-  complexity_router_config: ComplexityRouterConfigPayload;
-  default_model?: string;
-  router_name?: string;
-  team_id?: string;
-}
-
-export interface AutoRouterRoutingTestResult {
-  routed_model: string;
-  routed_model_configured: boolean;
-  routing_decision: RoutingDecision;
-}
-
-export type AutoRouterRoutingTestResponse =
-  | { status: "success"; result: AutoRouterRoutingTestResult }
-  | { status: "error"; error: string };
-
-export const testAutoRouterRouting = async (
-  accessToken: string,
-  request: AutoRouterRoutingTestRequest,
-): Promise<AutoRouterRoutingTestResponse> => {
-  try {
-    const result = await apiClient.post<AutoRouterRoutingTestResult>("/auto_router/test_routing", {
-      accessToken,
-      body: request,
-    });
-    return { status: "success", result };
-  } catch (error) {
-    return { status: "error", error: extractProxyErrorMessage(error) };
-  }
-};
-
-export interface ComplexityRouterConfigValidation {
-  valid: boolean;
-  error?: string | null;
-}
-
-// Dry-runs the same write gate /model/new and /model/update apply, so a save that would come back
-// as a raw 400 shows the backend's own message inline first. Transport failures fail open: the
-// write gate stays authoritative.
-export const validateAutoRouterConfig = async (
-  accessToken: string,
-  complexityRouterConfig: Record<string, unknown>,
-  teamId?: string,
-): Promise<ComplexityRouterConfigValidation> => {
-  try {
-    return await apiClient.post<ComplexityRouterConfigValidation>("/auto_router/validate_complexity_router_config", {
-      accessToken,
-      body: { complexity_router_config: complexityRouterConfig, ...(teamId && { team_id: teamId }) },
-    });
-  } catch (error) {
-    console.warn("Could not dry-run the complexity router config; the save will be validated server side", error);
-    return { valid: true };
   }
 };
 
@@ -3610,23 +3430,6 @@ export const updateCoordinationRedisSettingsCall = async (
   }
 };
 
-export const getPassThroughEndpointsCall = async (accessToken: string, teamId?: string | null) => {
-  try {
-    let path = `/config/pass_through_endpoint`;
-
-    if (teamId) {
-      path += `/team/${teamId}`;
-    }
-
-    const data = await apiClient.get(path, { accessToken });
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to get callbacks:", error);
-    throw error;
-  }
-};
-
 export const getConfigFieldSetting = async (accessToken: string, fieldName: string) => {
   try {
     let url = proxyBaseUrl
@@ -3649,25 +3452,6 @@ export const getConfigFieldSetting = async (accessToken: string, fieldName: stri
     }
 
     const data = await response.json();
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to set callbacks:", error);
-    throw error;
-  }
-};
-
-export const createPassThroughEndpoint = async (accessToken: string, formValues: Record<string, any>) => {
-  /**
-   * Set callbacks on proxy
-   */
-  try {
-    const data = await apiClient.post(`/config/pass_through_endpoint`, {
-      accessToken,
-      body: {
-        ...formValues, // Include formValues in the request body
-      },
-    });
     return data;
     // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
@@ -3709,36 +3493,6 @@ export const deleteConfigFieldSetting = async (accessToken: string, fieldName: s
   }
 };
 
-export const deletePassThroughEndpointsCall = async (accessToken: string, endpointId: string) => {
-  try {
-    let url = proxyBaseUrl
-      ? `${proxyBaseUrl}/config/pass_through_endpoint?endpoint_id=${endpointId}`
-      : `/config/pass_through_endpoint?endpoint_id=${endpointId}`;
-
-    const response = await fetch(url, {
-      method: "DELETE",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage = deriveErrorMessage(errorData);
-      handleError(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    return data;
-    // Handle success - you might want to update some state or UI based on the created key
-  } catch (error) {
-    console.error("Failed to get callbacks:", error);
-    throw error;
-  }
-};
-
 export const setCallbacksCall = async (accessToken: string, formValues: Record<string, any>) => {
   /**
    * Set callbacks on proxy
@@ -3754,38 +3508,6 @@ export const setCallbacksCall = async (accessToken: string, formValues: Record<s
     // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
     console.error("Failed to set callbacks:", error);
-    throw error;
-  }
-};
-
-export const individualModelHealthCheckCall = async (accessToken: string, modelId: string) => {
-  /**
-   * Run health check for a specific model using model ID (so each deployment is checked separately).
-   */
-  try {
-    let url = proxyBaseUrl
-      ? `${proxyBaseUrl}/health?model_id=${encodeURIComponent(modelId)}`
-      : `/health?model_id=${encodeURIComponent(modelId)}`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage = deriveErrorMessage(errorData);
-      handleError(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error(`Failed to call /health for model id ${modelId}:`, error);
     throw error;
   }
 };
@@ -3816,35 +3538,6 @@ export const cachingHealthCheckCall = async (accessToken: string) => {
     // Handle success - you might want to update some state or UI based on the created key
   } catch (error) {
     console.error("Failed to call /cache/ping:", error);
-    throw error;
-  }
-};
-
-export const latestHealthChecksCall = async (accessToken: string) => {
-  /**
-   * Get the latest health check status for all models
-   */
-  try {
-    let url = proxyBaseUrl ? `${proxyBaseUrl}/health/latest` : `/health/latest`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      handleError(errorData);
-      throw new Error(errorData);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error("Failed to call /health/latest:", error);
     throw error;
   }
 };
@@ -4003,7 +3696,7 @@ export const getGuardrailsList = async (accessToken: string) => {
     });
 
     if (!response.ok) {
-      throw new Error(t("v2 guardrails/list returned {value0}", { value0: (response.status) }));
+      throw new Error(t("v2 guardrails/list returned {value0}", { value0: response.status }));
     }
 
     const data = await response.json();
@@ -4409,8 +4102,6 @@ export const enrichPolicyTemplateStream = async (
     }
   }
 };
-
-
 
 export const createPolicyCall = async (accessToken: string, policyData: any) => {
   try {
@@ -6138,7 +5829,7 @@ export const getCategoryYaml = async (accessToken: string, categoryName: string)
       const errorData = await response.text();
       console.error(`Failed to get category YAML. Status: ${response.status}, Error:`, errorData);
       handleError(errorData);
-      throw new Error(t("Failed to get category YAML: {value0} {errorData}", { value0: (response.status), errorData }));
+      throw new Error(t("Failed to get category YAML: {value0} {errorData}", { value0: response.status, errorData }));
     }
 
     const data = await response.json();
@@ -6165,7 +5856,7 @@ export const getMajorAirlines = async (accessToken: string) => {
       const errorData = await response.text();
       console.error(`Failed to get major airlines. Status: ${response.status}, Error:`, errorData);
       handleError(errorData);
-      throw new Error(t("Failed to get major airlines: {value0} {errorData}", { value0: (response.status), errorData }));
+      throw new Error(t("Failed to get major airlines: {value0} {errorData}", { value0: response.status, errorData }));
     }
 
     const data = await response.json();
@@ -6585,7 +6276,7 @@ export const uiAuditLogsCall = async ({
   params = {},
 }: UiAuditLogsCallOptions) => {
   try {
-    let url = proxyBaseUrl ? `${proxyBaseUrl}/audit` : `/audit`;
+    let url = proxyBaseUrl ? `${proxyBaseUrl}/audit/logs` : `/audit/logs`;
 
     const queryParams = new URLSearchParams();
     queryParams.append("page", page.toString());
@@ -6614,7 +6305,40 @@ export const uiAuditLogsCall = async ({
       throw new Error(errorMessage);
     }
 
-    return await response.json();
+    const data = await response.json();
+    return {
+      ...data,
+      audit_logs: data.audit_logs.map((entry: {
+        id: number;
+        ts: string;
+        actor_id: string;
+        actor_kind: string;
+        actor_name?: string;
+        actor_email?: string;
+        object_name?: string;
+        team_id?: string | null;
+        action: string;
+        object_type: string;
+        object_id: string;
+        detail: Record<string, unknown> | null;
+      }) => ({
+        id: String(entry.id),
+        updated_at: entry.ts,
+        changed_by: entry.actor_id,
+        actor_kind: entry.actor_kind,
+        actor_name: entry.actor_name,
+        actor_email: entry.actor_email,
+        object_name: entry.object_name,
+        team_id: entry.team_id,
+        changed_by_api_key: entry.actor_kind === "key" ? entry.actor_id : "",
+        action: entry.action,
+        table_name: entry.object_type,
+        object_id: entry.object_id,
+        before_value: {},
+        updated_values: {},
+        detail: entry.detail ?? {},
+      })),
+    };
   } catch (error) {
     console.error("Failed to fetch audit logs:", error);
     throw error;
@@ -6672,41 +6396,6 @@ export interface LicenseInfo {
 
 export const getLicenseInfo = async (_accessToken: string): Promise<LicenseInfo | null> => {
   return null;
-};
-
-export const updatePassThroughEndpoint = async (
-  accessToken: string,
-  endpointPath: string,
-  formValues: Record<string, any>,
-) => {
-  try {
-    let url = proxyBaseUrl
-      ? `${proxyBaseUrl}/config/pass_through_endpoint/${encodeURIComponent(endpointPath)}`
-      : `/config/pass_through_endpoint/${encodeURIComponent(endpointPath)}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        [globalLitellmHeaderName]: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(formValues),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const errorMessage = deriveErrorMessage(errorData);
-      handleError(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    const data = await response.json();
-    toast.success(t("Pass through endpoint updated successfully"));
-    return data;
-  } catch (error) {
-    console.error("Failed to update pass through endpoint:", error);
-    throw error;
-  }
 };
 
 export const deleteCallback = async (accessToken: string, callbackName: string) => {
@@ -6944,7 +6633,8 @@ export const exchangeMcpOAuthToken = async ({
       typeof data?.error === "string" && typeof data?.error_description === "string"
         ? `${data.error}: ${data.error_description}`
         : undefined;
-    const errorMessage = oauthErrorMessage || deriveErrorMessage(data) || data?.detail || t("OAuth token exchange failed");
+    const errorMessage =
+      oauthErrorMessage || deriveErrorMessage(data) || data?.detail || t("OAuth token exchange failed");
     throw new Error(errorMessage);
   }
   return data;
@@ -7428,7 +7118,7 @@ export const registerClaudeCodePlugin = async (accessToken: string, pluginData: 
       try {
         errorMessage = deriveErrorMessage(JSON.parse(errorBody));
       } catch {
-        errorMessage = errorBody || t("Request failed with status {value0}", { value0: (response.status) });
+        errorMessage = errorBody || t("Request failed with status {value0}", { value0: response.status });
       }
       handleError(errorMessage);
       throw new Error(errorMessage);
@@ -7879,7 +7569,7 @@ export const storeMCPOAuthUserCredential = async (
     const detailMsg = Array.isArray(detail)
       ? detail
           .map((d: unknown) =>
-            d && typeof d === "object" ? (d as Record<string, unknown>).msg ?? JSON.stringify(d) : String(d),
+            d && typeof d === "object" ? ((d as Record<string, unknown>).msg ?? JSON.stringify(d)) : String(d),
           )
           .join("; ")
       : typeof detail === "string"
@@ -7910,7 +7600,7 @@ export const deleteMCPOAuthUserCredential = async (
     const detailMsg = Array.isArray(detail)
       ? detail
           .map((d: unknown) =>
-            d && typeof d === "object" ? (d as Record<string, unknown>).msg ?? JSON.stringify(d) : String(d),
+            d && typeof d === "object" ? ((d as Record<string, unknown>).msg ?? JSON.stringify(d)) : String(d),
           )
           .join("; ")
       : typeof detail === "string"

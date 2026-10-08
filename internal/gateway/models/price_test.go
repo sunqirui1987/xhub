@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/catalog"
@@ -58,11 +59,73 @@ func openPriceStore(t *testing.T) *store.Store {
 		// The price map is package state shared by every test in the process, so
 		// a row this test wrote must not leak into the next one.
 		catalog.RemoveModel("acme-chat-v1")
+		catalog.RemoveModel("partial-rates-test")
 		if baseline, ok := catalog.BaselineModel("claude-4.1-opus"); ok {
 			catalog.SetModel("claude-4.1-opus", baseline)
 		}
 	})
 	return st
+}
+
+func TestPricePartialUpdatePreservesQualifiedAndUntouchedRates(t *testing.T) {
+	const id = "partial-rates-test"
+	catalog.SetModel(id, map[string]any{
+		"litellm_provider":              "custom",
+		"input_cost_per_token":          1,
+		"input_cost_per_token_peak":     2,
+		"output_cost_per_token":         3,
+		"output_cost_per_token_peak":    4,
+		"cache_read_input_token_cost":   0.25,
+		"input_cost_per_image":          5,
+		"output_cost_per_second":        6,
+		"search_context_cost_per_query": 7,
+		"rates": []catalog.Rate{
+			{Measure: "token", UnitSize: 1, Side: "input", Variant: "uncached", Window: "offpeak", USD: 1},
+			{Measure: "token", UnitSize: 1, Side: "input", Variant: "uncached", Window: "peak", USD: 2},
+			{Measure: "token", UnitSize: 1, Side: "input", Variant: "thinking", Window: "all", USD: 99},
+			{Measure: "token", UnitSize: 1, Side: "output", Window: "offpeak", USD: 3},
+			{Measure: "token", UnitSize: 1, Side: "output", Window: "peak", USD: 4},
+			{Measure: "token", UnitSize: 1, Side: "cache_read", Window: "all", USD: 0.25},
+			{Measure: "picture", UnitSize: 1, Side: "input", Window: "all", USD: 5},
+			{Measure: "second", UnitSize: 1, Side: "output", Window: "all", USD: 6},
+			{Measure: "query", UnitSize: 1, Side: "output", Window: "all", USD: 7},
+		},
+	})
+	t.Cleanup(func() { catalog.RemoveModel(id) })
+
+	row := priceRowFrom(map[string]any{
+		"id": id, "input_cost_per_token": 1.5,
+		"upstream_model": "actual/model", "supplier_name": "Acme",
+	}, "openai")
+	catalog.SetModel(id, row)
+	if row["upstream_model"] != "actual/model" || row["supplier_name"] != "Acme" {
+		t.Fatalf("catalog import text fields were dropped: %#v", row)
+	}
+	off, ok := catalog.CostAt(id, catalog.Usage{PromptTokens: 10, CompletionTokens: 10, CachedTokens: 2, Images: 1, Seconds: 1, Searches: 1}, time.Date(2026, 3, 2, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60)))
+	if !ok || off.Total != 1.5*8+0.25*2+3*10+5+6+7 {
+		t.Fatalf("offpeak actual cost %#v ok=%v", off, ok)
+	}
+	peak, ok := catalog.CostAt(id, catalog.Usage{PromptTokens: 10, CompletionTokens: 10}, time.Date(2026, 3, 2, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60)))
+	if !ok || peak.Total != 2*10+4*10 {
+		t.Fatalf("peak rate was changed by base edit: %#v ok=%v", peak, ok)
+	}
+	rates, _ := catalog.DecodeRates(row["rates"])
+	foundQualified := false
+	for _, rate := range rates {
+		if rate.Variant == "thinking" && rate.USD == 99 {
+			foundQualified = true
+		}
+	}
+	if !foundQualified {
+		t.Fatal("partial edit dropped a qualified rate")
+	}
+
+	row = priceRowFrom(map[string]any{"id": id, "input_cost_per_token_peak": nil}, "openai")
+	catalog.SetModel(id, row)
+	charge, ok := catalog.CostAt(id, catalog.Usage{PromptTokens: 10}, time.Date(2026, 3, 2, 10, 0, 0, 0, time.FixedZone("CST", 8*60*60)))
+	if !ok || charge.Total != 15 {
+		t.Fatalf("clearing peak did not promote base to all: %#v ok=%v", charge, ok)
+	}
 }
 
 func call(h *priceHost, method, path string, body any) (int, map[string]any) {

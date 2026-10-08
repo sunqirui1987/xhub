@@ -1,5 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SpendLogsTable from "./index";
 import { renderWithProviders, testQueryClient } from "../../../tests/test-utils";
@@ -11,6 +10,13 @@ const { useAuthorizedMock, useOrganizationsMock } = vi.hoisted(() => ({
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: useAuthorizedMock,
+}));
+
+vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
+  default: function useCanMock(capability: string) {
+    const { userRole } = useAuthorizedMock();
+    return capability === "viewAuditLogs" && userRole === "Admin";
+  },
 }));
 
 vi.mock("@/app/(dashboard)/hooks/organizations/useOrganizations", () => ({
@@ -74,57 +80,20 @@ describe("SpendLogsTable network access by role", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  it("fires neither the audit nor the deleted-teams request for an internal user", async () => {
-    const user = userEvent.setup();
-    renderAs("Internal User");
-
-    // Liveness gate: the sibling Deleted Keys panel does reach the network, so a
-    // silent absence below means the gate worked, not that nothing rendered.
-    await waitFor(() => expect(requestedUrls().some((url) => url.includes("/key/list"))).toBe(true));
-
-    await user.click(screen.getByRole("tab", { name: "Deleted Keys" }));
-    await user.click(screen.getByRole("tab", { name: "Request Logs" }));
-
-    expect(requestedUrls().filter((url) => url.includes("/audit"))).toEqual([]);
-    expect(requestedUrls().filter((url) => url.includes("/v2/team/list"))).toEqual([]);
+  it.each([
+    ["Internal User", []],
+    ["Internal Viewer", []],
+    ["Internal User", ORG_ADMIN_MEMBERSHIPS],
+  ])("does not request audit or deleted resources for %s", async (role, organizations) => {
+    renderAs(role as string, organizations as unknown[]);
+    expect(screen.getByTestId("request-logs-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(requestedUrls()).toEqual([]);
   });
 
-  it("fetches the deleted teams an org admin is entitled to, and still no audit logs", async () => {
-    renderAs("Internal User", ORG_ADMIN_MEMBERSHIPS);
-
-    await waitFor(() =>
-      expect(requestedUrls().some((url) => url.includes("/v2/team/list") && url.includes("status=deleted"))).toBe(true),
-    );
-
-    expect(requestedUrls().filter((url) => url.includes("/audit"))).toEqual([]);
-  });
-
-  it("fetches deleted teams and audit logs for an admin", async () => {
-    const user = userEvent.setup();
+  it("does not request audit logs from the request logs page even for an admin", () => {
     renderAs("Admin");
-
-    await waitFor(() =>
-      expect(requestedUrls().some((url) => url.includes("/v2/team/list") && url.includes("status=deleted"))).toBe(true),
-    );
-
-    expect(requestedUrls().filter((url) => url.includes("/audit"))).toEqual([]);
-
-    await user.click(screen.getByRole("tab", { name: "Audit Logs" }));
-
-    await waitFor(() => expect(requestedUrls().some((url) => url.includes("/audit"))).toBe(true));
-  });
-
-  it("leaves the audit request unsent when an admin selects a tab after Audit Logs", async () => {
-    const user = userEvent.setup();
-    renderAs("Admin");
-
-    await user.click(screen.getByRole("tab", { name: "Deleted Teams" }));
-
-    expect(screen.getByRole("tab", { name: "Deleted Teams" })).toHaveAttribute("aria-selected", "true");
-    expect(requestedUrls().filter((url) => url.includes("/audit"))).toEqual([]);
-
-    await user.click(screen.getByRole("tab", { name: "Audit Logs" }));
-
-    await waitFor(() => expect(requestedUrls().some((url) => url.includes("/audit"))).toBe(true));
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(requestedUrls()).toEqual([]);
   });
 });

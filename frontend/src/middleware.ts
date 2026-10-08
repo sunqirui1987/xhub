@@ -17,6 +17,7 @@ const APP_PAGES = new Set([
   "/guardrails",
   "/usage",
   "/logs",
+  "/audit-logs",
   "/guardrails-monitor",
   "/teams",
   "/projects",

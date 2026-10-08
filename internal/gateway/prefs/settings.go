@@ -2,6 +2,7 @@
 package prefs
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
@@ -10,6 +11,38 @@ import (
 )
 
 var logTraceOnceSettings sync.Once
+
+var retiredRouterSettings = map[string]struct{}{
+	"model_group_alias":        {},
+	"model_group_retry_policy": {},
+	"retry_policy":             {},
+}
+
+type invalidPreferenceError struct{ message string }
+
+// Error describes an unsupported preference submitted by the client.
+// 参数：无。
+// 返回 string：客户端可读的错误说明。
+// 调用：设置更新处理器。
+// 测试：gateway/retired_preferences_test.go。
+func (e invalidPreferenceError) Error() string { return e.message }
+
+// rejectRetiredRouterSettings rejects settings removed from model management.
+// 参数 namespace（string）：设置命名空间；patch（map[string]any）：待更新字段。
+// 返回 error：包含已移除的路由设置时返回错误，否则为 nil。
+// 调用：设置更新处理器。
+// 测试：gateway/retired_preferences_test.go。
+func rejectRetiredRouterSettings(namespace string, patch map[string]any) error {
+	if namespace != "router_settings" {
+		return nil
+	}
+	for field := range retiredRouterSettings {
+		if _, ok := patch[field]; ok {
+			return invalidPreferenceError{message: fmt.Sprintf("%s is no longer supported", field)}
+		}
+	}
+	return nil
+}
 
 // Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here. A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
 // 参数 s（Host）：根地址使用的数据面宿主。
@@ -30,9 +63,6 @@ func Base(s Host) map[string]any {
 		"fallbacks":                []any{},
 		"context_window_fallbacks": []any{},
 		"content_policy_fallbacks": []any{},
-		"retry_policy":             map[string]any{},
-		"model_group_retry_policy": map[string]any{},
-		"model_group_alias":        map[string]any{},
 		"allowed_fails":            3,
 		"cooldown_time":            0,
 		"retry_after":              0,
@@ -55,7 +85,11 @@ func MergedRouter(s Host) map[string]any {
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
-	return Overlay(Base(s), db)
+	merged := Overlay(Base(s), db)
+	for field := range retiredRouterSettings {
+		delete(merged, field)
+	}
+	return merged
 }
 
 // MergedGeneral overlays database general settings on YAML. master_key, database_url, and redis_url are not exposed from the database.
@@ -84,6 +118,9 @@ func MergedGeneral(s Host) map[string]any {
 // 调用：仅在 settings.go 内使用
 // 测试：无直接单测
 func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
+	if err := rejectRetiredRouterSettings(namespace, patch); err != nil {
+		return err
+	}
 	var current map[string]any
 	switch namespace {
 	case "router_settings":
@@ -98,6 +135,11 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 		current = db
 	}
 	merged := MergePatch(current, patch)
+	if namespace == "router_settings" {
+		if err := ValidateModelRoutingDocument(merged); err != nil {
+			return invalidPreferenceError{message: err.Error()}
+		}
+	}
 	for k := range patch {
 		if err := s.RecordStore().PutConfig(namespace, k, merged[k]); err != nil {
 			return err
@@ -173,6 +215,10 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := saveNamespacePatch(s, ns, patch); err != nil {
+			if _, ok := err.(invalidPreferenceError); ok {
+				httpx.WriteError(w, 400, "invalid_request", err.Error())
+				return
+			}
 			httpx.WriteError(w, 500, "internal", err.Error())
 			return
 		}
@@ -272,7 +318,11 @@ func FieldUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = "general_settings"
 	}
-	if err := s.RecordStore().PutConfig(ns, name, body["field_value"]); err != nil {
+	if err := saveNamespacePatch(s, ns, map[string]any{name: body["field_value"]}); err != nil {
+		if _, ok := err.(invalidPreferenceError); ok {
+			httpx.WriteError(w, 400, "invalid_request", err.Error())
+			return
+		}
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}

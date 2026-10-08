@@ -44,6 +44,17 @@ export type SplitDeployment = {
   model_name: string;
   api_base: string;
   model: string;
+  weight?: string;
+  provider?: string;
+  supplier?: string;
+};
+
+/** Exact public-name overrides within the selected scope template. */
+export type ModelRoutingRule = {
+  model_name: string;
+  routing_strategy: string;
+  routing_strategy_args?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type TemplateRoutingGroup = {
@@ -98,6 +109,7 @@ export type TemplateFormState = {
   /** LiteLLM default_fallbacks: models used when this name has no chain of its own. */
   default_fallbacks: string;
   weights: WeightRow[];
+  model_routing: ModelRoutingRule[];
   /** Latency-based routing window, seconds. Empty omits it. */
   ttl: string;
   /** Latency-based routing buffer, percent. Empty omits it. */
@@ -137,6 +149,7 @@ const EDITED_KEYS = new Set([
   "routing_groups",
   "retry_policy",
   "model_group_alias",
+  "model_routing",
 ]);
 
 /** A new template starts as the same numbers the platform default uses. */
@@ -155,6 +168,7 @@ export const emptyForm = (): TemplateFormState => ({
   content_policy_fallbacks: [],
   default_fallbacks: "",
   weights: [],
+  model_routing: [],
   ttl: "",
   lowest_latency_buffer: "",
   stream_timeout: "",
@@ -299,7 +313,13 @@ export const deploymentsFromInfo = (rows: unknown[]): SplitDeployment[] => {
     const model = typeof params.model === "string" && params.model.trim() !== "" ? params.model.trim() : modelName;
     if (!model || model.startsWith("auto_router/")) continue;
     const apiBase = typeof params.api_base === "string" ? params.api_base.trim() : "";
-    out.push({ model_name: modelName || model, api_base: apiBase, model });
+    const weight = numberText(params.weight);
+    out.push({
+      model_name: modelName || model, api_base: apiBase, model,
+      ...(weight ? { weight } : {}),
+      ...(typeof params.custom_llm_provider === "string" ? { provider: params.custom_llm_provider } : {}),
+      ...(typeof params.litellm_credential_name === "string" ? { supplier: params.litellm_credential_name } : {}),
+    });
   }
   return out;
 };
@@ -322,6 +342,13 @@ export const formFromBody = (body: Record<string, unknown> | undefined): Templat
   for (const [key, value] of Object.entries(source)) {
     if (!EDITED_KEYS.has(key)) extra[key] = value;
   }
+  const modelRules = source.model_routing;
+  const validModelRules = Array.isArray(modelRules) && modelRules.every((rule) =>
+    isRecord(rule) && typeof rule.model_name === "string" && typeof rule.routing_strategy === "string" &&
+    (rule.routing_strategy_args === undefined || isRecord(rule.routing_strategy_args)),
+  );
+  // Keep malformed or future shapes visible in JSON instead of silently dropping them.
+  if (modelRules !== undefined && !validModelRules) extra.model_routing = modelRules;
   const strategy =
     typeof source.routing_strategy === "string" && source.routing_strategy.trim() !== ""
       ? source.routing_strategy.trim()
@@ -349,6 +376,7 @@ export const formFromBody = (body: Record<string, unknown> | undefined): Templat
     content_policy_fallbacks: chainsFrom(source.content_policy_fallbacks),
     default_fallbacks: listText(source.default_fallbacks),
     weights,
+    model_routing: validModelRules ? modelRules as ModelRoutingRule[] : [],
     ttl,
     lowest_latency_buffer: lowestLatencyBuffer,
     stream_timeout: numberText(source.stream_timeout),
@@ -422,6 +450,18 @@ export const bodyFromForm = (form: TemplateFormState): BodyResult => {
     else body[key] = parsed.value;
   }
   body.routing_strategy = form.routing_strategy.trim() || "simple-shuffle";
+  if (form.model_routing.length > 0) {
+    const seen = new Set<string>();
+    for (const rule of form.model_routing) {
+      const name = rule.model_name.trim();
+      if (!name || seen.has(name) || !rule.routing_strategy.trim()) return { ok: false, field: "model_routing" };
+      seen.add(name);
+      const argsForm = formFromBody({ routing_strategy_args: rule.routing_strategy_args });
+      const checked = bodyFromForm(argsForm);
+      if (!checked.ok) return { ok: false, field: "model_routing" };
+    }
+    body.model_routing = form.model_routing.map((rule) => ({ ...rule, model_name: rule.model_name.trim() }));
+  }
   body.enable_tag_filtering = form.enable_tag_filtering;
   body.enable_pre_call_checks = form.enable_pre_call_checks;
   body.fallback_causes = FALLBACK_CAUSES.filter((cause) => form.fallback_causes.includes(cause));

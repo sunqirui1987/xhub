@@ -1,4 +1,4 @@
-.PHONY: test run ui tidy e2e regression regression-live
+.PHONY: test run ui tidy e2e e2e-all regression regression-live
 
 test:
 	go test ./...
@@ -31,7 +31,6 @@ tidy:
 
 # Browser e2e: fake upstream + gateway :4000 + Next :3000 + Playwright.
 e2e:
-	python3 e2e/free_ports.py
-	cd frontend && npm run build
-	python3 e2e/free_ports.py
-	cd frontend && npx playwright test
+	bash scripts/e2e.sh
+
+e2e-all: e2e regression

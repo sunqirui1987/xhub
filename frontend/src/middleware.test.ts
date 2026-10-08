@@ -54,4 +54,10 @@ describe("dashboardAppPath", () => {
   it("renders the oauth callback in Next", () => {
     expect(dashboardAppPath("/mcp/oauth/callback")).toBe("/mcp/oauth/callback");
   });
+
+  it("renders the audit page and leaves audit API requests for the gateway", () => {
+    expect(dashboardAppPath("/audit-logs")).toBe("/audit-logs");
+    expect(dashboardAppPath("/ui/audit-logs")).toBe("/audit-logs");
+    expect(dashboardAppPath("/audit/logs")).toBeNull();
+  });
 });

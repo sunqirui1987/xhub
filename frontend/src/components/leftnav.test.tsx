@@ -169,6 +169,7 @@ describe("Sidebar (leftnav)", () => {
       expect(text).toContain("Users");
       expect(text).toContain("Models + Endpoints");
       expect(text).toContain("Routing & Load Balancing");
+      expect(screen.getByRole("link", { name: "Audit Logs" })).toHaveAttribute("href", "/ui/audit-logs");
     });
 
     it("keeps platform administration away from a plain member", () => {
@@ -184,6 +185,7 @@ describe("Sidebar (leftnav)", () => {
       expect(text).not.toContain("Models + Endpoints");
       expect(text).not.toContain("Routing & Load Balancing");
       expect(text).not.toContain("Price data");
+      expect(text).not.toContain("Audit Logs");
     });
 
     it("still gives a plain member their own pages and their team's", () => {
@@ -219,6 +221,18 @@ describe("Sidebar (leftnav)", () => {
       expect(text).toContain("Users");
       expect(text).not.toContain("Organizations");
       expect(text).not.toContain("Models + Endpoints");
+      expect(text).not.toContain("Audit Logs");
+    });
+
+    it("hides audit logs from organization administrators", () => {
+      setIdentity(MEMBER_CAPS);
+      mockUseOrganizations.mockReturnValueOnce({
+        data: [{ organization_id: "org-1", members: [{ user_id: "test-user-id", user_role: "org_admin" }] }] as any,
+        isLoading: false,
+        error: null,
+      });
+      renderWithProviders(<Sidebar {...defaultProps} />);
+      expect(screen.queryByRole("link", { name: "Audit Logs" })).not.toBeInTheDocument();
     });
   });
 
@@ -237,7 +251,7 @@ describe("Sidebar (leftnav)", () => {
     });
 
     it("keeps every platform page in the platform group", () => {
-      for (const page of ["models", "price-data", "guardrails"]) {
+      for (const page of ["models", "price-data", "guardrails", "audit-logs"]) {
         expect(placementsOf(page)).toEqual(["nav.groups.platform"]);
       }
     });

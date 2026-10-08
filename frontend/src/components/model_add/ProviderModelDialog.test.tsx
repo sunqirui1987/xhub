@@ -1,70 +1,81 @@
-/** @vitest-environment jsdom */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setActiveLocale } from "@/i18n/runtime";
 import { ProviderModelDialog } from "./ProviderModelDialog";
+import { upsertPriceModel } from "@/components/networking";
 
-vi.mock("@/components/networking", () => ({ getProxyBaseUrl: () => "http://gateway.test" }));
+const modelCreateCall = vi.fn();
+const apiPost = vi.fn();
+vi.mock("@/components/networking", () => ({
+  apiClient: { post: (...args: unknown[]) => apiPost(...args) },
+  upsertPriceModel: vi.fn(),
+  modelCreateCall: (...args: unknown[]) => modelCreateCall(...args),
+}));
 
-describe("ProviderModelDialog", () => {
-  beforeEach(() => setActiveLocale("en"));
+const supplier = {
+  credential_name: "fenno-work",
+  credential_values: { api_key: "secret" },
+  credential_info: { custom_llm_provider: "openai", builtin: "fennoai" },
+};
 
-  it("opens as a dialog, refreshes the provider, and adds one model with the selected credential", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { provider?: string; model_ids?: string[]; credential_name?: string };
-      if (String(url).endsWith("/model/builtin/add")) {
-        return new Response(JSON.stringify({ updated: true, api_base: "https://api.fenno.ai", wire_api: "responses" }), { status: 200 });
-      }
-      return new Response(
-        JSON.stringify({
-          provider: "fennoai",
-          api_base: "https://api.fenno.ai",
-          wire_api: "responses",
-          models: [
-            { id: "gpt-fenno", added: true },
-            { id: "codex-mini", added: false },
-          ],
-        }),
-        { status: 200 },
-      );
+describe("ProviderModelDialog catalog import", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiPost.mockResolvedValue({
+      models: [
+        { id: "gpt-priced", category: "llm", input_price: 2, output_price: 8 },
+        { id: "image-unpriced", category: "image", input_price: 5, output_price: 9 },
+      ],
     });
-    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(upsertPriceModel).mockResolvedValue({} as never);
+  });
 
+  it("imports selected rows through /price/model without creating a deployment", async () => {
+    const user = userEvent.setup();
+    const onAdded = vi.fn();
     render(
       <ProviderModelDialog
         provider="fennoai"
+        initialCredentialName="fenno-work"
+        credentials={[supplier]}
         accessToken="token"
-        initialCredentialName="fennoai-work"
-        credentials={[
-          { credential_name: "fennoai", credential_values: {}, credential_info: { builtin: "fennoai" } },
-          { credential_name: "fennoai-work", credential_values: {}, credential_info: { builtin: "fennoai" } },
-        ]}
-        onClose={() => undefined}
-        onAdded={() => undefined}
+        onClose={vi.fn()}
+        onAdded={onAdded}
       />,
     );
 
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("Already added")).toBeTruthy();
-    expect(screen.queryByText("https://api.fenno.ai")).toBeNull();
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/model/builtin/models"))).toBe(true);
-    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/model/builtin/add"))).toBe(false);
+    await user.click(await screen.findByRole("checkbox", { name: "gpt-priced" }));
+    await user.click(screen.getByRole("checkbox", { name: "image-unpriced" }));
+    await user.click(screen.getByRole("button", { name: "导入所选模型及价格" }));
 
-    expect(screen.getByRole("checkbox", { name: "gpt-fenno" })).toBeDisabled();
-
-    await user.click(screen.getByRole("checkbox", { name: "codex-mini" }));
-    await user.click(screen.getByRole("button", { name: "Add selected models" }));
-    const addCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/model/builtin/add"));
-    expect(JSON.parse(String(addCall?.[1]?.body))).toMatchObject({
-      provider: "fennoai",
-      model_ids: ["codex-mini"],
-      credential_name: "fennoai-work",
+    expect(apiPost).toHaveBeenCalledWith(
+      "/model/builtin/models",
+      expect.objectContaining({
+        accessToken: "token",
+        body: { provider: "fennoai", credential_name: "fenno-work" },
+      }),
+    );
+    await waitFor(() => expect(upsertPriceModel).toHaveBeenCalledTimes(2));
+    expect(upsertPriceModel).toHaveBeenNthCalledWith(1, "token", {
+      id: "fenno-work/gpt-priced",
+      upstream_model: "gpt-priced",
+      supplier_name: "fenno-work",
+      litellm_provider: "openai",
+      display_name: "gpt-priced",
+      source: "provider-import",
+      endpoint_type: "chat",
+      input_cost_per_token: 0.000002,
+      output_cost_per_token: 0.000008,
     });
-    const listCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/model/builtin/models"));
-    expect(JSON.parse(String(listCall?.[1]?.body)).credential_name).toBe("fennoai-work");
-    expect(JSON.parse(String(addCall?.[1]?.body))).not.toHaveProperty("mode");
-    expect(JSON.parse(String(addCall?.[1]?.body)).model_ids).not.toContain("gpt-fenno");
+    expect(upsertPriceModel).toHaveBeenNthCalledWith(2, "token", {
+      id: "fenno-work/image-unpriced",
+      upstream_model: "image-unpriced",
+      supplier_name: "fenno-work",
+      litellm_provider: "openai",
+      display_name: "image-unpriced",
+      source: "provider-import",
+    });
+    expect(modelCreateCall).not.toHaveBeenCalled();
+    expect(onAdded).toHaveBeenCalledOnce();
   });
 });

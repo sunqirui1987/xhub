@@ -42,6 +42,32 @@ func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
 	}
 }
 
+func TestOfficialUsesModelRoutingOverride(t *testing.T) {
+	var seen []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("Authorization"))
+		io.WriteString(w, "{\"id\":\"task-model-policy\"}")
+	}))
+	defer up.Close()
+	a := deployment("video", "provider/model-a", "key-a", up.URL, "ark_contents_generation", map[string]any{"weight": 9.0})
+	b := deployment("video", "provider/model-b", "key-b", up.URL, "ark_contents_generation", map[string]any{"weight": 1.0})
+	h := officialHost(up, a, b)
+	h.settings = map[string]any{
+		"routing_strategy":      "simple-shuffle",
+		"routing_strategy_args": map[string]any{"weights": map[string]any{up.URL + "|provider/model-a": 1.0}},
+		"model_routing": []any{map[string]any{
+			"model_name": "video", "routing_strategy": "weighted-split",
+			"routing_strategy_args": map[string]any{"weights": map[string]any{
+				up.URL + "|provider/model-a": 0.0, up.URL + "|provider/model-b": 1.0,
+			}},
+		}},
+	}
+	rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", "{\"model\":\"video\"}")
+	if rec.Code != http.StatusOK || len(seen) != 1 || seen[0] != "Bearer key-b" {
+		t.Fatalf("official model policy was not applied: status=%d seen=%v body=%s", rec.Code, seen, rec.Body.String())
+	}
+}
+
 func TestOfficialTemplateRetriesHTTPFailure(t *testing.T) {
 	var calls atomic.Int32
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

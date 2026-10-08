@@ -1,40 +1,26 @@
 import { expect, test } from "@playwright/test";
-import { MASTER, login, loginAdmin, t } from "./helpers";
+import { GATEWAY, login, loginAdmin, sessionBearer, t, watchGateway } from "./helpers";
 
-test.describe("view-only", () => {
-  test("hides Playground and Create New Key", async ({ page }) => {
-    await loginAdmin(page);
-    await page.waitForLoadState("domcontentloaded");
-    const cookies = await page.context().cookies();
-    const token = cookies.find((c) => c.name === "token")?.value;
-    // JWT key claim is the sess- used as Bearer.
-    const payload = JSON.parse(Buffer.from(token!.split(".")[1], "base64url").toString());
-    const sess = payload.key as string;
-    const res = await page.request.post("http://127.0.0.1:4000/user/new", {
-      headers: { Authorization: `Bearer ${sess}`, "Content-Type": "application/json" },
-      data: {
-        user_email: "viewer@xhub.local",
-        password: "viewer-pass",
-        user_role: "proxy_admin_viewer",
-      },
-    });
-    expect(res.ok()).toBeTruthy();
-    await page.evaluate(() => {
-      document.cookie = "token=; path=/; max-age=0";
-      document.cookie = "token=; path=/ui; max-age=0";
-      sessionStorage.removeItem("token");
-    });
-    await login(page, "viewer@xhub.local", "viewer-pass");
-    await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("link", { name: t("nav.playground"), exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: t("pages.apiKeys.create") })).toHaveCount(0);
-    const viewerCookies = await page.context().cookies();
-    const viewerToken = viewerCookies.find((c) => c.name === "token")?.value;
-    const viewerPayload = JSON.parse(Buffer.from(viewerToken!.split(".")[1], "base64url").toString());
-    const denied = await page.request.post("http://127.0.0.1:4000/key/generate", {
-      headers: { Authorization: `Bearer ${viewerPayload.key}`, "Content-Type": "application/json" },
-      data: { key_alias: "viewer-should-fail" },
-    });
-    expect(denied.status()).toBe(403);
+test("ordinary member cannot perform platform writes", async ({ page }) => {
+  const guard = watchGateway(page);
+  await loginAdmin(page);
+  const headers = { Authorization: "Bearer " + await sessionBearer(page) };
+  const created = await page.request.post(GATEWAY + "/user/new", {
+    headers, data: { user_email: "member-permissions@xhub.local", password: "member-pass", user_role: "user" },
   });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  await login(page, "member-permissions@xhub.local", "member-pass");
+  await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible();
+  await expect(page.locator('a[href="/ui/admin-panel"]')).toHaveCount(0);
+  await expect(page.locator('a[href="/ui/models-and-endpoints"]')).toHaveCount(0);
+  const memberHeaders = { Authorization: "Bearer " + await sessionBearer(page) };
+  for (const [path, data] of [
+    ["/model/new", { model_name: "forbidden-model", litellm_params: { model: "openai/gpt-4o-mini" } }],
+    ["/organization/new", { organization_alias: "forbidden-org" }],
+    ["/user/new", { user_email: "forbidden@example.com" }],
+  ] as const) {
+    const denied = await page.request.post(GATEWAY + path, { headers: memberHeaders, data });
+    expect(denied.status(), path).toBe(403);
+  }
+  guard.assertOk();
 });

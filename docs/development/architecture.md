@@ -48,6 +48,10 @@ flowchart LR
 | [store](../../internal/store) | 配置 CRUD | 不定义租户权限 |
 | [httpx](../../internal/httpx/readme.md) / [logx](../../internal/logx/log.go) | HTTP 公共类型、错误和运行日志 | 日志不应输出凭据 |
 
+目录导航补充：网关的 `family` 安装 API 家族处理器，`identity` 处理身份资源，`keys` 管理密钥，`models` 管理部署和价格，`prefs` 管理路由偏好，`templateauth` 处理模板授权与继承，`usage` 提供用量和日志报表，`guard` 执行正文护栏。各处理器仍须遵守统一的服务端授权和查询范围。
+
+`config` 负责配置加载；`catalog/publicdata` 保存静态计价数据；`llm/estimate` 提供用量估算；`provider/all` 汇总供应商注册，`provider/openai`、`provider/qiniu` 和 `provider/volcengine` 保存供应商登记与实现；`regression` 提供跨模块回归检查；`testsupport` 提供测试数据库等辅助设施。
+
 ## 数据边界
 
 资源层级为组织 → 团队 → 项目，个人账号通过团队获得推理范围。账号、组织管理和团队管理是独立角色层。[schema.sql](../../internal/iam/schema.sql) 定义持久化约束；没有从早期成员结构自动迁移的路径，新安装使用新库。

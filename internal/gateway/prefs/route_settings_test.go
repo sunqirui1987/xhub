@@ -328,12 +328,13 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 			"weights": []any{
 				map[string]any{"api_base": "https://a", "model": "gpt-4o", "weight": 70.0},
 				map[string]any{"model_name": "other", "weight": 0.0},
+				map[string]any{"deployment_id": "supplier-a", "weight": 11.0},
 			},
 		},
 	}}
 	got := listed.WeightOverrides()
 	zero, hasZero := got["|other"]
-	if got["https://a|gpt-4o"] != 70 || !hasZero || zero != 0 || len(got) != 2 {
+	if got["https://a|gpt-4o"] != 70 || !hasZero || zero != 0 || got["deployment:supplier-a"] != 11 || len(got) != 3 {
 		t.Fatalf("list weights: %#v", got)
 	}
 	mapped := RouteSettings{Settings: map[string]any{
@@ -346,5 +347,68 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 	}
 	if (RouteSettings{Settings: map[string]any{}}).WeightOverrides() != nil {
 		t.Fatalf("a document without shares must not invent any")
+	}
+}
+
+func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
+	rootArgs := map[string]any{"weights": map[string]any{"root|model": 99.0}}
+	chatArgs := map[string]any{"weights": map[string]any{"chat|provider-a": 3.0, "chat|provider-b": 7.0}}
+	original := map[string]any{
+		"routing_strategy":      "simple-shuffle",
+		"routing_strategy_args": rootArgs,
+		"num_retries":           4.0,
+		"timeout":               25.0,
+		"custom_policy":         map[string]any{"kept": true},
+		"model_routing": []any{
+			map[string]any{"model_name": "chat", "routing_strategy": "weighted-split", "routing_strategy_args": chatArgs},
+			map[string]any{"model_name": "embedding", "routing_strategy": "least-busy"},
+		},
+	}
+	base := RouteSettings{Settings: original, TemplateID: "template", TemplateName: "team policy", Source: "team"}
+
+	chat := base.ForModel("chat")
+	if chat.Err != nil || chat.Strategy() != "weighted-split" || chat.WeightOverrides()["chat|provider-b"] != 7 {
+		t.Fatalf("chat policy = strategy %q weights %#v err %v", chat.Strategy(), chat.WeightOverrides(), chat.Err)
+	}
+	if chat.Retries() != 4 || chat.TimeoutSeconds() != 25 || chat.Settings["custom_policy"] == nil {
+		t.Fatalf("model policy lost global or custom fields: %#v", chat.Settings)
+	}
+	if chat.TemplateID != base.TemplateID || chat.TemplateName != base.TemplateName || chat.Source != base.Source {
+		t.Fatalf("model policy lost template provenance: %#v", chat)
+	}
+
+	embedding := base.ForModel("embedding")
+	if embedding.Strategy() != "least-busy" || embedding.WeightOverrides() != nil {
+		t.Fatalf("an override without args inherited root weights: strategy=%q weights=%#v", embedding.Strategy(), embedding.WeightOverrides())
+	}
+	other := base.ForModel("other")
+	if other.Strategy() != "simple-shuffle" || other.WeightOverrides()["root|model"] != 99 {
+		t.Fatalf("unlisted model did not use root policy: strategy=%q weights=%#v", other.Strategy(), other.WeightOverrides())
+	}
+
+	if base.Strategy() != "simple-shuffle" || base.WeightOverrides()["root|model"] != 99 {
+		t.Fatalf("ForModel mutated its receiver: strategy=%q weights=%#v", base.Strategy(), base.WeightOverrides())
+	}
+	if original["routing_strategy"] != "simple-shuffle" {
+		t.Fatalf("ForModel mutated the source document: %#v", original)
+	}
+}
+
+func TestValidateModelRoutingDocumentRejectsAmbiguousRules(t *testing.T) {
+	cases := []map[string]any{
+		{"model_routing": map[string]any{}},
+		{"model_routing": []any{"bad"}},
+		{"model_routing": []any{map[string]any{"model_name": "", "routing_strategy": "least-busy"}}},
+		{"model_routing": []any{map[string]any{"model_name": "chat", "routing_strategy": "unknown"}}},
+		{"model_routing": []any{map[string]any{"model_name": "chat", "routing_strategy": "least-busy", "routing_strategy_args": []any{}}}},
+		{"model_routing": []any{
+			map[string]any{"model_name": "chat", "routing_strategy": "least-busy"},
+			map[string]any{"model_name": "chat", "routing_strategy": "weighted-split"},
+		}},
+	}
+	for i, document := range cases {
+		if err := ValidateModelRoutingDocument(document); err == nil {
+			t.Fatalf("case %d was accepted: %#v", i, document)
+		}
 	}
 }

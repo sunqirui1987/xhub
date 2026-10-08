@@ -33,18 +33,23 @@ var logTraceOncePrice sync.Once
 var rateFields = []string{
 	"input_cost_per_token",
 	"output_cost_per_token",
+	"input_cost_per_token_peak",
+	"output_cost_per_token_peak",
 	"cache_read_input_token_cost",
 	"cache_creation_input_token_cost",
 	"input_cost_per_image",
 	"output_cost_per_image",
 	"input_cost_per_second",
 	"output_cost_per_second",
+	"search_context_cost_per_query",
 }
 
 // textFields are the descriptive fields carried on a price row.
 var textFields = []string{
 	"display_name",
 	"description",
+	"upstream_model",
+	"supplier_name",
 	"mode",
 	"endpoint_type",
 	"source",
@@ -405,6 +410,7 @@ func priceRowFrom(body map[string]any, provider string) map[string]any {
 		// being billable on that side instead of billing nothing.
 		delete(row, field)
 	}
+	reconcilePriceRates(row, body)
 	for _, field := range flagFields {
 		if v, ok := body[field].(bool); ok {
 			row[field] = v
@@ -494,4 +500,94 @@ func numberField(v any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// Editing flat prices replaces their unqualified rate entries, while preserving
+// catalog variants (resolution, thinking, batch) the flat form cannot express.
+// 参数 row（map[string]any）：已合并旧目录行和平面字段的新行；patch（map[string]any）：本次请求实际提交的字段。
+// 返回：无。只替换 patch 触及的平面费率，并在 peak 变化时修正对应基础费率的窗口。
+// 调用：priceRowFrom。
+// 测试：price_test.go。
+func reconcilePriceRates(row, patch map[string]any) {
+	prior, ok := catalog.DecodeRates(row["rates"])
+	if !ok {
+		return
+	}
+	type flatSpec struct {
+		measure, side, variant, window string
+	}
+	specs := map[string]flatSpec{
+		"input_cost_per_token":            {"token", "input", "uncached", "offpeak"},
+		"output_cost_per_token":           {"token", "output", "", "offpeak"},
+		"input_cost_per_token_peak":       {"token", "input", "uncached", "peak"},
+		"output_cost_per_token_peak":      {"token", "output", "", "peak"},
+		"cache_read_input_token_cost":     {"token", "cache_read", "", "all"},
+		"cache_creation_input_token_cost": {"token", "cache_write", "", "all"},
+		"input_cost_per_image":            {"picture", "input", "", "all"},
+		"output_cost_per_image":           {"picture", "output", "", "all"},
+		"input_cost_per_second":           {"second", "input", "", "all"},
+		"output_cost_per_second":          {"second", "output", "", "all"},
+		"search_context_cost_per_query":   {"query", "output", "", "all"},
+	}
+	touched := map[string]flatSpec{}
+	for field, spec := range specs {
+		if _, exists := patch[field]; exists {
+			touched[field] = spec
+		}
+	}
+	if len(touched) == 0 {
+		return
+	}
+
+	rates := make([]catalog.Rate, 0, len(prior)+len(touched))
+	for _, rate := range prior {
+		replace := false
+		for _, spec := range touched {
+			if rate.Measure != spec.measure || rate.Side != spec.side || rate.Variant != spec.variant {
+				continue
+			}
+			if rate.Window == spec.window || (spec.window == "offpeak" && rate.Window == "all") {
+				replace = true
+				break
+			}
+		}
+		if !replace {
+			rates = append(rates, rate)
+		}
+	}
+	for field, spec := range touched {
+		usd, valid := numberField(row[field])
+		if !valid || usd < 0 {
+			continue
+		}
+		rates = append(rates, catalog.Rate{
+			Measure: spec.measure, UnitSize: 1, Side: spec.side, Variant: spec.variant,
+			Window: spec.window, SourceKey: field, USD: usd,
+		})
+	}
+
+	// A base token price applies all day unless the same side still has a peak
+	// price. Adding or clearing only the peak field must therefore adjust the
+	// base window without removing any other window or qualified variant.
+	for _, side := range []struct{ side, variant string }{{"input", "uncached"}, {"output", ""}} {
+		hasPeak := false
+		for _, rate := range rates {
+			if rate.Measure == "token" && rate.Side == side.side && rate.Variant == side.variant && rate.Window == "peak" {
+				hasPeak = true
+				break
+			}
+		}
+		for i := range rates {
+			rate := &rates[i]
+			if rate.Measure != "token" || rate.Side != side.side || rate.Variant != side.variant {
+				continue
+			}
+			if hasPeak && rate.Window == "all" {
+				rate.Window = "offpeak"
+			} else if !hasPeak && rate.Window == "offpeak" {
+				rate.Window = "all"
+			}
+		}
+	}
+	row["rates"] = rates
 }

@@ -1,15 +1,32 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownUp, Boxes, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownUp, Boxes, Pencil, Plus, Rocket, RotateCcw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { t } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALLBACK_CATEGORY, type PriceCatalogRow } from "./priceCatalogRows";
 import { measureLabel, rateLabel, rateText, windowLabel } from "@/lib/rateDisplay";
 
 type SortOrder = "name" | "input" | "output";
+type Modality = "text" | "image" | "audio" | "video";
+
+const MODALITIES: { value: Modality; label: string }[] = [
+  { value: "text", label: "priceCatalog.textModality" },
+  { value: "image", label: "priceCatalog.imageModality" },
+  { value: "audio", label: "priceCatalog.audioModality" },
+  { value: "video", label: "priceCatalog.videoModality" },
+];
+
+const CAPABILITY_FILTERS = [
+  { value: "longContext", label: "priceCatalog.longContext" },
+  { value: "tools", label: "priceCatalog.tools" },
+  { value: "reasoning", label: "priceCatalog.reasoning" },
+  { value: "vision", label: "priceCatalog.vision" },
+  { value: "caching", label: "priceCatalog.caching" },
+] as const;
 
 function priceText(value: number | null): string {
   if (value == null) return t("Price unavailable");
@@ -18,6 +35,21 @@ function priceText(value: number | null): string {
 
 function categoryLabel(category: string): string {
   return category === FALLBACK_CATEGORY ? t("Other") : category;
+}
+
+function rowModalities(row: PriceCatalogRow): Set<Modality> {
+  const text = [row.id, row.category, row.displayName ?? ""].join(" ").toLowerCase();
+  const measures = new Set(row.rateGroups.map((group) => group.measure));
+  const result = new Set<Modality>();
+  if (measures.has("picture") || row.capabilities.includes("vision") || /image|vision/.test(text)) result.add("image");
+  if (/audio|speech|transcri/.test(text)) result.add("audio");
+  if (
+    /video/.test(text) ||
+    row.rateGroups.some((group) => group.rates.some((rate) => /video|t2v|i2v|r2v/.test(rate.variant)))
+  )
+    result.add("video");
+  if (measures.has("token") || (!result.has("audio") && !result.has("video"))) result.add("text");
+  return result;
 }
 
 function ModelCard({
@@ -61,13 +93,7 @@ function ModelCard({
               </Button>
             )}
             {onEdit && (
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label={t("Edit")}
-                title={t("Edit")}
-                onClick={() => onEdit(row)}
-              >
+              <Button size="sm" variant="ghost" aria-label={t("Edit")} title={t("Edit")} onClick={() => onEdit(row)}>
                 <Pencil aria-hidden="true" />
               </Button>
             )}
@@ -97,6 +123,13 @@ function ModelCard({
           </Badge>
         ))}
       </div>
+      <Link
+        className={buttonVariants({ variant: "outline", className: "mt-4 w-full" })}
+        href={`/models-and-endpoints?catalog=${encodeURIComponent(row.id)}`}
+      >
+        <Rocket aria-hidden="true" />
+        {t("priceCatalog.deployModel")}
+      </Link>
       {(row.maxInput || row.maxOutput) && (
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
           {row.maxInput != null && (
@@ -123,9 +156,7 @@ function ModelCard({
               {label}
               {/* 分时模型的通用两格取的是最便宜那一档，也就是空闲价。
                   不标出来的话，上面的数字和下面表里的高峰价对不上。 */}
-              {row.windowed && value != null && (
-                <span className="ml-1 text-muted-foreground">({t("Off-peak")})</span>
-              )}
+              {row.windowed && value != null && <span className="ml-1 text-muted-foreground">({t("Off-peak")})</span>}
             </dt>
             <dd className="mt-1 flex flex-wrap items-baseline gap-1.5">
               <span
@@ -149,7 +180,7 @@ function ModelCard({
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t("priceCatalog.byMeasure", { measure: measureLabel(group.measure) })}
                 </span>
-                {group.unitSize > 1 && (
+                {group.measure !== "token" && group.unitSize > 1 && (
                   <span className="text-xs text-muted-foreground">
                     {t("priceCatalog.perUnits", { count: group.unitSize })}
                   </span>
@@ -167,32 +198,41 @@ function ModelCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {group.rates.map((rate) => (
-                    <tr key={rate.sourceKey || `${rate.side}-${rate.variant}-${rate.window}`}>
-                      <td className="py-1">
-                        {rateLabel(rate.side, rate.variant)}
-                        {/* 市场的中文说明（"含视频输入（1080p）"）和上面那一段
+                  {group.rates
+                    .filter(
+                      (rate, index, rates) =>
+                        rates.findIndex(
+                          (candidate) => candidate.side === rate.side && candidate.variant === rate.variant,
+                        ) === index,
+                    )
+                    .map((rate) => (
+                      <tr key={rate.sourceKey || `${rate.side}-${rate.variant}-${rate.window}`}>
+                        <td className="py-1">
+                          {rateLabel(rate.side, rate.variant)}
+                          {/* 市场的中文说明（"含视频输入（1080p）"）和上面那一段
                             说的是同一件事，重复显示只会让人以为有两档价。
                             只在它带来新信息时才附上，而且用 hover 收起来。 */}
-                        {rate.label && rate.label !== rateLabel(rate.side, rate.variant) && (
-                          <span className="ml-1 text-muted-foreground" title={rate.label}>
-                            · {rate.label}
-                          </span>
-                        )}
-                      </td>
-                      {group.windows.map((window) => {
-                        const cell = group.rates.find(
-                          (candidate) =>
-                            candidate.side === rate.side && candidate.variant === rate.variant && candidate.window === window,
-                        );
-                        return (
-                          <td key={window} className="py-1 text-right font-medium tabular-nums">
-                            {cell ? rateText(cell.usd, group.measure) : "—"}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                          {rate.label && rate.label !== rateLabel(rate.side, rate.variant) && (
+                            <span className="ml-1 text-muted-foreground" title={rate.label}>
+                              · {rate.label}
+                            </span>
+                          )}
+                        </td>
+                        {group.windows.map((window) => {
+                          const cell = group.rates.find(
+                            (candidate) =>
+                              candidate.side === rate.side &&
+                              candidate.variant === rate.variant &&
+                              candidate.window === window,
+                          );
+                          return (
+                            <td key={window} className="py-1 text-right font-medium tabular-nums">
+                              {cell ? rateText(cell.usd, group.measure) : "—"}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -320,6 +360,8 @@ export function PriceCatalog({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [provider, setProvider] = useState("all");
+  const [modality, setModality] = useState<Modality | "all">("all");
+  const [capability, setCapability] = useState("all");
   const [sort, setSort] = useState<SortOrder>("name");
   const [showFilters, setShowFilters] = useState(false);
   const [limit, setLimit] = useState(60);
@@ -330,13 +372,18 @@ export function PriceCatalog({
       Array.from(new Set(rows.map((row) => row.provider).filter((value): value is string => Boolean(value)))).sort(),
     [rows],
   );
-  const activeFilters = Number(category !== "all") + Number(provider !== "all");
+  const activeFilters =
+    Number(category !== "all") + Number(provider !== "all") + Number(modality !== "all") + Number(capability !== "all");
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return rows
       .filter((row) => {
         if (category !== "all" && row.category !== category) return false;
         if (provider !== "all" && (row.provider ?? "unknown") !== provider) return false;
+        if (modality !== "all" && !rowModalities(row).has(modality)) return false;
+        if (capability === "longContext" && (row.maxInput ?? 0) < 128_000) return false;
+        if (capability !== "all" && capability !== "longContext" && !row.capabilities.includes(capability))
+          return false;
         return !search || [row.id, row.provider ?? "", row.category].join(" ").toLowerCase().includes(search);
       })
       .sort((a, b) => {
@@ -345,12 +392,14 @@ export function PriceCatalog({
         }
         return a.id.localeCompare(b.id);
       });
-  }, [category, provider, query, rows, sort]);
+  }, [capability, category, modality, provider, query, rows, sort]);
 
   function resetFilters() {
     setQuery("");
     setCategory("all");
     setProvider("all");
+    setModality("all");
+    setCapability("all");
     setLimit(60);
   }
 
@@ -377,6 +426,102 @@ export function PriceCatalog({
         activeFilters={activeFilters}
         onAdd={onAdd}
       />
+
+      <div className="mt-4 space-y-4 rounded-xl border border-border bg-card p-4 sm:p-5">
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t("priceCatalog.manufacturers")}
+          </p>
+          <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label={t("priceCatalog.manufacturers")}>
+            {["all", ...providers].map((item) => (
+              <Button
+                key={item}
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant={provider === item ? "default" : "outline"}
+                aria-pressed={provider === item}
+                onClick={() => {
+                  setProvider(item);
+                  setLimit(60);
+                }}
+              >
+                {item === "all" ? t("priceCatalog.allProviders") : item}
+              </Button>
+            ))}
+            {rows.some((row) => row.provider == null) && (
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant={provider === "unknown" ? "default" : "outline"}
+                aria-pressed={provider === "unknown"}
+                onClick={() => setProvider("unknown")}
+              >
+                {t("priceCatalog.unknownProvider")}
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {t("priceCatalog.modalities")}
+            </p>
+            <div className="flex flex-wrap gap-2" role="group" aria-label={t("priceCatalog.modalities")}>
+              <Button
+                type="button"
+                size="sm"
+                variant={modality === "all" ? "default" : "outline"}
+                aria-pressed={modality === "all"}
+                onClick={() => setModality("all")}
+              >
+                {t("All")}
+              </Button>
+              {MODALITIES.map((item) => (
+                <Button
+                  key={item.value}
+                  type="button"
+                  size="sm"
+                  variant={modality === item.value ? "default" : "outline"}
+                  aria-pressed={modality === item.value}
+                  onClick={() => setModality(item.value)}
+                >
+                  {t(item.label)}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {t("priceCatalog.contexts")}
+            </p>
+            <div className="flex flex-wrap gap-2" role="group" aria-label={t("priceCatalog.contexts")}>
+              <Button
+                type="button"
+                size="sm"
+                variant={capability === "all" ? "default" : "outline"}
+                aria-pressed={capability === "all"}
+                onClick={() => setCapability("all")}
+              >
+                {t("All")}
+              </Button>
+              {CAPABILITY_FILTERS.map((item) => (
+                <Button
+                  key={item.value}
+                  type="button"
+                  size="sm"
+                  variant={capability === item.value ? "default" : "outline"}
+                  aria-pressed={capability === item.value}
+                  onClick={() => setCapability(item.value)}
+                >
+                  {t(item.label)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {showFilters && (
         <div id="price-catalog-filters" className="mt-3 space-y-5 rounded-xl border border-border bg-card p-5">
@@ -457,7 +602,7 @@ export function PriceCatalog({
       )}
       {!isLoading && visible.length > 0 && (
         <>
-          <div className="grid items-start gap-4 md:grid-cols-2">
+          <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visible.slice(0, limit).map((row) => (
               <ModelCard key={row.id} row={row} onEdit={onEdit} onDelete={onDelete} onReset={onReset} />
             ))}

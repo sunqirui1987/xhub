@@ -1,26 +1,25 @@
 import { Check, Copy } from "lucide-react";
 import { useState, useCallback } from "react";
-import moment from "moment";
-import { AuditLogEntry, AUDIT_TABLE_NAME_DISPLAY } from "../AuditLogsTableColumns";
-import DefaultProxyAdminTag from "../../common_components/DefaultProxyAdminTag";
+import { AuditLogEntry } from "../AuditLogsTableColumns";
 import CopyButton from "@/components/shared/CopyButton";
-import { StatusBadge, type StatusTone } from "@/components/shared/table_cells/status_badge";
+import { StatusBadge } from "@/components/shared/table_cells/status_badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { t } from "@/i18n";
+import { t, useI18n } from "@/i18n";
+import {
+  auditAction,
+  auditDate,
+  auditOperator,
+  auditResourceName,
+  auditResourceType,
+  auditTone,
+} from "../auditPresentation";
 
 interface AuditLogDrawerProps {
   open: boolean;
   onClose: () => void;
   log: AuditLogEntry | null;
 }
-
-const ACTION_TONE: Record<string, StatusTone> = {
-  created: "success",
-  updated: "info",
-  deleted: "error",
-  rotated: "warning",
-};
 
 function CopyableJsonBlock({ label, value }: { label: string; value: Record<string, any> }) {
   const [copied, setCopied] = useState(false);
@@ -149,7 +148,8 @@ function DiffSection({ log }: { log: AuditLogEntry }) {
               )}
               {value.max_budget !== undefined && (
                 <p>
-                  <span className="text-muted-foreground">{t("Max Budget:")}</span> ${Number(value.max_budget).toFixed(6)}
+                  <span className="text-muted-foreground">{t("Max Budget:")}</span> $
+                  {Number(value.max_budget).toFixed(6)}
                 </p>
               )}
             </div>
@@ -170,52 +170,76 @@ function DiffSection({ log }: { log: AuditLogEntry }) {
 }
 
 export function AuditLogDrawer({ open, onClose, log }: AuditLogDrawerProps) {
+  useI18n();
   if (!log) return null;
-
-  const tableDisplay = AUDIT_TABLE_NAME_DISPLAY[log.table_name] ?? log.table_name;
-
+  const detail = log.detail ?? {};
+  const renamed =
+    typeof detail.previous_name === "string" &&
+    typeof detail.object_name === "string" &&
+    detail.previous_name !== detail.object_name;
+  const source = ["session", "master", "system", "key"].includes(log.actor_kind ?? "") ? log.actor_kind : "unknown";
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <SheetContent side="right" className="w-[60%] gap-0 overflow-y-auto p-0 sm:max-w-none">
+      <SheetContent side="right" className="w-full gap-0 overflow-y-auto p-0 sm:max-w-xl">
         <SheetTitle className="sr-only">{t("Audit log details")}</SheetTitle>
-
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-6 py-4">
-          <StatusBadge tone={ACTION_TONE[log.action] ?? "neutral"} label={log.action} />
-          <span className="text-sm text-muted-foreground">
-            {moment.utc(log.updated_at).local().format(t("MMM D, YYYY HH:mm:ss"))}
-          </span>
+        <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-4 pr-12">
+          <StatusBadge tone={auditTone(log)} label={auditAction(log)} />
+          <time dateTime={log.updated_at} className="text-xs text-muted-foreground">
+            {auditDate(log.updated_at)}
+          </time>
         </div>
-
-        <div className="px-6 py-5">
-          <div className="mb-5 rounded-lg border border-border bg-muted p-4">
-            <p className="mb-2 text-xs font-semibold tracking-wide text-foreground uppercase">{t("Details")}</p>
-            <MetadataRow label={t("Table")} value={tableDisplay} />
-            <MetadataRow
-              label={t("Object ID")}
-              value={
-                <span className="inline-flex items-center gap-1 font-mono text-xs">
-                  {log.object_id}
-                  <CopyButton value={log.object_id} label={t("Copy object ID")} />
-                </span>
-              }
-            />
-            <MetadataRow label={t("Changed By")} value={<DefaultProxyAdminTag userId={log.changed_by} />} />
-            <MetadataRow
-              label={t("API Key (Hash)")}
-              value={
-                log.changed_by_api_key ? (
-                  <span className="inline-flex items-center gap-1 font-mono text-xs break-all">
-                    {log.changed_by_api_key}
-                    <CopyButton value={log.changed_by_api_key} label={t("Copy API key hash")} />
-                  </span>
-                ) : (
-                  "—"
-                )
-              }
-            />
+        <div className="space-y-5 px-6 py-5">
+          <div className="rounded-lg border border-border bg-muted p-4">
+            <p className="mb-3 text-sm font-semibold">{t("audit.summary")}</p>
+            <MetadataRow label={t("audit.operator")} value={auditOperator(log)} />
+            {log.actor_email && log.actor_name && <MetadataRow label={t("Email")} value={log.actor_email} />}
+            <MetadataRow label={t("audit.action")} value={auditAction(log)} />
+            <MetadataRow label={t("audit.resource")} value={auditResourceName(log)} />
+            <MetadataRow label={t("audit.resourceType")} value={auditResourceType(log)} />
+            <MetadataRow label={t("audit.source")} value={t("audit.sources." + source)} />
           </div>
-
-          <DiffSection log={log} />
+          {renamed && (
+            <p className="text-sm">
+              {t("audit.renamed", { before: String(detail.previous_name), after: String(detail.object_name) })}
+            </p>
+          )}
+          {detail.settings_changed === true && <p className="text-sm">{t("audit.settingsChanged")}</p>}
+          {log.detail !== undefined && !renamed && detail.settings_changed !== true && (
+            <p className="text-sm text-muted-foreground">{t("audit.noChanges")}</p>
+          )}
+          {log.detail === undefined && <DiffSection log={log} />}
+          <details className="rounded-lg border border-border p-4">
+            <summary className="cursor-pointer text-sm font-medium">{t("audit.technical")}</summary>
+            <div className="mt-3 space-y-1">
+              <MetadataRow label={t("audit.eventCode")} value={log.action} />
+              <MetadataRow
+                label={t("Object ID")}
+                value={
+                  <span className="inline-flex items-center gap-1 font-mono">
+                    {log.object_id}
+                    <CopyButton value={log.object_id} label={t("Copy object ID")} />
+                  </span>
+                }
+              />
+              {log.changed_by && (
+                <MetadataRow
+                  label={t("audit.actorID")}
+                  value={
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      {log.changed_by}
+                      <CopyButton value={log.changed_by} label={t("audit.actorID")} />
+                    </span>
+                  }
+                />
+              )}
+              {log.changed_by_api_key && <MetadataRow label={t("audit.keyID")} value={log.changed_by_api_key} />}
+              {log.team_id && <MetadataRow label={t("Team ID")} value={log.team_id} />}
+              <CopyableJsonBlock
+                label={t("audit.raw")}
+                value={log.detail !== undefined ? log : { id: log.id, action: log.action, table_name: log.table_name }}
+              />
+            </div>
+          </details>
         </div>
       </SheetContent>
     </Sheet>

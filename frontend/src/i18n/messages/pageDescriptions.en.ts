@@ -36,5 +36,6 @@ export const pageDescriptionsEn = {
   usage: "View legacy usage dashboard",
   "router-settings": "Configure routing and load balancing settings",
   "logging-and-alerts": "Set up logging and alert configurations",
+  "audit-logs": "Review platform operations, resource changes and operators",
   "admin-panel": "Access admin panel and settings",
 } as const;

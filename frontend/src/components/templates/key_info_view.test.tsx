@@ -28,9 +28,8 @@ vi.mock("./key_edit_view", () => ({
 
 import type { ActivityDateRange } from "@/app/(dashboard)/cost-optimization/_components/useDailyActivityRange";
 
-const AnalyticsDateControl = ({ activity, keyToken }: { activity: ActivityDateRange; keyToken: string }) => (
+const AnalyticsDateControl = ({ activity }: { activity: ActivityDateRange }) => (
   <div>
-    <span data-testid="key-auto-router-usage">{keyToken}</span>
     <output aria-label="Selected dates">{activity.dateValue.from?.toISOString()}</output>
     {[1, 10].map((day) => (
       <button
@@ -43,9 +42,6 @@ const AnalyticsDateControl = ({ activity, keyToken }: { activity: ActivityDateRa
   </div>
 );
 
-vi.mock("./KeyAutoRouterUsageTab", () => ({
-  default: (props: React.ComponentProps<typeof AnalyticsDateControl>) => <AnalyticsDateControl {...props} />,
-}));
 vi.mock("./KeySavingsTab", () => ({
   default: (props: React.ComponentProps<typeof AnalyticsDateControl>) => <AnalyticsDateControl {...props} />,
 }));
@@ -205,36 +201,17 @@ describe("KeyInfoView", () => {
     await userEvent.click(await screen.findByRole("button", { name: /more key actions/i }));
   };
 
-  it("shows key-scoped auto-router usage as its own admin tab", async () => {
-    vi.mocked(useAuthorized).mockReturnValue({ ...baseUseAuthorizedMock, userRole: "Admin" });
-    renderWithProviders(<KeyInfoView keyData={MOCK_KEY_DATA} onClose={() => {}} keyId="test-key-id" teams={[]} />);
-
-    await userEvent.click(screen.getByRole("tab", { name: "Auto-router usage" }));
-
-    expect(screen.getByTestId("key-auto-router-usage")).toHaveTextContent("test-token-123");
-  });
-
-  it("preserves dates in both directions across unmounted analytics panels", async () => {
+  it("preserves the selected dates when the savings panel is unmounted", async () => {
     vi.mocked(useAuthorized).mockReturnValue({ ...baseUseAuthorizedMock, userRole: "Admin" });
     renderWithProviders(<KeyInfoView keyData={MOCK_KEY_DATA} onClose={() => {}} keyId="test-key-id" teams={[]} />);
 
     expect(screen.queryByLabelText("Selected dates")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Savings" }));
     await userEvent.click(screen.getByRole("button", { name: "Select August 1" }));
-    await userEvent.click(screen.getByRole("tab", { name: "Auto-router usage" }));
-    expect(screen.getByLabelText("Selected dates")).toHaveTextContent("2026-08-01T00:00:00.000Z");
-    await userEvent.click(screen.getByRole("button", { name: "Select August 10" }));
     await userEvent.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.queryByLabelText("Selected dates")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Savings" }));
-    expect(screen.getByLabelText("Selected dates")).toHaveTextContent("2026-08-10T00:00:00.000Z");
-  });
-
-  it("does not offer the admin-only auto-router usage tab to an internal user", () => {
-    vi.mocked(useAuthorized).mockReturnValue({ ...baseUseAuthorizedMock, userRole: "Internal User" });
-    renderWithProviders(<KeyInfoView keyData={MOCK_KEY_DATA} onClose={() => {}} keyId="test-key-id" teams={[]} />);
-
-    expect(screen.queryByRole("tab", { name: "Auto-router usage" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Selected dates")).toHaveTextContent("2026-08-01T00:00:00.000Z");
   });
 
   describe("last updated", () => {

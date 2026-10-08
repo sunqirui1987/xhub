@@ -11,7 +11,6 @@ import { ToolbarSeparator } from "@/components/shared/ToolbarSeparator";
 import { getBreadcrumb } from "@/components/leftnav";
 import { BlogDropdown } from "@/components/Navbar/BlogDropdown/BlogDropdown";
 import { DocsLink } from "@/components/Navbar/DocsLink/DocsLink";
-import { NotificationsBell } from "@/components/Navbar/NotificationsBell/NotificationsBell";
 import ViewSwitcher from "@/components/Navbar/ViewSwitcher";
 import ThemeToggle from "@/components/ThemeToggle/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
@@ -40,16 +39,18 @@ export function DashboardHeader() {
   return (
     <header
       data-testid="admin-header"
-      className="flex h-16 flex-none items-center justify-between gap-6 border-b border-border bg-card px-5 shadow-sm"
+      className="flex h-16 flex-none items-center justify-between gap-2 border-b border-border bg-card px-2 shadow-sm sm:gap-6 sm:px-5"
     >
       <Breadcrumb className="min-w-0 flex-1">
         <BreadcrumbList className="flex-nowrap items-center gap-3 text-base">
-          <BreadcrumbItem className="flex-none">
+          <BreadcrumbItem className="hidden flex-none sm:flex">
             <ViewSwitcher />
           </BreadcrumbItem>
-          <BreadcrumbSeparator />
+          <BreadcrumbSeparator className="hidden sm:block" />
           <BreadcrumbItem className="min-w-0">
-            <BreadcrumbPage className="truncate text-lg font-semibold text-foreground">{title}</BreadcrumbPage>
+            <BreadcrumbPage className="truncate text-sm font-semibold text-foreground sm:text-lg">
+              {title}
+            </BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -66,7 +67,6 @@ export function DashboardHeader() {
         <ToolbarSeparator />
         <LanguageSwitcher />
         <ThemeToggle />
-        <NotificationsBell />
       </div>
     </header>
   );

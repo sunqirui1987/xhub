@@ -101,6 +101,13 @@ func (s *Server) callCost(alias, depID string, usage catalog.Usage, start time.T
 		if c, ok := deploymentCost(dep, usage, start); ok {
 			return c.Total, c.Input, c.Output, true, c
 		}
+		if dep.ModelInfo["pricing_source"] == "manual" {
+			return 0, 0, 0, false, catalog.Charge{}
+		}
+		if id, _ := dep.ModelInfo["base_model"].(string); id != "" {
+			c, ok := catalog.CostAt(id, usage, start)
+			return c.Total, c.Input, c.Output, ok, c
+		}
 		if id := dep.ParamString("model", ""); id != "" && id != alias {
 			if c, ok := catalog.CostAt(id, usage, start); ok {
 				return c.Total, c.Input, c.Output, true, c

@@ -267,6 +267,9 @@ func TestLiveStreamingIsBilledFromTheRealUsage(t *testing.T) {
 				t.Fatalf("the stream carried no usage event: %s", truncate(r.text(), 500))
 			}
 			expected := liveUsageCounts(streamUsage)
+			if expected.prompt <= 0 || expected.completion <= 0 {
+				t.Fatalf("the live stream lacked positive usage: %+v; %s", expected, truncate(r.text(), 500))
+			}
 			callID := r.header("x-litellm-call-id")
 			if callID == "" {
 				t.Fatal("the stream carried no call id, so its usage row cannot be found")
@@ -289,6 +292,16 @@ func TestLiveStreamingIsBilledFromTheRealUsage(t *testing.T) {
 			bill := breakdownOf(t, h, admin, callID)
 			if bill["source"] != "snapshot" {
 				t.Fatalf("a streaming row's cost came from %v, not from the rates it was billed at", bill["source"])
+			}
+			applied, _ := bill["applied"].([]any)
+			var rateSum float64
+			for _, item := range applied {
+				if rate, ok := item.(map[string]any); ok {
+					rateSum += numberOrZero(rate["quantity"]) * numberOrZero(rate["usd"])
+				}
+			}
+			if len(applied) == 0 || !nearlyEqual(rateSum, spend) {
+				t.Fatalf("stream applied rates total %v, recorded spend %v: %s", rateSum, spend, truncate(string(mustJSON(bill)), 400))
 			}
 			t.Logf("%s streaming: spend %v recorded with %v prompt / %v completion tokens",
 				public, spend, row["prompt_tokens"], row["completion_tokens"])
@@ -322,7 +335,7 @@ func TestLiveSameVendorViaEitherProtocolIsBilledAlike(t *testing.T) {
 	var tested int
 	for _, left := range byProtocol["anthropic"] {
 		for _, right := range byProtocol["openai"] {
-			if left.vendor.Base != right.vendor.Base || left.model != right.model {
+			if normalizeLiveBase(left.vendor.Base) != normalizeLiveBase(right.vendor.Base) || left.model != right.model {
 				continue
 			}
 			tested++
@@ -409,8 +422,8 @@ func liveUsageCounts(usage map[string]any) liveUsage {
 		out.cacheRead = firstLiveInt(usage, "cached_tokens")
 		for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
 			if details, ok := usage[key].(map[string]any); ok && !hasLiveValue(usage, "cached_tokens") {
-				if _, present := details["cached_tokens"]; present {
-					out.cacheRead = asIntAny(details["cached_tokens"])
+				if value, present := details["cached_tokens"]; present && value != nil {
+					out.cacheRead = asIntAny(value)
 					break
 				}
 			}
@@ -495,20 +508,73 @@ func sameRatePrices(left, right any) bool {
 	if !lok || !rok {
 		return false
 	}
-	keys := func(v any) string {
-		m, _ := v.(map[string]any)
-		return fmt.Sprintf("%v|%v|%v|%v|%v", m["measure"], m["side"], m["variant"], m["unit_size"], m["usd"])
+	keys := func(rates []any) []string {
+		out := make([]string, 0, len(rates))
+		for _, v := range rates {
+			m, _ := v.(map[string]any)
+			if m["measure"] != "token" || (m["side"] != "input" && m["side"] != "output") || m["variant"] == "cached" {
+				continue
+			}
+			out = append(out, fmt.Sprintf("%v|%v|%v|%v", m["measure"], m["side"], m["unit_size"], m["usd"]))
+		}
+		return out
 	}
-	leftKeys, rightKeys := make([]string, len(leftRates)), make([]string, len(rightRates))
-	for i := range leftRates {
-		leftKeys[i] = keys(leftRates[i])
-	}
-	for i := range rightRates {
-		rightKeys[i] = keys(rightRates[i])
-	}
+	leftKeys, rightKeys := keys(leftRates), keys(rightRates)
 	sort.Strings(leftKeys)
 	sort.Strings(rightKeys)
 	return strings.Join(leftKeys, "\n") == strings.Join(rightKeys, "\n")
+}
+
+func normalizeLiveBase(base string) string {
+	base = strings.TrimSuffix(strings.TrimSpace(base), "/")
+	return strings.TrimSuffix(base, "/v1")
+}
+
+func TestLiveUsageOracleHonorsExplicitZeroAndNullAliases(t *testing.T) {
+	got := liveUsageCounts(map[string]any{
+		"prompt_tokens": nil, "input_tokens": float64(9),
+		"completion_tokens": float64(0), "output_tokens": float64(4),
+		"cached_tokens":         nil,
+		"prompt_tokens_details": map[string]any{"cached_tokens": float64(2)},
+	})
+	if got.prompt != 9 || got.completion != 0 || got.cacheRead != 2 {
+		t.Fatalf("live usage oracle did not preserve null fallback and explicit zero: %+v", got)
+	}
+}
+
+func TestLiveUsageOracleDistinguishesNestedSubsetFromAnthropicCache(t *testing.T) {
+	openAI := liveUsageCounts(map[string]any{
+		"prompt_tokens":         float64(10),
+		"prompt_tokens_details": map[string]any{"cached_tokens": float64(3)},
+	})
+	if openAI.prompt != 10 || openAI.cacheRead != 3 {
+		t.Fatalf("OpenAI cached tokens are a subset of prompt tokens: %+v", openAI)
+	}
+	anthropic := liveUsageCounts(map[string]any{
+		"input_tokens": float64(7), "cache_read_input_tokens": float64(3),
+	})
+	if anthropic.prompt != 10 || anthropic.cacheRead != 3 {
+		t.Fatalf("Anthropic cache reads add to input tokens: %+v", anthropic)
+	}
+}
+
+func TestParseStreamUsageMergesResponseUsageEvents(t *testing.T) {
+	got := parseStreamUsage("data: {\"response\":{\"usage\":{\"input_tokens\":7}}}\n" +
+		"data: {\"response\":{\"usage\":{\"output_tokens\":2}}}\n")
+	if got["input_tokens"] != float64(7) || got["output_tokens"] != float64(2) {
+		t.Fatalf("stream usage events were not merged: %#v", got)
+	}
+}
+
+func TestSameRatePricesHandlesUnequalRateListLengths(t *testing.T) {
+	left := []any{map[string]any{"measure": "token", "side": "input", "usd": float64(1)}}
+	right := []any{
+		map[string]any{"measure": "token", "side": "input", "usd": float64(1)},
+		map[string]any{"measure": "token", "side": "output", "usd": float64(2)},
+	}
+	if sameRatePrices(left, right) {
+		t.Fatal("different rate lists compared equal")
+	}
 }
 
 // slugOf 把一个对外模型名收成能当变量名用的短标识。

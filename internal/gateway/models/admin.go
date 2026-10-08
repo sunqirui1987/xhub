@@ -1,7 +1,8 @@
-// Package models creates, updates, deletes, and blocks models. A model stored in the database overrides YAML with the same name.
+// Package models creates, updates, deletes, and disables models. A model stored in the database overrides YAML with the same name.
 package models
 
 import (
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -24,18 +25,16 @@ var logTraceOnceAdmin sync.Once
 func Public(m config.ModelEntry) map[string]any {
 	logTraceOnceAdmin.Do(func() { logx.Trace("enter models.Public") })
 
-	info := m.ModelInfo
+	info := maps.Clone(m.ModelInfo)
 	if info == nil {
 		info = map[string]any{}
 	}
 	if info["id"] == nil || str(info["id"]) == "" {
 		info["id"] = m.ModelName
 	}
+	stripModelOwnership(info)
 	params := redactLiteLLMParams(m.LiteLLMParams)
-	blocked := false
-	if v, ok := info["blocked"].(bool); ok {
-		blocked = v
-	}
+	info["disabled"] = m.Disabled()
 	// A model from the config file has no db_model. The dashboard uses that to disable delete and save.
 	if _, ok := info["db_model"].(bool); !ok {
 		info["db_model"] = false
@@ -44,7 +43,6 @@ func Public(m config.ModelEntry) map[string]any {
 		"model_name":     m.ModelName,
 		"litellm_params": params,
 		"model_info":     info,
-		"blocked":        blocked,
 	}
 }
 
@@ -85,8 +83,16 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 	if info == nil {
 		info = map[string]any{}
 	}
+	stripModelOwnership(info)
+	if _, ok := info["disabled"].(bool); !ok {
+		info["disabled"] = false
+	}
 	if str(info["id"]) == "" {
 		info["id"] = "model_" + httpx.CallID()[:12]
+	}
+	if err := validateDeployment(s, name, params, info); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
 	}
 	// A model created from the page is stored in the database. After a restart LoadStored adds it back and marks it db_model.
 	info["db_model"] = true
@@ -138,6 +144,8 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be updated. Edit the config file.")
 		return
 	}
+	m.LiteLLMParams = maps.Clone(m.LiteLLMParams)
+	m.ModelInfo = maps.Clone(m.ModelInfo)
 	if v := str(body["model_name"]); v != "" {
 		m.ModelName = v
 	}
@@ -160,14 +168,21 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 			m.ModelInfo[k] = v
 		}
 	}
-	// The models page pauses with {blocked: true} on this same update route.
-	if blocked, ok := body["blocked"].(bool); ok {
+	if disabled, ok := body["disabled"].(bool); ok {
 		if m.ModelInfo == nil {
 			m.ModelInfo = map[string]any{}
 		}
-		m.ModelInfo["blocked"] = blocked
+		m.ModelInfo["disabled"] = disabled
+	}
+	stripModelOwnership(m.ModelInfo)
+	if _, ok := m.ModelInfo["disabled"].(bool); !ok {
+		m.ModelInfo["disabled"] = m.Disabled()
 	}
 	m.ModelInfo["db_model"] = true
+	if err := validateDeployment(s, m.ModelName, m.LiteLLMParams, m.ModelInfo); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
@@ -216,30 +231,30 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
-// Block marks a model blocked.
-// 参数 s（Host）：拦截使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/mount.go
-// 测试：无直接单测
-func Block(s Host, w http.ResponseWriter, r *http.Request) {
-	setBlocked(s, w, r, true)
+// Disable prevents a stored deployment from being selected at runtime.
+// 参数 s（Host）：模型管理宿主；w（http.ResponseWriter）：HTTP 响应；r（*http.Request）：包含部署 id 或名称的请求。
+// 返回：无。状态码和模型 JSON 写入响应。
+// 调用：由 POST /model/disable 路由调用。
+// 测试：admin_test.go、regression/models_test.go。
+func Disable(s Host, w http.ResponseWriter, r *http.Request) {
+	setDisabled(s, w, r, true)
 }
 
-// Unblock clears a model block.
-// 参数 s（Host）：Unblock使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/mount.go
-// 测试：无直接单测
-func Unblock(s Host, w http.ResponseWriter, r *http.Request) {
-	setBlocked(s, w, r, false)
+// Enable makes a stored deployment eligible for selection.
+// 参数 s（Host）：模型管理宿主；w（http.ResponseWriter）：HTTP 响应；r（*http.Request）：包含部署 id 或名称的请求。
+// 返回：无。状态码和模型 JSON 写入响应。
+// 调用：由 POST /model/enable 路由调用。
+// 测试：admin_test.go、regression/models_test.go。
+func Enable(s Host, w http.ResponseWriter, r *http.Request) {
+	setDisabled(s, w, r, false)
 }
 
-// setBlocked sets the model blocked flag.
-// 参数 s（Host）：写入Blocked使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求；blocked（bool）：为真时走blocked这一支。为假时保持原来的路径。
+// setDisabled sets the persisted deployment disabled flag.
+// 参数 s（Host）：模型管理宿主；w（http.ResponseWriter）：调用方的 HTTP 响应；r（*http.Request）：入站 HTTP 请求；disabled（bool）：要持久化的禁用状态。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：仅在 admin.go 内使用。
 // 测试：无直接单测
-func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
+func setDisabled(s Host, w http.ResponseWriter, r *http.Request, disabled bool) {
 	if s.RequireManage(w, r) == nil {
 		return
 	}
@@ -262,19 +277,21 @@ func setBlocked(s Host, w http.ResponseWriter, r *http.Request, blocked bool) {
 		httpx.WriteError(w, 400, "invalid_request", "model not found")
 		return
 	}
+	if !modelIsDB(m) {
+		httpx.WriteError(w, 400, "invalid_request", "Config models cannot be disabled from the dashboard.")
+		return
+	}
+	m.ModelInfo = maps.Clone(m.ModelInfo)
 	if m.ModelInfo == nil {
 		m.ModelInfo = map[string]any{}
 	}
-	if !modelIsDB(m) {
-		httpx.WriteError(w, 400, "invalid_request", "Config models cannot be paused from the dashboard.")
-		return
-	}
-	m.ModelInfo["blocked"] = blocked
-	(*s.ModelTable())[i] = m
+	stripModelOwnership(m.ModelInfo)
+	m.ModelInfo["disabled"] = disabled
 	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
+	(*s.ModelTable())[i] = m
 	httpx.WriteJSON(w, 200, Public(m))
 }
 
@@ -327,7 +344,7 @@ func playgroundGroups(list []config.ModelEntry) []map[string]any {
 	groups := map[string][]string{}
 	order := []string{}
 	for _, m := range list {
-		if providerShell(m.ModelInfo) || m.ModelName == "" {
+		if providerShell(m.ModelInfo) || m.Disabled() || m.ModelName == "" {
 			continue
 		}
 		if _, ok := groups[m.ModelName]; !ok {
@@ -347,7 +364,7 @@ func playgroundGroups(list []config.ModelEntry) []map[string]any {
 	for _, name := range order {
 		mode := "chat"
 		for _, m := range list {
-			if m.ModelName != name || providerShell(m.ModelInfo) {
+			if m.ModelName != name || providerShell(m.ModelInfo) || m.Disabled() {
 				continue
 			}
 			if m.ModelInfo != nil {
@@ -407,13 +424,24 @@ func LoadStored(s Host) {
 		return
 	}
 	for _, row := range rows {
-		if clearCopiedMode(&row) {
-			if err := s.RecordStore().UpsertProxyModel(row); err != nil {
-				logx.Error("builtin model %s: %v", row.ID, err)
-			}
-		}
 		if row.Info == nil {
 			row.Info = map[string]any{}
+		}
+		changed := false
+		if _, ok := row.Info["disabled"].(bool); !ok {
+			row.Info["disabled"] = false
+			changed = true
+		}
+		before := len(row.Info)
+		stripModelOwnership(row.Info)
+		changed = changed || len(row.Info) != before
+		if clearCopiedMode(&row) {
+			changed = true
+		}
+		if changed {
+			if err := s.RecordStore().UpsertProxyModel(row); err != nil {
+				logx.Error("stored model %s: %v", row.ID, err)
+			}
 		}
 		row.Info["id"] = row.ID
 		row.Info["db_model"] = true

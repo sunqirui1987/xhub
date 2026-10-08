@@ -48,7 +48,7 @@ interface CredentialRowActionsProps {
   onListModels?: (credential: CredentialItem) => void;
 }
 
-function CredentialRowActions({ credential, onEdit, onDelete, onListModels }: CredentialRowActionsProps) {
+function CredentialRowActions({ credential, onEdit, onDelete }: CredentialRowActionsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -59,11 +59,6 @@ function CredentialRowActions({ credential, onEdit, onDelete, onListModels }: Cr
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        {credential.credential_info?.builtin && onListModels ? (
-          <DropdownMenuItem data-testid="credential-action-models" onClick={() => onListModels(credential)}>
-            {t("Fetch model list")}
-          </DropdownMenuItem>
-        ) : null}
         <DropdownMenuItem data-testid="credential-action-edit" onClick={() => onEdit(credential)}>
           <Pencil />
           {t("Edit")}
@@ -111,20 +106,9 @@ export const getCredentialsTableColumns = ({
       size: 260,
       enableSorting: true,
       cell: ({ row }) => {
-        const builtin = row.original.credential_info?.builtin || row.original.credential_name;
-        const isBuiltin = builtin === "fennoai" || builtin === "qiniu";
         return (
           <div className="flex items-center gap-2">
             <IdentityCell title={row.original.credential_name} className="max-w-48" titleClassName="font-medium" />
-            {isBuiltin && onListModels ? (
-              <button
-                type="button"
-                className="text-xs text-primary underline-offset-2 hover:underline"
-                onClick={() => onListModels(row.original)}
-              >
-                {t("Fetch model list")}
-              </button>
-            ) : null}
           </div>
         );
       },
@@ -156,11 +140,11 @@ export const getCredentialsTableColumns = ({
       cell: ({ row }) => (
         <div className="flex justify-end">
           <CredentialRowActions
-          credential={row.original}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onListModels={onListModels}
-        />
+            credential={row.original}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onListModels={onListModels}
+          />
         </div>
       ),
     },

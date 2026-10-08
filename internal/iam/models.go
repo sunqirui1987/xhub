@@ -178,6 +178,9 @@ func (Project) TableName() string { return "projects" }
 
 // AuditEntry is one audit-log row.
 type AuditEntry struct {
+	ActorName  string         `xorm:"-" json:"actor_name"`
+	ActorEmail string         `xorm:"-" json:"actor_email"`
+	ObjectName string         `xorm:"-" json:"object_name"`
 	ID         int64          `xorm:"pk autoincr 'id'" json:"id"`
 	TS         time.Time      `xorm:"created 'ts'" json:"ts"`
 	ActorID    string         `xorm:"'actor_id'" json:"actor_id"`

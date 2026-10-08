@@ -9,7 +9,7 @@ import (
 
 // TestFallbackChain 把同一对外名下的部署回退走完：
 // 5xx 换下一条且只记成功那笔 → 4xx 直接返回、不再往下试 → 全部失败是 502 且不扣费 →
-// 换部署前重新查额度，第二条不会被拨到 → 停用一条就走剩下那条，都停用则 model_paused →
+// 换部署前重新查额度，第二条不会被拨到 → 停用一条就走剩下那条，都停用则 model_disabled →
 // 护栏在选部署之前拦住，两条都不拨。
 func TestFallbackChain(t *testing.T) { runSimulated(t, fallbackSimulated) }
 
@@ -96,19 +96,19 @@ func fallbackSimulated(t *testing.T) {
 	h.setProjectBudget(t, admin, c.projectID, 1000)
 	h.scriptStatus("fail-a", 0)
 	h.scriptStatus("fail-b", 0)
-	h.ok(http.MethodPost, "/model/block", admin, map[string]any{"id": "dep-fail-a"})
-	h.assertBilled(t, c, admin, public, "paused deployment is skipped", []string{"fail-b"})
-	h.ok(http.MethodPost, "/model/block", admin, map[string]any{"id": "dep-fail-b"})
+	h.ok(http.MethodPost, "/model/disable", admin, map[string]any{"id": "dep-fail-a"})
+	h.assertBilled(t, c, admin, public, "disabled deployment is skipped", []string{"fail-b"})
+	h.ok(http.MethodPost, "/model/disable", admin, map[string]any{"id": "dep-fail-b"})
 	mark = len(h.upstreamCalls())
-	paused := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(public, "both paused"))
-	if paused.status != http.StatusBadRequest || !strings.Contains(errorMessage(paused), "paused") {
-		t.Fatalf("two paused deployments answered %s", paused.describe())
+	disabled := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(public, "both disabled"))
+	if disabled.status != http.StatusBadRequest || !strings.Contains(errorMessage(disabled), "disabled") {
+		t.Fatalf("two disabled deployments answered %s", disabled.describe())
 	}
 	if got := h.upstreamSince(mark); len(got) != 0 {
-		t.Fatalf("a paused model reached the upstream: %v", got)
+		t.Fatalf("a disabled model reached the upstream: %v", got)
 	}
 
-	h.ok(http.MethodPost, "/model/unblock", admin, map[string]any{"id": "dep-fail-b"})
+	h.ok(http.MethodPost, "/model/enable", admin, map[string]any{"id": "dep-fail-b"})
 	h.putGuardrail(t, "failover-block", guardrailRow("failover-block", kindBlockedWords, []string{"launch-codes"}, ""))
 	mark = len(h.upstreamCalls())
 	blocked := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(public, "the launch-codes"))

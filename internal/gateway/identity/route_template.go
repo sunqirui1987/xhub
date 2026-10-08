@@ -148,6 +148,10 @@ func RouteTemplateCreate(g Gate, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
+	if err := validateTemplateModelRouting(encoded); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	// Who this template belongs to. An absent pair means a platform template,
 	// which is what the current create path produces and what the existing
 	// tests exercise; an organization or team makes it theirs.
@@ -206,6 +210,10 @@ func RouteTemplateUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	body := readMap(r)
 	encoded, err := encodeTemplateBody(body["body"])
 	if err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := validateTemplateModelRouting(encoded); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
@@ -647,6 +655,14 @@ func encodeTemplateBody(raw any) (string, error) {
 	default:
 		return "", errors.New("body must be a JSON object")
 	}
+}
+
+func validateTemplateModelRouting(encoded string) error {
+	document := map[string]any{}
+	if err := json.Unmarshal([]byte(encoded), &document); err != nil {
+		return errors.New("body must be a JSON object")
+	}
+	return prefs.ValidateModelRoutingDocument(document)
 }
 
 // ctx0 is the request context, or the background context when the request has

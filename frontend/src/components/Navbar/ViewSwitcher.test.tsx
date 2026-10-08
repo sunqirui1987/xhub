@@ -28,7 +28,7 @@ vi.mock("@/contexts/PluginModeContext", () => ({ usePluginMode: mockUsePluginMod
 vi.mock("@/app/(dashboard)/hooks/uiSettings/useUISettings", () => ({ useUISettings: mockUseUISettings }));
 vi.mock("next/navigation", () => ({ usePathname: mockUsePathname }));
 // Deterministic hrefs so navigation assertions don't depend on server_root_path.
-vi.mock("@/utils/uiHref", () => ({ uiHref: (seg: string) => `/ui/${seg}` }));
+vi.mock("@/utils/uiHref", async (importOriginal) => ({ ...await importOriginal<typeof import("@/utils/uiHref")>(), uiHref: (seg: string) => `/ui/${seg}` }));
 
 describe("ViewSwitcher", () => {
   let assignSpy: ReturnType<typeof vi.fn>;
@@ -47,6 +47,12 @@ describe("ViewSwitcher", () => {
     state.enableChatUI = false;
     state.pathname = "/ui/";
     state.setMode.mockClear();
+  });
+
+  it.each(["/chat", "/ui/chat", "/chat/logs", "/ui/chat/logs"])("labels rewritten Chat route %s consistently", (pathname) => {
+    state.pathname = pathname;
+    render(<ViewSwitcher />);
+    expect(screen.getByRole("button")).toHaveTextContent("Chat");
   });
 
   it("opens Chat for everyone, without an administrator setting", async () => {

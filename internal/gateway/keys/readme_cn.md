@@ -1,19 +1,81 @@
-# gateway/keys
+# 虚拟密钥与服务密钥生命周期
 
-虚拟密钥的路由。以 `keys.Module` 挂在目录之前。
+[English](readme.md) · [全功能实现说明](../../../docs/development/implementation.md)
 
-POST `/key/generate` 默认给调用方建一把个人密钥，除非正文指定了别的属主。明文令牌只返回一次，前缀是 `sk-`。库存的是这段明文的 `iam.HashKey`。POST `/key/service-account/generate` 建一把属于团队或项目的服务密钥。团队管理员只能把 `models` 收窄到团队允许名单的子集，不能放宽。
+## 职责与实现契约
 
-`hashKeyToken` 对 `sk-` 开头的值做哈希，已经是哈希或 id 的原样通过。`lookupKey` 先按哈希查（`KeyByHash`），再按密钥 id 查，因为控制台传 id，LiteLLM 兼容客户端传明文。
+generate.go 创建个人密钥和服务账号密钥，admin.go 实现列表、详情、编辑、批量更新、禁用/恢复、删除、轮换及费用重置。Host 依赖认证、授权、IAM、配置和模板可见性；HTTP 接口见 mount.go。
+创建和再生成是 plaintext 唯一正常展示边界；Response 的 includePlain 参数控制返回，普通列表详情不能泄漏原始凭据。服务密钥的 owner_type、组织、团队、项目归属必须校验，不能伪装成个人密钥规避作用域。
+密钥管理员身份与可用模型不互相替代。编辑路由模板前读取并授权，空模板表示继承。禁用、过期、轮换和删除后推理请求要重新读取状态，旧密钥不能继续调用。批量操作需逐个校验对象，而不是只对整个 HTTP 请求做一次宽泛授权。
 
-GET `/key/list` 由 `KeysScope` 在 SQL 里收窄，不是查出之后再滤。平台管理员看见全部密钥。团队管理员看见自己的个人密钥，加上所管理团队的服务密钥。成员只看见自己的个人密钥。主密钥得到恒假范围，这样漏掉一次授权也不会变成跨租户列表。
+## 源码职责与入口
 
-POST `/key/block`、`/key/unblock`、`/key/delete`、`/key/update`、`/key/regenerate` 对这个密钥 id 做 `ActionKeyWrite`。重新生成会轮换库存哈希。POST `/key/{key}/reset_spend` 把这把密钥的花费计数清零。它不改写 `usage_events`。
+### admin.go
 
-`key_alias` 是显示名。密钥上的 RPM 和 TPM 限额稍后由 `gateway/limits.go` 对 Redis 键 `xhub:rpm:<Principal.Hash>` 和 `xhub:tpm:<Principal.Hash>` 执行，不是对 `api_base|model`。
+- [`func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — ServiceAccount generates a service key for a team or one of its projects. It has no owner, so it requires the team's administration rather than mere membership; Authorize makes that decision.
+- [`func Regenerate(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — Regenerate rotates the key plaintext. The old plaintext stops working immediately, and the key's own limits and narrowing are untouched.
+- [`func ResetSpend(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — ResetSpend sets the key spend back to zero, or to reset_to when the body carries one. Historical usage rows are not deleted, so the figures that produced the old total remain.
+- [`func Aliases(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — Aliases lists the key names the caller may see, for the dashboard pickers.
+- [`func Health(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — Health checks that a credential still passes identification. It is the liveness probe the LiteLLM clients call before their first request.
+- [`func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request)`](admin.go) — BulkUpdate applies one patch to many keys. A key the caller may not write is skipped rather than failing the batch, and updated is the count that landed.
 
-## 这个包不做什么
+### codec.go
 
-它不在 `/v1/chat/completions` 上验收密钥。那是 `auth` 加上 `dataplane.Serve`。它也不计在途调用。
+内部实现和协议边界见 [codec.go](codec.go)。
 
-English notes are in `readme.md` in this directory.
+### generate.go
+
+- [`func Generate(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Generate creates a virtual key and returns the plaintext only in this response. A member may mint a personal key for themselves inside a team they belong to; a service key needs the team's administration, and the decision is made by Authorize rather than here.
+- [`func List(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — List lists the keys the caller may see and never returns plaintext. The rows are narrowed in SQL by the scope, so a handler bug cannot widen the listing.
+- [`func Info(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Info reads one virtual key.
+- [`func Delete(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Delete removes virtual keys. The plaintext can no longer call inference.
+- [`func Block(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Block marks a virtual key blocked.
+- [`func Unblock(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Unblock clears the blocked flag.
+- [`func Update(s Host, w http.ResponseWriter, r *http.Request)`](generate.go) — Update changes a virtual key's name, narrowing, and limits. The plaintext stays the same, and a field the caller left out keeps its value.
+- [`func Response(k iam.Key, plain string, includePlain bool) map[string]any`](generate.go) — Response is the public JSON for a virtual key. The plaintext is omitted when includePlain is false; the stored hash never appears, because the hash is what authentication compares and publishing it would leak the credential.
+
+### host.go
+
+公开类型：`Host`.
+
+内部实现和协议边界见 [host.go](host.go)。
+
+### mount.go
+
+- [`func Module(h Host) httpx.Module`](mount.go) — Module creates, lists, updates, and rotates virtual keys.
+
+## 对外 HTTP 边界
+
+入口由下表所列注册文件安装。别名共享处理器；路径存在不替代权限和业务断言，授权说明见模块契约及接口参考。
+
+| Method / path | 注册文件 |
+| --- | --- |
+| `POST /key/generate` | [mount.go](mount.go) |
+| `POST /key/service-account/generate` | [mount.go](mount.go) |
+| `GET /key/list` | [mount.go](mount.go) |
+| `GET /key/info` | [mount.go](mount.go) |
+| `POST /v2/key/info` | [mount.go](mount.go) |
+| `POST /key/delete` | [mount.go](mount.go) |
+| `POST /key/block` | [mount.go](mount.go) |
+| `POST /key/unblock` | [mount.go](mount.go) |
+| `POST /key/update` | [mount.go](mount.go) |
+| `POST /key/bulk_update` | [mount.go](mount.go) |
+| `POST /key/regenerate` | [mount.go](mount.go) |
+| `POST /key/{key}/regenerate` | [mount.go](mount.go) |
+| `POST /key/{key}/reset_spend` | [mount.go](mount.go) |
+| `GET /key/aliases` | [mount.go](mount.go) |
+| `POST /key/health` | [mount.go](mount.go) |
+
+## 依赖关系
+
+[internal/auth](../../auth/readme_cn.md), [internal/authz](../../authz/readme_cn.md), [internal/gateway/templateauth](../templateauth/readme_cn.md), [internal/httpx](../../httpx/readme_cn.md), [internal/iam](../../iam/readme_cn.md), [internal/logx](../../logx/readme_cn.md).
+
+## 验证与维护入口
+
+当前目录没有直接测试文件；上层集成测试仅证明被执行的链路，不代表所有内部失败分支均已覆盖。
+
+```bash
+go test ./internal/gateway/keys -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

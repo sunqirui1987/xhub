@@ -235,9 +235,21 @@ func writeAudit(s *xorm.Session, a Actor, e Audit) error {
 	if kind == "" {
 		kind = "system"
 	}
-	detail := e.Detail
-	if detail == nil {
-		detail = map[string]any{}
+	// Copy the payload so adding display snapshots cannot mutate the caller's data.
+	detail := make(map[string]any, len(e.Detail)+2)
+	for key, value := range e.Detail {
+		detail[key] = value
+	}
+	if kind == "session" && a.ID != "" {
+		var user User
+		ok, err := s.ID(a.ID).Get(&user)
+		if err != nil {
+			return err
+		}
+		if ok {
+			detail["actor_name"] = user.Name
+			detail["actor_email"] = user.Email
+		}
 	}
 	row := AuditEntry{ActorID: a.ID, ActorKind: kind, Action: e.Action, ObjectType: e.ObjectType,
 		ObjectID: e.ObjectID, TeamID: e.TeamID, Detail: detail}
@@ -271,4 +283,66 @@ func (db *DB) ListAudit(ctx context.Context, limit, offset int) ([]AuditEntry, e
 	var out []AuditEntry
 	err := db.Engine.Context(ctx).Desc("id").Limit(limit, offset).Find(&out)
 	return out, err
+}
+
+// AuditFilter narrows the audit trail before pagination.
+type AuditFilter struct {
+	Search, ObjectID, ActorID, ActorKey, TeamID, KeyID, Action, ObjectType string
+}
+
+// QueryAudit returns matching rows and their total, newest first.
+// 参数 ctx（context.Context）：查询上下文；filter（AuditFilter）：筛选条件；limit、offset（int）：分页大小及偏移。
+// 返回 []AuditEntry、int64、error：当前页记录、匹配总数及数据库错误。
+// 调用：gateway/identity 审计记录处理器。
+// 测试：audit_test.go。
+func (db *DB) QueryAudit(ctx context.Context, filter AuditFilter, limit, offset int) ([]AuditEntry, int64, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := db.Engine.Context(ctx)
+	defer query.Close()
+	for _, field := range []struct{ column, value string }{
+		{"object_id", filter.ObjectID}, {"actor_id", filter.ActorID},
+		{"team_id", filter.TeamID}, {"object_type", filter.ObjectType},
+	} {
+		if field.value != "" {
+			query.And(field.column+" = ?", field.value)
+		}
+	}
+	if filter.ActorKey != "" {
+		query.And("actor_kind = ? AND actor_id = ?", "key", filter.ActorKey)
+	}
+	if filter.KeyID != "" {
+		query.And("object_type = ? AND object_id = ?", "key", filter.KeyID)
+	}
+	if filter.Action != "" {
+		switch filter.Action {
+		case "created":
+			query.And("action LIKE ?", "%.create")
+		case "deleted":
+			query.And("action LIKE ?", "%.delete")
+		case "rotated":
+			query.And("action LIKE ?", "%.rotate")
+		case "read":
+			query.And("action LIKE ?", "%.read")
+		case "bound":
+			query.And("action = ?", "route_template.bind")
+		case "updated":
+			query.And("(action LIKE ? OR action LIKE ? OR action LIKE ?)", "%.update", "%.admin_update", "%.profile")
+		default:
+			query.And("action = ?", filter.Action)
+		}
+	}
+	if filter.Search != "" {
+		applyAuditSearch(query, filter.Search)
+	}
+	var rows []AuditEntry
+	total, err := query.Desc("id").Limit(limit, offset).FindAndCount(&rows)
+	if err == nil {
+		err = db.enrichAudit(ctx, rows)
+	}
+	return rows, total, err
 }

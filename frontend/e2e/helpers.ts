@@ -3,6 +3,9 @@ import { translate } from "../src/i18n/translate";
 
 export const t = (key: string) => translate("zh-CN", key);
 
+export const GATEWAY = process.env.E2E_GATEWAY || "http://127.0.0.1:4100";
+export const UPSTREAM = process.env.E2E_UPSTREAM || "http://127.0.0.1:4110";
+
 export const MASTER = process.env.E2E_MASTER_KEY || "sk-e2e-master";
 
 export function watchGateway(page: Page) {
@@ -10,13 +13,7 @@ export function watchGateway(page: Page) {
   page.on("response", (res) => {
     const u = res.url();
     if (u.includes("/_next/")) return;
-    if (
-      !u.includes("/gw/") &&
-      !u.includes(":4000/") &&
-      !u.includes("127.0.0.1:3000/") &&
-      !u.includes("localhost:3000/")
-    )
-      return;
+    if (!u.startsWith(GATEWAY) && !u.startsWith((page.url().startsWith("http") ? new URL(page.url()).origin : "about:blank"))) return;
     if (res.status() >= 500) {
       bad.push(`${res.status()} ${res.request().method()} ${u}`);
     }
@@ -102,7 +99,41 @@ export async function loginAdmin(page: Page) {
   const guard = watchGateway(page);
   await login(page, "admin", MASTER);
   await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('a[href="/ui/admin-panel"]')).toBeVisible({ timeout: 20_000 });
+  await ensureFixtureTeam(page);
   guard.assertOk();
+}
+
+/** Hierarchy prerequisite; UI scenarios still perform their own writes. */
+export async function ensureFixtureTeam(page: Page) {
+  const headers = { Authorization: "Bearer " + await sessionBearer(page) };
+  const listed = await page.request.get(GATEWAY + "/organization/list", { headers });
+  expect(listed.ok()).toBeTruthy();
+  const orgs = await listed.json();
+  let org = orgs.find((item: { organization_alias: string }) => item.organization_alias === "e2e-fixture-org");
+  if (!org) {
+    const created = await page.request.post(GATEWAY + "/organization/new", { headers, data: { organization_alias: "e2e-fixture-org" } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    org = await created.json();
+    const team = await page.request.post(GATEWAY + "/team/new", { headers, data: { organization_id: org.organization_id, team_alias: "e2e-fixture-team" } });
+    expect(team.ok(), await team.text()).toBeTruthy();
+    await page.reload();
+    await expect(page.getByTestId("create-key-button")).toBeVisible();
+  }
+}
+
+export async function chooseKeyTeam(page: Page) {
+  const control = page.getByRole("dialog").getByRole("combobox", { name: t("Team"), exact: true });
+  if (await control.count()) {
+    await control.click();
+    await page.getByRole("option", { name: /e2e-fixture-team/ }).click();
+  }
+}
+
+export async function chooseOrganization(page: Page) {
+  const control = page.getByRole("dialog").getByRole("combobox", { name: t("Organization"), exact: true });
+  await control.click();
+  await page.getByRole("option", { name: /e2e-fixture-org/ }).click();
 }
 
 export const NAV_GROUPS = [
@@ -128,3 +159,9 @@ export const DASHBOARD_PAGES = [
   "/route-templates",
   "/router-settings",
 ];
+
+export async function sessionBearer(page: Page): Promise<string> {
+  const token = (await page.context().cookies()).find((cookie) => cookie.name === "token")?.value;
+  expect(token, "console session cookie").toBeTruthy();
+  return JSON.parse(Buffer.from(token!.split(".")[1], "base64url").toString()).key;
+}

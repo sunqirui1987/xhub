@@ -1,3 +1,5 @@
+import { chooseKeyTeam, chooseOrganization } from "./helpers";
+import { GATEWAY, UPSTREAM } from "./helpers";
 import { expect, test, type Page } from "@playwright/test";
 import { loginAdmin, stableGoto, t, uiPath, watchGateway } from "./helpers";
 
@@ -23,6 +25,7 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   const alias = "e2e-key-lifecycle";
   const renamed = "e2e-key-renamed";
   await page.getByTestId("create-key-button").click();
+  await chooseKeyTeam(page);
   await page.getByLabel(t("Key Name")).fill(alias);
   await page.getByRole("button", { name: t("pages.apiKeys.createSubmit"), exact: true }).click();
   await expect(page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ })).toBeVisible({ timeout: 15_000 });
@@ -72,11 +75,11 @@ test("model update, test connection, and delete", async ({ page }) => {
     const token = cookies.find((c) => c.name === "token")?.value;
     return JSON.parse(Buffer.from(token!.split(".")[1], "base64url").toString()).key as string;
   })();
-  const created = await page.request.post("http://127.0.0.1:4000/model/new", {
+  const created = await page.request.post(`${GATEWAY}/model/new`, {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-model-ops",
-      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: "http://127.0.0.1:4010" },
+      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
@@ -87,32 +90,23 @@ test("model update, test connection, and delete", async ({ page }) => {
   }
   await page.getByRole("tab", { name: t("pages.models.all") }).click();
   await expect(page.getByText("e2e-model-ops").first()).toBeVisible({ timeout: 15_000 });
-  await page
-    .getByRole("row", { name: /e2e-model-ops/ })
-    .getByRole("button")
-    .first()
-    .click();
-  await expect(page.getByTestId("test-connection-button")).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId("test-connection-button").click();
-  await expect(
-    page
-      .getByText(t("Connection test successful!"))
-      .or(page.getByText(t("Error testing connection: ")))
-      .first(),
-  ).toBeVisible({ timeout: 20_000 });
-  await page.getByRole("button", { name: t("Edit Settings") }).click();
-  await page.getByRole("textbox", { name: t("Enter model name") }).fill("e2e-model-renamed");
-  await page.getByRole("button", { name: t("Save Changes") }).click();
-  await expect(page.getByText(t("Model settings updated successfully"))).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("e2e-model-renamed").first()).toBeVisible();
-  await page.getByTestId("delete-model-button").click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: t("common.delete") })
-    .click();
-  await expect(page.getByText(t("Model deleted successfully"))).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("cell", { name: "e2e-model-renamed" })).toHaveCount(0);
-  await expect(page.getByRole("cell", { name: "e2e-model-ops" })).toHaveCount(0);
+  await page.getByRole("button", { name: "e2e-model-ops", exact: true }).click();
+  await page.getByRole("button", { name: "测试连接", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "连接正常，模型已响应。" })).toBeVisible();
+  await page.getByRole("button", { name: "编辑模型", exact: true }).click();
+  await page.getByLabel("对外模型名称 *").fill("e2e-model-renamed");
+  await page.getByRole("button", { name: "保存修改", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "e2e-model-renamed", exact: true })).toBeVisible();
+  await page.getByRole("switch", { name: "e2e-model-renamed 启用模型" }).click();
+  await expect(page.getByRole("switch", { name: "e2e-model-renamed 启用模型" })).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "测试连接", exact: true })).toBeDisabled();
+  await page.getByRole("switch", { name: "e2e-model-renamed 启用模型" }).click();
+  await expect(page.getByRole("switch", { name: "e2e-model-renamed 启用模型" })).toBeChecked();
+  await page.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("dialog").getByPlaceholder("e2e-model-renamed").fill("e2e-model-renamed");
+  await page.getByRole("dialog").getByRole("button", { name: "删除", exact: true }).click();
+  await expect(page.getByRole("button", { name: "e2e-model-renamed", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "e2e-model-ops", exact: true })).toHaveCount(0);
   guard.assertOk();
 });
 
@@ -121,14 +115,15 @@ test("team member add is listed", async ({ page }) => {
   await loginAdmin(page);
   await page.goto(uiPath("/teams"));
   await page.getByTestId("create-team-button").click();
+  await chooseOrganization(page);
   await page.getByTestId("team-name-input").fill("e2e-member-team");
   await page.getByTestId("create-team-submit").click();
   await expect(page.getByText("e2e-member-team").first()).toBeVisible({ timeout: 15_000 });
   await page.getByText("e2e-member-team", { exact: true }).first().click();
-  await page.getByRole("tab", { name: "Members" }).click();
-  const member = await page.request.post("http://127.0.0.1:4000/user/new", {
+  await page.getByRole("tab", { name: t("Members") }).click();
+  const member = await page.request.post(`${GATEWAY}/user/new`, {
     headers: { Authorization: `Bearer ${await sessionFrom(page)}`, "Content-Type": "application/json" },
-    data: { user_id: "e2e-member", user_email: "e2e-member@example.com", user_role: "internal_user" },
+    data: { user_id: "e2e-member", user_email: "e2e-member@example.com", user_role: "user" },
   });
   expect(member.ok(), await member.text()).toBeTruthy();
   await page.getByRole("button", { name: t("Add Member") }).click();
@@ -152,11 +147,11 @@ test("router fallback update lists the mapping", async ({ page }) => {
     const token = cookies.find((c) => c.name === "token")?.value;
     return JSON.parse(Buffer.from(token!.split(".")[1], "base64url").toString()).key as string;
   })();
-  const created = await page.request.post("http://127.0.0.1:4000/model/new", {
+  const created = await page.request.post(`${GATEWAY}/model/new`, {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-fallback-model",
-      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: "http://127.0.0.1:4010" },
+      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
@@ -165,19 +160,22 @@ test("router fallback update lists the mapping", async ({ page }) => {
     await loginAdmin(page);
     await stableGoto(page, "/route-templates");
   }
-  const platformRow = page.getByRole("row", { name: new RegExp(t("pages.routeTemplates.platformDefault")) });
+  const platformRow = page.locator('[data-slot="card"]').filter({ has: page.getByRole("heading", { name: t("pages.routeTemplates.platformDefault"), exact: true }) });
   await platformRow.getByRole("button", { name: t("pages.routeTemplates.edit") }).click();
-  await page.getByRole("tab", { name: t("pages.routeTemplates.fallbacksTab") }).click();
+  await page.getByRole("tab", { name: t("pages.routeTemplates.advancedSettings") }).click();
+  await page.getByRole("combobox", { name: t("pages.routeTemplates.advanced.addConfiguration") }).selectOption("failureFallbacks");
+  await page.getByRole("button", { name: t("pages.routeTemplates.advanced.addConfiguration") }).click();
   await page.getByPlaceholder(t("Select primary model")).first().click();
   await pickOption(page, "gpt-4o-mini");
   await page.getByPlaceholder(t("Select fallback models to add...")).first().click();
   await page.getByRole("option", { name: "e2e-fallback-model" }).click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: t("Save"), exact: true }).click();
-  await expect(page.getByText(t("pages.routeTemplates.platformSaved"))).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(t("pages.routeTemplates.platformSaved"))).toBeVisible();
+  await page.getByRole("button", { name: t("pages.routeTemplates.backToLibrary") }).click();
   await platformRow.getByRole("button", { name: t("pages.routeTemplates.edit") }).click();
-  await page.getByRole("tab", { name: t("pages.routeTemplates.fallbacksTab") }).click();
-  await expect(page.getByText("e2e-fallback-model")).toBeVisible();
+  await page.getByRole("tab", { name: t("pages.routeTemplates.advancedSettings") }).click();
+  await expect(page.getByText("e2e-fallback-model", { exact: true })).toBeVisible();
   guard.assertOk();
 });
 

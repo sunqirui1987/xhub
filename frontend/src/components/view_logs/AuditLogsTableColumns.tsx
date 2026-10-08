@@ -1,85 +1,69 @@
 "use client";
-
 import { ColumnDef } from "@tanstack/react-table";
-
-import { DateCell, IdCell, IdentityCell, StatusBadge, type StatusTone } from "@/components/shared/table_cells";
-
-import DefaultProxyAdminTag from "../common_components/DefaultProxyAdminTag";
+import { IdentityCell, StatusBadge } from "@/components/shared/table_cells";
 import { t } from "@/i18n";
-
+import {
+  auditAction,
+  auditDate,
+  auditOperator,
+  auditResourceName,
+  auditResourceType,
+  auditTone,
+  shortAuditID,
+} from "./auditPresentation";
 export type AuditLogEntry = {
   id: string;
   updated_at: string;
   changed_by: string;
   changed_by_api_key: string;
+  actor_kind?: string;
+  actor_name?: string;
+  actor_email?: string;
+  object_name?: string;
+  team_id?: string | null;
   action: string;
   table_name: string;
   object_id: string;
   before_value: Record<string, unknown>;
   updated_values: Record<string, unknown>;
+  detail?: Record<string, unknown>;
 };
-
-export const AUDIT_TABLE_NAME_DISPLAY: Record<string, string> = {
-  LiteLLM_VerificationToken: "Keys",
-  LiteLLM_TeamTable: "Teams",
-  LiteLLM_UserTable: "Users",
-  LiteLLM_OrganizationTable: "Organizations",
-  LiteLLM_ProxyModelTable: "Models",
-};
-
-const ACTION_TONE: Record<string, StatusTone> = {
-  created: "success",
-  updated: "info",
-  deleted: "error",
-  rotated: "warning",
-};
-
-const capitalize = (value: string): string => (value ? value.charAt(0).toUpperCase() + value.slice(1) : value);
-
-interface AuditLogsTableColumnsDeps {
+export const getAuditLogsTableColumns = ({
+  onViewLog,
+}: {
   onViewLog: (log: AuditLogEntry) => void;
-}
-
-export const getAuditLogsTableColumns = ({ onViewLog }: AuditLogsTableColumnsDeps): ColumnDef<AuditLogEntry>[] => [
+}): ColumnDef<AuditLogEntry>[] => [
   {
     id: "updated_at",
     accessorKey: "updated_at",
-    header: t("Timestamp"),
-    size: 200,
+    header: t("audit.time"),
+    size: 190,
     enableSorting: false,
-    cell: ({ row }) => <DateCell value={row.original.updated_at} />,
+    cell: ({ row }) => (
+      <time dateTime={row.original.updated_at} className="whitespace-nowrap text-xs text-muted-foreground">
+        {auditDate(row.original.updated_at)}
+      </time>
+    ),
   },
   {
     id: "action",
     accessorKey: "action",
-    header: t("Action"),
-    size: 110,
+    header: t("audit.action"),
+    size: 180,
     enableSorting: false,
-    cell: ({ row }) => (
-      <StatusBadge tone={ACTION_TONE[row.original.action] ?? "neutral"} label={capitalize(row.original.action)} />
-    ),
-  },
-  {
-    id: "table_name",
-    accessorKey: "table_name",
-    header: t("Table"),
-    size: 130,
-    enableSorting: false,
-    cell: ({ row }) => (
-      <span className="text-sm">{AUDIT_TABLE_NAME_DISPLAY[row.original.table_name] ?? row.original.table_name}</span>
-    ),
+    cell: ({ row }) => <StatusBadge tone={auditTone(row.original)} label={auditAction(row.original)} />,
   },
   {
     id: "object_id",
     accessorKey: "object_id",
-    header: t("Object ID"),
-    minSize: 220,
+    header: t("audit.resource"),
+    minSize: 240,
     enableSorting: false,
     cell: ({ row }) => (
       <IdentityCell
-        title={row.original.object_id}
-        titleClassName="font-mono text-xs font-normal text-primary"
-        className="max-w-72"
+        title={auditResourceName(row.original)}
+        subtitle={auditResourceType(row.original) + " · " + shortAuditID(row.original.object_id)}
+        className="max-w-80"
         onClick={() => onViewLog(row.original)}
       />
     ),
@@ -87,17 +71,19 @@ export const getAuditLogsTableColumns = ({ onViewLog }: AuditLogsTableColumnsDep
   {
     id: "changed_by",
     accessorKey: "changed_by",
-    header: t("Changed By"),
+    header: t("audit.operator"),
     size: 200,
     enableSorting: false,
-    cell: ({ row }) => <DefaultProxyAdminTag userId={row.original.changed_by} />,
-  },
-  {
-    id: "changed_by_api_key",
-    accessorKey: "changed_by_api_key",
-    header: t("API Key (Hash)"),
-    size: 160,
-    enableSorting: false,
-    cell: ({ row }) => <IdCell value={row.original.changed_by_api_key} variant="plain" />,
+    cell: ({ row }) => (
+      <IdentityCell
+        title={auditOperator(row.original)}
+        subtitle={
+          row.original.actor_email && row.original.actor_name
+            ? row.original.actor_email
+            : shortAuditID(row.original.changed_by)
+        }
+        className="max-w-64"
+      />
+    ),
   },
 ];

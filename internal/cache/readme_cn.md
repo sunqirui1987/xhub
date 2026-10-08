@@ -1,15 +1,41 @@
-# cache
+# 进程内响应缓存
 
-进程内的上游响应 LRU。容量是常量 `cacheEntries` = 8192。`New` 用 `hashicorp/golang-lru` 建表，只有库拒绝这个容量时才 panic，常量本身不会。网关在进程上留一份，通过 `ResponseCache` 交给 `dataplane.Serve`。
+[English](readme.md) · [全功能实现说明](../../docs/development/implementation.md)
 
-`Get` 和 `Set` 都会复制字节。调用方后来改自己的缓冲区，不会改到缓存里的值；改 `Get` 返回的切片，也不会改缓存。
+## 职责与实现契约
 
-`Key(parts...)` 是各段用一个零字节拼起来之后的 SHA-256，再编成十六进制。零字节用来避免 `"ab"+"c"` 和 `"a"+"bc"` 撞车。`Serve` 的调用是 `cache.Key(租户, op, 对外名, 原始正文)`。调用方有虚拟密钥时租户是 `Principal.Hash`，否则是空串。`op` 是数据面操作名（`chat`、`embedding` 等）。`alias` 是对外模型名。`rawBody` 是请求的原始字节。流式响应不调用 `Get`。命中由 `Host.WriteCacheHit` 写回，记账金额是 0，token 数保留。
+cache.go 实现容量为 8192 的并发 LRU。New 无容量参数；Get 返回字节副本，Set 复制输入，避免调用方修改共享缓存。Key 把各字符串以零字节分隔后计算 SHA256，调用方负责提供完整身份和行为上下文。
+缓存只保存完整成功响应，由 dataplane 决定是否读取和写入。流式请求不写此缓存；失败不得复用为成功。缓存键包含调用身份、操作、公开模型、正文、配置及模板等摘要，避免跨租户或改配置后错误命中。
+这里没有 TTL、磁盘持久化或 Redis 后端。Flush 清除这个对象中的条目，不重置预算、Redis 热状态或数据库日志。多实例有各自缓存，不能把一次清空当作全局失效。
 
-`Flush` 对 LRU 调用 `Purge`。它不写花费，也不访问 Redis。单次请求的路径上不会在写完响应之后调用 `Flush`；它给测试，以及给想把进程缓存倒空的操作路径。
+## 源码职责与入口
 
-## 这个包不做什么
+### cache.go
 
-它不缓存官方 bypass 的响应。`ServeBypass` 从不调用 `Get`。它不设 TTL。一条记录只在 LRU 淘汰或 `Flush` 时离开。它也不另存一份提示词；正文已经在哈希里。
+公开类型：`DualCache`.
 
-English notes are in `readme.md` in this directory.
+- [`func New() *DualCache`](cache.go) — New builds an in-process cache of 8192 entries. It panics if that capacity is illegal, which would be a programming error.
+- [`func Key(parts ...string) string`](cache.go) — Key hashes the tenant, operation, model, and body into a cache key. Parts are separated by a zero byte so "ab"+"c" and "a"+"bc" do not collide.
+- [`func (c *DualCache) Get(key string) ([]byte, bool)`](cache.go) — Get returns a copy of the cached bytes. Changing the slice does not change the cache. A miss returns ok false.
+- [`func (c *DualCache) Set(key string, value []byte)`](cache.go) — Set stores a copy of value. Later changes to the caller's slice do not change the cached bytes.
+- [`func (c *DualCache) Flush()`](cache.go) — Flush removes every cached response. It does not write spend or talk to Redis.
+
+## 对外 HTTP 边界
+
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
+
+## 依赖关系
+
+[internal/logx](../logx/readme_cn.md).
+
+## 验证与维护入口
+
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [cache_test.go](cache_test.go) | `TestKeySeparatesPartsAndCacheCopiesBytes` |
+
+```bash
+go test ./internal/cache -count=1
+```
+
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

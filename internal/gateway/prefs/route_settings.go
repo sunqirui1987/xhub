@@ -1,12 +1,14 @@
 package prefs
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"sync"
 
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/router"
 )
 
 var logTraceOnceRouteSettings sync.Once
@@ -187,6 +189,97 @@ func (r RouteSettings) Strategy() string {
 	return "simple-shuffle"
 }
 
+// ForModel returns the routing policy for one exact requested public model. A
+// matching model_routing row replaces only routing_strategy and
+// routing_strategy_args; retries, timeouts, cooldown settings, and unknown
+// fields continue to come from the already-resolved whole template document.
+// The source document is never mutated.
+func (r RouteSettings) ForModel(modelName string) RouteSettings {
+	if r.Err != nil {
+		return r
+	}
+	rules, present, err := modelRoutingRules(r.Settings)
+	if err != nil {
+		r.Err = err
+		return r
+	}
+	if !present {
+		return r
+	}
+	for _, rule := range rules {
+		name, _ := rule["model_name"].(string)
+		if strings.TrimSpace(name) != modelName {
+			continue
+		}
+		settings := make(map[string]any, len(r.Settings))
+		for key, value := range r.Settings {
+			settings[key] = value
+		}
+		settings["routing_strategy"] = strings.TrimSpace(rule["routing_strategy"].(string))
+		if args, ok := rule["routing_strategy_args"].(map[string]any); ok {
+			settings["routing_strategy_args"] = args
+		} else {
+			settings["routing_strategy_args"] = map[string]any{}
+		}
+		r.Settings = settings
+		return r
+	}
+	return r
+}
+
+// ValidateModelRoutingDocument validates the optional exact-name model routing
+// rules. Unknown fields elsewhere in the document are deliberately ignored.
+func ValidateModelRoutingDocument(settings map[string]any) error {
+	_, _, err := modelRoutingRules(settings)
+	return err
+}
+
+func modelRoutingRules(settings map[string]any) ([]map[string]any, bool, error) {
+	if settings == nil {
+		return nil, false, nil
+	}
+	raw, present := settings["model_routing"]
+	if !present || raw == nil {
+		return nil, present, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, true, fmt.Errorf("model_routing must be an array")
+	}
+	rules := make([]map[string]any, 0, len(items))
+	seen := map[string]bool{}
+	for i, item := range items {
+		rule, ok := item.(map[string]any)
+		if !ok {
+			return nil, true, fmt.Errorf("model_routing[%d] must be an object", i)
+		}
+		name, ok := rule["model_name"].(string)
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, true, fmt.Errorf("model_routing[%d].model_name is required", i)
+		}
+		if seen[name] {
+			return nil, true, fmt.Errorf("model_routing has duplicate model_name %q", name)
+		}
+		seen[name] = true
+		strategy, ok := rule["routing_strategy"].(string)
+		strategy = strings.TrimSpace(strategy)
+		if !ok || strategy == "" {
+			return nil, true, fmt.Errorf("model_routing[%d].routing_strategy is required", i)
+		}
+		if err := router.ValidateStrategy(strategy); err != nil {
+			return nil, true, fmt.Errorf("model_routing[%d].routing_strategy: %w", i, err)
+		}
+		if args, exists := rule["routing_strategy_args"]; exists && args != nil {
+			if _, ok := args.(map[string]any); !ok {
+				return nil, true, fmt.Errorf("model_routing[%d].routing_strategy_args must be an object", i)
+			}
+		}
+		rules = append(rules, rule)
+	}
+	return rules, true, nil
+}
+
 // Retries is how many times one deployment is tried before the next is used.
 // A value below one becomes one: a request that is never attempted cannot
 // succeed, and the caller would see a 502 for what is really a settings mistake.
@@ -277,7 +370,13 @@ func (r RouteSettings) WeightOverrides() map[string]float64 {
 			if !ok || weight < 0 {
 				continue
 			}
-			out[apiBase+"|"+model] = weight
+			if id, _ := row["pricing_id"].(string); strings.TrimSpace(id) != "" {
+				out["pricing:"+strings.TrimSpace(id)] = weight
+			} else if id, _ := row["deployment_id"].(string); strings.TrimSpace(id) != "" {
+				out["deployment:"+strings.TrimSpace(id)] = weight
+			} else {
+				out[apiBase+"|"+model] = weight
+			}
 		}
 	case map[string]any:
 		for id, value := range raw {

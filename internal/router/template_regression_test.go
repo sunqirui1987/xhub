@@ -79,6 +79,25 @@ func TestCooldownIDUsesConfiguredStablePricingIdentity(t *testing.T) {
 	}
 }
 
+func TestTemplateWeightsPreferStableIdentityAndKeepLegacyFallback(t *testing.T) {
+	a := deployment("shared-name", "same", 1)
+	b := deployment("shared-name", "same", 1)
+	a.LiteLLMParams["deployment_id"] = "supplier-a"
+	b.LiteLLMParams["deployment_id"] = "supplier-b"
+	weighted := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{
+		DeploymentID(a):         9,
+		"deployment:supplier-a": 3,
+		"deployment:supplier-b": 7,
+	})
+	if paramFloat(weighted[0], "weight", 0) != 3 || paramFloat(weighted[1], "weight", 0) != 7 {
+		t.Fatalf("stable identities did not isolate weights: %#v", weighted)
+	}
+	legacy := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{DeploymentID(a): 5})
+	if paramFloat(legacy[0], "weight", 0) != 5 || paramFloat(legacy[1], "weight", 0) != 5 {
+		t.Fatalf("legacy physical identity stopped applying: %#v", legacy)
+	}
+}
+
 func TestRuntimeMetricsUseCredentialAwareIDs(t *testing.T) {
 	a := deployment("shared-name", "same", 1)
 	b := deployment("shared-name", "same", 1)

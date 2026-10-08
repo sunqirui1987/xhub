@@ -1,75 +1,41 @@
-# config
+# 启动配置与模型定义
 
-## 这个模块做什么
+[English](readme.md) · [全功能实现说明](../../docs/development/implementation.md)
 
-`config` 读取网关进程启动时的 YAML。把 `configs/config.yaml` 变成 `Config` 只走这里。空的数据库地址和 SQLite 会被拒绝，进程不会悄悄退回本地文件库。
+## 职责与实现契约
 
-## 功能
+config.go 定义 Config、ModelEntry，加载 YAML 并解析 os.environ/NAME 引用。未知 router_settings 和 general_settings 字段保留，便于配置往返，但保存不意味着数据面一定执行。数据库地址只支持 PostgreSQL URL。
+Load 的平台默认策略是 simple-shuffle，重试预填 2，超时 60 秒；这些启动默认与 RouteSettings 对缺失字段的运行时读取规则要分开说明。ModelEntry.Disabled 从 model_info.disabled 的布尔值判断暂停，模型发现和运行时选路均排除暂停部署。
+管理员初始密码只用于创建尚不存在的账号；后续修改配置不覆盖已持久化密码。master 可选且不是登录凭据。命名凭据和内联历史凭据需按协议解析；环境变量不应写入响应、README 或日志。
 
-- `Load` 读 YAML，去掉两端空白后，把 `master_key`、`database_url`、`redis_url`、`admin_email`、`admin_password`、`admin_name` 里的 `os.environ/NAME` 换成环境变量。
-- `RouterSettings` 和 `GeneralSettings` 覆盖进程直接读取的字段。
-- `RouterRaw` 和 `GeneralRaw` 保留其余 YAML 键，数据库覆盖某一键时不会丢掉其它键。
-- `ModelEntry.ParamString` 读取一个上游参数，没有时用你给的默认值。
-- `SplitProviderModel` 在第一个 `/` 处拆开。左边是供应商，右边是模型。没有斜杠时供应商是 `openai`，模型是整段字符串。它不返回空供应商。
+## 源码职责与入口
 
-## 配置里的默认管理员
+### config.go
 
-`general_settings.admin_email` 和 `admin_password` 指定首位平台管理员。启动时如果该邮箱还没有账号，网关就创建它，因此新部署不必手动调 `POST /bootstrap`。
+公开类型：`Config`, `ModelEntry`, `RouterSettings`, `GeneralSettings`.
 
-这个密码是**初始密码**，不是被托管的密码：
+- [`func (m ModelEntry) Disabled() bool`](config.go) — Disabled reports whether this deployment is excluded from model discovery and runtime routing.
+- [`func Load(path string) (*Config, error)`](config.go) — Load reads YAML and requires a postgres:// or postgresql:// database URL.
+- [`func (e ModelEntry) ParamString(key, fallback string) string`](config.go) — ParamString 从一条部署的 litellm_params 里按名字读字符串。缺键或类型不对时返回 fallback。
+- [`func SplitProviderModel(raw string) (provider, model string)`](config.go) — SplitProviderModel splits provider/model. With no slash the provider is empty and the model name is the whole string.
 
-- 只在邮箱未知时创建账号
-- 之后改这个值**不会**重写已存的密码
-- 改线上密码走账号接口，不走配置文件
+## 对外 HTTP 边界
 
-两个值都支持 `os.environ/NAME`，部署时用它把密码留在文件之外。变量没设时解析成空串，而 `admin_email` 或 `admin_password` 为空就完全不执行创建。`disable_env_credential_login: true` 则彻底拒绝配置提供的账号。
+无本目录直接登记的 HTTP 路由。导出的 Go API 由上层调用；运行时目录调度或调用宿主的入口应沿依赖链追踪。
 
-树里的三份文件不是同一个地址：
+## 依赖关系
 
-| 文件 | 谁读 | `database_url` |
-| --- | --- | --- |
-| `configs/config.yaml` | `make run` | `postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable` |
-| `configs/config.example.yaml` | 没人读，它是模板 | `postgres://xhub:xhub@127.0.0.1:5432/xhub?sslmode=disable` |
-| `configs/config.docker.yaml` | 网关容器 | `postgres://xhub:xhub_dev_password@postgres:5432/xhub?sslmode=disable` |
+[internal/logx](../logx/readme_cn.md).
 
-Compose 把容器端口 `5432` 映到本机 `5433`。示例文件里的端口 `5432` 和密码 `xhub` 打不开这个库。
+## 验证与维护入口
 
-## 其它包怎么用
+| 测试文件 | 场景入口 |
+| --- | --- |
+| [config_test.go](config_test.go) | `TestLoadReadsTheConfiguredAdministrator`, `TestLoadResolvesTheAdministratorPasswordFromTheEnvironment`, `TestLoadDoesNotRequireAMasterKey`, `TestLoadWithoutAnAdministratorStillSucceeds`, `TestLoadReadsDisableEnvCredentialLogin` |
+| [url_test.go](url_test.go) | `TestDatabaseURLRequiresPostgresScheme` |
 
-导入 `github.com/sunqirui1987/xhub/internal/config`。
-
-```go
-cfg, err := config.Load("configs/config.yaml")
-if err != nil {
-    log.Fatal(err)
-}
-iamDB, err := iam.Open(ctx, cfg.GeneralSettings.DatabaseURL)
-srv := gateway.New(cfg, st, iamDB)
+```bash
+go test ./internal/config -count=1
 ```
 
-YAML 里一个模型是这样写的：
-
-```yaml
-model_list:
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com/v1
-router_settings:
-  routing_strategy: simple-shuffle
-```
-
-`database_url` 为空，或者以 `sqlite:`、`file:` 开头时，`Load` 返回错误。
-
-## Load 实际改了什么
-
-YAML 解码之后，`Load` 遍历每条部署 `litellm_params` 里的字符串。以 `os.environ/` 开头的值换成 `os.Getenv`。变量不存在时变成空串，于是这项配置保持关闭，而不是把占位符发给上游。这里不把 `custom_llm_provider` 转成小写；那一步在 `internal/llm` 灌凭据时做。
-
-空的 `routing_strategy` 变成 `simple-shuffle`。`num_retries` 为 0 时变成 2。`timeout` 为 0 时变成 60 秒。这些默认值在 `Load` 里写上，不是路由器写的。
-
-`ModelEntry.ParamString(key, fallback)` 从 `litellm_params` 读一个字符串。缺键或不是字符串时返回 `fallback`。`router.DeploymentID` 用它读 `api_base` 和 `model`，再用 `|` 拼成部署 id。
-
-## 这个包不做什么
-
-它不合并数据库里的覆盖值。那是 `internal/gateway/prefs` 的覆盖。它不打开 PostgreSQL。它也不监听 `:4000`。网关进程在启动时按命令行给出的路径调用一次 `Load`。
+数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。接口、字段或行为改变后同步本说明及相关功能文档。

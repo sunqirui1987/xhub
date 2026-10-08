@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Copy, FileJson, Loader2, Pencil, Plus, Shield } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 import { formatStrategyLabel } from "@/components/routing_groups/strategy";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import RouteTemplateGuide from "@/components/route_templates/RouteTemplateGuide";
 import {
   Dialog,
   DialogContent,
@@ -16,8 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import RouteTemplateLibrary from "./RouteTemplateLibrary";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import {
   getRouterSettingsCall,
@@ -40,7 +41,6 @@ import {
   deploymentsFromInfo,
   documentFromSettingsResponse,
   formFromBody,
-  formatUpdatedAt,
   nextCopyName,
   omitUntouchedRoutingGroups,
   prettyDocument,
@@ -57,7 +57,6 @@ type Draft = {
   lockedName: boolean;
   routingGroupsAtOpen: string;
 };
-type RenameTarget = { id: string; name: string; body: Record<string, unknown> };
 type UsageView = { name: string; rows: RouteTemplateUsage[]; refused: boolean };
 type JsonView = { name: string; body: Record<string, unknown> };
 
@@ -66,16 +65,17 @@ const draftFrom = (id: string, name: string, body: Record<string, unknown>, lock
   return { id, name, form, lockedName, routingGroupsAtOpen: lockedName ? form.routing_groups : "" };
 };
 
-const sheetTitle = (draft: Draft | null) => {
+const editorTitle = (draft: Draft | null) => {
   if (draft?.lockedName) return t("pages.routeTemplates.platformDefault");
   if (draft?.id) return t("pages.routeTemplates.edit");
   return t("pages.routeTemplates.create");
 };
 
-const usedByLabel = (count: number) =>
-  count > 0 ? t("pages.routeTemplates.usedByCount", { count }) : t("pages.routeTemplates.unused");
-
-const libraryIsEmpty = (count: number, loading: boolean) => count === 0 && !loading;
+const editorDescription = (draft: Draft | null) => {
+  if (draft?.lockedName) return t("pages.routeTemplates.platformEditHint");
+  if (draft?.id) return t("pages.routeTemplates.editHint");
+  return t("pages.routeTemplates.createHint");
+};
 
 const documentText = (row: JsonView | null) => (row ? prettyDocument(row.body) : "");
 
@@ -88,40 +88,37 @@ const scopeLabel = (scope: RouteTemplateUsage["scope_type"]) => {
 /**
  * The route template library.
  *
- * A template is one whole router settings document. The first row is the platform
- * default: the document every scope uses when it has not selected a template.
+ * A template is one whole router settings document. The platform default card
+ * holds the document every scope uses when it has not selected a template.
  * Named rows are what an organization, a team or a key can select.
  */
 const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessToken }) => {
   const { userId, userRole } = useAuthorized();
-  const [rows, setRows] = useState<RouteTemplateRow[]>([]);
-  const [platform, setPlatform] = useState<Record<string, unknown>>({});
   const [deployments, setDeployments] = useState<SplitDeployment[]>([]);
   const [jsonValid, setJsonValid] = useState(true);
   const [jsonView, setJsonView] = useState<JsonView | null>(null);
-  const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [rename, setRename] = useState<RenameTarget | null>(null);
+  const [search, setSearch] = useState("");
   const [usage, setUsage] = useState<UsageView | null>(null);
   const [pendingDelete, setPendingDelete] = useState<RouteTemplateRow | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!accessToken) return;
-    setLoading(true);
-    try {
-      const [next, settings] = await Promise.all([
-        loadRouteTemplates(accessToken),
-        getRouterSettingsCall(accessToken).catch(() => null),
+  const library = useQuery({
+    queryKey: ["route-template-library", accessToken],
+    enabled: !!accessToken,
+    queryFn: async () => {
+      const [rows, settings] = await Promise.all([
+        loadRouteTemplates(accessToken!),
+        getRouterSettingsCall(accessToken!),
       ]);
-      setRows(next);
-      setPlatform(documentFromSettingsResponse(settings));
-    } catch {
-      toast.fromError(t("Failed to load the templates"));
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken]);
+      return { rows, platform: documentFromSettingsResponse(settings) };
+    },
+  });
+  const rows = library.data?.rows ?? [];
+  const platform = library.data?.platform ?? {};
+  const loading = library.isPending;
+  const refresh = () => library.refetch();
+  const showLibrary = !draft && !library.isError && !loading;
 
   useEffect(() => {
     if (!accessToken || !userId || !userRole) return;
@@ -136,32 +133,12 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     };
   }, [accessToken, userId, userRole]);
 
-  useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-    void Promise.all([loadRouteTemplates(accessToken), getRouterSettingsCall(accessToken).catch(() => null)])
-      .then(([next, settings]) => {
-        if (cancelled) return;
-        setRows(next);
-        setPlatform(documentFromSettingsResponse(settings));
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLoading(false);
-        toast.fromError(t("Failed to load the templates"));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
-
   const summaryLabels = useMemo(
     () => ({
       strategy: (value: string) => t(formatStrategyLabel(value)),
-      retries: (value: number) => t("{count} retries", { count: value }),
+      retries: (value: number) => t("pages.routeTemplates.attemptsSummary", { count: value }),
       timeout: (seconds: number) => t("pages.routeTemplates.timeoutSummary", { seconds }),
-      fallbacks: (value: number) => t("{count} fallbacks", { count: value }),
+      fallbacks: (value: number) => t("pages.routeTemplates.fallbacksSummary", { count: value }),
       none: t("no fallbacks"),
     }),
     [],
@@ -173,10 +150,11 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
   };
 
   const save = async () => {
-    if (!accessToken || !draft || !jsonValid) return;
+    if (!accessToken || !draft) return;
+    if (!jsonValid || saving || !draft.name.trim()) return;
     const written = bodyFromForm(draft.form);
     if (!written.ok) {
-      toast.fromError(t("pages.routeTemplates.invalidNumber"));
+      toast.fromError(t("pages.routeTemplates.invalidField", { field: written.field }));
       return;
     }
     setSaving(true);
@@ -186,7 +164,11 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
         await setCallbacksCall(accessToken, { router_settings: patch });
         toast.success(t("pages.routeTemplates.platformSaved"));
       } else {
-        await saveRouteTemplate(accessToken, { id: draft.id || undefined, name: draft.name, body: written.body });
+        await saveRouteTemplate(accessToken, {
+          id: draft.id || undefined,
+          name: draft.name.trim(),
+          body: written.body,
+        });
         toast.success(t("pages.routeTemplates.saved"));
       }
       setDraft(null);
@@ -198,38 +180,25 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     }
   };
 
-  const copyDocument = async (name: string, body: Record<string, unknown>) => {
-    if (!accessToken) return;
+  const copyDocument = (name: string, body: Record<string, unknown>) => {
     const nextName = nextCopyName(
       name,
       rows.map((item) => item.name),
       (source) => t("pages.routeTemplates.copyOf", { name: source }),
     );
-    try {
-      await saveRouteTemplate(accessToken, { name: nextName, body });
-      toast.success(t("pages.routeTemplates.copied"));
-      await refresh();
-    } catch {
-      toast.fromError(t("Failed to save the template"));
-    }
-  };
-
-  const commitRename = async () => {
-    if (!accessToken || !rename) return;
-    try {
-      await saveRouteTemplate(accessToken, { id: rename.id, name: rename.name, body: rename.body });
-      toast.success(t("pages.routeTemplates.renamed"));
-      setRename(null);
-      await refresh();
-    } catch {
-      toast.fromError(t("Failed to save the template"));
-    }
+    setJsonValid(true);
+    setDraft(draftFrom("", nextName, body, false));
   };
 
   const showUsage = async (row: RouteTemplateRow, refused: boolean) => {
     if (!accessToken) return;
-    const listed = await loadTemplateUsage(accessToken, row.id).catch(() => [] as RouteTemplateUsage[]);
-    setUsage({ name: row.name, rows: listed, refused });
+    try {
+      const listed = await loadTemplateUsage(accessToken, row.id);
+      setUsage({ name: row.name, rows: listed, refused });
+      setPendingDelete(null);
+    } catch (error) {
+      toast.fromError(error);
+    }
   };
 
   const remove = async (row: RouteTemplateRow) => {
@@ -271,140 +240,125 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
 
   return (
     <div className="w-full space-y-6">
-      <div className="max-w-3xl">
-        <h2 className="text-2xl font-semibold text-foreground">{t("pages.routeTemplates.title")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{t("pages.routeTemplates.subtitle")}</p>
-        <p className="mt-2 text-sm text-muted-foreground">{t("pages.routeTemplates.platformDefaultHint")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          {draft && (
+            <Button variant="ghost" size="sm" className="-ml-3" disabled={saving} onClick={() => setDraft(null)}>
+              <ArrowLeft />
+              {t("pages.routeTemplates.backToLibrary")}
+            </Button>
+          )}
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+            {draft ? editorTitle(draft) : t("pages.routeTemplates.title")}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {draft ? editorDescription(draft) : t("pages.routeTemplates.pageIntro")}
+          </p>
+        </div>
+        {!draft && (
+          <Button onClick={startCreate} disabled={loading || library.isError}>
+            <Plus />
+            {t("pages.routeTemplates.create")}
+          </Button>
+        )}
       </div>
 
-      <Card>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-medium">{t("pages.routeTemplates.templates")}</h3>
-            <Button size="sm" onClick={startCreate}>
-              <Plus className="mr-1 size-4" />
-              {t("pages.routeTemplates.create")}
+      <RouteTemplateGuide compact={!!draft} />
+
+      {library.isError && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-destructive">{t("Failed to load the templates")}</p>
+            <Button variant="outline" size="sm" onClick={() => void refresh()}>
+              {t("pages.routeTemplates.reload")}
             </Button>
-          </div>
+          </CardContent>
+        </Card>
+      )}
+      {!library.isError && loading && (
+        <div
+          className="flex items-center justify-center gap-2 rounded-xl border border-dashed py-12 text-sm text-muted-foreground"
+          role="status"
+        >
+          <Loader2 className="size-4 animate-spin" />
+          {t("pages.routeTemplates.loadingTemplates")}
+        </div>
+      )}
+      {showLibrary && (
+        <>
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Shield className="size-5" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">{t("pages.routeTemplates.platformDefault")}</h3>
+                    <Badge variant="secondary">{t("pages.routeTemplates.defaultBadge")}</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{summarizeTemplate(platform, summaryLabels)}</p>
+                  <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.platformDefaultHint")}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setJsonView({ name: t("pages.routeTemplates.platformDefault"), body: platform })}
+                >
+                  <FileJson />
+                  {t("pages.routeTemplates.jsonTab")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => copyDocument(t("pages.routeTemplates.platformDefault"), platform)}
+                >
+                  <Copy />
+                  {t("pages.routeTemplates.copy")}
+                </Button>
+                <Button size="sm" variant="outline" onClick={openPlatform}>
+                  <Pencil />
+                  {t("pages.routeTemplates.edit")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
-          <div className="overflow-x-auto">
-            <Table className="min-w-[760px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("pages.routeTemplates.name")}</TableHead>
-                  <TableHead>{t("pages.routeTemplates.summary")}</TableHead>
-                  <TableHead>{t("pages.routeTemplates.usedBy")}</TableHead>
-                  <TableHead>{t("pages.routeTemplates.updatedAt")}</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell className="font-medium">{t("pages.routeTemplates.platformDefault")}</TableCell>
-                  <TableCell className="max-w-md text-muted-foreground">
-                    <p>{summarizeTemplate(platform, summaryLabels)}</p>
-                    <pre className="mt-1 max-h-24 overflow-auto rounded bg-muted p-2 font-mono text-[11px] text-foreground">
-                      {prettyDocument(platform)}
-                    </pre>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mt-1 h-auto px-2 py-1"
-                      onClick={() => setJsonView({ name: t("pages.routeTemplates.platformDefault"), body: platform })}
-                    >
-                      {t("pages.routeTemplates.viewJson")}
-                    </Button>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{t("pages.routeTemplates.platformUsedBy")}</TableCell>
-                  <TableCell className="text-muted-foreground">—</TableCell>
-                  <TableCell className="text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={openPlatform}>
-                      <Pencil className="mr-1 size-3.5" />
-                      {t("pages.routeTemplates.edit")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void copyDocument(t("pages.routeTemplates.platformDefault"), platform)}
-                    >
-                      <Copy className="mr-1 size-3.5" />
-                      {t("pages.routeTemplates.copy")}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-medium">{row.name}</TableCell>
-                    <TableCell className="max-w-md text-muted-foreground">
-                      <p>{summarizeTemplate(row.body, summaryLabels)}</p>
-                      <pre className="mt-1 max-h-24 overflow-auto rounded bg-muted p-2 font-mono text-[11px] text-foreground">
-                        {prettyDocument(row.body)}
-                      </pre>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="mt-1 h-auto px-2 py-1"
-                        onClick={() => setJsonView(row)}
-                      >
-                        {t("pages.routeTemplates.viewJson")}
-                      </Button>
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-auto px-2 py-1 text-muted-foreground"
-                        onClick={() => void showUsage(row, false)}
-                      >
-                        {usedByLabel(row.usedBy)}
-                      </Button>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{formatUpdatedAt(row.updated_at) || "—"}</TableCell>
-                    <TableCell className="text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" disabled={!row.writable} onClick={() => openNamed(row)}>
-                        <Pencil className="mr-1 size-3.5" />
-                        {t("pages.routeTemplates.edit")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!row.writable}
-                        onClick={() => setRename({ id: row.id, name: row.name, body: row.body })}
-                      >
-                        {t("pages.routeTemplates.rename")}
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => void copyDocument(row.name, row.body)}>
-                        <Copy className="mr-1 size-3.5" />
-                        {t("pages.routeTemplates.copy")}
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={!row.writable} onClick={() => setPendingDelete(row)}>
-                        <Trash2 className="size-4" />
-                        <span className="sr-only">{t("pages.routeTemplates.delete")}</span>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {libraryIsEmpty(rows.length, loading) && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-muted-foreground">
-                      {t("pages.routeTemplates.empty")}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+          <RouteTemplateLibrary
+            rows={rows}
+            search={search}
+            onSearch={setSearch}
+            summaryLabels={summaryLabels}
+            onCreate={startCreate}
+            onViewJson={setJsonView}
+            onCopy={(row) => copyDocument(row.name, row.body)}
+            onDelete={setPendingDelete}
+            onEdit={openNamed}
+            onUsage={(row) => void showUsage(row, false)}
+          />
+        </>
+      )}
 
-      <Sheet open={draft !== null} onOpenChange={(open) => !open && setDraft(null)}>
-        <SheetContent side="right" className="w-full data-[side=right]:sm:max-w-3xl">
-          <SheetHeader>
-            <SheetTitle>{sheetTitle(draft)}</SheetTitle>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-            {draft && (
+      {draft && (
+        <Card role="region" aria-label={editorTitle(draft)} className="gap-0 py-0">
+          <div className="sticky top-0 z-sticky flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b bg-card px-5 py-3">
+            <p className="text-sm text-muted-foreground">{t("pages.routeTemplates.draftHint")}</p>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" disabled={saving} onClick={() => setDraft(null)}>
+                {t("Cancel")}
+              </Button>
+              <Button onClick={() => void save()} disabled={saving || !jsonValid || !draft.name.trim()}>
+                {saving && <Loader2 className="animate-spin" />}
+                {t(draft.id ? "Save" : "pages.routeTemplates.create")}
+              </Button>
+            </div>
+          </div>
+          <CardContent className="py-6">
+            <fieldset disabled={saving} className="min-w-0">
               <TemplateEditor
+                key={draft.id || "new"}
                 name={draft.name}
                 nameLocked={draft.lockedName}
                 form={draft.form}
@@ -414,18 +368,10 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
                 onChange={(form) => setDraft({ ...draft, form })}
                 onJsonValid={setJsonValid}
               />
-            )}
-          </div>
-          <SheetFooter className="flex-row justify-end border-t border-border">
-            <Button variant="ghost" onClick={() => setDraft(null)}>
-              {t("Cancel")}
-            </Button>
-            <Button onClick={() => void save()} disabled={saving || !jsonValid}>
-              {t("Save")}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+            </fieldset>
+          </CardContent>
+        </Card>
+      )}
 
       <Dialog open={jsonView !== null} onOpenChange={(open) => !open && setJsonView(null)}>
         <DialogContent className="sm:max-w-2xl">
@@ -436,25 +382,6 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
           <pre className="max-h-[60vh] overflow-auto rounded bg-muted p-3 font-mono text-xs">
             {documentText(jsonView)}
           </pre>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={rename !== null} onOpenChange={(open) => !open && setRename(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("pages.routeTemplates.rename")}</DialogTitle>
-          </DialogHeader>
-          <Input
-            aria-label={t("pages.routeTemplates.name")}
-            value={rename?.name ?? ""}
-            onChange={(event) => rename && setRename({ ...rename, name: event.target.value })}
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setRename(null)}>
-              {t("Cancel")}
-            </Button>
-            <Button onClick={() => void commitRename()}>{t("Save")}</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

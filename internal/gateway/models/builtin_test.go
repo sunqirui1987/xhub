@@ -1,6 +1,7 @@
 package models
 
 import (
+	"math"
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/config"
@@ -68,6 +69,21 @@ func TestPlaygroundGroupSkipsProviderShellsAndUsesChat(t *testing.T) {
 	}
 }
 
+func TestPlaygroundGroupsExcludeDisabledDeployments(t *testing.T) {
+	got := playgroundGroups([]config.ModelEntry{
+		{ModelName: "mixed", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"disabled": true}},
+		{ModelName: "mixed", LiteLLMParams: map[string]any{"custom_llm_provider": "anthropic"}, ModelInfo: map[string]any{"disabled": false, "mode": "chat"}},
+		{ModelName: "off", ModelInfo: map[string]any{"disabled": true}},
+	})
+	if len(got) != 1 || got[0]["model_group"] != "mixed" {
+		t.Fatalf("groups %#v", got)
+	}
+	providers := got[0]["providers"].([]string)
+	if len(providers) != 1 || providers[0] != "anthropic" {
+		t.Fatalf("disabled provider remained: %#v", providers)
+	}
+}
+
 func TestParseModelIDs(t *testing.T) {
 	ids := ParseModelIDs([]byte(`{"data":[{"id":"gpt-4o"},{"id":""},{"id":"gpt-4o"},{"id":"qwen"}]}`))
 	if len(ids) != 2 || ids[0] != "gpt-4o" || ids[1] != "qwen" {
@@ -90,16 +106,23 @@ func TestBuiltinsEnabled(t *testing.T) {
 }
 
 func TestParseCatalogKeepsCategoryAndPrices(t *testing.T) {
-	body := []byte(`{"data":[{"id":"gpt-vision","category":"vision","input_price":1.25,"output_price":10},{"id":"deepseek/deepseek-v3","pricing":{"prompt":0.2,"completion":0.8}}]}`)
+	body := []byte(`{"data":[{"id":"gpt-vision","category":"vision","input_price":1.25,"output_price":10},{"id":"deepseek-v3","category":"chat","pricing":{"prompt":0.0000002,"completion":0.0000008}},{"id":"audio-model","category":"audio","input_price":2,"pricing":{"completion":0.000003}}]}`)
 	items := ParseCatalog(body)
-	if len(items) != 2 {
+	if len(items) != 3 {
 		t.Fatalf("%#v", items)
 	}
 	if items[0].Category != "vision" || items[0].InputPrice == nil || *items[0].InputPrice != 1.25 || items[0].OutputPrice == nil || *items[0].OutputPrice != 10 {
 		t.Fatalf("vision card %#v", items[0])
 	}
-	if items[1].Category != "deepseek" || items[1].InputPrice == nil || *items[1].InputPrice != 0.2 || items[1].OutputPrice == nil || *items[1].OutputPrice != 0.8 {
+	if items[1].Category != "chat" || items[1].InputPrice == nil || math.Abs(*items[1].InputPrice-0.2) > 1e-12 || items[1].OutputPrice == nil || math.Abs(*items[1].OutputPrice-0.8) > 1e-12 {
 		t.Fatalf("priced card %#v", items[1])
+	}
+	if items[2].InputPrice != nil || items[2].OutputPrice != nil {
+		t.Fatalf("multimodal card must remain unpriced %#v", items[2])
+	}
+	normalized := ParseCatalog([]byte(`{"data":[{"id":"embed","category":"embedding","input_cost_per_token":0.000000125}]}`))
+	if len(normalized) != 1 || normalized[0].InputPrice == nil || math.Abs(*normalized[0].InputPrice-0.125) > 1e-12 {
+		t.Fatalf("normalized token price was not converted to USD/1M %#v", normalized)
 	}
 	plain := ParseCatalog([]byte(`{"data":[{"id":"gpt-4o"}]}`))
 	if len(plain) != 1 || plain[0].InputPrice != nil || plain[0].OutputPrice != nil || plain[0].Category != "llm" {
@@ -118,6 +141,11 @@ func TestFillFromCostMapUsesPriceData(t *testing.T) {
 	fillFromCostMap(&item)
 	if *item.InputPrice != 1.25 {
 		t.Fatalf("payload price was replaced: %v", *item.InputPrice)
+	}
+	unpriced := CatalogModel{ID: "gpt-oss-120b", Category: "audio"}
+	fillFromCostMap(&unpriced)
+	if unpriced.InputPrice != nil || unpriced.OutputPrice != nil {
+		t.Fatalf("multimodal item was priced from token cost map: %#v", unpriced)
 	}
 }
 

@@ -155,7 +155,6 @@ func sessionModule(s *Server) httpx.Module {
 		reg.Handle("GET /model_hub", s.publicModelHub)
 		reg.Handle("GET /model_hub/{facet}", s.publicModelHubFacet)
 		reg.Handle("POST /model_hub/update_useful_links", s.updateUsefulLinks)
-		reg.Handle("GET /auto_router/shadow_eval", s.shadowEvalList)
 	})
 }
 

@@ -11,7 +11,6 @@ import { t } from "@/i18n";
 import UsageTab from "./UsageTab";
 import PromptCompressionTab from "./PromptCompressionTab";
 import PromptCachingTab from "./PromptCachingTab";
-import AutoRouterBenchmarksTab from "./AutoRouterBenchmarksTab";
 import { useDailyActivityRange } from "./useDailyActivityRange";
 
 interface CostOptimizationViewProps {
@@ -57,9 +56,6 @@ const CostOptimizationView: React.FC<CostOptimizationViewProps> = ({ accessToken
                   <TabsTrigger value="caching" className="flex-none px-0 py-[7px] data-active:font-semibold">
                     {t("Prompt Caching")}
                   </TabsTrigger>
-                  <TabsTrigger value="autorouter-usage" className="flex-none px-0 py-[7px] data-active:font-semibold">
-                    {t("Auto-Router")}
-                  </TabsTrigger>
                 </>
               )}
             </TabsList>
@@ -73,10 +69,7 @@ const CostOptimizationView: React.FC<CostOptimizationViewProps> = ({ accessToken
           <Info className="mt-0.5 size-5 text-primary" aria-hidden="true" />
           <p className="font-medium text-foreground">{t("This is an experimental dashboard")}</p>
           <p className="col-start-2 text-sm text-muted-foreground">
-            {t("Have feedback? Join the discussion")}{" "}
-            
-              {t("here")}
-            
+            {t("Have feedback? Join the discussion")} {t("here")}
           </p>
         </div>
 
@@ -96,9 +89,6 @@ const CostOptimizationView: React.FC<CostOptimizationViewProps> = ({ accessToken
             </TabsContent>
             <TabsContent value="caching" keepMounted={visitedTabs.includes("caching")}>
               <PromptCachingTab accessToken={accessToken} activity={activity} />
-            </TabsContent>
-            <TabsContent value="autorouter-usage" keepMounted={visitedTabs.includes("autorouter-usage")}>
-              <AutoRouterBenchmarksTab accessToken={accessToken} activity={activity} />
             </TabsContent>
           </>
         )}

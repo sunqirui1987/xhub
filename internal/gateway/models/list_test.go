@@ -33,3 +33,14 @@ func TestNonModelEntryKeepsOrdinaryModels(t *testing.T) {
 		t.Fatal("ordinary model was classified as a provider entry")
 	}
 }
+
+func TestProxyModelNamesOmitsOnlyFullyDisabledNames(t *testing.T) {
+	names := proxyModelNames([]config.ModelEntry{
+		{ModelName: "mixed", ModelInfo: map[string]any{"disabled": true}},
+		{ModelName: "mixed", ModelInfo: map[string]any{"disabled": false}},
+		{ModelName: "off", ModelInfo: map[string]any{"disabled": true}},
+	})
+	if len(names) != 1 || names[0] != "mixed" {
+		t.Fatalf("disabled deployments leaked into public names: %v", names)
+	}
+}

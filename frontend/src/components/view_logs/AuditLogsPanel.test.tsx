@@ -46,7 +46,6 @@ const defaultProps = {
   userRole: "Admin",
   userID: "user-1",
   isActive: true,
-  premiumUser: true,
 };
 
 const renderPanel = () => {
@@ -62,7 +61,7 @@ const TEXT_FILTERS: { filterId: string; placeholder: string; paramKey: keyof Aud
   { filterId: "object_id", placeholder: "Enter object ID…", paramKey: "object_id" },
   { filterId: "changed_by", placeholder: "Enter user ID…", paramKey: "changed_by" },
   { filterId: "team_id", placeholder: "Enter team ID…", paramKey: "object_team_id" },
-  { filterId: "key_hash", placeholder: "Enter key hash…", paramKey: "object_key_hash" },
+  { filterId: "key_hash", placeholder: "Enter key ID…", paramKey: "object_key_hash" },
 ];
 
 const SELECT_FILTERS: {
@@ -73,13 +72,19 @@ const SELECT_FILTERS: {
   value: string;
 }[] = [
   { label: "Action", comboboxIndex: 0, option: "Created", paramKey: "action", value: "created" },
-  { label: "Table", comboboxIndex: 1, option: "Teams", paramKey: "table_name", value: "LiteLLM_TeamTable" },
+  { label: "Table", comboboxIndex: 1, option: "Team", paramKey: "table_name", value: "LiteLLM_TeamTable" },
 ];
 
 describe("AuditLogsPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     respondWith(0);
+  });
+
+  it("shows a load failure instead of silently presenting an empty audit trail", async () => {
+    vi.mocked(uiAuditLogsCall).mockRejectedValue(new Error("Not Found"));
+    renderPanel();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load audit logs");
   });
 
   it("sends the typed search as params.search and returns to the first page", async () => {
