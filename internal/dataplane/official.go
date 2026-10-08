@@ -12,13 +12,17 @@ package dataplane
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -39,7 +43,11 @@ func ServeBypass(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.
 	if p == nil {
 		return
 	}
-	raw, _ := io.ReadAll(r.Body)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "could not read request body")
+		return
+	}
 	var body map[string]any
 	if len(bytes.TrimSpace(raw)) > 0 {
 		if json.Unmarshal(raw, &body) != nil {
@@ -84,12 +92,16 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		return
 	}
 	settings := h.RouteSettingsFor(principal)
+	if settings.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
+		return
+	}
 	list := eligible(h, hit)
 	if router.IsSplitStrategy(settings.Strategy()) {
 		list = router.ApplyWeights(list, settings.WeightOverrides())
 	}
+	list, _ = dropPaused(list)
 	pool := router.Order(list, alias, settings.Strategy(), h.RouteState())
-	pool, _ = dropPaused(pool)
 	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
@@ -97,13 +109,20 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	var dep config.ModelEntry
 	var respBody []byte
 	var status int
+	var selectedID string
 	tried := false
+	originalHit := hit
 	for _, rawDep := range pool {
 		candidate, err := h.AttachCredential(rawDep)
-		if err != nil { continue }
-		candidateHit := provider.ApplyOverride(candidate, hit)
+		if err != nil {
+			continue
+		}
+		candidateHit := provider.ApplyOverride(candidate, originalHit)
+		hit = candidateHit
 		base, key := bypassAuth(candidateHit, candidate)
-		if base == "" || key == "" { continue }
+		if base == "" || key == "" {
+			continue
+		}
 		body[field] = provider.OfficialID(candidateHit.Transport.StripPrefix, candidate.ParamString("model", alias))
 		payload, err := json.Marshal(body)
 		if err != nil {
@@ -119,13 +138,16 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 					return
 				}
 				principal = fresh
-				if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) { return }
+				if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) {
+					return
+				}
 			}
 			tried = true
 			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.TimeoutSeconds()*float64(time.Second)))
 			respBody, status, err = forwardOfficial(h, r.WithContext(ctx), http.MethodPost, url, key, payload, r.Header)
 			cancel()
-			dep, candidateHit = candidate, candidateHit
+			dep = candidate
+			selectedID = router.CooldownID(rawDep)
 			if err != nil {
 				logx.Error("bypass forward path=%s err=%s", r.URL.Path, safeErr(err))
 				h.NoteFailure(router.CooldownID(rawDep), settings)
@@ -136,7 +158,9 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 			}
 			if status >= 500 || status == http.StatusTooManyRequests {
 				h.NoteFailure(router.CooldownID(rawDep), settings)
-				if r.Context().Err() != nil { return }
+				if r.Context().Err() != nil {
+					return
+				}
 				continue
 			}
 			hit = candidateHit
@@ -150,9 +174,9 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 forwarded:
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
-	depID := router.DeploymentID(dep)
+	depID := selectedID
 	if taskID := provider.ReadTaskID(doc, hit.Transport.TaskID); taskID != "" && status < 400 {
-		h.PinOfficial(taskID, depID)
+		h.PinOfficial(officialTaskScope(principal, hit.Transport.ID, taskID), selectedID)
 	}
 	plan := h.PlanRoute(r, alias, body, principal)
 	h.RememberExchange(callID, r, raw, respBody)
@@ -169,13 +193,16 @@ forwarded:
 func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.Hit, id, callID string, start time.Time, principal *auth.Principal) {
 	var dep config.ModelEntry
 	var ok bool
+	scopedID := officialTaskScope(principal, hit.Transport.ID, id)
+	var depID string
 	if id != "" {
-		pinned := h.OfficialDeployment(id)
+		pinned := h.OfficialDeployment(scopedID)
 		if pinned == "" {
 			httpx.WriteTypedError(w, r.URL.Path, 404, "not_found", "unknown task")
 			return
 		}
 		dep, ok = h.FindDeployment(pinned)
+		depID = pinned
 		if !ok || !sameEndpoint(dep, hit) {
 			httpx.WriteTypedError(w, r.URL.Path, 404, "not_found", "unknown task")
 			return
@@ -192,6 +219,17 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 			return
 		}
 	}
+	if depID == "" {
+		depID = router.CooldownID(dep)
+	}
+	if !h.EnforceIdentityLimits(w, r.URL.Path, principal, dep.ModelName, 0) {
+		return
+	}
+	settings := h.RouteSettingsFor(principal)
+	if settings.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
+		return
+	}
 	hit = provider.ApplyOverride(dep, hit)
 	dep, err := h.AttachCredential(dep)
 	if err != nil {
@@ -204,7 +242,9 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		return
 	}
 	url := withQuery(base+provider.Expand(hit.Action.UpstreamPath, hit.Names), r)
-	respBody, status, err := forwardOfficial(h, r, r.Method, url, key, nil, r.Header)
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.TimeoutSeconds()*float64(time.Second)))
+	defer cancel()
+	respBody, status, err := forwardOfficial(h, r.WithContext(ctx), r.Method, url, key, nil, r.Header)
 	if err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
 		return
@@ -212,15 +252,20 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
 	usage := usageFromOfficial(doc)
-	if id != "" && usage != nil && !h.OfficialBilled(id) {
-		h.MarkOfficialBilled(id)
+	settlementID := ""
+	if id != "" && status >= 200 && status < 300 && positiveOfficialUsage(usage) && !officialPending(doc) {
+		// Re-submit on every completed poll. The durable request_id constraint,
+		// not a process-local marker written before persistence, claims the bill.
+		settlementID = officialSettlementID(scopedID, depID)
 	} else {
 		usage = nil
 	}
-	depID := router.DeploymentID(dep)
 	plan := h.PlanRoute(r, dep.ModelName, nil, principal)
 	h.RememberExchange(callID, r, nil, respBody)
-	h.AnnotateCall(callID, dataplaneNote(hit, dep, plan.SessionID, depID, time.Since(start)))
+	note := dataplaneNote(hit, dep, plan.SessionID, depID, time.Since(start))
+	note.SettlementID = settlementID
+	note.SkipRouteUsage = true
+	h.AnnotateCall(callID, note)
 	h.RecordSpend(w, principal, callID, dep.ModelName, hit.Transport.ID+":"+hit.Action.Name, usage, start, false, status, depID)
 	writeThrough(w, status, respBody)
 }
@@ -263,25 +308,10 @@ func sameEndpoint(dep config.ModelEntry, hit provider.Hit) bool {
 	return provider.Includes(dep, hit.Transport.ID)
 }
 
-// pickDeployment 在匹配当前端点类型的部署里按路由策略选出一条。没有可选部署时返回假。
-// 参数 alias：请求正文模型字段的值，要和部署的 ModelName 一致。
-// 返回：选中的部署。没有匹配时 ok 为 false，调用方写 400。
-// 调用：serveBypassCreate。测试：逻辑测试按模型名打到对应密钥。
-func pickDeployment(h Bypass, hit provider.Hit, alias string) (config.ModelEntry, bool) {
-	list := eligible(h, hit)
-	pool := router.Order(list, alias, h.GatewayConfig().RouterSettings.RoutingStrategy, h.RouteState())
-	pool, paused := dropPaused(pool)
-	if len(pool) == 0 {
-		_ = paused
-		return config.ModelEntry{}, false
-	}
-	return pool[0], true
-}
-
 // eligible 列出模型表里属于当前端点类型、或名字与自定义路径一致的部署。
 // 参数 h、hit：读模型表和当前匹配。
-// 返回：未再过滤暂停状态的部署。暂停由 pickDeployment 和 oneUpstream 去掉。
-// 调用：pickDeployment、oneUpstream。无单独测试。
+// 返回：未再过滤暂停状态的部署。暂停由创建和 oneUpstream 去掉。
+// 调用：serveBypassCreate、oneUpstream。测试：bypass_logic_test.go。
 func eligible(h Bypass, hit provider.Hit) []config.ModelEntry {
 	var out []config.ModelEntry
 	for _, m := range h.Models() {
@@ -354,7 +384,7 @@ func withQuery(url string, r *http.Request) string {
 }
 
 // forwardOfficial 向供应商发一次 HTTP。Authorization 换成这条部署的密钥。
-// Host 和 Content-Length 不转发。其余入站头原样复制。响应最多读 8 MiB。
+// Host、网关身份和逐跳头不转发。响应最多读 8 MiB，超出返回错误。
 //
 // 参数 method、url：上游方法和地址。apiKey：Bearer 密钥。body：创建时的 JSON，查询时为 nil。
 // 参数 in：入站头。
@@ -370,7 +400,18 @@ func forwardOfficial(h Bypass, r *http.Request, method, url, apiKey string, body
 		return nil, 0, err
 	}
 	for k, vals := range in {
-		if strings.EqualFold(k, "Authorization") || strings.EqualFold(k, "Host") || strings.EqualFold(k, "Content-Length") {
+		switch strings.ToLower(k) {
+		case "authorization", "host", "content-length", "cookie", "x-api-key", "api-key", "x-litellm-api-key", "connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade":
+			continue
+		}
+		connectionHeader := false
+		for _, named := range strings.Split(in.Get("Connection"), ",") {
+			if strings.EqualFold(strings.TrimSpace(named), k) {
+				connectionHeader = true
+				break
+			}
+		}
+		if connectionHeader {
 			continue
 		}
 		for _, v := range vals {
@@ -382,14 +423,69 @@ func forwardOfficial(h Bypass, r *http.Request, method, url, apiKey string, body
 		req.Header.Set("Content-Type", "application/json")
 	}
 	client := *h.HTTPClient()
-	if _, deadline := r.Context().Deadline(); deadline { client.Timeout = 0 }
+	if _, deadline := r.Context().Deadline(); deadline {
+		client.Timeout = 0
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
+	if err == nil && len(out) > 8<<20 {
+		err = fmt.Errorf("official response exceeds 8 MiB")
+	}
 	return out, resp.StatusCode, err
+}
+
+// officialTaskScope 隔离不同调用方和不同供应商端点的任务编号。
+// 参数 p、transport、id：调用方、端点类型和上游任务编号。
+// 返回：固定长度、不含凭证的任务范围键。
+// 调用：创建和查询。测试：official_template_test.go。
+func officialTaskScope(p *auth.Principal, transport, id string) string {
+	caller := ""
+	if p != nil {
+		if p.Hash != "" {
+			caller = "key:" + p.Hash
+		} else {
+			caller = "user:" + p.UserID
+		}
+	}
+	raw, _ := json.Marshal([]string{caller, transport, id})
+	sum := sha256.Sum256(raw)
+	return "v2:" + hex.EncodeToString(sum[:])
+}
+
+// officialSettlementID includes the pinned credential/deployment as well as
+// the caller, transport and task scope. Zero/progress polls keep their own IDs.
+// 参数 scopedID：隔离调用主体和任务的身份。depID：钉住的部署身份。
+// 返回：稳定的持久层结算 request_id。
+// 调用：serveBypassFollow。测试：official_settlement_test.go。
+func officialSettlementID(scopedID, depID string) string {
+	raw, _ := json.Marshal([]string{scopedID, depID})
+	sum := sha256.Sum256(raw)
+	return "official-settlement:" + hex.EncodeToString(sum[:])
+}
+
+// positiveOfficialUsage 判断规范化后是否有正用量。
+// 参数 usage：上游用量对象。返回：任一计费维度为正时为真。
+// 调用：serveBypassFollow。测试：official_settlement_test.go。
+func positiveOfficialUsage(usage map[string]any) bool {
+	u := catalog.NormalizeUsage(usage)
+	return u.PromptTokens > 0 || u.CompletionTokens > 0 || u.CachedTokens > 0 ||
+		u.CacheWriteTokens > 0 || u.Images > 0 || u.Seconds > 0 || u.Searches > 0
+}
+
+// officialPending 判断显式未完成或失败的任务，避免把进度用量当作最终账单。
+// 参数 doc：上游任务响应。返回：任务尚未成功完成时为真。
+// 调用：serveBypassFollow。测试：official_template_test.go。
+func officialPending(doc map[string]any) bool {
+	status, _ := doc["status"].(string)
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "queued", "pending", "running", "processing", "submitted", "failed", "error", "cancelled", "canceled":
+		return true
+	}
+	return false
 }
 
 // writeThrough 把上游状态码和正文写给调用方，Content-Type 固定为 application/json。

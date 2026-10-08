@@ -186,7 +186,7 @@ func APIKeyFrom(r *http.Request) string {
 	if v := stripBearer(r.Header.Get("x-litellm-api-key")); v != "" {
 		return v
 	}
-	h := r.Header.Get("Authorization")
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(h)), "bearer ") {
 		return stripBearer(h)
 	}

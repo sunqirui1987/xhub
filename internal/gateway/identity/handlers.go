@@ -962,12 +962,6 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, description := profilePatch(body)
-	if name != nil || description != nil {
-		if _, err := g.Identity().UpdateTeamProfile(r.Context(), actorOf(p), id, name, description); err != nil {
-			g.WriteIAMError(w, r, err)
-			return
-		}
-	}
 	status, budget := adminTeamPatch(body)
 	// The model list sits with the budget rather than with the profile: it is
 	// the team's ceiling, and a team administrator who could widen it would be
@@ -986,6 +980,14 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 			g.WriteAuthz(w, r, err)
 			return
 		}
+	}
+	if name != nil || description != nil {
+		if _, err := g.Identity().UpdateTeamProfile(r.Context(), actorOf(p), id, name, description); err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+	}
+	if status != nil || budget != nil || models != nil {
 		if _, err := g.Identity().AdminUpdateTeam(r.Context(), actorOf(p), id, status, budget, models); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
@@ -1167,6 +1169,8 @@ func projectName(body map[string]any) string {
 
 // projectStatus reads the console block switch. blocked true is blocked, false is active.
 // A body that only sends status keeps that value. Neither field means leave the current status.
+// 参数 body：项目更新请求。返回：新的生命周期状态或空串。
+// 调用：ProjectNew、ProjectUpdate。测试：project_status_test.go。
 func projectStatus(body map[string]any) string {
 	if v, ok := body["blocked"].(bool); ok {
 		if v {

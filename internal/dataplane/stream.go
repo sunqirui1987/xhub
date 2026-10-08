@@ -8,6 +8,7 @@ package dataplane
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -65,7 +66,7 @@ func responseID(raw []byte) string {
 // 返回 wrote：是否已经向 w 写过字节。usage：流里最后一次 usage。ttft：首字节耗时，没写过则为 0。
 // 返回 captured：最多 2 MiB，交给用量日志。
 // 调用：Serve 在操作是 chat 且上游协议是 responses 时。现有流式测试走 pipeStream，不走这条转换。
-func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.Time, model string) (bool, map[string]any, time.Duration, []byte) {
+func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.Time, model string) (bool, map[string]any, time.Duration, []byte, error) {
 	defer resp.Body.Close()
 	buf := make([]byte, 4096)
 	flusher, _ := w.(http.Flusher)
@@ -73,7 +74,7 @@ func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.
 	var ttft time.Duration
 	var pending []byte
 	var captured []byte
-	var usage map[string]any
+	parser := streamUsageParser{}
 	write := func(chunk []byte) {
 		if len(chunk) == 0 {
 			return
@@ -96,11 +97,11 @@ func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.
 			captured = append(captured, chunk[:take]...)
 			noteCaptureTruncated(len(captured))
 		}
-		usage = streamUsage(chunk, usage)
 	}
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			parser.write(buf[:n], false)
 			pending = append(pending, buf[:n]...)
 			emit, rest := llm.ResponsesSSEToChat(pending, model, false)
 			pending = rest
@@ -109,7 +110,11 @@ func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.
 		if err != nil {
 			emit, _ := llm.ResponsesSSEToChat(pending, model, true)
 			write(emit)
-			return wrote, usage, ttft, captured
+			parser.write(nil, true)
+			if err == io.EOF {
+				err = nil
+			}
+			return wrote, parser.usage, ttft, captured, err
 		}
 	}
 }
@@ -119,15 +124,14 @@ func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.
 // 参数 w：客户端响应。resp：上游响应，函数负责关闭 Body。start：请求开始时间。
 // 返回 wrote、usage、ttft、captured：含义与 pipeResponsesAsChat 相同，但不改写 chunk。
 // 调用：Serve 的普通流式路径。测试：failure_log_test.go TestServeLogsEmptyStreamAndUpstreamStatus、TestServeLogsCacheHitAndStreamMetrics。
-func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bool, map[string]any, time.Duration, []byte) {
+func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bool, map[string]any, time.Duration, []byte, error) {
 	defer resp.Body.Close()
 	buf := make([]byte, 4096)
 	flusher, _ := w.(http.Flusher)
 	wrote := false
 	var ttft time.Duration
-	var pending []byte
 	var captured []byte
-	var usage map[string]any
+	parser := streamUsageParser{}
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
@@ -149,15 +153,62 @@ func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bo
 				captured = append(captured, buf[:take]...)
 				noteCaptureTruncated(len(captured))
 			}
-			pending = append(pending, buf[:n]...)
-			usage = streamUsage(pending, usage)
-			if len(pending) > 1<<20 {
-				pending = pending[len(pending)-4096:]
-			}
+			parser.write(buf[:n], false)
 		}
 		if err != nil {
-			return wrote, usage, ttft, captured
+			parser.write(nil, true)
+			if err == io.EOF {
+				err = nil
+			}
+			return wrote, parser.usage, ttft, captured, err
 		}
+	}
+}
+
+// streamUsageParser keeps the unfinished SSE line between body reads. Providers
+// may split a data line at any byte, including in the middle of a JSON token.
+type streamUsageParser struct {
+	pending []byte
+	usage   map[string]any
+}
+
+// write appends one body fragment and consumes every complete SSE line. final
+// also consumes a final line without a newline, as permitted at EOF.
+// 参数 raw：本次读取的正文；final：正文是否已经结束。
+// 返回：无。解析出的用量合并进 p.usage，未完整的行保留在 p.pending。
+// 调用：pipeStream、pipeResponsesAsChat。测试：usage_stream_test.go。
+func (p *streamUsageParser) write(raw []byte, final bool) {
+	p.pending = append(p.pending, raw...)
+	for {
+		i := bytes.IndexByte(p.pending, '\n')
+		if i < 0 {
+			break
+		}
+		p.consumeLine(p.pending[:i])
+		p.pending = p.pending[i+1:]
+	}
+	if final && len(p.pending) > 0 {
+		p.consumeLine(p.pending)
+		p.pending = nil
+	}
+}
+
+// consumeLine parses one complete SSE data line or one newline-delimited JSON
+// object and merges any provider usage it contains.
+// 参数 line：不含换行符的完整事件行。
+// 返回：无。没有有效 JSON 或 usage 时保持原状态。
+// 调用：streamUsageParser.write。测试：usage_stream_test.go。
+func (p *streamUsageParser) consumeLine(line []byte) {
+	line = bytes.TrimSpace(line)
+	if bytes.HasPrefix(line, []byte("data:")) {
+		line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+	}
+	if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
+		return
+	}
+	var doc map[string]any
+	if json.Unmarshal(line, &doc) == nil {
+		p.usage = mergeUsage(p.usage, usageFromDocument(doc))
 	}
 }
 
@@ -166,20 +217,7 @@ func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bo
 // 返回：更新后的 usage。从未出现过时返回 prev，可能仍是 nil。
 // 调用：pipeStream、pipeResponsesAsChat。无单独测试。
 func streamUsage(raw []byte, prev map[string]any) map[string]any {
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		line = bytes.TrimPrefix(line, []byte("data:"))
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
-			continue
-		}
-		var doc map[string]any
-		if json.Unmarshal(line, &doc) != nil {
-			continue
-		}
-		if u, ok := doc["usage"].(map[string]any); ok {
-			prev = u
-		}
-	}
-	return prev
+	p := streamUsageParser{usage: prev}
+	p.write(raw, true)
+	return p.usage
 }

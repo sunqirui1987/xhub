@@ -332,7 +332,8 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 		},
 	}}
 	got := listed.WeightOverrides()
-	if got["https://a|gpt-4o"] != 70 || len(got) != 1 {
+	zero, hasZero := got["|other"]
+	if got["https://a|gpt-4o"] != 70 || !hasZero || zero != 0 || len(got) != 2 {
 		t.Fatalf("list weights: %#v", got)
 	}
 	mapped := RouteSettings{Settings: map[string]any{

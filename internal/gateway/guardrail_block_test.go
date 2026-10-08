@@ -77,7 +77,7 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 		IAM:        db,
 		Authz:      authz.New(db),
 		Store:      st,

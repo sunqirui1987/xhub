@@ -142,8 +142,7 @@ func startOf(t *testing.T, h *harness, admin, callID string) time.Time {
 	if callID == "" {
 		t.Fatal("the response carried no call id")
 	}
-	detail := h.ok(http.MethodGet, "/spend/logs/ui/"+callID, admin, nil)
-	row := detail.json()
+	row := logDetail(t, h, admin, callID)
 	raw, _ := row["startTime"].(string)
 	if raw == "" {
 		t.Fatalf("the log row carried no start time: %s", truncate(string(mustJSON(row)), 300))

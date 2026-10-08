@@ -3,8 +3,9 @@ package plugin
 
 import (
 	"fmt"
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"sync"
+
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // Call is the inference attempt an extension can read. The data plane fills it before contacting the upstream.
@@ -39,10 +40,11 @@ type Extension interface {
 	BeforeUpstream(call Call) Decision
 }
 
-// Registry stores extensions in registration order. The zero value is not usable; call New.
+// Registry stores extensions in registration order. Its zero value is ready to use.
 type Registry struct {
 	mu    sync.Mutex
 	order []Extension
+	names []string
 	by    map[string]Extension
 }
 
@@ -68,17 +70,24 @@ func (r *Registry) Register(ext Extension) error {
 	if r == nil {
 		return fmt.Errorf("plugin registry is nil")
 	}
-	if ext == nil || ext.Name() == "" {
+	if ext == nil {
+		return fmt.Errorf("plugin name is required")
+	}
+	name := ext.Name()
+	if name == "" {
 		return fmt.Errorf("plugin name is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	name := ext.Name()
+	if r.by == nil {
+		r.by = make(map[string]Extension)
+	}
 	if _, ok := r.by[name]; ok {
 		return fmt.Errorf("plugin %q is already registered", name)
 	}
 	r.by[name] = ext
 	r.order = append(r.order, ext)
+	r.names = append(r.names, name)
 	return nil
 }
 
@@ -93,11 +102,7 @@ func (r *Registry) Names() []string {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]string, len(r.order))
-	for i, ext := range r.order {
-		out[i] = ext.Name()
-	}
-	return out
+	return append([]string(nil), r.names...)
 }
 
 // Invoke runs the extension registered under name. A missing name returns an error and does not call any other extension.

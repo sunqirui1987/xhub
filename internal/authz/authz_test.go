@@ -2,13 +2,15 @@ package authz
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/testsupport"
+	"xorm.io/builder"
 )
 
-// fixture is the acceptance scenario from docs/design/permissions-plan.md section 13:
+// fixture exercises the role boundaries documented in docs/development/permissions.md:
 // two organizations, two teams each, two projects each, and five accounts.
 //
 //	orgA: teamA1 (alice admin, carol member)     teamA2 (dave admin)
@@ -508,6 +510,25 @@ func TestKeyRevalidatedEveryRequest(t *testing.T) {
 			t.Fatalf("after blocking the project: got %s, want forbidden", got)
 		}
 	})
+}
+
+func TestTeamAdminLogScopeExcludesOtherPersonalKeys(t *testing.T) {
+	f := newFixture(t)
+	g := f.guard(t, session(f.alice))
+	scope, err := g.LogsScope(context.Background())
+	if err != nil {
+		t.Fatalf("logs scope: %v", err)
+	}
+	query, args, err := builder.ToSQL(scope.Cond)
+	if err != nil {
+		t.Fatalf("render scope: %v", err)
+	}
+	if !strings.Contains(query, "owner_type") || !strings.Contains(query, "team_id") || !scope.ServiceOnly {
+		t.Fatalf("team log scope does not restrict team rows to service keys: query=%q args=%v scope=%#v", query, args, scope)
+	}
+	if strings.Count(query, "owner_type") < 2 {
+		t.Fatalf("scope must independently constrain own personal and team service logs: %q", query)
+	}
 }
 
 // TestMasterIsNarrow pins the master credential's deliberate lack of reach. It

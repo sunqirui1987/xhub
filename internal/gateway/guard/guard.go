@@ -3,6 +3,7 @@ package guard
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -71,13 +72,20 @@ func Evaluate(s Host, body map[string]any) (blocked bool, message string, findin
 			continue
 		}
 		mode := str(params["mode"])
-		if mode != "" && mode != "pre_call" {
+		if mode != "" && mode != "pre_call" && mode != "redact" {
 			continue
 		}
 		action, out := matchGuardrail(g, text)
 		findings = append(findings, findingJSON(g, action, out != text))
 		if action == "block" {
 			return true, "Guardrail blocked the request: " + findingName(g), findings
+		}
+		if action == "redact" {
+			visitRequestText(body, func(value string) string {
+				_, masked := matchGuardrail(g, value)
+				return masked
+			})
+			text = guardrailText(body)
 		}
 	}
 	return false, "", findings
@@ -175,7 +183,11 @@ func listGuardrails(s Host) []map[string]any {
 	}
 	var out []map[string]any
 	for _, kind := range []string{"guardrails", "guardrail"} {
-		list, _ := s.RecordStore().ListKV(kind)
+		list, err := s.RecordStore().ListKV(kind)
+		if err != nil {
+			logx.Error("guardrail lookup failed kind=%s err=%v", kind, err)
+			return []map[string]any{{"name": "guardrail_store_unavailable", "default_on": true, "guardrail": "always_block"}}
+		}
 		out = append(out, list...)
 	}
 	if out == nil {
@@ -209,10 +221,16 @@ func matchGuardrail(g map[string]any, text string) (action, out string) {
 	for _, w := range words {
 		if w != "" && strings.Contains(low, strings.ToLower(w)) {
 			if kind == "redact" || str(params["mode"]) == "redact" {
-				return "redact", strings.ReplaceAll(out, w, "[REDACTED]")
+				pattern := regexp.MustCompile("(?i)" + regexp.QuoteMeta(w))
+				out = pattern.ReplaceAllString(out, "[REDACTED]")
+				action = "redact"
+				continue
 			}
 			return "block", out
 		}
+	}
+	if action == "redact" {
+		return action, out
 	}
 	return "allow", out
 }
@@ -243,27 +261,46 @@ func extraWords(v any) []string {
 
 // guardrailText extracts the text a chat body should be checked against.
 // 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
-// 返回 string（string）：要检查的聊天文本。先取 text，否则 input，否则 prompt，再否则把 messages 的 content 拼起来。
+// 返回 string（string）：所有支持的文本字段，按协议字段顺序拼接。
 // 调用：仅在 guard.go 内使用
 // 测试：guard_test.go
 func guardrailText(body map[string]any) string {
-	if t := str(body["text"]); t != "" {
-		return t
-	}
-	if t := str(body["input"]); t != "" {
-		return t
-	}
-	if t := str(body["prompt"]); t != "" {
-		return t
-	}
-	var b strings.Builder
-	if msgs, ok := body["messages"].([]any); ok {
-		for _, raw := range msgs {
-			if m, ok := raw.(map[string]any); ok {
-				b.WriteString(str(m["content"]))
-				b.WriteByte(' ')
+	var parts []string
+	visitRequestText(body, func(value string) string {
+		if value != "" {
+			parts = append(parts, value)
+		}
+		return value
+	})
+	return strings.Join(parts, " ")
+}
+
+// visitRequestText visits protocol text fields while leaving roles, image URLs
+// and other metadata intact. The visitor may replace each text leaf in place.
+// 参数 body：请求正文；visit：文本转换函数。返回：无。
+// 调用：Evaluate、guardrailText。测试：guard_test.go。
+func visitRequestText(body map[string]any, visit func(string) string) {
+	var walk func(any) any
+	walk = func(value any) any {
+		switch v := value.(type) {
+		case string:
+			return visit(v)
+		case []any:
+			for i := range v {
+				v[i] = walk(v[i])
+			}
+		case map[string]any:
+			for _, key := range []string{"text", "content", "parts"} {
+				if child, ok := v[key]; ok {
+					v[key] = walk(child)
+				}
 			}
 		}
+		return value
 	}
-	return strings.TrimSpace(b.String())
+	for _, key := range []string{"text", "input", "prompt", "messages", "contents", "system", "instructions", "systemInstruction"} {
+		if value, ok := body[key]; ok {
+			body[key] = walk(value)
+		}
+	}
 }

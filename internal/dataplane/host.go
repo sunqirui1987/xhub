@@ -216,8 +216,17 @@ type Adapted interface {
 // 网关在 bypass.go 的 serveBypass 里，路径已经匹配到端点类型之后调用 ServeBypass。
 // 和 Adapted 同名的方法语义相同，这里再写一遍，读这个接口时不用跳回去。
 type Bypass interface {
+	// RouteSettingsFor 读取此次请求继承的模板。
+	// 参数 p：调用方。返回：路由配置。
+	// 调用：ServeBypass。测试：official_template_test.go。
 	RouteSettingsFor(p *auth.Principal) prefs.RouteSettings
+	// NoteFailure 更新当前凭据的失败计数。
+	// 参数 id、settings：凭据部署 id 和模板。返回：无。
+	// 调用：ServeBypass。测试：official_template_test.go。
 	NoteFailure(id string, settings prefs.RouteSettings)
+	// ResolveRequest 在重试前重新检查身份。
+	// 参数 r：请求。返回：最新身份或错误。
+	// 调用：ServeBypass。测试：official_template_test.go。
 	ResolveRequest(r *http.Request) (*auth.Principal, error)
 
 	// RequireLLMPrincipal 解析可以发起官方接口调用的身份。失败时响应已经写成 401，并返回 nil。
@@ -296,13 +305,15 @@ type Bypass interface {
 
 	// OfficialBilled 判断这个官方任务是否已经记过一次用量。
 	// 参数 taskID：与钉相同的 id。
-	// 返回：true 表示再查到 usage 也不再扣费。
-	// 调用：serveBypassFollow。测试：bypass_logic_test.go 第二次查询费用仍为空。
+	// 返回：旧宿主的本地标记，不能证明持久化成功。
+	// 兼容旧宿主；官方结算不使用此标记，以持久层 request_id 去重为准。
+	// 调用：旧宿主兼容接口。测试：official_settlement_test.go。
 	OfficialBilled(taskID string) bool
 
 	// MarkOfficialBilled 标记这个官方任务已经记过用量，避免后续查询再次扣费。
 	// 参数 taskID：任务 id。返回：无。
-	// 调用：serveBypassFollow 在第一次见到 usage 时，先标记再 RecordSpend。
+	// 兼容旧宿主；禁止在 RecordSpend 之前以此标记阻止结算重试。
+	// 调用：旧宿主兼容接口，官方结算不调用。
 	// 测试：bypass_logic_test.go
 	MarkOfficialBilled(taskID string)
 
@@ -373,12 +384,16 @@ type RoutePlan struct {
 // CacheKey 是响应缓存键。CacheHit 为 true 时扣费金额为 0。
 // SessionID 与 RoutePlan.SessionID 相同。DeploymentID 是 api_base|model。
 type CallNote struct {
-	TTFTMs       *int
-	Provider     string
-	CacheKey     string
-	CacheHit     bool
-	SessionID    string
-	DeploymentID string
+	// SettlementID overrides persisted RequestID, never the metadata callID.
+	SettlementID string
+	// SkipRouteUsage excludes async task queries from synchronous route TPM.
+	SkipRouteUsage bool
+	TTFTMs         *int
+	Provider       string
+	CacheKey       string
+	CacheHit       bool
+	SessionID      string
+	DeploymentID   string
 }
 
 // traceHop 在数据面入口记一条日志，只含路径，不含正文和密钥。

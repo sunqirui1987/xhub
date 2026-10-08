@@ -80,7 +80,15 @@ const renderSessionDrawer = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const drawer = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
-      <LogDetailsDrawer open={open} onClose={() => {}} logEntry={null} sessionId="session-1" accessToken="token" />
+      <LogDetailsDrawer
+        open={open}
+        onClose={() => {}}
+        logEntry={null}
+        sessionId="session-1"
+        sessionApiKey="key-1"
+        sessionUserId="user-1"
+        accessToken="token"
+      />
     </QueryClientProvider>
   );
   const { rerender } = render(drawer(true));
@@ -91,6 +99,58 @@ const sidebarEventNames = () =>
   screen.queryAllByText(/^(llm-early|llm-late|tool-early|tool-late)$/).map((el) => el.textContent);
 
 describe("LogDetailsDrawer session sidebar sorting", () => {
+  it("loads only the clicked caller's session", async () => {
+    renderSessionDrawer();
+
+    await waitFor(() =>
+      expect(sessionSpendLogsCall).toHaveBeenCalledWith("token", "session-1", 1, 100, {
+        apiKey: "key-1",
+        userId: "user-1",
+      }),
+    );
+  });
+
+  it("waits for caller resolution before loading a deep-linked session", async () => {
+    vi.mocked(sessionSpendLogsCall).mockClear();
+    vi.mocked(sessionSpendLogsCall).mockResolvedValue({ data: [], total: 0, total_pages: 1 });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <LogDetailsDrawer
+          open
+          onClose={() => {}}
+          logEntry={null}
+          sessionId="shared"
+          accessToken="token"
+          sessionCallerResolved={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(sessionSpendLogsCall).not.toHaveBeenCalled();
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <LogDetailsDrawer
+          open
+          onClose={() => {}}
+          logEntry={makeLog({ request_id: "representative", api_key: "key-1", user: "user-1" })}
+          sessionId="shared"
+          sessionApiKey="key-1"
+          sessionUserId="user-1"
+          accessToken="token"
+          sessionCallerResolved
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(sessionSpendLogsCall).toHaveBeenCalledTimes(1));
+    expect(sessionSpendLogsCall).toHaveBeenCalledWith("token", "shared", 1, 100, {
+      apiKey: "key-1",
+      userId: "user-1",
+    });
+  });
+
   it("defaults to duration order, longest call first across LLM and MCP calls", async () => {
     renderSessionDrawer();
     await waitFor(() => expect(sidebarEventNames()).toHaveLength(4));

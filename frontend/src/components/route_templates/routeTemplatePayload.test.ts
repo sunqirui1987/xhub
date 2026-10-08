@@ -52,7 +52,7 @@ describe("summarizeTemplate", () => {
   it("falls back to the defaults a template need not spell out", () => {
     // A template seeded from the platform default has no reason to name the
     // strategy, so a blank summary would be wrong about what it does.
-    expect(summarizeTemplate({}, labels)).toBe("strategy:simple-shuffle · 2 retries · 60s · no fallbacks");
+    expect(summarizeTemplate({}, labels)).toBe("strategy:simple-shuffle · 1 retries · 60s · no fallbacks");
   });
 
   it("reports no fallbacks when the list is absent or empty", () => {

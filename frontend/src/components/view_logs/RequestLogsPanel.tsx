@@ -339,6 +339,9 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
         onClose={closeUrlLog}
         logEntry={displayLog}
         sessionId={displaySessionId}
+        sessionApiKey={displayLog?.api_key}
+        sessionUserId={displayLog?.user}
+        sessionCallerResolved={displayLog !== null}
         accessToken={accessToken}
         allLogs={rows}
         onSelectLog={handleSelectLog}

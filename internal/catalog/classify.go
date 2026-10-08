@@ -122,7 +122,8 @@ func IsLLMPrefix(path string) bool {
 		"/v1/evals", "/evals",
 		"/v2/rerank", "/chat", "/completions", "/embeddings", "/messages",
 		"/responses", "/audio", "/images", "/moderations", "/rerank",
-		"/files", "/batches", "/engines", "/openai", "/cursor", "/queue",
+		"/files", "/batches", "/assistants", "/threads", "/fine_tuning",
+		"/containers", "/videos", "/engines", "/openai", "/cursor", "/queue",
 		"/realtime", "/a2a",
 	}
 	for _, p := range prefixes {

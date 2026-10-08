@@ -122,6 +122,26 @@ func TestPriceCatalogServesTheEmbeddedBaseline(t *testing.T) {
 	}
 }
 
+func TestInvalidPriceDoesNotOverwriteStoredRates(t *testing.T) {
+	h := &priceHost{store: openPriceStore(t), allow: true}
+	status, _ := call(h, http.MethodPost, "/price/model", map[string]any{"id": "acme-chat-v1", "litellm_provider": "custom", "input_cost_per_token": 0.000002})
+	if status != 200 {
+		t.Fatal(status)
+	}
+	for _, bad := range []any{-1, "NaN", "+Inf", "garbage", true, map[string]any{}} {
+		for _, field := range rateFields {
+			status, _ := call(h, http.MethodPost, "/price/model", map[string]any{"id": "acme-chat-v1", "litellm_provider": "custom", field: bad})
+			if status != 400 {
+				t.Fatalf("%s=%v status=%d", field, bad, status)
+			}
+			in, _, _ := catalog.TokenRates("acme-chat-v1")
+			if in != 0.000002 {
+				t.Fatalf("invalid price changed stored rate to %v", in)
+			}
+		}
+	}
+}
+
 func TestPriceModelWriteIsStoredAndSurvivesAReload(t *testing.T) {
 	h := &priceHost{store: openPriceStore(t), allow: true}
 

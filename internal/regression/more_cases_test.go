@@ -32,11 +32,12 @@ func idempotencyChain(t *testing.T, live bool) {
 	headers := map[string]string{"Idempotency-Key": "same-call"}
 	before := h.moneyOf(t, c)
 	mark := len(h.upstreamCalls())
-	first := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, "idempotent"), headers)
+	body := chatRequest(model, "idempotent")
+	first := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
 	if first.status != http.StatusOK {
 		t.Fatalf("first call: %s", first.describe())
 	}
-	second := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, "different body, same key"), headers)
+	second := h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, body, headers)
 	if second.status != first.status || second.text() != first.text() {
 		t.Fatalf("replay differed:\nfirst %s\nsecond %s", first.describe(), second.describe())
 	}
@@ -123,14 +124,14 @@ func tpmChain(t *testing.T, live bool) {
 		admin = h.adminSession()
 		c = h.openScope(t, admin, "tpm")
 	}
-	// 估算至少 96 个 token。100 放得下第一次，放不下第二次。
+	// 第二次估算 99 token；加上第一次实际 16 / Redis 估算 33，均超过 100。
 	h.ok(http.MethodPost, "/key/update", admin, map[string]any{"key": c.key, "tpm_limit": 100})
 	mark := len(h.upstreamCalls())
 	first := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, "tpm one"))
 	if first.status != http.StatusOK {
 		t.Fatalf("first call under the token window: %s", first.describe())
 	}
-	second := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, "tpm two"))
+	second := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, strings.Repeat("x", 268)))
 	if second.status != http.StatusTooManyRequests || !strings.Contains(errorMessage(second), "tpm_limit") {
 		t.Fatalf("tpm refusal: %s", second.describe())
 	}

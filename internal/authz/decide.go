@@ -982,12 +982,15 @@ func (g *Guard) LogsScope(ctx context.Context) (*Scope, error) {
 		return &Scope{Cond: own, Kind: ScopeOwnLogs, UserID: g.actor.UserID,
 			OwnerTypes: []string{iam.OwnerPersonal}}, nil
 	}
+	service := builder.Cond(builder.Eq{"owner_type": iam.OwnerService})
+	service = service.And(builder.In("team_id", watch))
 	return &Scope{
-		Cond:       own.Or(builder.In("team_id", watch)),
-		Kind:       ScopeTeamLogs,
-		TeamIDs:    watch,
-		UserID:     g.actor.UserID,
-		OwnerTypes: []string{iam.OwnerPersonal, iam.OwnerService},
+		Cond:        own.Or(service),
+		Kind:        ScopeTeamLogs,
+		TeamIDs:     watch,
+		UserID:      g.actor.UserID,
+		OwnerTypes:  []string{iam.OwnerPersonal, iam.OwnerService},
+		ServiceOnly: true,
 	}, nil
 }
 

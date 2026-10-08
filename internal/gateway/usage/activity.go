@@ -87,6 +87,7 @@ type activityRow struct {
 	route          string
 	prompt         int
 	completion     int
+	cacheRead      *int
 	spend          float64
 	success        bool
 }
@@ -95,6 +96,8 @@ type metric struct {
 	spend      float64
 	prompt     int
 	completion int
+	cacheRead  int
+	cacheKnown bool
 	requests   int
 	success    int
 	failed     int
@@ -105,10 +108,14 @@ type metric struct {
 // 返回：无。这次调用的费用、token 和成败已累加进指标。成功计入成功次数，否则计入失败次数。
 // 调用：gateway/usage/entity_activity.go。
 // 测试：无直接单测
-func (m *metric) add(prompt, completion int, spend float64, success bool) {
+func (m *metric) add(prompt, completion int, cacheRead *int, spend float64, success bool) {
 	m.spend += spend
 	m.prompt += prompt
 	m.completion += completion
+	if cacheRead != nil {
+		m.cacheRead += *cacheRead
+		m.cacheKnown = true
+	}
 	m.requests++
 	if success {
 		m.success++
@@ -126,6 +133,8 @@ func (m *metric) fold(other metric) {
 	m.spend += other.spend
 	m.prompt += other.prompt
 	m.completion += other.completion
+	m.cacheRead += other.cacheRead
+	m.cacheKnown = m.cacheKnown || other.cacheKnown
 	m.requests += other.requests
 	m.success += other.success
 	m.failed += other.failed
@@ -137,7 +146,7 @@ func (m *metric) fold(other metric) {
 // 调用：gateway/usage/entity_activity.go
 // 测试：无直接单测
 func (m metric) json() map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"spend":                                  m.spend,
 		"flat_cost":                              0.0,
 		"prompt_tokens":                          m.prompt,
@@ -146,14 +155,16 @@ func (m metric) json() map[string]any {
 		"api_requests":                           m.requests,
 		"successful_requests":                    m.success,
 		"failed_requests":                        m.failed,
-		"cache_read_input_tokens":                0,
-		"cache_creation_input_tokens":            0,
 		"compression_saved_tokens":               0,
 		"compression_savings_spend":              0.0,
 		"prompt_caching_savings_spend":           0.0,
 		"gateway_injected_caching_savings_spend": 0.0,
 		"autorouter_savings_spend":               0.0,
 	}
+	if m.cacheKnown {
+		out["cache_read_input_tokens"] = m.cacheRead
+	}
+	return out
 }
 
 type keyMetric struct {
@@ -256,6 +267,7 @@ func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 			route:          llmRoute(e.CallType),
 			prompt:         e.PromptTokens,
 			completion:     e.CompletionTokens,
+			cacheRead:      e.CachedTokens,
 			spend:          e.Cost,
 			success:        e.Status == "" || e.Status == "success" || e.Status == "succeeded",
 		})
@@ -478,7 +490,7 @@ func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 			}
 			days[row.day] = day
 		}
-		day.add(row.prompt, row.completion, row.spend, row.success)
+		day.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 		addNamed(day.models, row.model, row)
 		addNamed(day.groups, row.model, row)
 		addNamed(day.providers, row.provider, row)
@@ -492,7 +504,7 @@ func rollupDays(rows []activityRow, dim entityDim) map[string]*dayMetric {
 			route = &metric{}
 			day.routes[row.route] = route
 		}
-		route.add(row.prompt, row.completion, row.spend, row.success)
+		route.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 		if dim != entityNone {
 			addEntity(day, dim, row)
 		}
@@ -511,7 +523,7 @@ func addNamed(into map[string]*namedMetric, name string, row activityRow) {
 		bucket = &namedMetric{keys: map[string]*keyMetric{}}
 		into[name] = bucket
 	}
-	bucket.add(row.prompt, row.completion, row.spend, row.success)
+	bucket.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 	if row.apiKey != "" {
 		addKey(bucket.keys, row.apiKey, row)
 	}
@@ -528,7 +540,7 @@ func addKey(into map[string]*keyMetric, hash string, row activityRow) {
 		bucket = &keyMetric{alias: row.keyAlias, teamID: row.teamID, userID: row.userID}
 		into[hash] = bucket
 	}
-	bucket.add(row.prompt, row.completion, row.spend, row.success)
+	bucket.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 }
 
 // 把按名称聚合的桶收成报表对象。
@@ -575,7 +587,7 @@ func keysJSON(in map[string]*keyMetric) map[string]any {
 // 调用：仅在 activity.go 内使用
 // 测试：无直接单测
 func metadataJSON(total metric, page, totalPages int) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"total_spend":                                  total.spend,
 		"total_prompt_tokens":                          total.prompt,
 		"total_completion_tokens":                      total.completion,
@@ -583,8 +595,6 @@ func metadataJSON(total metric, page, totalPages int) map[string]any {
 		"total_api_requests":                           total.requests,
 		"total_successful_requests":                    total.success,
 		"total_failed_requests":                        total.failed,
-		"total_cache_read_input_tokens":                0,
-		"total_cache_creation_input_tokens":            0,
 		"total_flat_cost":                              0.0,
 		"total_compression_saved_tokens":               0,
 		"total_compression_savings_spend":              0.0,
@@ -595,6 +605,10 @@ func metadataJSON(total metric, page, totalPages int) map[string]any {
 		"has_more":                                     page < totalPages,
 		"page":                                         page,
 	}
+	if total.cacheKnown {
+		out["total_cache_read_input_tokens"] = total.cacheRead
+	}
+	return out
 }
 
 // 空字符串改成 nil，这样 JSON 里是 null。

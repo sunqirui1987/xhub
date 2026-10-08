@@ -1,25 +1,11 @@
 # gateway/guard
 
-聊天的护栏。以 `guard.Module` 挂上。
+通过 guard.Module 挂载。管理试跑 /apply_guardrail、/guardrails/apply_guardrail 要求管理权限；推理时聊天与 Responses 在缓存和上游前调用 Evaluate。
 
-POST `/apply_guardrail` 和 POST `/guardrails/apply_guardrail` 做一次检查并返回动作。推理路径不走这两条路由。`dataplane.Serve` 只在 `op` 是 `chat` 或空时调用 `Host.GuardrailBlocks`，在缓存和上游之前。
+规则来自 guardrails、guardrail 记录。已配置存储读取失败产生阻断规则；没有配置存储的宿主仍跳过检查。默认启用的 pre_call、redact 规则顺序执行，阻断后不伪造后续执行结果。
 
-`listGuardrails` 从 `RecordStore` 读键值种类 `guardrails` 和 `guardrail`。没有库时跳过检查，并打一条 debug 日志。
+扫描 text/input/prompt/messages/contents/system/instructions/systemInstruction 及支持的嵌套 text/content/parts 数组，不再只取第一个字段。保留图片 URL 和消息角色。关键词忽略大小写；打码替换所有命中词，实际改写发送给上游的文本。
 
-`guardrailText` 是被检查的文本：先 `text`，否则 `input`，否则 `prompt`，再否则把 `messages[].content` 拼起来。
+阻断返回 400 guardrail_failed，保留失败日志并记零本地费用。本包只是本地关键词匹配，不是 Azure Content Safety 或通用多模态审核。官方 Bypass、工具参数、图片内容不在扫描范围。
 
-`matchGuardrail` 读 `litellm_params.guardrail` 或顶层的 `guardrail`：
-
-- `block` 或 `always_block` 返回动作 `block` 和原文。
-- 否则对词表 `blocked_words` 和 `keywords`（在参数上或在护栏上）做不区分大小写的包含判断。种类是 `redact` 或 `litellm_params.mode == redact` 时，返回动作 `redact`，并把命中的词换成 `[REDACTED]`。其他命中返回 `block`。
-- 没有命中返回 `allow` 和原文。
-
-`Serve` 里的拦截是 HTTP 400 `guardrail_failed`。交换仍会存下来，并以失败调用 `RecordSpend`，这样日志抽屉能看出是哪条护栏拦住的。
-
-控制台的护栏园（`frontend` 的 guardrails 组件）编辑这些键值文档。园里的模式包括金融、医疗、法律、暴力、越狱和 PII 辅助。这个包不调用 Azure Content Safety。Go 匹配器里没有 0、2、4、6 的 Azure 严重级别。
-
-## 这个包不做什么
-
-它不跑在 bypass 上。官方内容生成不会扫敏感词。它也不实现插件的 `Decision`。插件在 `Serve` 里更晚运行，即使每条护栏都放行，插件仍可以拒绝。
-
-English notes are in `readme.md` in this directory.
+测试见 guard_test.go、guard_regression_test.go 及 dataplane 缓存/交换测试。

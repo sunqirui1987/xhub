@@ -153,6 +153,19 @@ func TestRedactHidesBearerAndKey(t *testing.T) {
 	}
 }
 
+func TestRedactHidesCaseInsensitiveKeysAndURLCredentials(t *testing.T) {
+	got := redact("keys SK-UPPER Sk-Mixed_123 url https://user:SK-URLSECRET@api.example.com/v1?key=SK-QUERY")
+	if strings.Contains(strings.ToLower(got), "sk-") {
+		t.Fatalf("redaction leaked a case-insensitive key: %s", got)
+	}
+	if strings.Contains(got, "user:") || strings.Contains(got, "QUERY") || strings.Contains(got, "https://") {
+		t.Fatalf("redaction leaked URL credentials or full URL: %s", got)
+	}
+	if !strings.Contains(got, "api.example.com") {
+		t.Fatalf("redaction removed useful URL host: %s", got)
+	}
+}
+
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

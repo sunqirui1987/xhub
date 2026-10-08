@@ -14,7 +14,7 @@ func TestHandlerLogsMethodPathStatusAndDuration(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 	}
 	s.Handle("GET /health/liveliness", s.healthLive)
 
@@ -53,7 +53,7 @@ func TestHandlerLogsErrorLineForFailure(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 	}
 	var buf bytes.Buffer
 	prev := log.Writer()

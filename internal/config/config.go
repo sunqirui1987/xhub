@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -71,11 +72,11 @@ type GeneralSettings struct {
 
 var logTraceOnceConfig sync.Once
 
-// Load reads YAML. An empty database_url, or one that starts with sqlite or file:, returns an error instead of silently using a local file database.
-// 参数 path（string）：YAML 配置文件的磁盘路径，不是请求 URL。空路径或 sqlite、file: 开头的数据库地址会返回错误。
+// Load reads YAML and requires a postgres:// or postgresql:// database URL.
+// 参数 path（string）：YAML 配置文件的磁盘路径，不是请求 URL。
 // 调用：catalog/classify.go、gateway/catalog.go
 // 测试：activity_http_test.go、builtin_providers_test.go、chains_test.go
-// 返回：解析后的进程配置。error 非 nil 时配置为 nil，原因是读文件失败、YAML 无效，或数据库地址为空、sqlite、file:。
+// 返回：解析后的进程配置。读文件、YAML 或数据库 URL 协议校验失败时返回错误。
 func Load(path string) (*Config, error) {
 	logTraceOnceConfig.Do(func() { logx.Trace("enter config.Load") })
 
@@ -109,9 +110,9 @@ func Load(path string) (*Config, error) {
 	if c.GeneralSettings.DatabaseURL == "" {
 		return nil, fmt.Errorf("general_settings.database_url is required and must be a postgres:// URL")
 	}
-	low := strings.ToLower(c.GeneralSettings.DatabaseURL)
-	if strings.HasPrefix(low, "sqlite:") || strings.HasPrefix(low, "file:") {
-		return nil, fmt.Errorf("sqlite is not supported; set general_settings.database_url to a postgres:// URL")
+	dbURL, err := url.Parse(c.GeneralSettings.DatabaseURL)
+	if err != nil || (dbURL.Scheme != "postgres" && dbURL.Scheme != "postgresql") {
+		return nil, fmt.Errorf("general_settings.database_url must be a postgres:// or postgresql:// URL")
 	}
 	if c.RouterSettings.RoutingStrategy == "" {
 		c.RouterSettings.RoutingStrategy = "simple-shuffle"

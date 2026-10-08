@@ -54,22 +54,22 @@ func putGuardrail(t *testing.T, st *store.Store, id string, row map[string]any) 
 	}
 }
 
-func TestGuardrailTextPrefersAnExplicitFieldOverMessages(t *testing.T) {
+func TestGuardrailTextScansAllProtocolFields(t *testing.T) {
 	body := map[string]any{
 		"text":     "from text",
 		"input":    "from input",
 		"prompt":   "from prompt",
 		"messages": []any{map[string]any{"role": "user", "content": "from messages"}},
 	}
-	if got := guardrailText(body); got != "from text" {
+	if got := guardrailText(body); got != "from text from input from prompt from messages" {
 		t.Fatalf("text wins: %q", got)
 	}
 	delete(body, "text")
-	if got := guardrailText(body); got != "from input" {
+	if got := guardrailText(body); got != "from input from prompt from messages" {
 		t.Fatalf("input wins: %q", got)
 	}
 	delete(body, "input")
-	if got := guardrailText(body); got != "from prompt" {
+	if got := guardrailText(body); got != "from prompt from messages" {
 		t.Fatalf("prompt wins: %q", got)
 	}
 	delete(body, "prompt")
@@ -87,9 +87,7 @@ func TestGuardrailTextJoinsMessageStringsAndSkipsOtherShapes(t *testing.T) {
 			map[string]any{"role": "user", "content": "and hello"},
 		},
 	}
-	// A content array is not a string, so it is not scanned. The string parts
-	// are joined in order and trimmed.
-	if got := guardrailText(body); got != "be brief  and hello" {
+	if got := guardrailText(body); got != "be brief not a message bomb and hello" {
 		t.Fatalf("joined: %q", got)
 	}
 	if got := guardrailText(nil); got != "" {
@@ -163,8 +161,8 @@ func TestMatchGuardrailBlocksRedactsAndAllows(t *testing.T) {
 	}
 	// The match ignores case. The replacement uses the spelling saved on the rule.
 	action, out = matchGuardrail(redact, "see Bomb now")
-	if action != "redact" || out != "see Bomb now" {
-		t.Fatalf("redact keeps unmatched casing: %s %q", action, out)
+	if action != "redact" || out != "see [REDACTED] now" {
+		t.Fatalf("redact must match case-insensitively: %s %q", action, out)
 	}
 
 	byMode := map[string]any{"litellm_params": map[string]any{"mode": "redact", "keywords": []any{"ssn"}}}

@@ -225,6 +225,10 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		total, in, out = 0, 0, 0
 		charge = catalog.Charge{}
 	}
+	if status >= 400 {
+		total, in, out = 0, 0, 0
+		charge = catalog.Charge{}
+	}
 	// LiteLLM stores response_cost or 0.0. Unknown models still get a row, with spend 0.
 	spend := 0.0
 	if okc {
@@ -233,7 +237,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		w.Header().Set("x-litellm-response-cost-original", catalog.Format(total))
 		w.Header().Set("x-litellm-response-cost-input", catalog.Format(in))
 		w.Header().Set("x-litellm-response-cost-output", catalog.Format(out))
-		if p.Key != nil {
+		if p != nil && p.Key != nil {
 			shown := p.Key.Spend + total
 			if s.Live != nil {
 				shown = p.Key.Spend + s.Live.HotSpend(live.SpendRef("key", p.Hash)) + total
@@ -272,7 +276,6 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 	if tokens == 0 {
 		tokens = asInt(usage["total_tokens"])
 	}
-	s.noteUsage(depID, tokens)
 	ex := s.takeExchange(callID)
 	callType := strings.TrimSpace(op)
 	if callType == "" {
@@ -288,9 +291,16 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		tokens = 0
 	}
 	note := s.takeNote(callID)
+	if !cacheHit && tokens > 0 && !note.SkipRouteUsage {
+		s.noteUsage(depID, tokens)
+	}
+	keyID := ""
+	if p != nil {
+		keyID = p.KeyID
+	}
 	row := live.SpendLog{
 		RequestID: callID, CallType: callType, Model: alias, APIKey: hash,
-		KeyID:  p.KeyID,
+		KeyID:  keyID,
 		Prompt: pt, Completion: ct, Spend: spend, SpendValid: true,
 		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
 		CacheHit: cacheHit || note.CacheHit, Status: rowStatus, OwnerType: ownerType,
@@ -300,6 +310,9 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		SessionID: note.SessionID, CachedTokens: cachedColumn(usage),
 		Guardrail:     s.takeGuardrail(callID),
 		PriceSnapshot: catalog.Snapshot(charge),
+	}
+	if note.SettlementID != "" {
+		row.RequestID = note.SettlementID
 	}
 	if p != nil && p.Key != nil {
 		row.KeyHash = p.Key.TokenHash
@@ -891,13 +904,13 @@ func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID,
 		if usage == nil {
 			usage = map[string]any{}
 		}
-		if _, ok := usage["prompt_tokens"]; !ok {
-			usage["prompt_tokens"] = usage["input_tokens"]
-			usage["completion_tokens"] = usage["output_tokens"]
-		}
 		s.recordSpend(w, p, callID, alias, op, usage, start, false, status, depID)
 		respBody, _ = json.Marshal(parsed)
-		s.Cache.Set(ck, respBody)
+		if status >= 200 && status < 300 {
+			s.Cache.Set(ck, respBody)
+		}
+	} else {
+		s.recordSpend(w, p, callID, alias, op, nil, start, false, status, depID)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("x-litellm-response-duration-ms", strconv.FormatInt(time.Since(start).Milliseconds(), 10))

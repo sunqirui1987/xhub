@@ -1,7 +1,10 @@
 package gateway
 
 import (
+	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -24,6 +27,25 @@ func TestSessionIDSticksToThePromptPrefix(t *testing.T) {
 	second := sessionID(&http.Request{Header: http.Header{}}, body)
 	if first == "" || first != second {
 		t.Fatalf("prefix session changed: %q vs %q", first, second)
+	}
+}
+
+func TestContinuationPinsDoNotCrossCallerOrModel(t *testing.T) {
+	s := &Server{}
+	s.CommitRoute(dataplane.RoutePlan{Alias: "model-a", Caller: "user:alice"}, "supplier-a", "resp_shared")
+	req := httptest.NewRequest("POST", "/v1/responses", nil)
+	body := map[string]any{"previous_response_id": "resp_shared"}
+	if got := s.PlanRoute(req, "model-a", body, &auth.Principal{UserID: "alice"}).Pinned; got != "supplier-a" {
+		t.Fatal(got)
+	}
+	if got := s.PlanRoute(req, "model-a", body, &auth.Principal{UserID: "bob"}).Pinned; got != "" {
+		t.Fatal("cross-caller pin", got)
+	}
+	if got := s.PlanRoute(req, "model-b", body, &auth.Principal{UserID: "alice"}).Pinned; got != "" {
+		t.Fatal("cross-model pin", got)
+	}
+	if sessionPinKey("a|b", "c", "d") == sessionPinKey("a", "b|c", "d") {
+		t.Fatal("tuple separator collision")
 	}
 }
 

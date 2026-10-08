@@ -3,7 +3,11 @@ package family
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +35,11 @@ func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 	if p == nil {
 		return
 	}
-	raw, _ := io.ReadAll(r.Body)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.WriteError(w, 400, "invalid_request", "cannot read request body")
+		return
+	}
 	path := r.URL.Path
 	op := inferenceOp(path)
 	if op != "" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
@@ -56,7 +64,16 @@ func ServeDataPlane(s Host, w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	resourceCRUD(s, w, r, path, raw)
+	caller := "user:" + p.UserID
+	if p.Hash != "" {
+		caller = "key:" + p.Hash
+	}
+	if p.Hash == "" && p.UserID == "" {
+		httpx.WriteError(w, 403, "forbidden", "resource owner required")
+		return
+	}
+	sum := sha256.Sum256([]byte(caller))
+	resourceCRUD(s, w, r, path, raw, hex.EncodeToString(sum[:]))
 }
 
 // Responses is the Responses API entry and always uses the data-plane responses operation.
@@ -76,7 +93,9 @@ func Responses(s Host, w http.ResponseWriter, r *http.Request) {
 func injectModel(path string, raw []byte) []byte {
 	var body map[string]any
 	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &body)
+		if json.Unmarshal(raw, &body) != nil || body == nil {
+			return raw
+		}
 	}
 	if body == nil {
 		body = map[string]any{}
@@ -158,182 +177,130 @@ func inferenceOp(path string) string {
 	return ""
 }
 
-// writeInferenceNative writes the native response shape for an operation that has not entered the general data plane.
-// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；op（string）：操作名或 call_type，写入用量行并选择协议；body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：仅在 handlers.go 内使用
-// 测试：无直接单测
+// writeInferenceNative rejects operations without a real provider implementation.
+// 参数 w、op、body：响应、操作及请求。返回：HTTP 501。
+// 调用：ServeDataPlane。测试：TestUnsupportedInferenceDoesNotFabricateUsage。
 func writeInferenceNative(w http.ResponseWriter, op string, body map[string]any) {
-	id := httpx.CallID()
-	model := str(body["model"])
-	now := time.Now().UTC().Unix()
-	var out map[string]any
-	switch op {
-	case "images":
-		n := asInt(body["n"])
-		if n < 1 {
-			n = 1
-		}
-		data := []any{}
-		for i := 0; i < n; i++ {
-			item := map[string]any{"url": "https://example.invalid/img/" + id}
-			if str(body["response_format"]) == "b64_json" {
-				item = map[string]any{"b64_json": "AAAA"}
-			}
-			data = append(data, item)
-		}
-		out = map[string]any{"created": now, "data": data}
-	case "audio_speech":
-		w.Header().Set("Content-Type", "audio/mpeg")
-		w.Header().Set("x-litellm-model-name", model)
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte("ID3"))
-		return
-	case "audio_transcription":
-		out = map[string]any{
-			"text": "hello", "language": str(body["language"]), "duration": 1.0,
-			"segments": []any{},
-		}
-	case "moderations":
-		if model == "" {
-			model = "omni-moderation-latest"
-		}
-		out = map[string]any{
-			"id": "modr-" + id[:12], "model": model,
-			"results": []any{map[string]any{"flagged": false, "categories": map[string]any{}, "category_scores": map[string]any{}}},
-		}
-	case "rerank":
-		docs, _ := body["documents"].([]any)
-		top := asInt(body["top_n"])
-		if top <= 0 || top > len(docs) {
-			top = len(docs)
-		}
-		results := []any{}
-		for i := 0; i < top; i++ {
-			results = append(results, map[string]any{"index": i, "relevance_score": 1.0 - float64(i)*0.01})
-		}
-		out = map[string]any{"id": id, "results": results, "meta": map[string]any{"tokens": map[string]any{"input_tokens": 1}}}
-	case "videos":
-		if model == "" {
-			model = str(body["model"])
-		}
-		out = map[string]any{
-			"id": "video_" + id[:12], "object": "video", "status": "queued",
-			"model": model, "created_at": now,
-		}
-	case "realtime":
-		out = map[string]any{
-			"id": "sess_" + id[:12], "object": "realtime.session",
-			"model": model, "modalities": body["modalities"], "voice": body["voice"],
-			"client_secret": map[string]any{"value": "eph-" + id[:8], "expires_at": now + 3600},
-		}
-	case "responses":
-		text := str(body["input"])
-		if text == "" {
-			text = "ok"
-		}
-		out = map[string]any{
-			"id": "resp_" + id[:12], "object": "response", "status": "completed",
-			"model": model, "created_at": now,
-			"output": []any{map[string]any{
-				"type": "message", "role": "assistant",
-				"content": []any{map[string]any{"type": "output_text", "text": text}},
-			}},
-			"usage": map[string]any{"input_tokens": 8, "output_tokens": 2, "total_tokens": 10},
-		}
-	case "gemini":
-		out = map[string]any{
-			"candidates": []any{map[string]any{
-				"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": "ok"}}},
-			}},
-			"usageMetadata": map[string]any{"promptTokenCount": 8, "candidatesTokenCount": 2, "totalTokenCount": 10},
-		}
-	case "count_tokens":
-		out = map[string]any{"input_tokens": 8}
-	case "chat":
-		out = map[string]any{
-			"id": "chatcmpl_" + id[:12], "object": "chat.completion", "created": now, "model": model,
-			"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}},
-			"usage":   map[string]any{"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10},
-		}
-	default:
-		out = map[string]any{
-			"id": id, "object": op, "model": model, "created": now,
-			"data": []any{},
-		}
-	}
-	httpx.WriteJSON(w, 200, out)
+	httpx.WriteError(w, http.StatusNotImplemented, "not_implemented", op+" requires a provider implementation")
 }
 
 // resourceCRUD lists, reads, and writes a catalog resource stored as key-value JSON. files and batches return 404 when the id is missing.
 // 参数 s（Host）：resourceCRUD使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求；path（string）：resourceCRUD要定位的路径。可能是 URL，也可能是字段路径；raw（[]byte）：原始文本或 JSON 字节。
+// 参数 owner（string）：已经哈希的调用方标识，隔离资源命名空间。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：仅在 handlers.go 内使用
 // 测试：无直接单测
-func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, raw []byte) {
+func resourceCRUD(s Host, w http.ResponseWriter, r *http.Request, path string, raw []byte, owner string) {
 	kind := resourceKind(path)
+	namespace := "inference_resource:v2:" + owner + ":" + kind
 	var body map[string]any
-	_ = json.Unmarshal(raw, &body)
+	if len(bytes.TrimSpace(raw)) > 0 && (json.Unmarshal(raw, &body) != nil || body == nil) {
+		httpx.WriteError(w, 400, "invalid_request", "JSON object required")
+		return
+	}
 	if body == nil {
 		body = map[string]any{}
 	}
 	id := resourcePathID(path)
-	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		if strings.HasSuffix(path, "/content") {
-			httpx.WriteJSON(w, 200, map[string]any{"text": "", "object": "file_content"})
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodDelete && kind != "assistants" && kind != "threads" {
+		httpx.WriteError(w, 501, "not_implemented", kind+" requires a provider implementation")
+		return
+	}
+	parts := catalog.Split(strings.TrimSuffix(path, "/"))
+	if kind == "threads" {
+		for i, part := range parts {
+			if part == "threads" && len(parts) > i+2 {
+				httpx.WriteError(w, 501, "not_implemented", "nested thread operations require a provider implementation")
+				return
+			}
+		}
+	}
+	st := s.RecordStore()
+	if st == nil {
+		httpx.WriteError(w, 503, "unavailable", "resource store unavailable")
+		return
+	}
+	writeErr := func(err error) {
+		if errors.Is(err, sql.ErrNoRows) {
+			httpx.WriteError(w, 404, "not_found", singular(kind)+" not found")
 			return
 		}
+		logx.Error("resource store failure kind=%s err=%v", kind, err)
+		httpx.WriteError(w, 500, "internal", "resource store failure")
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
 		if id != "" {
-			m, err := s.RecordStore().GetKV(kind, id)
+			m, err := st.GetKV(namespace, id)
 			if err != nil {
-				if kind == "files" || kind == "batches" {
-					httpx.WriteError(w, 404, "not_found", singular(kind)+" not found")
-					return
-				}
-				httpx.WriteJSON(w, 200, map[string]any{"id": id, "object": singular(kind), "data": []any{}})
+				writeErr(err)
+				return
+			}
+			if strings.HasSuffix(path, "/content") {
+				httpx.WriteError(w, 501, "not_implemented", "file content requires provider storage")
 				return
 			}
 			httpx.WriteJSON(w, 200, m)
 			return
 		}
-		list, _ := s.RecordStore().ListKV(kind)
+		list, err := st.ListKV(namespace)
+		if err != nil {
+			writeErr(err)
+			return
+		}
 		httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": list})
 	case http.MethodDelete:
 		if id == "" {
 			id = str(body["id"])
 		}
-		_ = s.RecordStore().DeleteKV(kind, id)
+		if _, err := st.GetKV(namespace, id); err != nil {
+			writeErr(err)
+			return
+		}
+		if err := st.DeleteKV(namespace, id); err != nil {
+			writeErr(err)
+			return
+		}
 		httpx.WriteJSON(w, 200, map[string]any{"id": id, "object": singular(kind), "deleted": true})
 	default:
+		var obj map[string]any
 		if id != "" {
-			m, err := s.RecordStore().GetKV(kind, id)
-			if err == nil {
-				for k, v := range body {
-					m[k] = v
-				}
-				if strings.Contains(path, "cancel") {
-					m["status"] = "cancelled"
-				}
-				b, _ := json.Marshal(m)
-				_ = s.RecordStore().PutKV(kind, id, string(b))
-				httpx.WriteJSON(w, 200, m)
+			var err error
+			obj, err = st.GetKV(namespace, id)
+			if err != nil {
+				writeErr(err)
 				return
 			}
+			for k, v := range body {
+				if k != "id" {
+					obj[k] = v
+				}
+			}
+			if strings.Contains(path, "cancel") {
+				obj["status"] = "cancelled"
+			}
+		} else {
+			obj = nativeResource(kind, body)
+			id = str(obj["id"])
 		}
-		obj := nativeResource(kind, body)
-		id = str(obj["id"])
-		b, _ := json.Marshal(obj)
-		_ = s.RecordStore().PutKV(kind, id, string(b))
+		b, err := json.Marshal(obj)
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid_request", "invalid resource")
+			return
+		}
+		if err := st.PutKV(namespace, id, string(b)); err != nil {
+			writeErr(err)
+			return
+		}
 		httpx.WriteJSON(w, 200, obj)
 	}
 }
 
-// resourceKind reads the resource kind from the path, such as files, batches, or assistants. An unrecognized path is resources.
-// 参数 path（string）：resource种类要定位的路径。可能是 URL，也可能是字段路径。
-// 返回 string（string）：路径里的资源集合名，例如 files、batches、assistants。认不出时是 resources。
-// 调用：仅在 handlers.go 内使用
-// 测试：无直接单测
+// resourceKind identifies the resource collection in the request path.
+// 参数 path：请求路径。
+// 返回：集合名。
+// 调用：resourceCRUD。
+// 测试：resource_isolation_test.go。
 func resourceKind(path string) string {
 	p := strings.ToLower(path)
 	switch {

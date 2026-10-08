@@ -59,10 +59,15 @@ else
 fi
 
 ARGS=(-count=1 -timeout=600s)
+export XHUB_REGRESSION_STRICT=1
 if [[ "$VERBOSE" == 1 ]]; then
   ARGS+=(-v)
 fi
 if [[ -n "$PATTERN" ]]; then
+  if ! go test ./internal/regression/ -list "$PATTERN" | rg -q '^Test'; then
+    echo "no regression tests matched: $PATTERN" >&2
+    exit 1
+  fi
   ARGS+=(-run "$PATTERN")
 fi
 

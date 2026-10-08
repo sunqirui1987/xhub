@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -178,12 +179,10 @@ func (c *Client) AddUsage(id string, tokens int) error {
 	if c == nil || id == "" || tokens == 0 {
 		return nil
 	}
-	ctx := context.Background()
-	key := "xhub:routetpm:" + id
-	if err := c.rdb.IncrBy(ctx, key, int64(tokens)).Err(); err != nil {
-		return err
+	if tokens < 0 {
+		return fmt.Errorf("negative token increment")
 	}
-	return c.rdb.Expire(ctx, key, time.Minute).Err()
+	return incrementWithTTL.Run(context.Background(), c.rdb, []string{"xhub:routetpm:" + id}, tokens, 60000).Err()
 }
 
 // Usages returns each deployment's token usage for the current minute.
@@ -249,15 +248,14 @@ func (c *Client) bump(prefix string, n int64) (int64, error) {
 	if c == nil {
 		return 0, nil
 	}
-	ctx := context.Background()
-	key := fmt.Sprintf("%s:%d", prefix, minuteBucket())
-	v, err := c.rdb.IncrBy(ctx, key, n).Result()
-	if err != nil {
-		return 0, err
+	if n < 0 {
+		return 0, fmt.Errorf("negative counter increment")
 	}
-	_ = c.rdb.Expire(ctx, key, 2*time.Minute).Err()
-	return v, nil
+	key := fmt.Sprintf("%s:%d", prefix, minuteBucket())
+	return incrementWithTTL.Run(context.Background(), c.rdb, []string{key}, n, 120000).Int64()
 }
+
+var incrementWithTTL = redis.NewScript("local n = redis.call('INCRBY', KEYS[1], ARGV[1]); redis.call('PEXPIRE', KEYS[1], ARGV[2]); return n")
 
 // ChargeSpend adds a dollar delta to hot spend and puts the id in the set waiting to be flushed.
 // 参数 id（string）：Charge花费使用的主键。空串表示调用方没有指定记录；usd（float64）：Charge花费使用的小数。0 表示没有费用或尚未计价。
@@ -427,20 +425,30 @@ type SpendLog struct {
 	PriceSnapshot string `json:"price_snapshot,omitempty"`
 }
 
-// EnqueueLog pushes a log onto the Redis list. The request path does only this step. EnqueueSpend publishes the log and its hot budget deltas in one Redis operation. A flusher cannot acknowledge a log before its matching deltas exist.
+// EnqueueSpend publishes a log and its hot budget deltas atomically. RequestID
+// must identify one immutable event globally (including the tenant namespace).
+// Replays are successful no-ops, even after AckFlushed; the first payload wins.
+// Dedup identities have no TTL. Redis persistence/retention is required until
+// PostgreSQL commits; this method does not wait for an fsync or replica quorum.
 // 参数 row（SpendLog）：从用量或目录读出的SpendLog。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：gateway/spend.go
 // 测试：无直接单测
 func (c *Client) EnqueueSpend(row SpendLog) error {
-	if c == nil {
-		return nil
+	if c == nil || c.rdb == nil {
+		return fmt.Errorf("enqueue spend: Redis client is unavailable")
+	}
+	if row.Spend < 0 || math.IsNaN(row.Spend) || math.IsInf(row.Spend, 0) || row.Prompt < 0 || row.Completion < 0 || (row.CachedTokens != nil && *row.CachedTokens < 0) {
+		return fmt.Errorf("enqueue spend: invalid cost or token count")
+	}
+	if row.RequestID == "" {
+		return fmt.Errorf("enqueue spend: request_id is required")
 	}
 	raw, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
-	args := []any{raw, 0.0}
+	args := []any{raw, 0.0, row.RequestID}
 	if row.SpendValid {
 		args[1] = row.Spend
 	}
@@ -453,18 +461,43 @@ func (c *Client) EnqueueSpend(row SpendLog) error {
 			args = append(args, id)
 		}
 	}
-	return enqueueSpendScript.Run(context.Background(), c.rdb, []string{"xhub:spendlog"}, args...).Err()
+	return enqueueSpendScript.Run(context.Background(), c.rdb, []string{"xhub:spendlog", "xhub:spend:requests"}, args...).Err()
 }
 
 var enqueueSpendScript = redis.NewScript(`
+if redis.call('HEXISTS', KEYS[2], ARGV[3]) == 1 then
+  return 0
+end
 local delta = tonumber(ARGV[2])
-for i = 3, #ARGV do
+-- Lua errors do not roll back earlier writes. Check all mutable key types and
+-- numeric results before publishing anything. Infrastructure failures such as
+-- OOM still require operational recovery; Redis is not a database outbox.
+local queueType = redis.call('TYPE', KEYS[1]).ok
+if queueType ~= 'none' and queueType ~= 'list' then
+  return redis.error_reply('spend queue is not a list')
+end
+local idsType = redis.call('TYPE', 'xhub:spend:ids').ok
+if idsType ~= 'none' and idsType ~= 'set' then
+  return redis.error_reply('spend ids is not a set')
+end
+for i = 4, #ARGV do
+  if delta ~= 0 then
+    local raw = redis.call('GET', 'xhub:spend:' .. ARGV[i])
+    local current = raw and tonumber(raw) or 0
+    if (raw and not tonumber(raw)) or current + delta ~= current + delta or
+       math.abs(current + delta) == math.huge then
+      return redis.error_reply('invalid hot spend counter')
+    end
+  end
+end
+for i = 4, #ARGV do
   if delta ~= 0 then
     redis.call('INCRBYFLOAT', 'xhub:spend:' .. ARGV[i], delta)
     redis.call('SADD', 'xhub:spend:ids', ARGV[i])
   end
 end
 redis.call('RPUSH', KEYS[1], ARGV[1])
+redis.call('HSET', KEYS[2], ARGV[3], '1')
 return 1
 `)
 
@@ -498,10 +531,13 @@ func (c *Client) PeekLogs(n int) (rows []SpendLog, raw []string) {
 		return nil, nil
 	}
 	out := make([]SpendLog, 0, len(vals))
-	for _, item := range vals {
+	for i, item := range vals {
 		var row SpendLog
-		if json.Unmarshal([]byte(item), &row) != nil {
-			continue
+		if json.Unmarshal([]byte(item), &row) != nil || row.RequestID == "" {
+			// Never acknowledge an undecodable event. Return only the valid
+			// prefix; a corrupt head blocks flushing until explicitly repaired.
+			logx.Error("spend queue contains an invalid event at offset %d", i)
+			return out, vals[:i]
 		}
 		out = append(out, row)
 	}
@@ -516,6 +552,11 @@ func (c *Client) PeekLogs(n int) (rows []SpendLog, raw []string) {
 func (c *Client) AckFlushed(deltas map[string]float64, n int, head string) error {
 	if c == nil || n < 1 || head == "" {
 		return nil
+	}
+	for _, delta := range deltas {
+		if delta < 0 || math.IsNaN(delta) || math.IsInf(delta, 0) {
+			return fmt.Errorf("ack spend: invalid delta")
+		}
 	}
 	args := make([]any, 0, 2+len(deltas)*2)
 	args = append(args, n, head)
@@ -534,6 +575,16 @@ if (not head) or head ~= ARGV[2] then
   return 0
 end
 local n = tonumber(ARGV[1])
+-- Preflight every counter before subtracting any of them.
+for i = 3, #ARGV, 2 do
+  local raw = redis.call('GET', 'xhub:spend:' .. ARGV[i])
+  local current = raw and tonumber(raw) or 0
+  local delta = tonumber(ARGV[i + 1])
+  if not delta or (raw and not tonumber(raw)) or
+     current - delta ~= current - delta or math.abs(current - delta) == math.huge then
+    return redis.error_reply('invalid hot spend counter')
+  end
+end
 local i = 3
 while i <= #ARGV do
   local id = ARGV[i]

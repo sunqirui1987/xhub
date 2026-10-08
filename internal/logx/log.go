@@ -49,7 +49,7 @@ func write(level, format string, args ...any) {
 
 var (
 	bearerValue = regexp.MustCompile(`(?i)bearer\s+\S+`)
-	secretValue = regexp.MustCompile(`sk-[A-Za-z0-9_\-]+`)
+	secretValue = regexp.MustCompile(`(?i)sk-[A-Za-z0-9_-]+`)
 	httpURL     = regexp.MustCompile(`https?://[^\s"'<>]+`)
 )
 

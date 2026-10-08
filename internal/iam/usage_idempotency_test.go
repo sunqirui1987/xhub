@@ -2,6 +2,8 @@ package iam
 
 import (
 	"context"
+	"math"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,6 +32,56 @@ func usageRecord(requestID, userID string, cost float64) UsageRecord {
 		CompletionTokens: 10,
 		Cost:             cost,
 		DurationMS:       40,
+	}
+}
+
+func TestRecordUsageRejectsInvalidBatchBeforeWriting(t *testing.T) {
+	db := testDB(t)
+	good := usageRecord("valid-before-invalid", "", 1)
+	negative := -1
+	invalid := []UsageRecord{
+		{Cost: 1},
+		usageRecord("negative", "", -1),
+		usageRecord("nan", "", math.NaN()),
+		usageRecord("infinity", "", math.Inf(1)),
+		{RequestID: "tokens", PromptTokens: -1},
+		{RequestID: "cached", CachedTokens: &negative},
+	}
+	for _, bad := range invalid {
+		if err := db.RecordUsage(context.Background(), []UsageRecord{good, bad}); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+		if countEvents(t, db, good.RequestID) != 0 {
+			t.Fatal("invalid batch partially persisted")
+		}
+	}
+}
+
+func TestRecordUsageConcurrentSettlement(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	u, err := db.CreateUser(ctx, Actor{Kind: "system"}, UserInput{Email: "concurrent@example.com", Name: "Concurrent", Password: "password123", Role: RoleUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := usageRecord("official-settlement:scoped-task", u.ID, 1.25)
+	row.TS = time.Time{}
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := db.RecordUsage(ctx, []UsageRecord{row}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if countEvents(t, db, row.RequestID) != 1 || userSpend(t, db, u.ID) != 1.25 || dailyRequests(t, db, u.ID) != 1 || dailyCost(t, db, u.ID) != 1.25 {
+		t.Fatal("concurrent settlement charged or aggregated twice")
+	}
+	if !row.TS.IsZero() {
+		t.Fatal("RecordUsage mutated caller record")
 	}
 }
 

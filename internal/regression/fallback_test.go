@@ -18,6 +18,11 @@ func fallbackSimulated(t *testing.T) {
 	h := newHarness(t)
 	admin := h.adminSession()
 	c := h.openScope(t, admin, "failover")
+	// This test deliberately accumulates failures to exercise fallback. Disable
+	// cooldown so those earlier requests cannot change the candidate order.
+	if r := h.setRouter(admin, map[string]any{"allowed_fails": 0}); r.status >= 300 {
+		t.Fatalf("disable cooldown for deterministic failover: %s", r.text())
+	}
 	h.addDBModel(t, admin, public, "fail-a", "dep-fail-a", map[string]any{"weight": 10})
 	h.addDBModel(t, admin, public, "fail-b", "dep-fail-b", nil)
 
@@ -77,16 +82,6 @@ func fallbackSimulated(t *testing.T) {
 		money := h.moneyOf(t, c)
 		spent := money.project
 		h.setProjectBudget(t, admin, c.projectID, spent)
-		project, err := h.db.GetProject(t.Context(), c.projectID)
-		if err != nil {
-			t.Errorf("read project after setting boundary: %v", err)
-			return
-		}
-		hot := 0.0
-		if h.redisClient() != nil {
-			hot = h.redisClient().HotSpend(live.SpendRef("project", c.projectID))
-		}
-		t.Logf("project budget boundary: spend=%.17g hot=%.17g ceiling=%.17g", project.Spend, hot, *project.MaxBudget)
 	})
 	mark = len(h.upstreamCalls())
 	stopped := h.do(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(public, "budget between deployments"))

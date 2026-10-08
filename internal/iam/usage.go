@@ -2,6 +2,8 @@ package iam
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"time"
 
 	"xorm.io/xorm"
@@ -157,11 +159,16 @@ func (db *DB) RecordUsage(ctx context.Context, records []UsageRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
+	records = append([]UsageRecord(nil), records...)
+	for i := range records {
+		r := &records[i]
+		if r.RequestID == "" || r.Cost < 0 || math.IsNaN(r.Cost) || math.IsInf(r.Cost, 0) || r.PromptTokens < 0 || r.CompletionTokens < 0 || (r.CachedTokens != nil && *r.CachedTokens < 0) {
+			return fmt.Errorf("usage record %d: invalid identity, cost or token count", i)
+		}
+		r.TS = stamp(r.TS)
+	}
 	return db.tx(ctx, func(s *xorm.Session) error {
 		for _, r := range records {
-			if r.RequestID == "" {
-				continue
-			}
 			fresh, err := insertEvent(s, r)
 			if err != nil {
 				return err
@@ -259,8 +266,8 @@ func addScopeSpend(s *xorm.Session, r UsageRecord) error {
 	if r.Cost == 0 {
 		return nil
 	}
-	// Deterministic order, matching every other writer, so two flushers cannot
-	// deadlock by taking the same rows in opposite order.
+	// Stable scope order within an event. Differently ordered batches can still
+	// deadlock; callers must retry the entire transaction on failure.
 	for _, t := range []struct{ table, id string }{
 		{"organizations", r.OrganizationID}, {"teams", r.TeamID}, {"projects", r.ProjectID},
 		{"users", r.UserID}, {"api_keys", r.KeyID},

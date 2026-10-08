@@ -4,18 +4,19 @@
 
 `iam` is the identity store: accounts, organizations, teams, memberships, projects, access groups, virtual keys, usage, request logs and the audit trail. `schema.sql` owns the constraints (composite foreign keys, CHECKs, a case-insensitive email) and xorm owns every read and write. There is no migration from the previous JSON-membership schema and no compatibility layer: the database is rebuilt, and this schema is the whole of it.
 
-Membership is only ever read from `team_members`. There is no mirror of members anywhere else, which is what makes removing a member take effect on the next request rather than at the next login.
+Team membership is read from `team_members`; organization-administrator assignments are read from `organization_members`. Authorization uses current rows, so removing membership takes effect on the next request rather than at the next login.
 
 ## The model
 
-Two account roles and two team roles, and nothing else:
+Account, organization, and team roles are independent:
 
 | Scope | Values |
 | --- | --- |
 | Account (`users.role`) | `admin`, `user` |
+| Organization (`organization_members.role`) | `org_admin` |
 | Team (`team_members.role`) | `team_admin`, `member` |
 
-Resources descend **organization → team → project**. An organization is maintained by platform administrators only. A user gains permission only through team membership: there is no org membership, no project admin, and no access-group role.
+Resources descend **organization → team → project**. Platform administrators manage global resources; organization administrators manage members and projects within their organization, with the limits in the [permission reference](../../docs/development/permissions.md). Personal inference access requires team membership. There is no project-administrator or access-group role.
 
 Ownership of an inference call is **snapshotted** onto `usage_events` at write time. `usage_events` therefore has no foreign keys at all: a member who leaves a team does not move the spend they already produced, and deleting a team does not erase history.
 
@@ -37,7 +38,7 @@ Ownership of an inference call is **snapshotted** onto `usage_events` at write t
 `allowedModels` is the only function the catalog and the inference path use. Every scope resolves to a single team and capabilities are never merged across teams:
 
 ```
-team    = union of the team's active access groups
+team    = the team's model list (empty means unrestricted at this level)
 project = team ∩ project narrowing   (when the scope names a project)
 key     = (project or team) ∩ key narrowing   (when the scope names a key)
 ```
@@ -47,7 +48,7 @@ Two callers wrap it:
 - `AllowedModelsForTeam(ctx, teamID)` — a team's set, used before a key exists
 - `AllowedModelsForKey(ctx, k)` — a key's effective set
 
-An empty narrowing list on a project or a key means **inherit**, not **deny**. An empty set is not a denial either: nothing has been assigned yet.
+An empty model list on a project or key means **inherit**, not **deny**. The resolver uses nil for unrestricted scope; authorization still checks identity, current membership, blocked resources, and deployment availability. Access-group records are not the source of this resolver's team model set.
 
 ## Reading usage and logs
 

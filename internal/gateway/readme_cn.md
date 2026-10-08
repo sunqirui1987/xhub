@@ -14,13 +14,13 @@
 4. 目录路径的默认处理函数 `serveFamilyRoute` 调用 `limits.go` 的 `dataPlane`，再调用 `dataplane.Serve`。图像、音频、重排、视频、responses、文件和 realtime 有自己的 family 处理函数，最后仍进同一个数据面。
 5. 没有 `"/"` 路由。`newEngine` 的 `NoRoute` 写 JSON 404 `not_found`，不是 Gin 的纯文本。
 
-`spend.go` 的 `recordSpend` 给上面每条路径写用量行。写之前 `AnnotateCall` 附上供应商、TTFT、会话和部署。提示词存储是可选的，把头、正文和响应留在同一行。官方任务的创建不记账。第一次正文里带 usage 的后续查询记一次。
+`spend.go` 的 `RecordSpend` 给这些路径写用量。写之前 `AnnotateCall` 附上供应商、TTFT、会话和部署；正文存储是可选的。官方任务创建不记生成费，成功终态且有正用量的查询使用稳定结算身份去重持久化，详见[计价参考](../../docs/development/pricing.md)。
 
-## 钉
+## 会话粘性与任务定位
 
-聊天粘滞（`affinity.go`）用 `deployment_affinity:v1:session:<对外名>:<调用方哈希前 8 字节>:<会话id>`，有效期一小时（`affinityTTL`）。`previous_response_id` 先查 `deployment_affinity:v1:response:<id>`。会话 id 的顺序是客户端会话头、缓存键、上一次响应、稳定提示前缀的哈希。适配调用成功后 `CommitRoute` 写下这根钉。Bypass 不用这根钉来选部署。
+聊天粘性（`affinity.go`）保留一小时（`affinityTTL`）。会话键为 `deployment_affinity:v2:session:` 加公开模型、调用方、会话 ID 的 JSON 元组 SHA-256；响应键为 `deployment_affinity:v3:response:` 加模型、调用方、响应 ID 的同类摘要。优先查询 `previous_response_id`；会话选择依次使用显式头/元数据、缓存键、上次响应和稳定提示前缀摘要。只有完整成功的适配调用通过 `CommitRoute` 写入。官方转发使用独立任务定位。
 
-官方任务用 `official_task:v1:<任务id>`，七天（`officialPinTTL`）。`official_billed:v1:<任务id>` 是只记一次账的标记，同样的有效期。配了 Redis 时两者都走 `live.SetString`，否则留在进程内的表。
+官方任务定位保留七天（`officialPinTTL`）。数据面先对调用方、transport、任务 ID 求摘要，再交给 `PinOfficial`；查询保持相同范围并使用绑定部署。有 Redis 时保存到 Redis，同时提供进程内兜底。结算正确性依靠 Redis/PostgreSQL 对稳定 `request_id` 去重，不依赖提前写入 billed 标记。详见[运行参考](../../docs/development/runtime.md)。
 
 ## 花费和限额
 

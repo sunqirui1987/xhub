@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/sunqirui1987/xhub/internal/authz"
+	"github.com/sunqirui1987/xhub/internal/gateway/templateauth"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -38,6 +39,10 @@ func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 	obj := authz.Object{Type: authz.ObjectKey, TeamID: in.TeamID, ProjectID: in.ProjectID,
 		OwnerType: iam.OwnerService}
 	if err := s.Authorize(r, p, authz.ActionKeyCreate, obj); err != nil {
+		s.WriteAuthz(w, r, err)
+		return
+	}
+	if err := templateauth.Selection(s, r, p, str(body["route_template_id"])); err != nil {
 		s.WriteAuthz(w, r, err)
 		return
 	}
@@ -199,6 +204,10 @@ func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	body := readMap(r)
 	tokens := idsFrom(body, "keys", "key")
+	if err := templateauth.Selection(s, r, p, str(body["route_template_id"])); err != nil {
+		s.WriteAuthz(w, r, err)
+		return
+	}
 	n := 0
 	out := []map[string]any{}
 	for _, token := range tokens {

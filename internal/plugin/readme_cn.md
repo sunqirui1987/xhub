@@ -6,7 +6,7 @@
 
 `Decision.Refuse == true` 让 `dataplane.Serve` 跳过响应缓存，并且不联系上游。`Status`、`Code`、`Message` 是数据面写出的错误。`Header` 即使放行也会抄到响应上，这样客户端能看出扩展跑过。
 
-`New` 返回空注册表。`Registry` 的零值不能用。`Register` 按顺序追加。空名字或重复名字返回错误，已有顺序不动。`Names` 返回一份拷贝。
+`New` 返回空注册表，`Registry` 的零值也可以直接使用。`Register` 按顺序追加。空名字或重复名字返回错误，已有顺序不动。每次注册只读取一次 `Name`，扩展不能在注册过程中改变身份。`Names` 返回一份拷贝。
 
 `Run` 按登记顺序调用 `BeforeUpstream`。第一次拒绝就停掉后面的，已经写上的头保留。空注册表返回零值 `Decision`，`Serve` 继续。`Invoke` 只跑一个名字；没有这个名字时返回错误，不会去调别的扩展。
 

@@ -34,7 +34,7 @@ func (s *Server) RouteSettingsFor(p *auth.Principal) prefs.RouteSettings {
 	row, err := s.IAM.GetRouteTemplate(context.Background(), p.RouteTemplateID)
 	if err != nil {
 		logx.Error("route template lookup failed id=%s err=%v", p.RouteTemplateID, err)
-		return prefs.PlatformSettings(platform)
+		return prefs.RouteSettings{Err: err, TemplateID: p.RouteTemplateID}
 	}
 	if row == nil {
 		// The template was deleted after the chain recorded it. The requests

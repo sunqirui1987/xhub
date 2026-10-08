@@ -1,6 +1,8 @@
 package regression
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -93,7 +95,9 @@ func TestLiveRealModelsAreBilledFromTheCatalog(t *testing.T) {
 				if len(applied) == 0 {
 					t.Fatalf("the breakdown named no applied rate: %s", truncate(string(mustJSON(bill)), 400))
 				}
-				var billedPrompt, billedCompletion, sum float64
+				expected := liveUsageCounts(usage)
+				var billedInput, billedCachedInput, billedCacheRead, billedCacheWrite, billedCompletion, sum float64
+				var hasInput, hasCachedInput, hasCacheRead, hasCacheWrite bool
 				for _, item := range applied {
 					rate, _ := item.(map[string]any)
 					measure, _ := rate["measure"].(string)
@@ -103,15 +107,45 @@ func TestLiveRealModelsAreBilledFromTheCatalog(t *testing.T) {
 					}
 					quantity := numberOrZero(rate["quantity"])
 					switch side {
-					case "input", "cache_read", "cache_write":
-						billedPrompt += quantity
+					case "input":
+						if rate["variant"] == "cached" {
+							billedCachedInput += quantity
+							hasCachedInput = true
+						} else {
+							billedInput += quantity
+							hasInput = true
+						}
+					case "cache_read":
+						billedCacheRead += quantity
+						hasCacheRead = true
+					case "cache_write":
+						billedCacheWrite += quantity
+						hasCacheWrite = true
 					case "output":
 						billedCompletion += quantity
 					}
 					sum += quantity * numberOrZero(rate["usd"])
 				}
-				if billedPrompt != float64(upstreamPrompt) {
-					t.Fatalf("the bill accounts for %v prompt tokens but the vendor reported %d", billedPrompt, upstreamPrompt)
+				// A catalog may price cache hits as an input variant, as a separate
+				// cache_read side, or not price them separately at all. In every
+				// case the input-side quantities must account for the full prompt once.
+				if hasInput {
+					wantInput := expected.prompt
+					if hasCachedInput || hasCacheRead {
+						wantInput -= expected.cacheRead
+					}
+					if billedInput != float64(wantInput) {
+						t.Fatalf("the bill accounts for uncached input=%v, want %d from prompt=%d cache_read=%d", billedInput, wantInput, expected.prompt, expected.cacheRead)
+					}
+				}
+				if hasCachedInput && billedCachedInput != float64(expected.cacheRead) {
+					t.Fatalf("the bill accounts for cached input=%v but the vendor reported %d", billedCachedInput, expected.cacheRead)
+				}
+				if hasCacheRead && billedCacheRead != float64(expected.cacheRead) {
+					t.Fatalf("the bill accounts for cache_read=%v but the vendor reported %d", billedCacheRead, expected.cacheRead)
+				}
+				if hasCacheWrite && billedCacheWrite != float64(expected.cacheWrite) {
+					t.Fatalf("the bill accounts for cache_write=%v but the vendor reported %d", billedCacheWrite, expected.cacheWrite)
 				}
 				if billedCompletion != float64(upstreamCompletion) {
 					t.Fatalf("the bill accounts for %v completion tokens but the vendor reported %d", billedCompletion, upstreamCompletion)
@@ -122,14 +156,14 @@ func TestLiveRealModelsAreBilledFromTheCatalog(t *testing.T) {
 
 				// 用量行里的 token 数也要是上游报的那些，不能是估的。
 				row := logDetail(t, h, admin, r.header("x-litellm-call-id"))
-				if got := numberOrZero(row["prompt_tokens"]); got != float64(upstreamPrompt) {
+				if got := numberOrZero(row["prompt_tokens"]); got != float64(expected.prompt) {
 					t.Fatalf("the log row records %v prompt tokens while the vendor reported %d", got, upstreamPrompt)
 				}
 				if got := numberOrZero(row["completion_tokens"]); got != float64(upstreamCompletion) {
 					t.Fatalf("the log row records %v completion tokens while the vendor reported %d", got, upstreamCompletion)
 				}
 				t.Logf("%s: vendor reported prompt=%d completion=%d, charged %v from the built-in catalog",
-					public, upstreamPrompt, upstreamCompletion, charged)
+					public, expected.prompt, expected.completion, charged)
 			})
 		}
 	}
@@ -172,19 +206,22 @@ func TestLiveVendorUsageFieldsAreUnderstood(t *testing.T) {
 			// 网关归一化之后必须至少把上游报的提示数认全，不能少。
 			// 少了就说明这家用的拼法没被认出来——那正是账单变少的原因。
 			billed := catalog.NormalizeUsage(usage)
-			if billed.PromptTokens < upstreamPrompt {
+			expected := liveUsageCounts(usage)
+			if billed.PromptTokens != expected.prompt {
 				t.Fatalf("the gateway normalized the vendor's %d prompt tokens to %d; "+
 					"the vendor's field names are not fully understood: %v",
 					upstreamPrompt, billed.PromptTokens, sortedKeys(usage))
 			}
-			if billed.CompletionTokens != upstreamCompletion {
+			if billed.CompletionTokens != expected.completion {
 				t.Fatalf("the gateway normalized the vendor's %d completion tokens to %d",
 					upstreamCompletion, billed.CompletionTokens)
 			}
 			// 提示侧含缓存读，所以 = 未命中 + 命中；而缓存读不该超过总数。
-			if billed.CachedTokens > billed.PromptTokens {
-				t.Fatalf("the normalized cache read (%d) exceeds the whole prompt (%d)",
-					billed.CachedTokens, billed.PromptTokens)
+			if billed.CachedTokens != expected.cacheRead {
+				t.Fatalf("the normalized cache read is %d, vendor reported %d", billed.CachedTokens, expected.cacheRead)
+			}
+			if billed.CacheWriteTokens != expected.cacheWrite {
+				t.Fatalf("the normalized cache write is %d, vendor reported %d", billed.CacheWriteTokens, expected.cacheWrite)
 			}
 		})
 	}
@@ -214,6 +251,9 @@ func TestLiveStreamingIsBilledFromTheRealUsage(t *testing.T) {
 
 			path, body := liveCallShape(public, vendor.Protocol, "Reply with the single word ok.")
 			body["stream"] = true
+			if vendor.Protocol != "anthropic" {
+				body["stream_options"] = map[string]any{"include_usage": true}
+			}
 			r := h.do(http.MethodPost, path, tn.key, body)
 			if r.status != http.StatusOK {
 				t.Fatalf("the live vendor refused the stream (%d): %s", r.status, r.describe())
@@ -222,6 +262,11 @@ func TestLiveStreamingIsBilledFromTheRealUsage(t *testing.T) {
 			if !strings.Contains(r.text(), "data:") && !strings.Contains(r.text(), "event:") {
 				t.Fatalf("the stream carried no events: %s", truncate(r.text(), 300))
 			}
+			streamUsage := parseStreamUsage(r.text())
+			if len(streamUsage) == 0 {
+				t.Fatalf("the stream carried no usage event: %s", truncate(r.text(), 500))
+			}
+			expected := liveUsageCounts(streamUsage)
 			callID := r.header("x-litellm-call-id")
 			if callID == "" {
 				t.Fatal("the stream carried no call id, so its usage row cannot be found")
@@ -234,10 +279,10 @@ func TestLiveStreamingIsBilledFromTheRealUsage(t *testing.T) {
 				t.Fatalf("a real streaming call to %s was recorded at zero spend: %s",
 					public, truncate(string(mustJSON(row)), 400))
 			}
-			if got := numberOrZero(row["completion_tokens"]); got <= 0 {
+			if got := numberOrZero(row["completion_tokens"]); got != float64(expected.completion) {
 				t.Fatalf("a streaming call recorded no completion tokens: %s", truncate(string(mustJSON(row)), 300))
 			}
-			if got := numberOrZero(row["prompt_tokens"]); got <= 0 {
+			if got := numberOrZero(row["prompt_tokens"]); got != float64(expected.prompt) {
 				t.Fatalf("a streaming call recorded no prompt tokens: %s", truncate(string(mustJSON(row)), 300))
 			}
 			// 这一行也要能解释那一笔。
@@ -282,10 +327,7 @@ func TestLiveSameVendorViaEitherProtocolIsBilledAlike(t *testing.T) {
 			}
 			tested++
 			t.Run(left.vendor.ID+"/"+left.model+" via both protocols", func(t *testing.T) {
-				runs := map[string]struct {
-					charged float64
-					prompt  int
-				}{}
+				runs := map[string]map[string]any{}
 				for _, side := range []pair{left, right} {
 					h := newHarness(t, liveModelDeployment(side.vendor, side.model))
 					h.live = true
@@ -298,27 +340,18 @@ func TestLiveSameVendorViaEitherProtocolIsBilledAlike(t *testing.T) {
 					if usage == nil {
 						t.Fatalf("%s: the vendor answer carried no usage: %s", side.vendor.Protocol, r.describe())
 					}
-					prompt, _ := liveCounts(usage)
-					runs[side.vendor.Protocol] = struct {
-						charged float64
-						prompt  int
-					}{parseFloatOrZero(r.header("x-litellm-response-cost")), prompt}
+					bill := breakdownOf(t, h, admin, r.header("x-litellm-call-id"))
+					runs[side.vendor.Protocol] = bill
 				}
 				a, o := runs["anthropic"], runs["openai"]
-				if a.charged <= 0 || o.charged <= 0 {
+				if a == nil || o == nil {
 					t.Fatalf("one of the two protocols was not priced: %+v", runs)
 				}
-				// 供应商对两套协议报的 token 数不必逐字相同（Anthropic 那套不把缓存读
-				// 算进 input_tokens，而且各自的提示模板不同），所以比的是"单位价"：
-				// 金额除以 token 数。同一个模型的单位价在两条协议上必须一致。
-				if a.prompt == 0 || o.prompt == 0 {
-					t.Skipf("a protocol reported no prompt tokens: %+v", runs)
+				if a["source"] != "snapshot" || o["source"] != "snapshot" {
+					t.Fatalf("one protocol did not retain its pricing snapshot: %+v", runs)
 				}
-				unitA, unitO := a.charged/float64(a.prompt), o.charged/float64(o.prompt)
-				if diff := unitA/unitO - 1; diff > 0.05 || diff < -0.05 {
-					t.Fatalf("the two protocols priced the same model differently: "+
-						"anthropic %v per prompt token (charged %v for %d), openai %v per prompt token (charged %v for %d)",
-						unitA, a.charged, a.prompt, unitO, o.charged, o.prompt)
+				if !sameRatePrices(a["applied"], o["applied"]) {
+					t.Fatalf("the two protocols used different normalized rates: anthropic=%s openai=%s", truncate(string(mustJSON(a["applied"])), 500), truncate(string(mustJSON(o["applied"])), 500))
 				}
 			})
 		}
@@ -340,12 +373,7 @@ func (h *harness) liveCallFor(t *testing.T, key, model, protocol, prompt string)
 	path, body := liveCallShape(model, protocol, prompt)
 	r := h.do(http.MethodPost, path, key, body)
 	if r.status != http.StatusOK {
-		// A vendor outage or a credential problem is not a gateway defect, and
-		// failing loudly is still the right answer: a live model that cannot be
-		// reached proves nothing, and a silent skip would look exactly like a
-		// pass. Drop the model from <ID>_MODELS if the vendor has retired it.
-		t.Fatalf("the live vendor refused the call (%d). This is either a credential problem, a retired model, or a vendor outage -- not a gateway defect. Remove it from %s<ID>_MODELS if the vendor no longer serves it: %s",
-			r.status, liveVendorEnvPrefix, r.describe())
+		t.Fatalf("live call failed: status=%d model=%s protocol=%s evidence=%s", r.status, model, protocol, r.describe())
 	}
 	return r
 }
@@ -366,6 +394,51 @@ func liveCallShape(model, protocol, prompt string) (string, map[string]any) {
 	}
 }
 
+type liveUsage struct {
+	prompt, input, cacheRead, cacheWrite, completion int
+}
+
+func liveUsageCounts(usage map[string]any) liveUsage {
+	var out liveUsage
+	out.input = firstLiveInt(usage, "prompt_tokens", "input_tokens")
+	out.completion = firstLiveInt(usage, "completion_tokens", "output_tokens")
+	if hasLiveValue(usage, "cache_read_input_tokens", "cache_read_tokens") {
+		out.cacheRead = firstLiveInt(usage, "cache_read_input_tokens", "cache_read_tokens")
+		out.prompt = out.input + out.cacheRead
+	} else {
+		out.cacheRead = firstLiveInt(usage, "cached_tokens")
+		for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
+			if details, ok := usage[key].(map[string]any); ok && !hasLiveValue(usage, "cached_tokens") {
+				if _, present := details["cached_tokens"]; present {
+					out.cacheRead = asIntAny(details["cached_tokens"])
+					break
+				}
+			}
+		}
+		out.prompt = out.input
+	}
+	out.cacheWrite = firstLiveInt(usage, "cache_creation_input_tokens", "cache_write_tokens")
+	return out
+}
+
+func hasLiveValue(usage map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if value, ok := usage[key]; ok && value != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func firstLiveInt(usage map[string]any, keys ...string) int {
+	for _, key := range keys {
+		if value, ok := usage[key]; ok && value != nil {
+			return asIntAny(value)
+		}
+	}
+	return 0
+}
+
 // liveCounts 从供应商回的真实 usage 里读提示和完成 token 数。
 //
 // 两套拼法都读：OpenAI 的 prompt_tokens/completion_tokens，和 Anthropic 的
@@ -374,15 +447,68 @@ func liveCallShape(model, protocol, prompt string) (string, map[string]any) {
 // 参数 usage（map[string]any）：供应商回的 usage 对象。
 // 返回 prompt（int）：提示 token 数；completion（int）：完成 token 数。
 func liveCounts(usage map[string]any) (prompt, completion int) {
-	prompt = asIntAny(usage["prompt_tokens"])
-	if prompt == 0 {
-		prompt = asIntAny(usage["input_tokens"])
+	counts := liveUsageCounts(usage)
+	return counts.prompt, counts.completion
+}
+
+func parseStreamUsage(raw string) map[string]any {
+	merged := map[string]any{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(payload), &event) != nil {
+			continue
+		}
+		usage, _ := event["usage"].(map[string]any)
+		if usage == nil {
+			if message, ok := event["message"].(map[string]any); ok {
+				usage, _ = message["usage"].(map[string]any)
+			}
+		}
+		if usage == nil {
+			if delta, ok := event["delta"].(map[string]any); ok {
+				usage, _ = delta["usage"].(map[string]any)
+			}
+		}
+		if usage == nil {
+			if response, ok := event["response"].(map[string]any); ok {
+				usage, _ = response["usage"].(map[string]any)
+			}
+		}
+		for key, value := range usage {
+			merged[key] = value
+		}
 	}
-	completion = asIntAny(usage["completion_tokens"])
-	if completion == 0 {
-		completion = asIntAny(usage["output_tokens"])
+	return merged
+}
+
+func sameRatePrices(left, right any) bool {
+	leftRates, lok := left.([]any)
+	rightRates, rok := right.([]any)
+	if !lok || !rok {
+		return false
 	}
-	return prompt, completion
+	keys := func(v any) string {
+		m, _ := v.(map[string]any)
+		return fmt.Sprintf("%v|%v|%v|%v|%v", m["measure"], m["side"], m["variant"], m["unit_size"], m["usd"])
+	}
+	leftKeys, rightKeys := make([]string, len(leftRates)), make([]string, len(rightRates))
+	for i := range leftRates {
+		leftKeys[i] = keys(leftRates[i])
+	}
+	for i := range rightRates {
+		rightKeys[i] = keys(rightRates[i])
+	}
+	sort.Strings(leftKeys)
+	sort.Strings(rightKeys)
+	return strings.Join(leftKeys, "\n") == strings.Join(rightKeys, "\n")
 }
 
 // slugOf 把一个对外模型名收成能当变量名用的短标识。

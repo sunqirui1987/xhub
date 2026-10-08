@@ -41,7 +41,7 @@ func TestHandlerDialFailureLogKeepsHostWithoutURL(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 		IAM:        db,
 		Authz:      authz.New(db),
 		sessions:   map[string]sessionRec{"session-token": {UserID: user.ID, Version: user.SessionVersion, ExpiresAt: time.Now().Add(time.Hour)}},

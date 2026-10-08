@@ -45,10 +45,10 @@ func newLogHost(cfg *config.Config, client *http.Client) *logHost {
 }
 
 func (h *logHost) RequireLLMPrincipal(http.ResponseWriter, *http.Request) *auth.Principal {
-	return &auth.Principal{Kind: "session"}
+	return &auth.Principal{Kind: "session", UserID: "log-user"}
 }
 func (h *logHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
-	return &auth.Principal{Kind: "session"}, nil
+	return &auth.Principal{Kind: "session", UserID: "log-user"}, nil
 }
 func (h *logHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
 	return prefs.PlatformSettings(nil)
@@ -325,7 +325,11 @@ func TestServeLogsCacheHitAndStreamMetrics(t *testing.T) {
 			"api_base": "https://api.openai.com/v1",
 		},
 	}), nil)
-	h.cache.Set(cache.Key("", "chat", "gpt-4o-mini", string(raw)), []byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	scope, err := json.Marshal(map[string]any{"models": h.cfg.ModelList, "router": h.RouteSettingsFor(nil).Settings, "session": "", "query": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cache.Set(cache.Key("user:log-user", "chat", "gpt-4o-mini", string(raw), string(scope)), []byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
 
 	buf := captureLog(t)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(raw))

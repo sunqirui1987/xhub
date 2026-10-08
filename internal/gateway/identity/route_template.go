@@ -140,7 +140,7 @@ func RouteTemplateCreate(g Gate, w http.ResponseWriter, r *http.Request) {
 	// default, not as an empty one.
 	//
 	// Resolution replaces rather than merges, so a template that omits a key
-	// means that key's zero value - one attempt, no timeout. Seeding makes every
+	// means that key's zero value - one attempt, a zero timeout. Seeding makes every
 	// template in the table a working configuration, and an operator who wants
 	// one attempt can still delete the line.
 	encoded, err := encodeTemplateBody(seedFromPlatform(g.RouterDocument(), body["body"]))
@@ -366,6 +366,17 @@ func RouteTemplateBinding(g Gate, w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		inherited := routeTemplateResolution{ScopeType: prefs.PlatformSource}
+		if parent, parentID, parentErr := parentScope(g.Identity(), r, scope, scopeID); parentErr != nil {
+			http.Error(w, parentErr.Error(), http.StatusInternalServerError)
+			return
+		} else if parentID != "" {
+			inherited, err = resolveRouteTemplate(g, r, parent, parentID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		httpx.WriteJSON(w, 200, map[string]any{
 			"scope": scope, "scope_id": scopeID,
 			// selected is what this scope chose; effective is what it will
@@ -373,6 +384,7 @@ func RouteTemplateBinding(g Gate, w http.ResponseWriter, r *http.Request) {
 			// inherited from the level above.
 			"route_template_id": current,
 			"effective":         resolved,
+			"inherited":         inherited,
 		})
 		return
 	}
@@ -458,20 +470,35 @@ func resolveRouteTemplate(g Gate, r *http.Request, scope, scopeID string) (route
 	// is what the store does not already know: the starting row names its parent,
 	// not the other way round.
 	chain := []prefs.ScopeRef{{Kind: scope, ID: scopeID}}
-	at, id := parentScope(g.Identity(), r, scope, scopeID)
+	at, id, err := parentScope(g.Identity(), r, scope, scopeID)
+	if err != nil {
+		return routeTemplateResolution{}, err
+	}
 	for id != "" && len(chain) < 3 {
 		chain = append(chain, prefs.ScopeRef{Kind: at, ID: id})
-		at, id = parentScope(g.Identity(), r, at, id)
+		at, id, err = parentScope(g.Identity(), r, at, id)
+		if err != nil {
+			return routeTemplateResolution{}, err
+		}
 	}
 	for _, step := range chain {
 		if lookup.TemplateFor(step.Kind, step.ID) != "" {
+			if lookup.err != nil {
+				return routeTemplateResolution{}, lookup.err
+			}
 			resolved := prefs.Resolve(g.RouterDocument(), lookup, chain...)
+			if lookup.err != nil {
+				return routeTemplateResolution{}, lookup.err
+			}
 			return routeTemplateResolution{
 				TemplateID: resolved.TemplateID,
 				Name:       resolved.TemplateName,
 				ScopeType:  resolved.Source,
 				ScopeID:    step.ID,
 			}, nil
+		}
+		if lookup.err != nil {
+			return routeTemplateResolution{}, lookup.err
 		}
 	}
 	return routeTemplateResolution{ScopeType: prefs.PlatformSource}, nil
@@ -483,6 +510,7 @@ type requestLookup struct {
 	bound map[string]string
 	db    *iam.DB
 	ctx   context.Context
+	err   error
 }
 
 // TemplateFor returns the template one scope selects.
@@ -497,7 +525,8 @@ func (l *requestLookup) TemplateFor(kind, id string) string {
 	}
 	selected, err := l.db.ScopeRouteTemplate(l.ctx, kind, id)
 	if err != nil {
-		selected = ""
+		l.err = err
+		return ""
 	}
 	l.bound[key] = selected
 	return selected
@@ -514,7 +543,8 @@ func (l *requestLookup) Load(id string) *iam.RouteTemplate {
 	}
 	row, err := l.db.GetRouteTemplate(l.ctx, id)
 	if err != nil {
-		row = nil
+		l.err = err
+		return nil
 	}
 	l.byID[id] = row
 	return row
@@ -526,24 +556,30 @@ func (l *requestLookup) Load(id string) *iam.RouteTemplate {
 // 返回 string（string）：上一层范围；string（string）：上一层的那一行。
 // 调用：resolveRouteTemplate。
 // 测试：route_template_test.go
-func parentScope(db *iam.DB, r *http.Request, scope, scopeID string) (string, string) {
+func parentScope(db *iam.DB, r *http.Request, scope, scopeID string) (string, string, error) {
 	switch scope {
 	case "key":
 		key, err := db.GetKey(ctx0(r), scopeID)
-		if err != nil || key == nil {
-			return "", ""
+		if err != nil {
+			return "", "", err
+		}
+		if key == nil {
+			return "", "", nil
 		}
 		// A key belonging to nobody but an organization still has a team; a key
 		// with no team at all stops here.
-		return "team", key.TeamID
+		return "team", key.TeamID, nil
 	case "team":
 		team, err := db.GetTeam(ctx0(r), scopeID)
-		if err != nil || team == nil {
-			return "", ""
+		if err != nil {
+			return "", "", err
 		}
-		return "organization", team.OrganizationID
+		if team == nil {
+			return "", "", nil
+		}
+		return "organization", team.OrganizationID, nil
 	default:
-		return "", ""
+		return "", "", nil
 	}
 }
 
@@ -551,7 +587,7 @@ func parentScope(db *iam.DB, r *http.Request, scope, scopeID string) (string, st
 // every template in the table is a complete configuration.
 //
 // Resolution replaces rather than merges. A template that omitted num_retries
-// would mean one attempt; one that omitted timeout would mean no timeout. Those
+// would mean one attempt; one that omitted timeout would mean a zero timeout. Those
 // are legitimate things to configure and surprising things to get by accident, so
 // the starting point is the platform document and the operator edits it down.
 //

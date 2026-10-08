@@ -3504,7 +3504,7 @@ export const getRouteTemplateBindingCall = async (
   accessToken: string,
   scope: "organization" | "team" | "key",
   scopeId: string,
-): Promise<{ route_template_id: string; effective: EffectiveRouteTemplate }> => {
+): Promise<{ route_template_id: string; effective: EffectiveRouteTemplate; inherited?: EffectiveRouteTemplate }> => {
   const data = await apiClient.get(
     `/route_template/binding?scope=${encodeURIComponent(scope)}&scope_id=${encodeURIComponent(scopeId)}`,
     { accessToken },
@@ -3512,6 +3512,7 @@ export const getRouteTemplateBindingCall = async (
   return {
     route_template_id: data?.route_template_id ?? "",
     effective: data?.effective ?? { scope_type: "platform" },
+    inherited: data?.inherited,
   };
 };
 
@@ -5709,6 +5710,7 @@ export const sessionSpendLogsCall = async (
   session_id: string,
   page: number = 1,
   page_size: number = 100,
+  caller?: { apiKey?: string; userId?: string },
 ) => {
   try {
     const params = new URLSearchParams({
@@ -5716,6 +5718,11 @@ export const sessionSpendLogsCall = async (
       page: String(page),
       page_size: String(page_size),
     });
+    if (caller?.apiKey) {
+      params.set("api_key", caller.apiKey);
+    } else if (caller?.userId) {
+      params.set("user_id", caller.userId);
+    }
     let url = proxyBaseUrl
       ? `${proxyBaseUrl}/spend/logs/session/ui?${params.toString()}`
       : `/spend/logs/session/ui?${params.toString()}`;

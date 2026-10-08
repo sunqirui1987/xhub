@@ -16,13 +16,14 @@ var logTraceOnceRouteSettings sync.Once
 //
 // It is the single answer to "which settings apply to this call". Everything in
 // the request path that used to read the process-global document - the strategy,
-// the retry count, the timeout, the cooldown thresholds, the fallback chains -
+// the retry count, the timeout, and the cooldown thresholds -
 // reads this instead, so a scope that selected a template and a scope that did
 // not are routed and billed by the same code with different inputs.
 //
 // Settings is a whole document, not a merge. See Resolve for why.
 type RouteSettings struct {
 	Settings map[string]any
+	Err      error
 	// TemplateID and TemplateName are empty when the platform default applies.
 	TemplateID   string
 	TemplateName string
@@ -88,9 +89,8 @@ type ScopeLookup interface {
 // That rule puts a requirement on how templates are written, and the create path
 // meets it: a new template is seeded from the platform default rather than from
 // an empty document, so every template in the table is a complete document. A
-// template that really did omit num_retries would mean one attempt and no
-// timeout, which is a legitimate thing to write and a surprising thing to get by
-// accident.
+// template that omits num_retries means one attempt; omitting timeout means
+// sixty seconds, matching the typed readers below.
 //
 // A scope that selects nothing inherits from the level above rather than falling
 // straight to the platform default. That is what makes "the organization picked a

@@ -289,7 +289,7 @@ func addEntity(day *dayMetric, dim entityDim, row activityRow) {
 		bucket = &entityBucket{keys: map[string]*keyMetric{}}
 		day.entities[id] = bucket
 	}
-	bucket.add(row.prompt, row.completion, row.spend, row.success)
+	bucket.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 	if bucket.teamAlias == "" {
 		bucket.teamAlias = row.teamAlias
 	}
@@ -409,7 +409,7 @@ func teamSpendByUserBody(r *http.Request, rows []activityRow, labels entityLabel
 			grouped[key] = bucket
 			order = append(order, key)
 		}
-		bucket.add(row.prompt, row.completion, row.spend, row.success)
+		bucket.add(row.prompt, row.completion, row.cacheRead, row.spend, row.success)
 	}
 	sort.Slice(order, func(i, j int) bool {
 		a, b := grouped[order[i]], grouped[order[j]]

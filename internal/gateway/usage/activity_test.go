@@ -73,6 +73,30 @@ func TestDailyActivityResponseFoldsOneDay(t *testing.T) {
 	}
 }
 
+func TestDailyActivityReportsKnownCacheReadsAndOmitsUnknownCacheFields(t *testing.T) {
+	cached := 7
+	rows := rollupRows()
+	rows[0].cacheRead = &cached
+	body := dailyActivityResponse(rows, 1, true)
+	meta := body["metadata"].(map[string]any)
+	if meta["total_cache_read_input_tokens"] != 7 {
+		t.Fatalf("cache read total: %#v", meta)
+	}
+	if _, ok := meta["total_cache_creation_input_tokens"]; ok {
+		t.Fatalf("unknown cache creation was reported as measured: %#v", meta)
+	}
+	day := body["results"].([]any)[0].(map[string]any)
+	metrics := day["metrics"].(map[string]any)
+	if metrics["cache_read_input_tokens"] != 7 {
+		t.Fatalf("day cache reads: %#v", metrics)
+	}
+
+	unknown := dailyActivityResponse(rollupRows(), 1, true)["metadata"].(map[string]any)
+	if _, ok := unknown["total_cache_read_input_tokens"]; ok {
+		t.Fatalf("unknown cache reads were reported as zero: %#v", unknown)
+	}
+}
+
 // TestGatewayActivityBodySplitsByOutcomeAndRoute covers the request-count view
 // the gateway activity panel reads.
 func TestGatewayActivityBodySplitsByOutcomeAndRoute(t *testing.T) {

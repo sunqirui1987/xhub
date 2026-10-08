@@ -749,6 +749,21 @@ func (h *harness) doHeaders(method, path, token string, body any, headers map[st
 	h.t.Helper()
 	var reader io.Reader
 	if body != nil {
+		// Business live calls should stay small even when the caller is one of the
+		// broader workflow tests rather than the pricing-specific helpers.
+		// Simulated requests keep their original body exactly.
+		if h.live && strings.HasPrefix(path, "/v1/") {
+			if object, ok := body.(map[string]any); ok {
+				copyBody := make(map[string]any, len(object)+1)
+				for k, v := range object {
+					copyBody[k] = v
+				}
+				if _, exists := copyBody["max_tokens"]; !exists {
+					copyBody["max_tokens"] = 16
+				}
+				body = copyBody
+			}
+		}
 		raw, err := json.Marshal(body)
 		if err != nil {
 			h.t.Fatalf("marshal body for %s %s: %v", method, path, err)
@@ -939,7 +954,7 @@ func namesOf(rows []map[string]any, field string) []string {
 //
 //	XHUB_REGRESSION_<ID>_KEY    必需。缺了这家就整组跳过，不静默当成通过
 //	XHUB_REGRESSION_<ID>_BASE   必需。chat 部署的根地址，OpenAI 兼容的带 /v1
-//	XHUB_REGRESSION_<ID>_MODELS 可选。逗号分隔的模型名，缺省用 DEFAULT_MODEL
+//	XHUB_REGRESSION_<ID>_MODELS 必需。逗号分隔的模型名，必须是真实供应商接受的名称
 //	XHUB_REGRESSION_<ID>_PROTOCOL 可选。anthropic 或 openai，缺省 openai
 //	XHUB_REGRESSION_<ID>_BYPASS_BASE 可选。Bypass 端点要的裸主机名，缺省由 BASE 去掉 /v1
 //
@@ -1009,6 +1024,9 @@ func liveVendors(t *testing.T) []liveVendor {
 		protocol := strings.ToLower(strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_PROTOCOL")))
 		if protocol == "" {
 			protocol = "openai"
+		}
+		if protocol != "openai" && protocol != "anthropic" {
+			t.Fatalf("%s_PROTOCOL must be openai or anthropic", liveVendorEnvPrefix+id)
 		}
 		vendors = append(vendors, liveVendor{
 			ID: id, Key: key, Base: base, BypassBase: bypass,

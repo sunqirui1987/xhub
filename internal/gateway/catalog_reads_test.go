@@ -17,7 +17,7 @@ type catalogRoute struct {
 // TestCatalogReads calls every catalog GET through the shipped gateway handler.
 // A removed column must stay 404. A retired path must stay 410. A mounted read
 // must return JSON, either 200 without an error object or the handler's 400
-// contract.
+// contract. Unsupported nested provider resources must return 501.
 func TestCatalogReads(t *testing.T) {
 	srv, base, db := bootGateway(t)
 	defer srv.Close()
@@ -47,6 +47,17 @@ func TestCatalogReads(t *testing.T) {
 				errObj, _ := probe["error"].(map[string]any)
 				if errObj["type"] != "removed" {
 					t.Fatalf("410 contract %s", trim(body))
+				}
+				return
+			}
+			if strings.Contains(path, "/threads/") && strings.HasSuffix(path, "/messages") {
+				var probe map[string]any
+				if status != http.StatusNotImplemented || json.Unmarshal(body, &probe) != nil {
+					t.Fatalf("unsupported resource status %d %s", status, trim(body))
+				}
+				errObj, _ := probe["error"].(map[string]any)
+				if errObj["type"] != "not_implemented" {
+					t.Fatalf("501 contract %s", trim(body))
 				}
 				return
 			}

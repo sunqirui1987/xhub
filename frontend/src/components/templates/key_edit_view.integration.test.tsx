@@ -323,7 +323,7 @@ describe("KeyEditView", () => {
         />,
       );
 
-    it("locks the prompts control for a non-premium admin so an unsavable value cannot be entered", async () => {
+    it("does not render or load removed policy and prompt controls for a non-premium admin", async () => {
       renderWithProviders(
         <KeyEditView
           keyData={MOCK_KEY_DATA}
@@ -336,15 +336,14 @@ describe("KeyEditView", () => {
         />,
       );
 
-      const prompts = await screen.findByLabelText(/Prompts/);
-      expect(prompts).toBeDisabled();
-
-      await userEvent.type(prompts, "sneaky-prompt{Enter}");
-
-      expect(screen.queryByLabelText("sneaky-prompt")).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: /save changes/i });
+      expect(screen.queryByLabelText(/Prompts/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Policies")).not.toBeInTheDocument();
+      expect(getPromptsList).not.toHaveBeenCalled();
+      expect(getPoliciesList).not.toHaveBeenCalled();
     });
 
-    it("leaves the prompts control usable for a premium admin", async () => {
+    it("does not restore removed policy and prompt controls for a premium admin", async () => {
       renderWithProviders(
         <KeyEditView
           keyData={MOCK_KEY_DATA}
@@ -357,25 +356,26 @@ describe("KeyEditView", () => {
         />,
       );
 
-      const prompts = await screen.findByLabelText(/Prompts/);
-      expect(prompts).toBeEnabled();
-
-      await userEvent.type(prompts, "allowed-prompt{Enter}");
-
-      expect(await screen.findByLabelText("allowed-prompt")).toBeInTheDocument();
+      await screen.findByRole("button", { name: /save changes/i });
+      expect(screen.queryByLabelText(/Prompts/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Policies")).not.toBeInTheDocument();
+      expect(getPromptsList).not.toHaveBeenCalled();
+      expect(getPoliciesList).not.toHaveBeenCalled();
     });
 
-    it("should render both fields and load prompts for an admin", async () => {
+    it("omits removed policy and prompt controls and requests for an admin", async () => {
       renderAs("Admin");
 
       await waitFor(() => {
-        expect(getPromptsList).toHaveBeenCalledWith("test-token");
+        expect(modelAvailableCall).toHaveBeenCalled();
       });
-      expect(screen.getByText("Prompts", { selector: "label" })).toBeInTheDocument();
-      expect(screen.getByText("Policies")).toBeInTheDocument();
+      expect(getPromptsList).not.toHaveBeenCalled();
+      expect(getPoliciesList).not.toHaveBeenCalled();
+      expect(screen.queryByText("Prompts", { selector: "label" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Policies")).not.toBeInTheDocument();
     });
 
-    it("lists a prompt existing in several environments once in the dropdown", async () => {
+    it("does not request prompts even when the removed control has available data", async () => {
       vi.mocked(getPromptsList).mockResolvedValueOnce({
         prompts: [
           { prompt_id: "envgreet", litellm_params: {}, prompt_info: { prompt_type: "db" }, environment: "development" },
@@ -385,10 +385,10 @@ describe("KeyEditView", () => {
 
       renderAs("Admin");
 
-      const prompts = await screen.findByLabelText(/Prompts/);
-      await userEvent.type(prompts, "envgreet");
-
-      expect(await screen.findAllByRole("option", { name: "envgreet" })).toHaveLength(1);
+      await screen.findByRole("button", { name: /save changes/i });
+      expect(getPromptsList).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText(/Prompts/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "envgreet" })).not.toBeInTheDocument();
     });
 
     it("should omit both fields and fire neither admin-only request for an internal user", async () => {
@@ -850,7 +850,7 @@ describe("KeyEditView", () => {
     });
   });
 
-  it("should keep mcp_toolsets when saving an edit that does not touch the MCP selector", async () => {
+  it("omits hidden MCP permissions so an untouched save preserves stored toolsets", async () => {
     const onSubmitMock = vi.fn().mockResolvedValue(undefined);
     const keyDataWithToolset = {
       ...MOCK_KEY_DATA,
@@ -859,6 +859,7 @@ describe("KeyEditView", () => {
         mcp_toolsets: ["ts-1"],
       },
     };
+    const originalPermission = structuredClone(keyDataWithToolset.object_permission);
 
     renderWithProviders(
       <KeyEditView
@@ -881,7 +882,9 @@ describe("KeyEditView", () => {
     await waitFor(() => {
       expect(onSubmitMock).toHaveBeenCalled();
     });
-    expect(onSubmitMock.mock.calls[0][0].mcp_servers_and_groups.toolsets).toEqual(["ts-1"]);
+    expect(screen.queryByTestId("mcp-server-selector")).not.toBeInTheDocument();
+    expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("mcp_servers_and_groups");
+    expect(keyDataWithToolset.object_permission).toEqual(originalPermission);
   });
 
   it("should submit budget_limits: [] when the last budget window is deleted", async () => {
@@ -1926,16 +1929,10 @@ describe("KeyEditView", () => {
     model_rpm_limit: undefined,
     guardrails: undefined,
     disable_global_guardrails: false,
-    policies: undefined,
     tags: ["test-tag"],
-    prompts: undefined,
     access_group_ids: [],
     allowed_passthrough_routes: undefined,
-    vector_stores: [],
-    mcp_servers_and_groups: { servers: [], accessGroups: [], toolsets: [] },
-    mcp_tool_permissions: {},
-    agents_and_groups: { agents: [], accessGroups: [] },
-    skills: [],
+    route_template_id: "",
     organization_id: null,
     team_id: null,
     logging_settings: [],
@@ -2159,7 +2156,7 @@ describe("KeyEditView", () => {
       expect(onSubmitMock.mock.calls[0][0].guardrails).toEqual(["guardrail-1"]);
     });
 
-    it("carries a picked policy into the payload", async () => {
+    it("omits the removed policy field from the UI, requests, and payload", async () => {
       vi.mocked(getPoliciesList).mockResolvedValueOnce({
         policies: [{ policy_name: "policy-1", version_number: 1, version_status: "production" }],
       });
@@ -2167,27 +2164,29 @@ describe("KeyEditView", () => {
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await pickFromCombobox(/Select policies/, /policy-1/);
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].policies).toEqual(["policy-1"]);
+      expect(screen.queryByLabelText(/Select policies/)).not.toBeInTheDocument();
+      expect(getPoliciesList).not.toHaveBeenCalled();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("policies");
     });
 
-    it("carries a typed prompt into the payload", async () => {
+    it("omits the removed prompt field from the UI, requests, and payload", async () => {
       const onSubmitMock = vi.fn().mockResolvedValue(undefined);
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await userEvent.type(screen.getByLabelText("Prompts"), "prompt-1{Enter}");
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].prompts).toEqual(["prompt-1"]);
+      expect(screen.queryByLabelText("Prompts")).not.toBeInTheDocument();
+      expect(getPromptsList).not.toHaveBeenCalled();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("prompts");
     });
 
     it("carries the RPM rate limit type into its own payload key", async () => {
@@ -2207,7 +2206,7 @@ describe("KeyEditView", () => {
       expect(payload.tpm_limit_type).toBeNull();
     });
 
-    it("carries a picked vector store into the payload", async () => {
+    it("omits the removed vector-store field from the UI, requests, and payload", async () => {
       vi.mocked(vectorStoreListCall).mockResolvedValueOnce({
         data: [{ vector_store_id: "vs-1", vector_store_name: "VS One" }],
       });
@@ -2215,13 +2214,14 @@ describe("KeyEditView", () => {
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await pickFromCombobox("Select vector stores", /VS One/);
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].vector_stores).toEqual(["vs-1"]);
+      expect(screen.queryByLabelText("Select vector stores")).not.toBeInTheDocument();
+      expect(vectorStoreListCall).not.toHaveBeenCalled();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("vector_stores");
     });
 
     it("carries a picked pass through route into the payload", async () => {
@@ -2268,54 +2268,56 @@ describe("KeyEditView", () => {
       expect(onSubmitMock.mock.calls[0][0].team_id).toBe("team-9");
     });
 
-    it("carries a picked MCP server into the payload", async () => {
+    it("omits the removed MCP selector and payload field", async () => {
       const onSubmitMock = vi.fn().mockResolvedValue(undefined);
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await userEvent.click(screen.getByRole("button", { name: "pick mcp server" }));
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].mcp_servers_and_groups.servers).toEqual(["mcp-1"]);
+      expect(screen.queryByTestId("mcp-server-selector")).not.toBeInTheDocument();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("mcp_servers_and_groups");
     });
 
-    it("carries a picked agent into the payload", async () => {
+    it("omits the removed agent selector and payload field", async () => {
       const onSubmitMock = vi.fn().mockResolvedValue(undefined);
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await userEvent.click(screen.getByRole("button", { name: "pick agent" }));
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].agents_and_groups.agents).toEqual(["agent-1"]);
+      expect(screen.queryByTestId("agent-selector")).not.toBeInTheDocument();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("agents_and_groups");
     });
 
-    it("carries a picked skill into the payload", async () => {
+    it("omits the removed skill selector and payload field", async () => {
       const onSubmitMock = vi.fn().mockResolvedValue(undefined);
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await userEvent.click(screen.getByRole("button", { name: "pick skill" }));
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].skills).toEqual(["private-skill"]);
+      expect(screen.queryByTestId("skill-selector")).not.toBeInTheDocument();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("skills");
     });
 
-    it("preloads the stored skills into the payload when the selector is left untouched", async () => {
+    it("omits stored skills from the payload so an untouched save preserves them", async () => {
       const onSubmitMock = vi.fn().mockResolvedValue(undefined);
-      renderForPayload(onSubmitMock, {
+      const keyDataWithSkills = {
         ...MOCK_KEY_DATA,
         object_permission: { ...MOCK_KEY_DATA.object_permission, skills: ["stored-skill"] },
-      } as KeyResponse);
+      } as KeyResponse;
+      const originalPermission = structuredClone(keyDataWithSkills.object_permission);
+      renderForPayload(onSubmitMock, keyDataWithSkills);
       await screen.findByRole("button", { name: /save changes/i });
 
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -2323,7 +2325,9 @@ describe("KeyEditView", () => {
       await waitFor(() => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
-      expect(onSubmitMock.mock.calls[0][0].skills).toEqual(["stored-skill"]);
+      expect(screen.queryByTestId("skill-selector")).not.toBeInTheDocument();
+      expect(onSubmitMock.mock.calls[0][0]).not.toHaveProperty("skills");
+      expect(keyDataWithSkills.object_permission).toEqual(originalPermission);
     });
 
     it("carries an added logging integration into the payload", async () => {

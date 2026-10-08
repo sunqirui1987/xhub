@@ -5,9 +5,9 @@
 //
 //   - The request-log family (/spend/logs/ui, its detail route) is readable by
 //     any signed-in caller, narrowed by authz.LogsScope: your own personal logs,
-//     plus every log under a team you administer or an organization you
-//     administer. Reading someone else's content as a platform administrator
-//     writes an audit row.
+//     plus service-key logs for teams you administer. Platform administrators
+//     can read every log. Reading someone else's content as a platform
+//     administrator writes an audit row.
 //   - The global spend family (/global/spend/*) is a platform-wide view and is
 //     gated on a platform administrator session.
 package usage
@@ -85,7 +85,10 @@ func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, logPageResponse(rows, total, page, pageSize))
 }
 
-// SessionLogs lists every call in one session. The list route folds a session into a single row; this route is what the drawer opens when that row is clicked.
+// SessionLogs lists every call in one caller's session. The list route folds a
+// caller/session pair into a single row; this route is what the drawer opens
+// when that row is clicked. api_key takes precedence over user_id, matching the
+// grouping rule used by collapseSessions.
 // 参数 s（Host）：会话Logs使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/usage/mount.go
@@ -97,24 +100,33 @@ func SessionLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	q.Del("group_by_session")
+	if strings.TrimSpace(q.Get("api_key")) != "" {
+		q.Del("user_id")
+	}
 	r.URL.RawQuery = q.Encode()
 	LogsV2(s, w, r)
 }
 
-// collapseSessions keeps one row per non-empty session and totals the calls that landed on this page. A request with no session stays on its own row.
+// collapseSessions keeps one row per caller and non-empty session and totals
+// the calls that landed on this page. API key is the caller identity when
+// present; keyless calls use user. Legacy rows with neither identity retain the
+// old session-only grouping. A request with no session stays on its own row.
 // 参数 rows（[]map[string]any）：从用量或目录读出的map[string]any。
 // 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
 // 调用：仅在 reports.go 内使用
 // 测试：无直接单测
 func collapseSessions(rows []map[string]any) []map[string]any {
+	type sessionKey struct {
+		kind, caller, session string
+	}
 	type agg struct {
 		row   map[string]any
 		count int
 		spend float64
 		tok   int
 	}
-	order := []string{}
-	groups := map[string]*agg{}
+	order := []sessionKey{}
+	groups := map[sessionKey]*agg{}
 	var solo []map[string]any
 	for _, row := range rows {
 		sid, _ := row["session_id"].(string)
@@ -122,19 +134,25 @@ func collapseSessions(rows []map[string]any) []map[string]any {
 			solo = append(solo, row)
 			continue
 		}
-		g := groups[sid]
+		groupKey := sessionKey{kind: "legacy", session: sid}
+		if keyID, _ := row["api_key"].(string); keyID != "" {
+			groupKey.kind, groupKey.caller = "key", keyID
+		} else if userID, _ := row["user"].(string); userID != "" {
+			groupKey.kind, groupKey.caller = "user", userID
+		}
+		g := groups[groupKey]
 		if g == nil {
 			g = &agg{row: row}
-			groups[sid] = g
-			order = append(order, sid)
+			groups[groupKey] = g
+			order = append(order, groupKey)
 		}
 		g.count++
 		g.spend += asFloat(row["spend"])
 		g.tok += asInt(row["total_tokens"])
 	}
 	out := make([]map[string]any, 0, len(solo)+len(order))
-	for _, sid := range order {
-		g := groups[sid]
+	for _, groupKey := range order {
+		g := groups[groupKey]
 		g.row["session_total_count"] = g.count
 		g.row["session_total_spend"] = g.spend
 		g.row["session_total_tokens"] = g.tok
@@ -238,6 +256,9 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 			"messages":            []any{},
 			"response":            map[string]any{},
 			"metadata":            meta,
+		}
+		if e.CachedTokens != nil {
+			row["cache_read_input_tokens"] = *e.CachedTokens
 		}
 		if e.TTFTMs != nil && *e.TTFTMs > 0 {
 			row["completionStartTime"] = e.TS.Add(time.Duration(*e.TTFTMs) * time.Millisecond).UTC().Format(time.RFC3339Nano)

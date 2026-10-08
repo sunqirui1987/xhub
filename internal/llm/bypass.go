@@ -99,12 +99,12 @@ func ResponsesToChat(raw []byte, model string) []byte {
 // 测试：bypass_test.go
 func ResponsesSSEToChat(buf []byte, model string, flush bool) (emit, rest []byte) {
 	for {
-		idx := bytes.Index(buf, []byte("\n\n"))
+		idx, separatorLen := sseBoundary(buf)
 		if idx < 0 {
 			break
 		}
 		emit = append(emit, chatChunkFromEvent(buf[:idx], model)...)
-		buf = buf[idx+2:]
+		buf = buf[idx+separatorLen:]
 	}
 	if flush {
 		if len(bytes.TrimSpace(buf)) > 0 {
@@ -116,6 +116,24 @@ func ResponsesSSEToChat(buf []byte, model string, flush bool) (emit, rest []byte
 		return emit, nil
 	}
 	return emit, buf
+}
+
+// sseBoundary finds the first complete SSE event for either LF or CRLF line endings.
+// 参数 buf（[]byte）：尚未解析的 SSE 字节。
+// 返回 idx（int）：事件结束位置，未收齐时为 -1；separatorLen（int）：空行分隔符的字节数。
+// 调用：ResponsesSSEToChat。
+// 测试：bypass_test.go。
+func sseBoundary(buf []byte) (idx, separatorLen int) {
+	lf := bytes.Index(buf, []byte("\n\n"))
+	crlf := bytes.Index(buf, []byte("\r\n\r\n"))
+	switch {
+	case lf < 0:
+		return crlf, 4
+	case crlf < 0 || lf < crlf:
+		return lf, 2
+	default:
+		return crlf, 4
+	}
 }
 
 // 把一条上游 SSE 事件转成对话补全块。增量文本、推理文本和完成用量走不同分支。

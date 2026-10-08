@@ -53,10 +53,11 @@ export const summarizeTemplate = (body: Record<string, unknown>, labels: {
   const strategy = typeof body.routing_strategy === "string" && body.routing_strategy !== ""
     ? labels.strategy(body.routing_strategy)
     : labels.strategy("simple-shuffle");
-  const retries = typeof body.num_retries === "number" ? body.num_retries : 2;
+  const retries = typeof body.num_retries === "number" && Number.isFinite(body.num_retries) && body.num_retries >= 1
+    ? Math.trunc(body.num_retries) : 1;
   // A missing or non-positive timeout is 60 on the request path. The summary
   // says that, so the row does not claim a timeout the call will not use.
-  const timeout = typeof body.timeout === "number" && body.timeout > 0 ? body.timeout : 60;
+  const timeout = typeof body.timeout === "number" && Number.isFinite(body.timeout) && body.timeout > 0 ? body.timeout : 60;
   const fallbacks = Array.isArray(body.fallbacks) ? body.fallbacks.length : 0;
   const parts = [strategy, labels.retries(retries), labels.timeout(timeout)];
   parts.push(fallbacks > 0 ? labels.fallbacks(fallbacks) : labels.none);

@@ -35,7 +35,7 @@ func (s *Server) PlanRoute(r *http.Request, alias string, body map[string]any, p
 	plan := dataplane.RoutePlan{Alias: alias, Caller: callerScope(p)}
 	if body != nil {
 		if prev := strings.TrimSpace(asString(body["previous_response_id"])); prev != "" {
-			if id := s.affinityGet("deployment_affinity:v1:response:" + prev); id != "" {
+			if id := s.affinityGet(responsePinKey(alias, plan.Caller, prev)); id != "" {
 				plan.Pinned = id
 			}
 		}
@@ -59,19 +59,30 @@ func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID 
 	if plan.SessionID != "" && plan.Caller != "" {
 		s.affinitySet(sessionPinKey(plan.Alias, plan.Caller, plan.SessionID), deploymentID)
 	}
-	if responseID != "" {
-		s.affinitySet("deployment_affinity:v1:response:"+responseID, deploymentID)
+	if responseID != "" && plan.Caller != "" {
+		s.affinitySet(responsePinKey(plan.Alias, plan.Caller, responseID), deploymentID)
 	}
 }
 
-// 拼出会话粘滞的 Redis 键。调用方只取哈希前 8 字节，避免键里出现完整密钥。
+// responsePinKey isolates continuation IDs by caller and public model.
+// 参数 alias、caller、responseID：模型、调用方范围和响应 id。
+// 返回：不含原始调用方凭据的缓存键。
+// 调用：PlanRoute、CommitRoute。测试：affinity_test.go。
+func responsePinKey(alias, caller, responseID string) string {
+	raw, _ := json.Marshal([]string{alias, caller, responseID})
+	sum := sha256.Sum256(raw)
+	return "deployment_affinity:v3:response:" + hex.EncodeToString(sum[:])
+}
+
+// 用完整 SHA256 哈希隔离模型、调用方与会话，避免分隔符碰撞及原始标识泄露。
 // 参数 alias（string）：对外模型名；caller（string）：调用方范围，一般是密钥哈希或用户 id，用来隔离粘滞键；sessionID（string）：会话 id。相同会话应钉在同一上游部署。
 // 返回 string（string）：会话粘滞的 Redis 键，含对外名、调用方哈希和会话 id。
 // 调用：仅在 affinity.go 内使用
 // 测试：affinity_test.go
 func sessionPinKey(alias, caller, sessionID string) string {
-	sum := sha256.Sum256([]byte(caller))
-	return "deployment_affinity:v1:session:" + alias + ":" + hex.EncodeToString(sum[:8]) + ":" + sessionID
+	raw, _ := json.Marshal([]string{alias, caller, sessionID})
+	sum := sha256.Sum256(raw)
+	return "deployment_affinity:v2:session:" + hex.EncodeToString(sum[:])
 }
 
 // 确定粘滞键里的调用方范围，优先密钥哈希，其次用户。
@@ -278,6 +289,7 @@ func (s *Server) affinityGet(key string) string {
 	defer s.affinityMu.Unlock()
 	pin, ok := s.affinity[key]
 	if !ok || time.Now().After(pin.until) {
+		delete(s.affinity, key)
 		return ""
 	}
 	return pin.deployment
@@ -352,6 +364,11 @@ func (s *Server) affinitySetFor(key, deployment string, ttl time.Duration) {
 	defer s.affinityMu.Unlock()
 	if s.affinity == nil {
 		s.affinity = map[string]affinityPin{}
+	}
+	for oldKey, pin := range s.affinity {
+		if time.Now().After(pin.until) {
+			delete(s.affinity, oldKey)
+		}
 	}
 	s.affinity[key] = affinityPin{deployment: deployment, until: time.Now().Add(ttl)}
 }

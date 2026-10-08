@@ -1,17 +1,11 @@
 # gateway/family
 
-Handlers for the OpenAI-shaped families that are not the management modules: responses, files, batches, assistants, and the rest of the embedded catalog that `ingress` does not special-case.
+Handlers for non-management catalog families. Responses enters adapted inference. Generic resources require an authorized inference principal; the key credential hash or session user ID defines a hashed storage namespace, preventing cross-caller access.
 
-`family.Module` registers POST `/v1/responses` and POST `/responses` onto `Responses`, which enters `dataplane.Serve` with the responses operation. Other catalog paths are mounted by `ingress.go` and call back into this package.
+Only assistants and threads metadata can be created or updated locally. Nested thread operations, real files/uploads, batches, fine-tuning, count-token/realtime placeholders and other provider work must have a real implementation and return 501 when unsupported. Lists, reads and deletes operate only on caller-owned metadata; file content is not fabricated. Old global resource records are not exposed through the new namespace.
 
-`resourceKind` reads the collection from the path: `files`, `batches`, `assistants`, `threads`, `fine_tuning`, `containers`, `vector_stores`, `videos`, and the search, ocr, rag, and mcp prefixes. An unrecognized path is `resources`. `idField` is the row id name for that kind (`credential_name`, `guardrail_id`, `user_id`, …). Kinds without a special case use the singular name plus `_id`. `aliasField` is the display-name field (`guardrail_name`, `agent_name`, …). A kind with no special case uses the singular name plus `_alias`, not an empty string.
+Malformed JSON returns 400. Missing records return 404; storage errors return 500, unavailable storage 503. Mixed catalog families such as agents, skills and workflows remain refused because the generic store does not supply their authorization model.
 
-`ServeMixed` is the handler for catalog paths classified as mixed (`/v1/agents`, `/v1/skills`, `/v1/workflows`, and the same class). It still requires an identity, then refuses. The generic store behind those paths is one key-value namespace with no owner and no team column, so serving them would let any signed-in member, and any inference key, read every other principal's rows. The refusal is intentional.
+This package does not implement official Qiniu/Volcengine contents tasks, which use provider matching and dataplane.ServeBypass. Metadata storage does not implement OpenAI assistants execution or a complete async state machine.
 
-Rows that are still stored (files, batches, and the kinds that are not mixed) go to `RecordStore` key-value. `Freeze` fills id, status, and timestamps when absent and deletes `password`. `mergeCredentialPatch` overlays ordinary fields and does not replace `password` or `credential_values` as a whole.
-
-## What this package does not do
-
-It does not implement the Qiniu or Volcengine contents APIs. Those are bypass matches in `provider` and `dataplane.ServeBypass`, and they never enter `resourceKind`. A `video_generation` endpoint type is the adapted `/v1/videos` operation, which does enter `Serve`.
-
-中文说明见同目录 `readme_cn.md`。
+Evidence: resource_isolation_test.go and gateway/catalog_reads_test.go. 中文说明见 readme_cn.md。

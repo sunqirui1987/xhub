@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, renderWithProviders, testQueryClient } from "../../../tests/test-utils";
 import type { LogEntry } from "./columns";
 import RequestLogsPanel from "./RequestLogsPanel";
+import { translate } from "@/i18n/translate";
 
 vi.mock("../networking", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../networking")>();
@@ -395,7 +396,7 @@ describe("RequestLogsPanel", () => {
       fireEvent.click(screen.getByTestId("pagination-next"));
       await waitFor(() => expect(lastCall()?.page).toBe(2));
 
-      await user.click(screen.getByRole("button", { name: /Last 24 Hours/i }));
+      await user.click(screen.getByRole("button", { name: translate("zh-CN", "Last 24 Hours") }));
       await user.click(await screen.findByRole("button", { name: "Custom Range" }));
 
       await waitFor(() => {
@@ -485,8 +486,8 @@ describe("RequestLogsPanel", () => {
       renderPanel();
 
       await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalled());
-      await user.click(screen.getByRole("button", { name: /Last 24 Hours/i }));
-      await user.click(await screen.findByRole("button", { name: "Last 15 Minutes" }));
+      await user.click(screen.getByRole("button", { name: translate("zh-CN", "Last 24 Hours") }));
+      await user.click(await screen.findByRole("button", { name: translate("zh-CN", "Last 15 Minutes") }));
 
       const windowSeconds = () => {
         const call = lastCall();
@@ -505,13 +506,13 @@ describe("RequestLogsPanel", () => {
       renderPanel();
 
       await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalled());
-      await user.click(screen.getByRole("button", { name: /Last 24 Hours/i }));
-      await user.click(await screen.findByRole("button", { name: "Last 15 Minutes" }));
-      expect(await screen.findByRole("button", { name: /Last 15 Minutes/i })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: translate("zh-CN", "Last 24 Hours") }));
+      await user.click(await screen.findByRole("button", { name: translate("zh-CN", "Last 15 Minutes") }));
+      expect(await screen.findByRole("button", { name: translate("zh-CN", "Last 15 Minutes") })).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Reset Filters" }));
 
-      expect(await screen.findByRole("button", { name: /Last 24 Hours/i })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: translate("zh-CN", "Last 24 Hours") })).toBeInTheDocument();
 
       await user.click(screen.getByTestId("datatable-refresh"));
 

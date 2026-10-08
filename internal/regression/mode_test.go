@@ -42,7 +42,7 @@ func openLiveChat(t *testing.T, name string) (*harness, string, chained, string)
 	vendors := liveCredentials(t)
 	vendor := vendors[0]
 	model := vendor.ID + "/" + vendor.Models[0]
-	h := newHarness(t, liveModelDeployment(vendor, model))
+	h := newHarness(t, liveModelDeployment(vendor, vendor.Models[0]))
 	h.live = true
 	admin := h.adminSession()
 	return h, admin, h.openScope(t, admin, name), model

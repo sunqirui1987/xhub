@@ -642,6 +642,38 @@ describe("sessionSpendLogsCall", () => {
     expect(parsed.searchParams.get("page")).toBe("3");
     expect(parsed.searchParams.get("page_size")).toBe("100");
   });
+
+  it("scopes a session to its API key caller", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [], total: 0 }),
+    } as any);
+    global.fetch = mockFetch as any;
+
+    await Networking.sessionSpendLogsCall("token", "shared", 1, 100, {
+      apiKey: "key-1",
+      userId: "user-1",
+    });
+
+    const [url] = mockFetch.mock.calls[0];
+    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
+    expect(parsed.searchParams.get("api_key")).toBe("key-1");
+    expect(parsed.searchParams.has("user_id")).toBe(false);
+  });
+
+  it("scopes a keyless session to its user caller", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ data: [], total: 0 }),
+    } as any);
+    global.fetch = mockFetch as any;
+
+    await Networking.sessionSpendLogsCall("token", "shared", 1, 100, { userId: "user-1" });
+
+    const [url] = mockFetch.mock.calls[0];
+    const parsed = typeof url === "string" ? new URL(url, "http://example.com") : new URL((url as Request).url);
+    expect(parsed.searchParams.get("user_id")).toBe("user-1");
+  });
 });
 
 describe("buildModelGroupTestRequest", () => {

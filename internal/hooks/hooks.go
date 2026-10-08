@@ -41,12 +41,15 @@ func (e *Engine) Begin(keyID string) func() {
 	e.mu.Lock()
 	e.inflight[keyID]++
 	e.mu.Unlock()
+	var once sync.Once
 	return func() {
-		e.mu.Lock()
-		e.inflight[keyID]--
-		if e.inflight[keyID] <= 0 {
-			delete(e.inflight, keyID)
-		}
-		e.mu.Unlock()
+		once.Do(func() {
+			e.mu.Lock()
+			e.inflight[keyID]--
+			if e.inflight[keyID] <= 0 {
+				delete(e.inflight, keyID)
+			}
+			e.mu.Unlock()
+		})
 	}
 }

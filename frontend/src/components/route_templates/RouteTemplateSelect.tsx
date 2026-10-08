@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { t } from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -37,15 +37,11 @@ const RouteTemplateSelect: React.FC<{
   const [options, setOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
   const [effective, setEffective] = useState<EffectiveRouteTemplate | null>(null);
-  const onChangeRef = useRef(onChange);
-  const valueRef = useRef(value);
+  const [inherited, setInherited] = useState<EffectiveRouteTemplate | null>(null);
 
   useEffect(() => {
-    onChangeRef.current = onChange;
-    valueRef.current = value;
-  }, [onChange, value]);
-
-  useEffect(() => {
+    setOptions([]);
+    setOptionsLoaded(false);
     if (!accessToken) return;
     let cancelled = false;
     void getRouteTemplatesCall(accessToken)
@@ -63,21 +59,21 @@ const RouteTemplateSelect: React.FC<{
   }, [accessToken]);
 
   useEffect(() => {
+    setEffective(null);
+    setInherited(null);
     if (!accessToken || !scope || !scopeId) return;
     let cancelled = false;
     void getRouteTemplateBindingCall(accessToken, scope, scopeId)
       .then((binding) => {
         if (cancelled) return;
         setEffective(binding.effective);
-        if (binding.route_template_id && binding.route_template_id !== valueRef.current) {
-          onChangeRef.current(binding.route_template_id);
-        }
+        setInherited(binding.inherited ?? (!binding.route_template_id ? binding.effective : null));
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [accessToken, scope, scopeId]);
+  }, [accessToken, scope, scopeId, value]);
 
   const selected = value || INHERIT;
   const selectedOption = options.find((option) => option.id === value);
@@ -88,11 +84,16 @@ const RouteTemplateSelect: React.FC<{
         (effective?.template_id === value ? effective.name : undefined) ||
         t(optionsLoaded ? "pages.routeTemplates.unknownTemplate" : "pages.routeTemplates.loadingTemplates");
   let status = t("pages.routeTemplates.inheritHint");
-  if (effective) {
+  const preview = value
+    ? { template_id: value, name: selectedOption?.name ?? (effective?.template_id === value ? effective.name : undefined), scope_type: scope ?? "key" }
+    : inherited;
+  if (preview) {
     status =
-      effective.scope_type === "platform" || !effective.name
+      preview.scope_type === "platform"
         ? t("pages.routeTemplates.effectivePlatform")
-        : t("pages.routeTemplates.effectiveFrom", { name: effective.name, scope: scopeName(effective.scope_type) });
+        : preview.name
+          ? t("pages.routeTemplates.effectiveFrom", { name: preview.name, scope: scopeName(preview.scope_type) })
+          : t("pages.routeTemplates.inheritHint");
   }
 
   return (

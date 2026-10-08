@@ -5903,7 +5903,6 @@ export const zhPhrases: Record<string, string> = {
   "Reject": "拒绝",
   "Approve": "批准",
   "Value": "值",
-  "Method": "方法",
   "Endpoint": "端点",
   "Review": "审核",
   "Submitted:": "已提交：",

@@ -220,6 +220,23 @@ func TestLiveChains(t *testing.T) {
 }
 
 func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
+	var calls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("upstream request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-playground-fixture" {
+			t.Errorf("upstream authorization %q", r.Header.Get("Authorization"))
+		}
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Contains(body, []byte(`"model":"gpt-6-astra"`)) || !bytes.Contains(body, []byte(`"content":"ping"`)) {
+			t.Errorf("upstream body %s", trim(body))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-playground","object":"chat.completion","created":1,"model":"gpt-6-astra","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer upstream.Close()
 	cfg, err := config.Load(configPath(t))
 	if err != nil {
 		t.Fatal(err)
@@ -228,11 +245,11 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ensurePlaygroundModel(t, st)
+	ensurePlaygroundModel(t, st, upstream.URL)
 	srv, base, db := bootGateway(t)
 	defer srv.Close()
 	key := loginAdmin(t, base, db)
-	client := &http.Client{Timeout: 90 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second}
 	payload := []byte(`{"model":"gpt-6-astra","messages":[{"role":"user","content":"ping"}]}`)
 	req, err := http.NewRequest(http.MethodPost, base+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
@@ -246,51 +263,43 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusUnauthorized {
-		if strings.Contains(string(body), "openai.com") {
-			return
-		}
-		t.Fatalf("local auth rejection: %s", trim(body))
+	if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"content":"pong"`)) {
+		t.Fatalf("status %d body %s", resp.StatusCode, trim(body))
 	}
-	var parsed struct {
-		Error struct {
-			Type    string `json:"type"`
-			Message string `json:"message"`
-		} `json:"error"`
+	if calls != 1 {
+		t.Fatalf("upstream calls %d", calls)
 	}
-	_ = json.Unmarshal(body, &parsed)
-	if parsed.Error.Type == "authentication_error" {
-		t.Fatalf("local authentication_error: %s", parsed.Error.Message)
-	}
-	if resp.StatusCode == http.StatusOK {
-		return
-	}
-	if resp.StatusCode == http.StatusBadGateway && parsed.Error.Type == "upstream_error" && strings.Contains(parsed.Error.Message, "api.openai.com") {
-		return
-	}
-	t.Fatalf("status %d type %s body %s", resp.StatusCode, parsed.Error.Type, trim(body))
 }
 
-func ensurePlaygroundModel(t *testing.T, st *store.Store) {
+func ensurePlaygroundModel(t *testing.T, st *store.Store, upstreamURL string) {
 	t.Helper()
 	rows, err := st.ListProxyModels()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range rows {
-		if row.ModelName == "gpt-6-astra" {
-			return
+	var previous *store.ProxyModel
+	for i := range rows {
+		if rows[i].ID == "model_gpt6_astra" {
+			copy := rows[i]
+			previous = &copy
+			break
 		}
 	}
-	t.Cleanup(func() { _ = st.DeleteProxyModel("model_gpt6_astra") })
+	t.Cleanup(func() {
+		if previous != nil {
+			_ = st.UpsertProxyModel(*previous)
+		} else {
+			_ = st.DeleteProxyModel("model_gpt6_astra")
+		}
+	})
 	err = st.UpsertProxyModel(store.ProxyModel{
 		ID:        "model_gpt6_astra",
 		ModelName: "gpt-6-astra",
 		Params: map[string]any{
 			"model":               "openai/gpt-6-astra",
 			"custom_llm_provider": "openai",
-			"api_base":            "https://api.openai.com/v1",
-			"api_key":             "sk-playground-probe",
+			"api_base":            upstreamURL + "/v1",
+			"api_key":             "sk-playground-fixture",
 		},
 		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true},
 	})

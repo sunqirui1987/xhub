@@ -13,7 +13,7 @@ func TestGatewayDoesNotHostTheConsole(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 	}
 	s.Handle("GET /health/liveliness", s.healthLive)
 	s.Handle("GET /litellm/.well-known/litellm-ui-config", s.uiConfig)
@@ -67,7 +67,7 @@ func TestPublicOriginOverride(t *testing.T) {
 	s := &Server{
 		engine:     newEngine(),
 		registered: map[string]struct{}{},
-		idem:       map[string]idemRec{},
+		idem:       map[string]*idemRec{},
 	}
 	s.Handle("GET /litellm/.well-known/litellm-ui-config", s.uiConfig)
 	req := httptest.NewRequest(http.MethodGet, "/litellm/.well-known/litellm-ui-config", nil)

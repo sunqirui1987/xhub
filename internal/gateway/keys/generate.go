@@ -244,6 +244,10 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		s.WriteAuthz(w, r, err)
 		return
 	}
+	if err := templateauth.Selection(s, r, p, str(body["route_template_id"])); err != nil {
+		s.WriteAuthz(w, r, err)
+		return
+	}
 	out, err := s.Identity().UpdateKey(r.Context(), actorOf(p), k.ID, patchFrom(k, body))
 	if err != nil {
 		s.WriteIAMError(w, r, err)

@@ -252,6 +252,9 @@ func TestEventRowExposesTheConsoleColumns(t *testing.T) {
 	if row["custom_llm_provider"] != "openai" || row["cache_key"] != "ck-1" || meta["cached_tokens"] != 100 {
 		t.Fatalf("provider/cache %#v", row)
 	}
+	if row["cache_read_input_tokens"] != 100 {
+		t.Fatalf("cache read tokens %#v", row)
+	}
 	if row["endTime"] == row["startTime"] {
 		t.Fatal("end time collapsed onto start")
 	}

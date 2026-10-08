@@ -59,7 +59,10 @@ func Postgres(t *testing.T, prefix string) string {
 
 	root, err := pgx.Connect(ctx, dsn)
 	if err != nil {
-		t.Skipf("no test database at %s: %v", dsn, err)
+		if os.Getenv("XHUB_REGRESSION_STRICT") == "1" {
+			t.Fatalf("regression database is unreachable; check XHUB_TEST_DATABASE_URL or start PostgreSQL on 127.0.0.1:5433")
+		}
+		t.Skipf("test database is unreachable (%T)", err)
 	}
 	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		root.Close(ctx)

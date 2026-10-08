@@ -62,9 +62,12 @@ type Server struct {
 	tpmHits map[string][]tokHit
 	// catalog is the routes.json table mounted after the modules.
 	catalog []catRoute
-	// sessions is the console login state. idem is the Idempotency-Key replay buffer.
+	// sessions is the console login state. idem is the authenticated
+	// Idempotency-Key replay and in-flight table.
 	sessions map[string]sessionRec
-	idem     map[string]idemRec
+	idem     map[string]*idemRec
+	idemTTL  time.Duration
+	now      func() time.Time
 	mu       sync.Mutex
 	// yamlStoreModelInDB is the startup flag. A database override can change
 	// the same behavior later through prefs.
@@ -85,11 +88,16 @@ type Server struct {
 }
 
 type idemRec struct {
-	Code int
-	CT   string
-	Body []byte
-	Hdr  map[string]string
+	RequestHash [32]byte
+	ExpiresAt   time.Time
+	Done        chan struct{}
+	Code        int
+	CT          string
+	Body        []byte
+	Hdr         map[string]string
 }
+
+const defaultIdempotencyTTL = 24 * time.Hour
 
 type tokHit struct {
 	t time.Time
@@ -126,7 +134,9 @@ func New(cfg *config.Config, st *store.Store, db *iam.DB) *Server {
 		tpmHits:            map[string][]tokHit{},
 		catalog:            loadCatalog(),
 		sessions:           map[string]sessionRec{},
-		idem:               map[string]idemRec{},
+		idem:               map[string]*idemRec{},
+		idemTTL:            defaultIdempotencyTTL,
+		now:                time.Now,
 		yamlStoreModelInDB: cfg.GeneralSettings.StoreModelInDB,
 	}
 	if cfg.GeneralSettings.RedisURL != "" {

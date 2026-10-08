@@ -101,7 +101,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		logx.Debug("process path=%s step=limits refused model=%s", r.URL.Path, alias)
 		return
 	}
-	if op == "chat" || op == "" {
+	if op == "chat" || op == "responses" || op == "" {
 		if blocked, msg := h.GuardrailBlocks(callID, body); blocked {
 			logx.Error("process path=%s step=guardrail blocked model=%s", r.URL.Path, alias)
 			// The refusal is still a request. Record it so the logs drawer can
@@ -109,6 +109,13 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			h.RememberExchange(callID, r, raw, nil)
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			httpx.WriteTypedError(w, r.URL.Path, 400, "guardrail_failed", msg)
+			return
+		}
+		// Guardrails can redact the parsed request. Cache and exchange logs must
+		// describe the same request that the encoder sends upstream.
+		raw, err = json.Marshal(body)
+		if err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid guarded request")
 			return
 		}
 	}
@@ -133,12 +140,24 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	// the process-global document. That is what makes a scope that selected a
 	// template and one that did not run the same code with different inputs.
 	routeCfg := h.RouteSettingsFor(p)
-	tenant := ""
-	if p.Key != nil {
-		tenant = p.Hash
+	if routeCfg.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
+		return
 	}
-	ck := cache.Key(tenant, op, alias, string(raw))
+	tenant := p.Hash
+	if tenant == "" {
+		tenant = "user:" + p.UserID
+	}
 	plan := h.PlanRoute(r, alias, body, p)
+	cacheScope, err := json.Marshal(map[string]any{
+		"models": cfg.ModelList, "router": routeCfg.Settings,
+		"session": plan.SessionID, "query": r.URL.RawQuery,
+	})
+	if err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "invalid route configuration")
+		return
+	}
+	ck := cache.Key(tenant, op, alias, string(raw), string(cacheScope))
 	stream, _ := body["stream"].(bool)
 	if !stream {
 		if hit, ok := h.ResponseCache().Get(ck); ok {
@@ -167,13 +186,13 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	if router.IsSplitStrategy(routeCfg.Strategy()) {
 		models = router.ApplyWeights(models, routeCfg.WeightOverrides())
 	}
-	pool := router.Order(models, alias, routeCfg.Strategy(), h.RouteState())
-	pool = preferDeployment(pool, plan.Pinned)
-	pool, paused := dropPaused(pool)
+	models, paused := dropPaused(models)
 	// 能力门。适配路径原来完全不过滤端点类型，一条标成 embedding 的部署
 	// 仍能被 /v1/chat/completions 打到。Bypass 部署在这里被丢掉：它们的入口是
 	// 供应商自己的路径，由 gateway 的 serveBypass 先一步接走，落到这里只会打错地址。
-	pool = provider.AdaptedPool(pool, op)
+	models = provider.AdaptedPool(models, op)
+	pool := router.Order(models, alias, routeCfg.Strategy(), h.RouteState())
+	pool = preferDeployment(pool, plan.Pinned)
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
 		if paused > 0 {
@@ -201,8 +220,8 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	// misspelled a provider name used to be told their API key was missing.
 	unimplementedProvider := false
 
-	for di, rawDep := range pool {
-		if di > 0 {
+	for _, rawDep := range pool {
+		if triedHTTP {
 			// A retry is a new request against the upstream, so the credential
 			// is resolved again: a key revoked between attempts must not carry
 			// the retry, and the hierarchy is re-checked before spend is added.
@@ -251,7 +270,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		} else {
 			logx.Debug("upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
 		}
-		did := dep.ParamString("api_base", "") + "|" + upstreamModel
+		did := router.CooldownID(rawDep)
 		upstreamOp := llm.PrepareQiniuBypass(op, apiBase, body)
 		built, err := llm.Build(r.Context(), llm.Request{
 			Op: upstreamOp, Provider: provider, APIBase: apiBase, APIKey: apiKey, Model: realModel, Body: body,
@@ -265,6 +284,17 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		}
 
 		for try := 0; try < attempts; try++ {
+			if try > 0 {
+				fresh, err := h.ResolveRequest(r)
+				if err != nil || fresh == nil || !fresh.CanInfer() {
+					httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
+					return
+				}
+				p = fresh
+				if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
+					return
+				}
+			}
 			triedHTTP = true
 			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, provider, realModel, baseHost(apiBase))
 			h.IncBusy(did)
@@ -291,6 +321,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				cancelAttempt()
 				h.DecBusy(did)
 				lastErr = err
+				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
 				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
 				continue
 			}
@@ -299,14 +330,14 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				resp.Body.Close()
 				cancelAttempt()
 				h.DecBusy(did)
-			h.NoteFailure(router.CooldownID(rawDep), routeCfg)
+				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
 				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
 				continue
 			}
 
-			h.NoteLatency(router.DeploymentID(rawDep), float64(time.Since(start).Milliseconds()))
+			h.NoteLatency(did, float64(time.Since(start).Milliseconds()))
 			h.SetChatHeaders(w, p, alias, apiBase)
 			// A chat client still expects chat chunks. The bypass body is Responses SSE, so translate only that public op.
 			asChat := upstreamOp == llm.OpResponses && (op == "" || op == llm.OpChat) && resp.StatusCode < 400
@@ -315,35 +346,55 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				var usage map[string]any
 				var ttft time.Duration
 				var streamed []byte
+				var streamErr error
 				if asChat {
-					wrote, usage, ttft, streamed = pipeResponsesAsChat(w, resp, start, alias)
+					wrote, usage, ttft, streamed, streamErr = pipeResponsesAsChat(w, resp, start, alias)
 				} else {
-					wrote, usage, ttft, streamed = pipeStream(w, resp, start)
+					wrote, usage, ttft, streamed, streamErr = pipeStream(w, resp, start)
 				}
 				h.DecBusy(did)
 				cancelAttempt()
+				if streamErr != nil {
+					lastErr = streamErr
+					h.NoteFailure(did, routeCfg)
+					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(streamErr))
+					if wrote {
+						h.RememberExchange(callID, r, raw, streamed)
+						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck, SessionID: plan.SessionID, DeploymentID: did})
+						h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusBadGateway, did)
+						return
+					}
+					continue
+				}
 				if wrote {
 					usage = completeUsage(usage, body, streamed)
 					pt, ct := usageCounts(usage)
 					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
-					depID := router.DeploymentID(rawDep)
+					depID := did
 					h.RememberExchange(callID, r, raw, streamed)
 					h.AnnotateCall(callID, CallNote{
 						TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck,
 						SessionID: plan.SessionID, DeploymentID: depID,
 					})
-					h.CommitRoute(plan, depID, responseID(streamed))
-					h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusOK, depID)
+					if resp.StatusCode < 400 {
+						h.CommitRoute(plan, depID, responseID(streamed))
+					}
+					h.RecordSpend(w, p, callID, alias, op, usage, start, false, resp.StatusCode, depID)
 					return
 				}
 				lastErr = errEmptyUpstream
 				logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
 				continue
 			}
-			respBody, _ := io.ReadAll(resp.Body)
+			respBody, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			cancelAttempt()
 			h.DecBusy(did)
+			if readErr != nil {
+				lastErr = readErr
+				h.NoteFailure(did, routeCfg)
+				continue
+			}
 			if asChat {
 				respBody = llm.ResponsesToChat(respBody, alias)
 			}
@@ -351,13 +402,15 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			pt, ct := bodyUsage(respBody)
 			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, provider, realModel)
 			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
-			depID := router.DeploymentID(rawDep)
+			depID := did
 			h.RememberExchange(callID, r, raw, respBody)
 			h.AnnotateCall(callID, CallNote{
 				TTFTMs: ttftMillis(elapsed), Provider: provider, CacheKey: ck,
 				SessionID: plan.SessionID, DeploymentID: depID,
 			})
-			h.CommitRoute(plan, depID, responseID(respBody))
+			if resp.StatusCode < 400 {
+				h.CommitRoute(plan, depID, responseID(respBody))
+			}
 			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, depID)
 			return
 		}
@@ -431,7 +484,7 @@ func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
 		return pool
 	}
 	for i, entry := range pool {
-		if router.DeploymentID(entry) != id {
+		if router.CooldownID(entry) != id && router.DeploymentID(entry) != id {
 			continue
 		}
 		if i == 0 {

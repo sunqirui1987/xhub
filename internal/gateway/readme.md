@@ -14,13 +14,13 @@ Listeners are not in this package's constants. The console is a separate Next.js
 4. A catalog path whose handler is the default `serveFamilyRoute` calls `dataPlane` in `limits.go`, which calls `dataplane.Serve`. Images, audio, rerank, videos, responses, files, and realtime have their own family handlers and still end in that data plane.
 5. No `"/"` route. `newEngine` `NoRoute` writes JSON 404 `not_found`, not Gin's plain text.
 
-`recordSpend` in `spend.go` writes the usage row for every one of those paths. `AnnotateCall` attaches provider, TTFT, session, and deployment before that write. Prompt storage is optional and keeps headers, body, and response on the same row. Create of an official task does not bill. The first follow-up whose body has usage bills once.
+`RecordSpend` in `spend.go` writes usage for these paths. `AnnotateCall` attaches provider, TTFT, session, and deployment before that write. Prompt storage is optional. Official-task creation does not bill; a successful terminal query with positive usage uses a stable settlement identity to deduplicate persistence. See the [pricing reference](../../docs/development/pricing.md).
 
 ## Pins
 
-Chat affinity (`affinity.go`) uses `deployment_affinity:v1:session:<alias>:<8-byte caller hash>:<sessionID>` for one hour (`affinityTTL`). `previous_response_id` looks up `deployment_affinity:v1:response:<id>` first. Session id order is a client session header, then a cache key, then the previous response, then a hash of the stable prompt prefix. `CommitRoute` writes the pin after a successful adapted call. Bypass does not use this pin to choose a deployment.
+Chat affinity (`affinity.go`) lasts one hour (`affinityTTL`). Session keys use `deployment_affinity:v2:session:` plus SHA-256 of a JSON tuple containing public model, caller, and session; response keys use `deployment_affinity:v3:response:` with model, caller, and response ID. `previous_response_id` is checked first. Session selection uses explicit headers/metadata, cache keys, previous response, then a stable prompt-prefix hash. `CommitRoute` writes after a complete successful adapted call. Bypass has separate task pins.
 
-Official tasks use `official_task:v1:<taskID>` for seven days (`officialPinTTL`). `official_billed:v1:<taskID>` is the bill-once mark, same TTL. Both go through `live.SetString` when Redis is configured, and an in-process map otherwise.
+Official task pins last seven days (`officialPinTTL`). The data plane hashes caller, transport, and task ID before passing the identifier to `PinOfficial`; queries stay in that scope and use the pinned deployment. Redis stores pins when configured, with an in-process fallback. Settlement correctness relies on stable `request_id` deduplication in Redis/PostgreSQL, rather than a prewritten billed mark. See the [runtime reference](../../docs/development/runtime.md).
 
 ## Spend and limits
 

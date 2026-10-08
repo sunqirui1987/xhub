@@ -160,6 +160,14 @@ describe("ui and json", () => {
 });
 
 describe("nextCopyName", () => {
+  it("preserves zero weights and rejects malformed shares", () => {
+    const form = formFromBody({ routing_strategy_args: { weights: [{ api_base: "a", model: "m", weight: 0 }] } });
+    const result = bodyFromForm(form);
+    expect(result.ok && result.body.routing_strategy_args).toEqual({ weights: [{ model_name: "m", api_base: "a", model: "m", weight: 0 }] });
+    for (const weight of ["-1", "invalid", "Infinity"]) {
+      expect(bodyFromForm({ ...form, weights: [{ ...form.weights[0], weight }] })).toEqual({ ok: false, field: "weights" });
+    }
+  });
   it("numbers a second copy so the two names stay distinct", () => {
     const copyOf = (name: string) => `${name} 的副本`;
     expect(nextCopyName("便宜优先", [], copyOf)).toBe("便宜优先 的副本");

@@ -361,13 +361,14 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
                     </TableCell>
                     <TableCell className="text-muted-foreground">{formatUpdatedAt(row.updated_at) || "—"}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => openNamed(row)}>
+                      <Button size="sm" variant="ghost" disabled={!row.writable} onClick={() => openNamed(row)}>
                         <Pencil className="mr-1 size-3.5" />
                         {t("pages.routeTemplates.edit")}
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
+                        disabled={!row.writable}
                         onClick={() => setRename({ id: row.id, name: row.name, body: row.body })}
                       >
                         {t("pages.routeTemplates.rename")}
@@ -376,7 +377,7 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
                         <Copy className="mr-1 size-3.5" />
                         {t("pages.routeTemplates.copy")}
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setPendingDelete(row)}>
+                      <Button size="sm" variant="ghost" disabled={!row.writable} onClick={() => setPendingDelete(row)}>
                         <Trash2 className="size-4" />
                         <span className="sr-only">{t("pages.routeTemplates.delete")}</span>
                       </Button>

@@ -24,6 +24,9 @@ export interface LogDetailsDrawerProps {
   onClose: () => void;
   logEntry: LogEntry | null;
   sessionId?: string | null;
+  sessionApiKey?: string | null;
+  sessionUserId?: string | null;
+  sessionCallerResolved?: boolean;
   accessToken?: string | null;
   allLogs?: LogEntry[];
   onSelectLog?: (log: LogEntry) => void;
@@ -115,6 +118,9 @@ export function LogDetailsDrawer({
   onClose,
   logEntry,
   sessionId,
+  sessionApiKey,
+  sessionUserId,
+  sessionCallerResolved = true,
   accessToken,
   allLogs = [],
   onSelectLog,
@@ -127,13 +133,14 @@ export function LogDetailsDrawer({
   const [copiedLeftPanelId, setCopiedLeftPanelId] = useState(false);
 
   const { data: sessionData } = useQuery({
-    queryKey: ["sessionLogs", sessionId],
+    queryKey: ["sessionLogs", sessionId, sessionApiKey, sessionUserId],
     queryFn: async () => {
       if (!sessionId || !accessToken) return { logs: [] as LogEntry[], total: 0 };
 
       // Fetch the first page, then page through the rest so sessions with more
       // than one page of logs are shown in full (capped for safety).
-      const firstPage = await sessionSpendLogsCall(accessToken, sessionId, 1, SESSION_PAGE_SIZE);
+      const caller = { apiKey: sessionApiKey || undefined, userId: sessionUserId || undefined };
+      const firstPage = await sessionSpendLogsCall(accessToken, sessionId, 1, SESSION_PAGE_SIZE, caller);
       let rows: LogEntry[] = firstPage.data || firstPage || [];
       const pagesToFetch = Math.min(firstPage.total_pages ?? 1, MAX_SESSION_PAGES);
 
@@ -144,7 +151,7 @@ export function LogDetailsDrawer({
           const end = Math.min(start + BATCH - 1, pagesToFetch);
           const batch = await Promise.all(
             Array.from({ length: end - start + 1 }, (_, i) =>
-              sessionSpendLogsCall(accessToken, sessionId, start + i, SESSION_PAGE_SIZE),
+              sessionSpendLogsCall(accessToken, sessionId, start + i, SESSION_PAGE_SIZE, caller),
             ),
           );
           remaining.push(...batch);
@@ -165,7 +172,7 @@ export function LogDetailsDrawer({
 
       return { logs, total };
     },
-    enabled: Boolean(open && isSessionMode && sessionId && accessToken),
+    enabled: Boolean(open && isSessionMode && sessionId && accessToken && sessionCallerResolved),
   });
 
   const sessionLogs: LogEntry[] = useMemo(

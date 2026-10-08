@@ -2,9 +2,11 @@
 package router
 
 import (
+	"encoding/json"
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,20 +65,22 @@ func (st State) instant() time.Time {
 // on. A deployment with no stated rate comes back as +Inf so it sorts last
 // instead of winning by declaration order.
 //
-// It reads the flat input cost first because that is what the strategy has always
-// compared, and a deployment that typed only a rate table falls back to the rate
-// table's input side for the window in effect.
+// Rate tables take precedence over flat fields, as they do during settlement.
+// Explicit zero prices remain comparable; peak fields use the decision time.
 //
 // 参数 e（config.ModelEntry）：一条部署；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
 // 返回 float64（float64）：可比价的每 token 输入价。没有写价时是正无穷。
 // 调用：Pick 的 cost 分支。
 // 测试：无直接单测
 func comparableRate(e config.ModelEntry, st State) float64 {
-	if rate, ok := costParamFloat(e, "input_cost_per_token"); ok {
-		return rate
+	usage := catalog.Usage{PromptTokens: 1}
+	charge, ok := catalog.CostFromRates(deploymentRates(e), usage, st.instant())
+	if !ok {
+		charge, ok = catalog.CostFromFlatOrRates(func(field string) (float64, bool) {
+			return costParamFloat(e, field)
+		}, usage, st.instant())
 	}
-	charge, ok := catalog.CostFromRates(deploymentRates(e), catalog.Usage{PromptTokens: 1}, st.instant())
-	if !ok || charge.Input <= 0 {
+	if !ok || charge.Input < 0 || math.IsNaN(charge.Input) || math.IsInf(charge.Input, 0) {
 		return math.Inf(1)
 	}
 	return charge.Input
@@ -97,14 +101,32 @@ func costParamFloat(e config.ModelEntry, key string) (float64, bool) {
 	if !ok || v == nil {
 		return 0, false
 	}
+	var rate float64
 	switch t := v.(type) {
 	case float64:
-		return t, true
+		rate = t
+	case float32:
+		rate = float64(t)
 	case int:
-		return float64(t), true
+		rate = float64(t)
+	case int64:
+		rate = float64(t)
+	case json.Number:
+		var err error
+		rate, err = t.Float64()
+		if err != nil {
+			return 0, false
+		}
+	case string:
+		var err error
+		rate, err = strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err != nil {
+			return 0, false
+		}
 	default:
 		return 0, false
 	}
+	return rate, rate >= 0 && !math.IsNaN(rate) && !math.IsInf(rate, 0)
 }
 
 // deploymentRates reads a rate table typed on a deployment's litellm_params.
@@ -133,10 +155,14 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 	pool := All(list, alias)
 	if IsSplitStrategy(strategy) {
 		pool = splitCandidates(pool, st)
+	} else {
+		pool = openCandidates(pool, st)
 	}
 	first := Pick(list, alias, strategy, st)
 	if first == nil {
-		if IsSplitStrategy(strategy) { return nil }
+		if IsSplitStrategy(strategy) {
+			return nil
+		}
 		return pool
 	}
 	fid := CooldownID(*first)
@@ -182,7 +208,7 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		best := 0
 		bestN := 1 << 30
 		for i, e := range pool {
-			n := st.Busy[DeploymentID(e)]
+			n, _ := stateInt(st.Busy, e)
 			if n < bestN {
 				bestN = n
 				best = i
@@ -214,10 +240,8 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		bestC := 1e99
 		for i, e := range pool {
 			c := paramFloat(e, "latency_ms", float64(i))
-			if st.Latency != nil {
-				if v, ok := st.Latency[DeploymentID(e)]; ok {
-					c = v
-				}
+			if v, ok := stateFloat(st.Latency, e); ok {
+				c = v
 			}
 			if c < bestC {
 				bestC = c
@@ -230,10 +254,8 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		bestC := 1e99
 		for i, e := range pool {
 			c := paramFloat(e, "tpm", float64(i))
-			if st.Usage != nil {
-				if v, ok := st.Usage[DeploymentID(e)]; ok {
-					c = v
-				}
+			if v, ok := stateFloat(st.Usage, e); ok {
+				c = v
 			}
 			if c < bestC {
 				bestC = c
@@ -317,7 +339,9 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 				best = i
 			}
 		}
-		if best < 0 { return nil }
+		if best < 0 {
+			return nil
+		}
 		return &pool[best]
 	}
 	picked := st.Splits.PickWeighted(ids, weights, available)
@@ -327,7 +351,11 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 	return &pool[picked]
 }
 
-// Retry candidates obey the same exclusions as the first weighted choice.
+// splitCandidates returns the retry pool for a weighted split. Cooling deployments and deployments with invalid or nonpositive weights cannot receive either the first attempt or a retry.
+// 参数 pool（[]config.ModelEntry）：分流前的候选部署；st（State）：此刻的冷却状态和分流状态。
+// 返回 []config.ModelEntry（[]config.ModelEntry）：仍可接收请求的候选部署，顺序与 pool 相同。
+// 调用：Order 的分流策略分支。
+// 测试：split_test.go、template_regression_test.go。
 func splitCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
 	out := make([]config.ModelEntry, 0, len(pool))
 	for _, e := range pool {
@@ -337,6 +365,27 @@ func splitCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
 		}
 	}
 	return out
+}
+
+// openCandidates removes cooling deployments when at least one candidate is open. If every candidate is cooling, it returns the original pool so non-split strategies retain their documented fail-open behavior.
+// 参数 pool（[]config.ModelEntry）：同一公开模型名下的候选部署；st（State）：此刻的冷却状态。
+// 返回 []config.ModelEntry（[]config.ModelEntry）：有健康候选时只含健康部署；全部冷却时返回原池。
+// 调用：Order。
+// 测试：template_regression_test.go。
+func openCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
+	if len(st.Cooldown) == 0 {
+		return pool
+	}
+	open := make([]config.ModelEntry, 0, len(pool))
+	for _, e := range pool {
+		if !st.Cooldown[CooldownID(e)] {
+			open = append(open, e)
+		}
+	}
+	if len(open) == 0 {
+		return pool
+	}
+	return open
 }
 
 // matchDeployments finds deployments whose public model name matches, including wildcards. It does not sort them. matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
@@ -442,23 +491,67 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
-// DeploymentID is the deployment identity, shaped as api_base|model parameter. Redis cooldown and usage use this id.
+// DeploymentID is the physical deployment identity, shaped as api_base|model. Weight overrides use this stable frontend-facing id.
 // 调用：dataplane/live.go、dataplane/official.go、dataplane/serve.go、gateway/wire.go
 // 测试：bypass_logic_test.go
 // 参数 e（config.ModelEntry）：一条部署。用它的 api_base 和 model 参数，model 空则用公开名。
-// 返回：api_base|model。Redis 冷却、延迟和用量都用这个 id。两端都空时是 "|"。
+// 返回：api_base|model。权重覆盖继续使用这个 id；两端都空时是 "|"。
 func DeploymentID(e config.ModelEntry) string {
 	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 }
 
-// CooldownID isolates failures of named credentials sharing an endpoint. Usage
-// and latency retain DeploymentID; no API key is ever included in this ID.
+// CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
+// 参数 e（config.ModelEntry）：一条部署；命名凭证从 litellm_credential_name 读取；稳定计费身份可从 pricing_id 或 deployment_id 读取。
+// 返回 string（string）：运行时部署 id；没有稳定计费身份时为 api_base|model，并在有命名凭证时追加 |credential:<name>。
+// 调用：路由冷却、分流、运行指标、会话钉住和调用记账。
+// 测试：template_regression_test.go。
 func CooldownID(e config.ModelEntry) string {
 	id := DeploymentID(e)
+	stable := e.ParamString("pricing_id", "")
+	if stable == "" {
+		stable = e.ParamString("deployment_id", "")
+	}
+	if stable != "" {
+		id += "|pricing:" + stable
+	}
 	if name := e.ParamString("litellm_credential_name", ""); name != "" {
 		return id + "|credential:" + name
 	}
 	return id
+}
+
+// stateInt reads runtime integer state by credential-aware identity, then falls back to the physical deployment id for snapshots written by older processes.
+// 参数 values（map[string]int）：按运行时部署 id 保存的整数状态；e（config.ModelEntry）：要查找的部署。
+// 返回 int（int）：找到的状态值，未找到时为 0；bool（bool）：是否找到对应状态。
+// 调用：Pick 的 least-busy 分支。
+// 测试：template_regression_test.go。
+func stateInt(values map[string]int, e config.ModelEntry) (int, bool) {
+	id := CooldownID(e)
+	if value, ok := values[id]; ok {
+		return value, true
+	}
+	if legacy := DeploymentID(e); legacy != id {
+		value, ok := values[legacy]
+		return value, ok
+	}
+	return 0, false
+}
+
+// stateFloat reads runtime floating-point state by credential-aware identity, then falls back to the physical deployment id for snapshots written by older processes.
+// 参数 values（map[string]float64）：按运行时部署 id 保存的浮点状态；e（config.ModelEntry）：要查找的部署。
+// 返回 float64（float64）：找到的状态值，未找到时为 0；bool（bool）：是否找到对应状态。
+// 调用：Pick 的 latency 和 tpm 分支。
+// 测试：template_regression_test.go。
+func stateFloat(values map[string]float64, e config.ModelEntry) (float64, bool) {
+	id := CooldownID(e)
+	if value, ok := values[id]; ok {
+		return value, true
+	}
+	if legacy := DeploymentID(e); legacy != id {
+		value, ok := values[legacy]
+		return value, ok
+	}
+	return 0, false
 }
 
 // IsSplitStrategy reports whether strategy divides traffic by weight.

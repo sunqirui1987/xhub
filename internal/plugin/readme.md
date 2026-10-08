@@ -6,7 +6,7 @@ The pre-upstream extension point. This package does not import gateway and does 
 
 `Decision.Refuse == true` tells `dataplane.Serve` to skip the response cache and not contact the upstream. `Status`, `Code`, and `Message` are the error the data plane writes. `Header` is copied onto the response even when the call is allowed, so a client can see that the extension ran.
 
-`New` returns an empty registry. The zero `Registry` value is not usable. `Register` appends in order. An empty name or a duplicate name returns an error and leaves the existing order unchanged. `Names` returns a copy.
+`New` returns an empty registry. The zero `Registry` value is also ready to use. `Register` appends in order. An empty name or a duplicate name returns an error and leaves the existing order unchanged. Each registration reads `Name` once, so an implementation cannot change identity during registration. `Names` returns a copy.
 
 `Run` calls `BeforeUpstream` in registration order. The first refusal stops the rest and keeps headers already set. An empty registry returns a zero `Decision`, and `Serve` continues. `Invoke` runs one name; a missing name returns an error and does not call any other extension.
 

@@ -52,7 +52,7 @@ interface AddModelFormProps {
   setShowAdvancedSettings: (show: boolean) => void;
   teams: Team[] | null;
   credentials: CredentialItem[];
-  modelCostMap?: Record<string, { endpoint_type?: string }> | null;
+  modelCostMap?: Record<string, { endpoint_type?: string; display_name?: string }> | null;
 }
 
 const connectionTestModelName = (values: MountedFormValues): string | undefined => {

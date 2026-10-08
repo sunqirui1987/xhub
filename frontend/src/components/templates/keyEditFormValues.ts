@@ -57,6 +57,7 @@ export interface KeyEditFormValues {
   disabled_callbacks?: string[];
   auto_rotate?: boolean;
   rotation_interval?: string;
+  route_template_id?: string;
 }
 
 const readMetadata = (keyData: KeyResponse, key: string): unknown =>

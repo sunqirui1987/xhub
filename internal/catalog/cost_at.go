@@ -277,32 +277,24 @@ func NormalizeUsage(usage map[string]any) Usage {
 	if usage == nil {
 		return out
 	}
-	out.PromptTokens = intField(usage, "prompt_tokens")
-	if out.PromptTokens == 0 {
-		out.PromptTokens = intField(usage, "input_tokens")
-	}
-	out.CompletionTokens = intField(usage, "completion_tokens")
-	if out.CompletionTokens == 0 {
-		out.CompletionTokens = intField(usage, "output_tokens")
-	}
+	out.PromptTokens = firstIntField(usage, "prompt_tokens", "input_tokens")
+	out.CompletionTokens = firstIntField(usage, "completion_tokens", "output_tokens")
 
 	// A cache read in its own top-level field is a second count, so the prompt
 	// count beside it excludes it and both have to be added up. The nested
 	// spellings are subsets and are read as such below.
-	separate := intField(usage, "cache_read_input_tokens")
-	if separate == 0 {
-		separate = intField(usage, "cache_read_tokens")
+	separate := firstIntField(usage, "cache_read_input_tokens", "cache_read_tokens")
+	_, hasSeparate := usage["cache_read_input_tokens"]
+	if usage["cache_read_input_tokens"] == nil {
+		hasSeparate = usage["cache_read_tokens"] != nil
 	}
-	if separate > 0 {
+	if hasSeparate {
 		out.CachedTokens = separate
 		out.PromptTokens += separate
 	} else {
 		out.CachedTokens = cachedTokensIn(usage)
 	}
-	out.CacheWriteTokens = intField(usage, "cache_creation_input_tokens")
-	if out.CacheWriteTokens == 0 {
-		out.CacheWriteTokens = intField(usage, "cache_write_tokens")
-	}
+	out.CacheWriteTokens = firstIntField(usage, "cache_creation_input_tokens", "cache_write_tokens")
 	out.Images = firstIntField(usage, "images", "image_count", "num_images", "output_images")
 	out.Seconds = firstFloatField(usage, "seconds", "duration_seconds", "video_seconds", "audio_seconds")
 	out.Searches = firstIntField(usage, "searches", "search_count", "web_search_requests")
@@ -316,13 +308,13 @@ func NormalizeUsage(usage map[string]any) Usage {
 // 调用：NormalizeUsage。
 // 测试：cost_at_test.go
 func cachedTokensIn(usage map[string]any) int {
-	if n := intField(usage, "cached_tokens"); n != 0 {
-		return n
+	if usage["cached_tokens"] != nil {
+		return intField(usage, "cached_tokens")
 	}
 	for _, key := range []string{"prompt_tokens_details", "input_tokens_details"} {
 		if details, ok := usage[key].(map[string]any); ok {
-			if n := intField(details, "cached_tokens"); n != 0 {
-				return n
+			if details["cached_tokens"] != nil {
+				return intField(details, "cached_tokens")
 			}
 		}
 	}

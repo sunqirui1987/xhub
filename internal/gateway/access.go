@@ -10,6 +10,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 // The SSO code generator and its exchange are gone. The pair minted an
@@ -25,6 +26,7 @@ import (
 // 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {
+		logx.Debug("access denied method=%s path=%s operation=cache_flush", r.Method, r.URL.Path)
 		return
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "cache flushed"})

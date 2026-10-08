@@ -5,6 +5,7 @@
 package models
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -205,6 +206,19 @@ func UpsertPriceModel(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := priceRowFrom(body, provider)
+	for _, field := range rateFields {
+		v, exists := body[field]
+		if !exists || v == nil {
+			continue
+		}
+		if text, ok := v.(string); ok && strings.TrimSpace(text) == "" {
+			continue
+		}
+		if n, valid := numberField(v); !valid || n < 0 {
+			httpx.WriteError(w, 400, "invalid_request", field+" must be a finite non-negative number")
+			return
+		}
+	}
 
 	if err := s.RecordStore().PutConfig(priceModelNS, id, row); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
@@ -462,7 +476,7 @@ func providerField(key, label, kind string, required bool, def string) map[strin
 func numberField(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
-		return n, true
+		return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 	case int:
 		return float64(n), true
 	case int64:
@@ -476,7 +490,7 @@ func numberField(v any) (float64, bool) {
 		if err != nil {
 			return 0, false
 		}
-		return out, true
+		return out, !math.IsNaN(out) && !math.IsInf(out, 0)
 	default:
 		return 0, false
 	}

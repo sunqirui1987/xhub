@@ -2,7 +2,7 @@
 // contain inference or admin logic.
 //
 // Order for one request: recover and access log, call id, CORS, OPTIONS,
-// idempotency replay, bypass match, then Gin. A streaming body skips the
+// body read, authenticated idempotency, bypass match, then Gin. A streaming body skips the
 // idempotency buffer and the response hold buffer because those would have
 // to store the whole stream. Bypass runs before Gin so an official path is
 // not swallowed by a catalog pattern that happens to share a prefix.
@@ -12,6 +12,7 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,7 +23,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
@@ -127,28 +128,25 @@ func (s *Server) Handler() http.Handler {
 		}
 		stream, _ := body["stream"].(bool)
 		idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		var lease *idempotencyLease
 		if idemKey != "" && !stream {
-			ck := auth.APIKeyFrom(r) + "|" + r.Method + "|" + r.URL.Path + "|" + idemKey
-			s.mu.Lock()
-			hit, ok := s.idem[ck]
-			s.mu.Unlock()
-			if ok {
+			var hit *idemRec
+			var conflict bool
+			lease, hit, conflict = s.beginIdempotency(r, idemKey, raw)
+			if conflict {
+				httpx.WriteTypedError(w, r.URL.Path, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different request payload")
+				return
+			}
+			if hit != nil {
 				logx.Debug("process %s %s step=idempotency hit=true", r.Method, r.URL.Path)
-				for k, v := range hit.Hdr {
-					w.Header().Set(k, v)
-				}
-				if hit.CT != "" {
-					w.Header().Set("Content-Type", hit.CT)
-				}
-				w.WriteHeader(hit.Code)
-				_, _ = w.Write(hit.Body)
-				if hit.Code >= 400 {
-					lw.note = errorNote(hit.Body)
-				}
+				s.writeIdempotentResponse(w, lw, hit)
 				return
 			}
 		}
-		if s.serveBypass(lw, r) {
+		if lease != nil {
+			defer lease.abort()
+		}
+		if lease == nil && s.serveBypass(lw, r) {
 			return
 		}
 		if stream || strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -158,7 +156,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		logx.Debug("process %s %s step=dispatch mode=buffered", r.Method, r.URL.Path)
 		hw := &holdWriter{ResponseWriter: w, code: 200}
-		s.engine.ServeHTTP(hw, r)
+		if !s.serveBypass(hw, r) {
+			s.engine.ServeHTTP(hw, r)
+		}
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", "application/json")
 		}
@@ -179,8 +179,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		w.WriteHeader(code)
 		_, _ = w.Write(hw.buf.Bytes())
-		if idemKey != "" && code < 500 {
-			ck := auth.APIKeyFrom(r) + "|" + r.Method + "|" + r.URL.Path + "|" + idemKey
+		if lease != nil && code < 500 {
 			rec := idemRec{Code: code, CT: w.Header().Get("Content-Type"), Body: append([]byte(nil), hw.buf.Bytes()...)}
 			rec.Hdr = map[string]string{}
 			for _, k := range []string{"x-litellm-call-id", "x-litellm-version", "x-litellm-model-name", "x-litellm-model-id"} {
@@ -188,11 +187,174 @@ func (s *Server) Handler() http.Handler {
 					rec.Hdr[k] = v
 				}
 			}
-			s.mu.Lock()
-			s.idem[ck] = rec
-			s.mu.Unlock()
+			lease.complete(&rec)
 		}
 	})
+}
+
+type idempotencyLease struct {
+	server *Server
+	key    string
+	rec    *idemRec
+	done   bool
+}
+
+// beginIdempotency authenticates the caller and either owns, replays, or rejects an idempotent operation.
+// 参数 r（*http.Request）：带当前凭证、方法、路径和查询串的请求；key（string）：调用方提供的幂等键；body（[]byte）：用于请求指纹的原始正文。
+// 返回 lease（*idempotencyLease）：首次请求的执行所有权；replay（*idemRec）：已完成响应或等待取消响应；conflict（bool）：同键请求指纹不一致。
+// 调用：Handler 在非流式请求进入 bypass 或 Gin 前调用。
+// 测试：TestIdempotencyScopesHashesAndExpires、TestIdempotencyConcurrentRequestWaitsForOwner 和 TestIdempotencyReplaysWithoutASecondCharge。
+func (s *Server) beginIdempotency(r *http.Request, key string, body []byte) (*idempotencyLease, *idemRec, bool) {
+	p, err := s.resolve(r)
+	if err != nil || p == nil {
+		return nil, nil, false
+	}
+	namespace := ""
+	switch p.Kind {
+	case authz.KindKey:
+		namespace = "key:" + p.KeyID
+	case authz.KindSession:
+		sessionHash := sha256.Sum256([]byte(p.Session))
+		namespace = "session:" + p.UserID + ":" + stringHex(sessionHash[:])
+	default:
+		return nil, nil, false
+	}
+	cacheKey := namespace + "|" + r.Method + "|" + r.URL.Path + "|" + key
+	hashInput := append([]byte(r.URL.RawQuery), 0)
+	hashInput = append(hashInput, body...)
+	hash := sha256.Sum256(hashInput)
+	for {
+		now := time.Now()
+		if s.now != nil {
+			now = s.now()
+		}
+		ttl := s.idemTTL
+		if ttl <= 0 {
+			ttl = defaultIdempotencyTTL
+		}
+		s.mu.Lock()
+		for expiredKey, expired := range s.idem {
+			if expired.Done == nil && !now.Before(expired.ExpiresAt) {
+				delete(s.idem, expiredKey)
+			}
+		}
+		rec := s.idem[cacheKey]
+		if rec == nil {
+			rec = &idemRec{RequestHash: hash, ExpiresAt: now.Add(ttl), Done: make(chan struct{})}
+			s.idem[cacheKey] = rec
+			s.mu.Unlock()
+			return &idempotencyLease{server: s, key: cacheKey, rec: rec}, nil, false
+		}
+		if rec.RequestHash != hash {
+			s.mu.Unlock()
+			return nil, nil, true
+		}
+		done := rec.Done
+		if done == nil {
+			hit := cloneIdemRec(rec)
+			s.mu.Unlock()
+			return nil, hit, false
+		}
+		s.mu.Unlock()
+		select {
+		case <-done:
+		case <-r.Context().Done():
+			return nil, &idemRec{Code: http.StatusRequestTimeout, CT: "application/json", Body: []byte("{\"error\":{\"message\":\"request cancelled while waiting for the original idempotent request\",\"type\":\"request_cancelled\"}}")}, false
+		}
+	}
+}
+
+// stringHex encodes bytes as lowercase hexadecimal for secret-free session namespaces.
+// 参数 raw（[]byte）：要编码的摘要字节。
+// 返回 string（string）：每字节两个字符的小写十六进制文本。
+// 调用：beginIdempotency 编码会话凭证的 SHA-256 摘要。
+// 测试：TestIdempotencyScopesHashesAndExpires 间接验证命名空间不包含原始会话凭证。
+func stringHex(raw []byte) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, len(raw)*2)
+	for i, b := range raw {
+		out[i*2] = digits[b>>4]
+		out[i*2+1] = digits[b&15]
+	}
+	return string(out)
+}
+
+// complete publishes a successful idempotent response and wakes duplicate requests.
+// 参数 response（*idemRec）：要保存的状态码、响应头和响应正文。
+// 返回：无；接收者对应的占位记录原地变为已完成记录。
+// 调用：Handler 在非 5xx 缓冲响应写出后调用。
+// 测试：TestIdempotencyScopesHashesAndExpires 和 TestIdempotencyConcurrentRequestWaitsForOwner。
+func (l *idempotencyLease) complete(response *idemRec) {
+	if l == nil || l.done {
+		return
+	}
+	l.server.mu.Lock()
+	if l.server.idem[l.key] == l.rec {
+		l.rec.Code, l.rec.CT, l.rec.Body, l.rec.Hdr = response.Code, response.CT, response.Body, response.Hdr
+		close(l.rec.Done)
+		l.rec.Done = nil
+	}
+	l.server.mu.Unlock()
+	l.done = true
+}
+
+// abort releases an unfinished idempotency claim so a later request can retry it.
+// 参数：无；使用接收者保存的服务器、缓存键和占位记录。
+// 返回：无；仍由本 lease 持有时删除占位并唤醒等待者。
+// 调用：Handler 延迟调用；complete 已提交时该调用为空操作。
+// 测试：TestIdempotencyScopesHashesAndExpires 覆盖释放后的重新占有。
+func (l *idempotencyLease) abort() {
+	if l == nil || l.done {
+		return
+	}
+	l.server.mu.Lock()
+	if l.server.idem[l.key] == l.rec {
+		delete(l.server.idem, l.key)
+		close(l.rec.Done)
+	}
+	l.server.mu.Unlock()
+	l.done = true
+}
+
+// cloneIdemRec copies a completed response before releasing the idempotency lock.
+// 参数 rec（*idemRec）：锁保护下的已完成幂等记录。
+// 返回 *idemRec：正文和响应头均独立复制的响应快照。
+// 调用：beginIdempotency 在缓存命中时调用。
+// 测试：TestIdempotencyScopesHashesAndExpires 和 TestIdempotencyConcurrentRequestWaitsForOwner 间接覆盖。
+func cloneIdemRec(rec *idemRec) *idemRec {
+	return &idemRec{Code: rec.Code, CT: rec.CT, Body: append([]byte(nil), rec.Body...), Hdr: cloneStringMap(rec.Hdr)}
+}
+
+// cloneStringMap returns an independent copy of a string response-header map.
+// 参数 in（map[string]string）：可能为空的原始响应头映射。
+// 返回 map[string]string：可由调用方独立修改的新映射。
+// 调用：cloneIdemRec 复制缓存响应头时调用。
+// 测试：幂等重放测试通过响应快照间接覆盖。
+func cloneStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// writeIdempotentResponse writes a cached status, selected headers, and body to the client.
+// 参数 w（http.ResponseWriter）：客户端响应；lw（*statusRecorder）：访问日志状态记录器；hit（*idemRec）：缓存响应快照。
+// 返回：无；响应已写入 w，错误响应同时更新 lw 的错误摘要。
+// 调用：Handler 在 beginIdempotency 返回缓存命中时调用。
+// 测试：TestIdempotencyReplaysWithoutASecondCharge 通过完整入口重放覆盖。
+func (s *Server) writeIdempotentResponse(w http.ResponseWriter, lw *statusRecorder, hit *idemRec) {
+	for k, v := range hit.Hdr {
+		w.Header().Set(k, v)
+	}
+	if hit.CT != "" {
+		w.Header().Set("Content-Type", hit.CT)
+	}
+	w.WriteHeader(hit.Code)
+	_, _ = w.Write(hit.Body)
+	if hit.Code >= 400 {
+		lw.note = errorNote(hit.Body)
+	}
 }
 
 // errorNote reads the error type and message from a JSON error body. A non-JSON body is shortened.

@@ -399,7 +399,7 @@ func TestTheTeamReadExposesTheSelection(t *testing.T) {
 // TestANewTemplateIsSeededFromThePlatformDefault 证明新模板是一份完整文档。
 //
 // 解析是整份替换，不是按字段合并。所以模板里少写一个键就意味着那个键的零值：
-// 少写 num_retries 是"只尝试一次"，少写 timeout 是"没有超时"。这两个都是
+// 少写 num_retries 是"只尝试一次"，少写 timeout 是"零超时"。这两个都是
 // 可以配的，但不该是新建一份模板时不小心得到的。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
@@ -424,7 +424,7 @@ func TestANewTemplateIsSeededFromThePlatformDefault(t *testing.T) {
 	}
 	// 而平台里本来就有的其它键也要在，否则模板会把这些键变成零值。
 	if _, ok := body["timeout"]; !ok {
-		t.Fatalf("the seed dropped timeout, which would mean no timeout at all: %#v", body)
+		t.Fatalf("the seed dropped timeout, which would mean a zero timeout: %#v", body)
 	}
 	if _, ok := body["routing_strategy"]; !ok {
 		t.Fatalf("the seed dropped routing_strategy: %#v", body)

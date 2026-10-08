@@ -107,8 +107,8 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		t.Fatalf("first poll spend %+v", host.spend[1])
 	}
 	rec = host.call(t, http.MethodGet, "/api/v3/contents/generations/tasks/cgt-1", "")
-	if host.spend[2].usage != nil {
-		t.Fatalf("second poll charged again %+v", host.spend[2])
+	if host.spend[2].usage == nil || host.spend[2].callID == host.spend[1].callID || host.notes[2].SettlementID != host.notes[1].SettlementID || host.notes[1].SettlementID == "" || len(host.billed) != 0 {
+		t.Fatalf("second poll must retry the same durable settlement %+v", host.spend[2])
 	}
 
 	rec = host.call(t, http.MethodGet, "/v3/contents/generations/tasks/cgt-1", "")
@@ -116,7 +116,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		t.Fatalf("qiniu path accepted a volcengine task %d %s", rec.Code, rec.Body.String())
 	}
 
-	delete(host.pins, "cgt-1")
+	delete(host.pins, officialTaskScope(&auth.Principal{UserID: "test-user"}, "ark_contents_generation", "cgt-1"))
 	rec = host.call(t, http.MethodGet, "/api/v3/contents/generations/tasks/cgt-1", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expired pin %d", rec.Code)
@@ -199,18 +199,20 @@ func lastCall(t *testing.T, mu *sync.Mutex, seen []captured) captured {
 }
 
 type spendNote struct {
-	op, depID string
-	usage     map[string]any
+	op, depID, callID string
+	usage             map[string]any
 }
 
 type logicHost struct {
-	cfg    *config.Config
-	client *http.Client
-	models []config.ModelEntry
-	pins   map[string]string
-	billed map[string]bool
-	spend  []spendNote
-	notes  []CallNote
+	cfg      *config.Config
+	client   *http.Client
+	models   []config.ModelEntry
+	pins     map[string]string
+	billed   map[string]bool
+	spend    []spendNote
+	notes    []CallNote
+	settings map[string]any
+	failures []string
 }
 
 func (h *logicHost) call(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
@@ -226,12 +228,15 @@ func (h *logicHost) call(t *testing.T, method, target, body string) *httptest.Re
 }
 
 func (h *logicHost) RequireLLMPrincipal(http.ResponseWriter, *http.Request) *auth.Principal {
-	return &auth.Principal{Kind: "session"}
+	return &auth.Principal{Kind: "session", UserID: "test-user"}
 }
 func (h *logicHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
-	return &auth.Principal{Kind: "session"}, nil
+	return &auth.Principal{Kind: "session", UserID: "test-user"}, nil
 }
 func (h *logicHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
+	if h.settings != nil {
+		return prefs.RouteSettings{Settings: h.settings}
+	}
 	return prefs.PlatformSettings(nil)
 }
 
@@ -248,13 +253,15 @@ func (h *logicHost) GuardrailBlocks(string, map[string]any) (bool, string) {
 func (h *logicHost) AttachCredential(dep config.ModelEntry) (config.ModelEntry, error) {
 	return dep, nil
 }
-func (h *logicHost) IncBusy(string)                                                      {}
-func (h *logicHost) DecBusy(string)                                                      {}
-func (h *logicHost) NoteFailure(string, prefs.RouteSettings)                             {}
+func (h *logicHost) IncBusy(string) {}
+func (h *logicHost) DecBusy(string) {}
+func (h *logicHost) NoteFailure(id string, _ prefs.RouteSettings) {
+	h.failures = append(h.failures, id)
+}
 func (h *logicHost) NoteLatency(string, float64)                                         {}
 func (h *logicHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, string) {}
-func (h *logicHost) RecordSpend(_ http.ResponseWriter, _ *auth.Principal, _, _, op string, usage map[string]any, _ time.Time, _ bool, _ int, depID string) {
-	h.spend = append(h.spend, spendNote{op: op, depID: depID, usage: usage})
+func (h *logicHost) RecordSpend(_ http.ResponseWriter, _ *auth.Principal, callID, _, op string, usage map[string]any, _ time.Time, _ bool, _ int, depID string) {
+	h.spend = append(h.spend, spendNote{op: op, depID: depID, callID: callID, usage: usage})
 }
 func (h *logicHost) RememberExchange(string, *http.Request, []byte, []byte) {}
 func (h *logicHost) PlanRoute(*http.Request, string, map[string]any, *auth.Principal) RoutePlan {
@@ -265,7 +272,7 @@ func (h *logicHost) AnnotateCall(_ string, note CallNote)  { h.notes = append(h.
 func (h *logicHost) PinnedDeployment(string) string        { return "" }
 func (h *logicHost) FindDeployment(id string) (config.ModelEntry, bool) {
 	for _, m := range h.models {
-		if router.DeploymentID(m) == id {
+		if router.CooldownID(m) == id || router.DeploymentID(m) == id {
 			return m, true
 		}
 	}

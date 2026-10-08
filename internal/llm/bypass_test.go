@@ -70,3 +70,15 @@ func TestResponsesSSEToChat(t *testing.T) {
 		t.Fatalf("%s", text)
 	}
 }
+
+func TestResponsesSSEToChatAcceptsCRLFAndSplitFrames(t *testing.T) {
+	first := []byte("event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\r\n")
+	emit, rest := ResponsesSSEToChat(first, "model", false)
+	if len(emit) != 0 || string(rest) != string(first) {
+		t.Fatalf("partial frame emitted=%q rest=%q", emit, rest)
+	}
+	emit, rest = ResponsesSSEToChat(append(rest, []byte("\r\n")...), "model", false)
+	if len(rest) != 0 || !strings.Contains(string(emit), `"content":"hi"`) {
+		t.Fatalf("CRLF frame emitted=%q rest=%q", emit, rest)
+	}
+}
