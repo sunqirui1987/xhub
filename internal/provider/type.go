@@ -1,20 +1,15 @@
-// Package provider 是端点目录。供应商目录登记能力、转发方式和模型，
-// 人在添加模型时从这些里选。网关按能力决定一条请求能不能打到一条部署，
-// 按转发方式决定怎么把它送到上游。它不为每一家供应商长一个 switch。
-//
-// 目录里有两件互相独立的事，它们曾经被压成同一个下拉：
-//
-//   - 能力（Capability）：这条模型应答哪些入口。文本进文本出是 chat，
-//     向量是 embedding，生图是 image。一种能力对应一组入口路径，
-//     同一组里的路径是同一件事的不同拼法。
-//   - 转发方式（Transport）：网关怎么把请求送到上游。协议适配由网关按
-//     (op, 供应商) 自己编译；内置 Bypass 按目录里登记的路径原样转发；
-//     自定义 Bypass 按操作员照文档填的路径转发。
+// Package provider 管理供应商、公开端点类型、执行传输和模型登记。
+// 供应商保存连接与鉴权；端点类型定义客户端协议；传输定义具体上游动作。
+// 部署显式声明 transport 与 endpoint_types，价格目录只负责计价，不推断调用能力。
+// adapted 编译公开协议到供应商协议；bypass 保留供应商协议载荷与响应。
 package provider
 
-import "github.com/sunqirui1987/xhub/internal/logx"
+import (
+	"strings"
+	"time"
 
-import "strings"
+	"github.com/sunqirui1987/xhub/internal/logx"
+)
 
 // Action 是一个端点类型里的一次 HTTP 调用，例如 create 或 get。
 type Action struct {
@@ -25,6 +20,8 @@ type Action struct {
 	// TaskQuery 是携带任务 id 的查询参数。
 	// 空表示 id 是路径里的 {name} 占位符。
 	TaskQuery string `json:"task_query,omitempty"`
+	// Model 是固定创建路径对应的上游模型；可选请求体 model 仅用于选择网关别名。
+	Model string `json:"model,omitempty"`
 }
 
 // Capability 是一种入口能力。它决定哪些路径能调用一条模型。
@@ -41,25 +38,76 @@ type Capability struct {
 	Paths []string `json:"paths,omitempty"`
 }
 
-// Transport 是网关把请求送到上游的方式。
-//
-//   - adapted：网关按 (op, 供应商) 编译请求，走 llm.Endpoint / llm.Build。
-//     这一种不进目录：它的行为由供应商名决定，不是一条可以登记的数据。
-//   - bypass：内置的原样转发。字段是 APIBase、ModelField、TaskID、
-//     StripPrefix 和 Actions。
+// EndpointDescriptor 定义公开端点类型；不包含供应商地址或密钥。
+// Family 用于界面分类，Protocol 标识载荷协议，Capability 关联适配层能力。
+type EndpointDescriptor struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Kind       Kind   `json:"kind"`
+	Protocol   string `json:"protocol"`
+	Family     string `json:"family"`
+	Capability string `json:"capability,omitempty"`
+}
+
+// AuthConfig 定义供应商鉴权；先清除客户端凭据，再写入部署凭据。
+// Header 指定头名称；Prefix 如 Bearer 或 Key，空值表示直接写入密钥。
+type AuthConfig struct {
+	Header string `json:"header"`
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// Transport 定义原生协议如何在供应商上执行，与公开端点类型分开登记。
+// SupplierPrefixes 按供应商追加协议路径；ResponseUsage 只提取响应事实，不计算金额。
+// EndpointType 关联公开协议；Protocol 决定事实提取；Family 用于展示；ModelGroup 区分队列。
+// Auth、Headers 定义鉴权和协议默认头；ID 是部署引用的稳定执行标识。
+// APIBase 是无部署或供应商默认地址时的根地址；ModelField 指定可替换的顶层模型字段。
+// TaskID 指定响应中的任务编号；StripPrefix 只移除模型的一层供应商前缀。
+// QueueURLs 要求轮询 URL 改写为网关入口；Billing 定义成功结果的异步用量提取。
+// Actions 是方法和路径白名单，禁止任意地址代理；创建与查询必须固定到同一传输。
 type Transport struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	// Kind 只有 adapted 和 bypass。custom 不是一种 Kind：它是部署上自己带的
-	// 一份 bypass 文档，由 overrideTransport 读出来，ID 是 "custom"。
+	SupplierPrefixes map[string]string                                   `json:"supplier_prefixes,omitempty"`
+	EndpointType     string                                              `json:"endpoint_type"`
+	Protocol         string                                              `json:"protocol"`
+	Family           string                                              `json:"family"`
+	ModelGroup       string                                              `json:"model_group,omitempty"`
+	Auth             AuthConfig                                          `json:"auth"`
+	Headers          map[string]string                                   `json:"headers,omitempty"`
+	ResponseUsage    func(map[string]any, map[string]any) map[string]any `json:"-"`
+	ID               string                                              `json:"id"`
+	Label            string                                              `json:"label"`
+	// Kind 只有 adapted 和 bypass。所有 Bypass 传输必须在后台注册，部署不能上传任意路径文档。
 	Kind Kind `json:"kind"`
 	// Providers 限制这个转发方式对哪些供应商显示。空表示任何供应商都能选。
-	Providers   []string `json:"providers,omitempty"`
-	APIBase     string   `json:"api_base,omitempty"`
-	ModelField  string   `json:"model_field,omitempty"`
-	TaskID      string   `json:"task_id,omitempty"`
-	StripPrefix string   `json:"strip_prefix,omitempty"`
-	Actions     []Action `json:"actions,omitempty"`
+	Providers   []string     `json:"providers,omitempty"`
+	APIBase     string       `json:"api_base,omitempty"`
+	ModelField  string       `json:"model_field,omitempty"`
+	TaskID      string       `json:"task_id,omitempty"`
+	StripPrefix string       `json:"strip_prefix,omitempty"`
+	QueueURLs   bool         `json:"queue_urls,omitempty"`
+	Billing     *TaskBilling `json:"-"`
+	Actions     []Action     `json:"actions,omitempty"`
+}
+
+// TaskContext 保存异步结算需要的创建事实，不保存提示词、素材 URL 或密钥。
+// StartedAt 用于选择时段价格；Model 固定上游模型；Resolution、HasVideo、Variant 保存价格维度。
+// Known=false 表示上下文不完整；PricingBlocked 保留无法自动计价的明确原因。
+// 请求时长不代表实际生成量，实际用量必须从成功结果提取。
+type TaskContext struct {
+	StartedAt      time.Time `json:"started_at"`
+	Model          string    `json:"model"`
+	Resolution     string    `json:"resolution"`
+	HasVideo       bool      `json:"has_video"`
+	Known          bool      `json:"known"`
+	Variant        string    `json:"variant,omitempty"`
+	PricingBlocked string    `json:"pricing_blocked,omitempty"`
+}
+
+// TaskBilling 定义供应商成功终态和实测用量，不在传输层计算金额。
+// Context 接收创建请求，保存最小计价上下文；Usage 接收轮询结果与固定上下文。
+// 未完成或失败返回 nil；缺失价格维度时保留 pricing_blocked，交给目录处理。
+type TaskBilling struct {
+	Context func(map[string]any) TaskContext
+	Usage   func(map[string]any, TaskContext) map[string]any
 }
 
 // Kind 说一条请求按哪种方式处理。
@@ -73,12 +121,10 @@ const (
 )
 
 // Hit 是一条请求路径命中的转发方式和动作。
-// DeploymentName 在路径属于某条部署自己的自定义端点时才有值。
 type Hit struct {
-	Transport      Transport
-	Action         Action
-	Names          map[string]string
-	DeploymentName string
+	Transport Transport
+	Action    Action
+	Names     map[string]string
 }
 
 // OfficialID 从存储的模型 id 上剥掉一层 "<前缀>/"。后面的斜杠保留，
@@ -134,8 +180,6 @@ func Expand(pattern string, names map[string]string) string {
 	return out
 }
 
-// init 记一次类型定义文件的载入。这个文件只有类型和几个纯函数，
-// 载入本身没有别的可记的事。
 // init 记一次类型定义文件的载入。这个文件只有类型和几个纯函数，
 // 载入本身没有别的可记的事。
 // 参数：无。

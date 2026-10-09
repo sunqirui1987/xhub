@@ -50,7 +50,9 @@ func TestCatalogReads(t *testing.T) {
 				}
 				return
 			}
-			if strings.Contains(path, "/threads/") && strings.HasSuffix(path, "/messages") {
+			if (strings.Contains(path, "/threads/") && strings.HasSuffix(path, "/messages")) ||
+				strings.HasPrefix(path, "/guardrails/submissions/") ||
+				path == "/guardrails/ui/major_airlines" || strings.HasPrefix(path, "/guardrails/ui/category_yaml/") {
 				var probe map[string]any
 				if status != http.StatusNotImplemented || json.Unmarshal(body, &probe) != nil {
 					t.Fatalf("unsupported resource status %d %s", status, trim(body))

@@ -4,15 +4,14 @@
 
 ## 职责与实现契约
 
-router.go 选择同公开模型名的部署并按策略排序，adapter.go 适配运行状态读取，split.go 实现平滑加权分流。禁用部署被过滤；冷却状态优先用扩展标识，兼容旧标识。
-DeploymentID 是 api_base|model，用于模板权重；CooldownID 再加入 pricing/deployment ID 与命名凭据，不能放原始秘密。ApplyWeights 复制参数后覆盖份额，不能修改共享配置。simple-shuffle 当前偏向最大权重，weighted-split 才按比例累计调度；未提供权重等份，明确零排除。
+router.go 选择同公开模型名的部署并按策略排序，adapter.go 适配运行状态读取，split.go 实现平滑加权分流。禁用部署被过滤；冷却状态使用当前运行身份。
+WeightID 优先稳定部署 ID，其次定价 ID；没有两者时为空，模板不能为该行覆盖权重。CooldownID 包含端点、模型、定价/部署 ID 和命名凭据，不包含原始秘密。ApplyWeights 复制参数并仅匹配稳定键。simple-shuffle 当前偏向最大权重，weighted-split 才按比例累计调度；未提供权重等份，明确零排除。
 router 只排序已授权候选，不授予模型访问。普通策略全冷却时仍尝试，split 没正权重开放候选则为空。成本策略比较当前输入 token 单价，不是全请求费用预测。粘性只能调整入选列表顺序，不能恢复被过滤部署。
 
 ## 源码职责与入口
 
 ### adapter.go
 
-- [`func EncodeRequest(op, provider string, body map[string]any, realModel string) ([]byte, error)`](adapter.go) — EncodeRequest turns the public JSON body into the upstream request body. The protocol details live in internal/llm. This wrapper keeps the old name so callers do not each import that package.
 - [`func DecodeResponse(op, provider, alias string, raw []byte) []byte`](adapter.go) — DecodeResponse turns an upstream response into the public shape and puts the caller's model alias back into the model field.
 
 ### router.go
@@ -22,10 +21,10 @@ router 只排序已授权候选，不授予模型访问。普通策略全冷却�
 - [`func All(list []config.ModelEntry, alias string) []config.ModelEntry`](router.go) — All returns every deployment under one public model name, before a strategy orders them.
 - [`func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry`](router.go) — Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
 - [`func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry`](router.go) — Pick returns the first deployment from Order. It returns nil when no deployment is usable.
-- [`func DeploymentID(e config.ModelEntry) string`](router.go) — DeploymentID is the physical deployment identity, shaped as api_base|model. Weight overrides use this stable frontend-facing id.
+- [`func WeightID(e config.ModelEntry) string`](router.go) — 优先部署 ID 的 deployment:<id>，其次 pricing:<id>；没有稳定 ID 时返回空串。
 - [`func CooldownID(e config.ModelEntry) string`](router.go) — CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
 - [`func IsSplitStrategy(strategy string) bool`](router.go) — IsSplitStrategy reports whether strategy divides traffic by weight. Hyphens and underscores are the same name. Anything else, including simple-shuffle, is not a split: simple-shuffle still picks the heaviest deployment, and treating it as a split would change that.
-- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — ApplyWeights copies list and sets weight on the deployments named in overrides. The key is DeploymentID (api_base|model). A deployment that is not in the map keeps the weight already on it, which defaults to 1 inside the split. An empty map returns the same slice, so a document that does not configure shares does not allocate or change the pool. The copy matters: ModelList is the process config, and writing weight onto it would leak one request's template into the next request.
+- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — 复制候选部署并仅匹配 WeightID；未匹配者保留自身权重，空映射返回原切片，避免修改共享 ModelList。
 - [`func AdapterURL(provider, apiBase, realModel string) string`](router.go) — AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
 - [`func AdapterURLOp(op, provider, apiBase, realModel string) string`](router.go) — AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
 - [`func ValidateStrategy(strategy string) error`](router.go) — ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses. An unknown name returns an error and is not treated as simple-shuffle.
@@ -53,8 +52,9 @@ router 只排序已授权候选，不授予模型访问。普通策略全冷却�
 | --- | --- |
 | [cost_regression_test.go](cost_regression_test.go) | `TestCostRoutingUsesSettlementRatePrecedenceAndWindow`, `TestCostRoutingAcceptsValidNumericRates` |
 | [disabled_test.go](disabled_test.go) | `TestAllExcludesDisabledExactAndWildcardDeployments` |
+| [runtime_identity_test.go](runtime_identity_test.go) | TestDatabaseRuntimeIdentityKeepsRetryAndSplitRowsDistinct、TestDatabaseRuntimeIdentityIsolatesCooldown、TestDatabaseRuntimeIdentityIsolatesMetrics、TestCooldownIDPreservesParameterIdentityPrecedence：数据库重复部署保持独立的重试、分流、冷却与指标身份。 |
 | [split_test.go](split_test.go) | `TestWeightedSplitFollowsTheConfiguredRatio`, `TestWeightedSplitDoesNotRequireHundred`, `TestSplitWithoutWeightsIsEven`, `TestSplitSkipsACoolingDeployment`, `TestSplitIsEvenAfterACoolingDeploymentReturns`, `TestSplitWithOneDeploymentDoesNotDisturbIt`, `TestSplitWithoutStateFallsBackToHighestWeight`, `TestApplyWeightsUsesTheDocumentWithoutTouchingThePool`, `TestWeightedSplitIsItsOwnStrategy`, `TestSplitKeepsRatioAcrossManyDraws`, `TestCostStrategyDoesNotLetAnUnpricedDeploymentWin` |
-| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsAcceptLegacyPhysicalID` |
+| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsRejectPhysicalIDForNamedCredentials` |
 
 ```bash
 go test ./internal/router -count=1

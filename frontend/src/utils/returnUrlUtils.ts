@@ -45,7 +45,10 @@ export function consoleHref(path: string): string {
 
 export function getLoginUrl(baseUrl: string = ""): string {
   const path = "/ui/login/";
-  if (!baseUrl) return path;
+  if (!baseUrl) {
+    const root = consoleUiRoot();
+    return root ? new URL(`${root}${path}`).pathname : path;
+  }
   try {
     const given = new URL(baseUrl);
     const page = consoleOrigin();

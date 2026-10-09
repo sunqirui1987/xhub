@@ -12,11 +12,24 @@ interface GuardrailTestPanelProps {
   guardrailNames: string[];
   onSubmit: (text: string, metadata?: Record<string, unknown> | null) => void;
   isLoading: boolean;
-  results: Array<{ guardrailName: string; response_text: string; latency: number }> | null;
+  results: Array<{
+    guardrailName: string;
+    response_text: string;
+    latency: number;
+    action?: string;
+    reason?: string;
+  }> | null;
   errors: Array<{ guardrailName: string; error: Error; latency: number }> | null;
   onClose: () => void;
 }
 
+/**
+ * 用途：提供普通护栏调试输入、metadata 校验及结果展示。
+ * 参数：属性：规则名称、提交/关闭回调、忙碌状态、结果和错误数组。
+ * 返回：React 测试表单；实际规则执行由父组件处理。
+ * 调用：GuardrailTestPlayground。
+ * 测试：GuardrailTestPanel.test.tsx。
+ */
 export function GuardrailTestPanel({
   guardrailNames,
   onSubmit,
@@ -29,6 +42,13 @@ export function GuardrailTestPanel({
   const [metadataText, setMetadataText] = useState("");
   const [metadataError, setMetadataError] = useState<string | null>(null);
 
+  /**
+   * 用途：严格解析可选 metadata 对象，避免把数组或基础值发给执行器。
+   * 参数：raw：JSON 文本，空白代表未提供。
+   * 返回：metadata/error 对象；解析失败使用错误字段，不抛出。
+   * 调用：handleSubmit。
+   * 测试：GuardrailTestPanel.test.tsx。
+   */
   const parseMetadata = (raw: string): { metadata: Record<string, unknown> | null; error: string | null } => {
     if (!raw.trim()) {
       return { metadata: null, error: null };
@@ -44,6 +64,13 @@ export function GuardrailTestPanel({
     }
   };
 
+  /**
+   * 用途：校验测试文本和 metadata，再调用父组件的调试入口。
+   * 参数：无；读取输入状态。
+   * 返回：void；校验失败显示错误，成功传递原文本和 metadata。
+   * 调用：测试按钮。
+   * 测试：GuardrailTestPanel.test.tsx。
+   */
   const handleSubmit = () => {
     if (!inputText.trim()) {
       toast.fromError(t("Please enter text to test"));
@@ -61,6 +88,13 @@ export function GuardrailTestPanel({
     onSubmit(inputText, metadata);
   };
 
+  /**
+   * 用途：处理 Enter 提交，同时允许 Shift/Ctrl/Meta 修饰键保留编辑行为。
+   * 参数：e：文本区键盘事件。
+   * 返回：void；普通 Enter 阻止默认换行并触发提交。
+   * 调用：输入文本区。
+   * 测试：GuardrailTestPanel.test.tsx。
+   */
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
@@ -68,6 +102,13 @@ export function GuardrailTestPanel({
     }
   };
 
+  /**
+   * 用途：复制测试输入，兼容安全剪贴板和旧浏览器执行命令。
+   * 参数：text：要复制的原输入。
+   * 返回：Promise<boolean>；复制失败返回 false。
+   * 调用：handleCopyInput。
+   * 测试：GuardrailTestPanel.test.tsx。
+   */
   const copyToClipboard = async (text: string) => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -96,6 +137,13 @@ export function GuardrailTestPanel({
     }
   };
 
+  /**
+   * 用途：复制当前测试文本，并依据复制结果提示成功或失败。
+   * 参数：无；读取 inputText。
+   * 返回：Promise<void>；通过 toast 展示结果。
+   * 调用：复制输入按钮。
+   * 测试：GuardrailTestPanel.test.tsx。
+   */
   const handleCopyInput = async () => {
     const success = await copyToClipboard(inputText);
     if (success) {
@@ -125,7 +173,10 @@ export function GuardrailTestPanel({
               </div>
             </div>
             <p className="text-sm text-muted-foreground">
-              {t("Test {value0} and compare results", { value0: (guardrailNames.length > 1 ? "guardrails" : "guardrail") })}</p>
+              {t("Test {value0} and compare results", {
+                value0: guardrailNames.length > 1 ? "guardrails" : "guardrail",
+              })}
+            </p>
           </div>
         </div>
       </div>
@@ -165,7 +216,10 @@ export function GuardrailTestPanel({
             />
             <div className="mt-1 flex items-center justify-between">
               <span className="text-xs text-muted-foreground">
-                {t("Press")} <kbd className="rounded-sm border border-border bg-muted px-1 py-0.5 text-xs">{t("Enter")}</kbd> {t("to submit •")} <kbd className="rounded-sm border border-border bg-muted px-1 py-0.5 text-xs">Shift+Enter</kbd>{" "}
+                {t("Press")}{" "}
+                <kbd className="rounded-sm border border-border bg-muted px-1 py-0.5 text-xs">{t("Enter")}</kbd>{" "}
+                {t("to submit •")}{" "}
+                <kbd className="rounded-sm border border-border bg-muted px-1 py-0.5 text-xs">Shift+Enter</kbd>{" "}
                 {t("for new line")}
               </span>
               <span className="text-xs text-muted-foreground">Characters: {inputText.length}</span>
@@ -184,7 +238,9 @@ export function GuardrailTestPanel({
                   }
                 />
                 <TooltipContent>
-                  {t("JSON object forwarded to the guardrail as request_data['metadata']. Custom guardrails can read per-request configuration from it.")}
+                  {t(
+                    "JSON object forwarded to the guardrail as request_data['metadata']. Custom guardrails can read per-request configuration from it.",
+                  )}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -213,8 +269,14 @@ export function GuardrailTestPanel({
             >
               {isLoading && <UiLoadingSpinner className="size-4" />}
               {isLoading
-                ? t("Testing {value0} guardrail{value1}...", { value0: (guardrailNames.length), value1: (guardrailNames.length > 1 ? "s" : "") })
-                : t("Test {value0} guardrail{value1}", { value0: (guardrailNames.length), value1: (guardrailNames.length > 1 ? "s" : "") })}
+                ? t("Testing {value0} guardrail{value1}...", {
+                    value0: guardrailNames.length,
+                    value1: guardrailNames.length > 1 ? "s" : "",
+                  })
+                : t("Test {value0} guardrail{value1}", {
+                    value0: guardrailNames.length,
+                    value1: guardrailNames.length > 1 ? "s" : "",
+                  })}
             </Button>
           </div>
         </div>

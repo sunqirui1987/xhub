@@ -109,8 +109,8 @@ func SessionLogs(s Host, w http.ResponseWriter, r *http.Request) {
 
 // collapseSessions keeps one row per caller and non-empty session and totals
 // the calls that landed on this page. API key is the caller identity when
-// present; keyless calls use user. Legacy rows with neither identity retain the
-// old session-only grouping. A request with no session stays on its own row.
+// present; keyless calls use user. Rows without a caller identity remain
+// separate. A request with no session stays on its own row.
 // 参数 rows（[]map[string]any）：从用量或目录读出的map[string]any。
 // 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
 // 调用：仅在 reports.go 内使用
@@ -134,11 +134,16 @@ func collapseSessions(rows []map[string]any) []map[string]any {
 			solo = append(solo, row)
 			continue
 		}
-		groupKey := sessionKey{kind: "legacy", session: sid}
+		groupKey := sessionKey{session: sid}
 		if keyID, _ := row["api_key"].(string); keyID != "" {
 			groupKey.kind, groupKey.caller = "key", keyID
 		} else if userID, _ := row["user"].(string); userID != "" {
 			groupKey.kind, groupKey.caller = "user", userID
+		} else {
+			// Without a caller, even a missing or duplicated request ID cannot
+			// prove that two rows belong to the same session.
+			solo = append(solo, row)
+			continue
 		}
 		g := groups[groupKey]
 		if g == nil {
@@ -317,6 +322,15 @@ func costBreakdown(e iam.UsageEvent) map[string]any {
 		out["window"] = snap.Window
 		out["applied"] = appliedRateRows(snap.Applied)
 		out["source"] = "snapshot"
+		if snap.PricingStatus != "" {
+			out["pricing_status"] = snap.PricingStatus
+		}
+		if snap.Usage != nil {
+			out["usage"] = snap.Usage
+		}
+		if snap.PricingStatus == "unpriced" {
+			return out
+		}
 		for _, rate := range snap.Applied {
 			amount := rate.Quantity * rate.USD
 			switch rate.Side {
@@ -412,7 +426,7 @@ func parsePriceSnapshot(raw string) *catalog.PriceSnapshot {
 		logx.Error("price snapshot on a usage row is not readable err=%v", err)
 		return nil
 	}
-	if len(snap.Applied) == 0 {
+	if len(snap.Applied) == 0 && snap.PricingStatus != "unpriced" {
 		return nil
 	}
 	return &snap

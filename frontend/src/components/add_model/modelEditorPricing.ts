@@ -16,6 +16,11 @@ export type EditorModel = {
   model_info: Record<string, unknown>;
 };
 
+/** catalogModelId 解析独立的价格目录模型 ID。
+ * 参数 rows：目录映射；upstream：模型或目录 ID；provider：可选供应商。
+ * 返回：有价候选优先的目录 ID；无匹配时为空字符串。
+ * 调用：价格来源预选及 effectivePricing。测试：modelEditorPricing.test.ts。
+ */
 export function catalogModelId(rows: Record<string, CatalogRow>, upstream: string, provider = ""): string {
   const bare = upstream.includes("/") ? upstream.slice(upstream.indexOf("/") + 1) : upstream;
   const candidates = [upstream, bare, provider + "/" + upstream];
@@ -26,12 +31,22 @@ export function catalogModelId(rows: Record<string, CatalogRow>, upstream: strin
   return candidates.find((id) => hasPrice(rows[id])) ?? candidates.find((id) => rows[id]) ?? "";
 }
 
+/** catalogRows 把目录响应转换成按模型 ID 索引的可选条目。
+ * 参数 models：网络返回的未知值。
+ * 返回：过滤 removed 条目后的目录映射；非数组返回空映射。
+ * 调用：ModelEditor 目录加载。测试：modelEditorPricing.test.ts。
+ */
 export function catalogRows(models?: unknown): Record<string, CatalogRow> {
   const entries = Array.isArray(models) ? (models as CatalogRow[]) : [];
   return Object.fromEntries(entries.filter((row) => !row.removed).map((row) => [String(row.id), row]));
 }
 
-// Deployment overrides have the same precedence as the gateway's cost lookup.
+// 部署人工价格优先级与网关费用查询保持一致；价格来源不改变端点或传输。
+/** effectivePricing 解析部署当前生效的计价来源。
+ * 参数 model：部署；rows：价格目录。
+ * 返回：生效目录条目和来源说明；人工定价缺失时明确返回未设置。
+ * 调用：模型详情和 ModelEditor。测试：modelEditorPricing.test.ts。
+ */
 export function effectivePricing(model: EditorModel, rows: Record<string, CatalogRow>) {
   if (hasPrice(model.litellm_params)) return { row: model.litellm_params, source: "部署定价" };
   if (model.model_info.pricing_source === "manual") return { row: undefined, source: "部署定价（未设置）" };
@@ -49,6 +64,11 @@ export function effectivePricing(model: EditorModel, rows: Record<string, Catalo
   return { row: rows[id], source: "价格目录 · " + id };
 }
 
+/** pricingRates 读取完整费率或把明确的单价字段转换为费率。
+ * 参数 row：可选定价条目。
+ * 返回：费率列表，保留原始变体；缺少条目时返回空数组。
+ * 调用：editorDefaults。测试：modelEditorPricing.test.ts。
+ */
 export function pricingRates(row?: CatalogRow): PriceRate[] {
   if (!row) return [];
   if (Array.isArray(row.rates) && row.rates.length) return row.rates as PriceRate[];
@@ -64,6 +84,11 @@ export function pricingRates(row?: CatalogRow): PriceRate[] {
   });
 }
 
+/** hasPrice 判断条目是否明确提供了价格。
+ * 参数 row：可选定价条目。
+ * 返回：布尔值；明确的零价格算已定价，字段缺失不算免费。
+ * 调用：目录筛选、默认值及提交校验。测试：modelEditorPricing.test.ts。
+ */
 export function hasPrice(row?: CatalogRow): boolean {
   return (
     !!row &&
@@ -71,6 +96,11 @@ export function hasPrice(row?: CatalogRow): boolean {
       PRICE_FIELDS.some((field) => typeof row[field.name] === "number"))
   );
 }
+/** billingModeOf 根据价格单位选择人工定价编辑表单。
+ * 参数 row：可选定价条目。
+ * 返回：秒、图片或 token 表单模式；该返回值不声明模型的调用端点。
+ * 调用：editorDefaults。测试：modelEditorPricing.test.ts。
+ */
 export function billingModeOf(row?: CatalogRow): BillingMode {
   const rates = Array.isArray(row?.rates) ? (row.rates as PriceRate[]) : [];
   if (
@@ -87,12 +117,22 @@ export function billingModeOf(row?: CatalogRow): BillingMode {
     return "image";
   return "token";
 }
+/** rateMeasure 将已知价格字段名映射为计量单位。
+ * 参数 name：价格字段名。
+ * 返回：picture、second、query 或 token。
+ * 调用：pricingRates、catalogFieldValue。测试：modelEditorPricing.test.ts。
+ */
 export function rateMeasure(name: string): string {
   if (name.includes("image")) return "picture";
   if (name.includes("second")) return "second";
   if (name.includes("query")) return "query";
   return "token";
 }
+/** catalogFieldValue 读取可安全展示到单价输入框的价格。
+ * 参数 row：定价条目；name：已登记价格字段名。
+ * 返回：换算为表单展示单位的字符串；只有带规格的价格时返回空字符串。
+ * 调用：editorDefaults、ModelEditor 价格预填。测试：modelEditorPricing.test.ts。
+ */
 export function catalogFieldValue(row: CatalogRow | undefined, name: string): string {
   if (!row) return "";
   const field = PRICE_FIELDS.find((entry) => entry.name === name)!;
@@ -105,11 +145,16 @@ export function catalogFieldValue(row: CatalogRow | undefined, name: string): st
       Number.isFinite(rate.usd) &&
       rate.usd >= 0,
   );
-  // Qualified catalog prices stay in the rate table; don't flatten them to the minimum.
+  // 带规格的目录价格必须保留在费率表中，不能取最低价填成无规格的统一单价。
   const exact = candidates.find((rate) => !rate.variant || rate.variant === "uncached");
   const value = exact?.usd ?? (candidates.length ? undefined : row[name]);
   return typeof value === "number" ? String(Number((value * field.scale).toPrecision(12))) : "";
 }
+/** editorDefaults 建立模型编辑表单的初始值。
+ * 参数 model：可选原部署，未传表示新增。
+ * 返回：供应商、模型、显式端点绑定和独立价格来源的表单值。
+ * 调用：ModelEditor 和 buildEditorModel。测试：modelEditorPricing.test.ts。
+ */
 export function editorDefaults(model?: EditorModel): Record<string, unknown> {
   const params = model?.litellm_params ?? {};
   const info = model?.model_info ?? {};
@@ -120,8 +165,8 @@ export function editorDefaults(model?: EditorModel): Record<string, unknown> {
       (String(params.model ?? "").includes("/") ? String(params.model).split("/")[0] : "openai"),
     model: params.model ?? "",
     model_name: model?.model_name ?? "",
-    mode: info.mode ?? "",
-    transport: info.transport ?? "adapted",
+    endpoint_type: Array.isArray(info.endpoint_types) ? (info.endpoint_types[0] ?? "") : "",
+    transport: info.transport ?? "",
     endpoint_types: info.endpoint_types ?? [],
     disabled: info.disabled === true,
     pricing_source: info.pricing_source ?? (hasPrice(params) ? "manual" : "catalog"),
@@ -132,23 +177,32 @@ export function editorDefaults(model?: EditorModel): Record<string, unknown> {
     ...Object.fromEntries(PRICE_FIELDS.map((field) => [field.name, catalogFieldValue(params, field.name)])),
   };
 }
+/** buildEditorModel 校验表单并构造新的模型部署载荷。
+ * 参数 values：表单值；original：可选原部署，用于保留未修改的人工费率。
+ * 返回：EditorModel；缺少端点、供应商或合法价格时抛出可展示的错误。
+ * 调用：ModelEditor 保存。测试：modelEditorPricing.test.ts。
+ */
 export function buildEditorModel(values: Record<string, unknown>, original?: EditorModel): EditorModel {
   const params: Record<string, unknown> = {
     model: String(values.model ?? "").trim(),
     custom_llm_provider: values.custom_llm_provider,
   };
   const info: Record<string, unknown> = {
-    mode: values.mode,
     transport: values.transport,
     endpoint_types: values.endpoint_types,
     disabled: values.disabled === true,
     pricing_source: values.pricing_source,
-    endpoint: values.endpoint ?? null,
   };
   const name = String(values.model_name ?? "").trim();
   if (!name || !params.model || !params.custom_llm_provider || !values.supplier)
     throw new Error("请选择供应商，并填写上游模型和对外模型名称。");
-  if (!values.mode) throw new Error("请选择调用方式。");
+  if (
+    !values.endpoint_type ||
+    !values.transport ||
+    !Array.isArray(values.endpoint_types) ||
+    !values.endpoint_types.includes(values.endpoint_type)
+  )
+    throw new Error("请选择端点类型。");
   if (values.supplier === "__existing__" && !original) throw new Error("请选择已配置的模型提供商。");
   if (values.supplier !== "__existing__") {
     params.litellm_credential_name = values.supplier;

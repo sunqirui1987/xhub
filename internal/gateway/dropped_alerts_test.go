@@ -82,6 +82,51 @@ func TestDroppedAlertsAreGone(t *testing.T) {
 	}
 }
 
+// TestPlatformTemplateSaveCanClearModelRouting verifies that an explicit empty
+// list clears model-specific rules while omitted fields retain patch semantics.
+func TestPlatformTemplateSaveCanClearModelRouting(t *testing.T) {
+	srv, base, db := bootGateway(t)
+	defer srv.Close()
+	key := loginAdmin(t, base, db)
+
+	status, body := authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"model_routing":[{"model_name":"chat","routing_strategy":"least-busy"}]}}`))
+	if status != http.StatusOK {
+		t.Fatalf("save model routing status %d %s", status, trim(body))
+	}
+
+	// A regular partial update must preserve model_routing.
+	status, body = authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"timeout":17}}`))
+	if status != http.StatusOK {
+		t.Fatalf("partial update status %d %s", status, trim(body))
+	}
+	var response struct {
+		RouterSettings map[string]any `json:"router_settings"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := response.RouterSettings["model_routing"]; !ok {
+		t.Fatalf("partial update removed model_routing: %s", trim(body))
+	}
+
+	// The editor sends an explicit empty list when all rules are removed.
+	status, body = authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"model_routing":[]}}`))
+	if status != http.StatusOK {
+		t.Fatalf("remove model routing status %d %s", status, trim(body))
+	}
+	response.RouterSettings = nil
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatal(err)
+	}
+	rules, ok := response.RouterSettings["model_routing"].([]any)
+	if !ok || len(rules) != 0 {
+		t.Fatalf("explicit empty list did not clear model_routing: %s", trim(body))
+	}
+	if response.RouterSettings["timeout"] != float64(17) {
+		t.Fatalf("removing model_routing changed unrelated settings: %s", trim(body))
+	}
+}
+
 // TestUnusedAdminSurfacesStayGone checks the settings that never affected a
 // request: cost discounts and margins, the price calculator, SSO login, the IP
 // allow-list, SCIM, and the vault backends. Prompt storage and the UI settings

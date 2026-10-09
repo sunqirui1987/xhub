@@ -2,6 +2,7 @@ package regression
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/config"
@@ -27,13 +28,14 @@ func splitDeployment(public, upstream string, weight float64) config.ModelEntry 
 		ModelName: public,
 		LiteLLMParams: map[string]any{
 			"model":                 upstream,
+			"deployment_id":         strings.TrimPrefix(upstream, "openai/"),
 			"api_key":               "sk-fake-upstream",
 			"custom_llm_provider":   "openai",
 			"weight":                weight,
 			"input_cost_per_token":  testInputRate,
 			"output_cost_per_token": testOutputRate,
 		},
-		ModelInfo: map[string]any{"mode": "chat"},
+		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	}
 }
 
@@ -169,7 +171,7 @@ func TestSplitIsEvenWhenNoWeightsAreSet(t *testing.T) {
 				"input_cost_per_token":  testInputRate,
 				"output_cost_per_token": testOutputRate,
 			},
-			ModelInfo: map[string]any{"mode": "chat"},
+			ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 		}
 	}
 	h := newHarness(t, bare("even-a"), bare("even-b"))

@@ -30,7 +30,7 @@ func TestNamedCredentialCooldownAndRetryIsolation(t *testing.T) {
 	b := deployment("shared-name", "same", 1)
 	a.LiteLLMParams["litellm_credential_name"] = "first"
 	b.LiteLLMParams["litellm_credential_name"] = "second"
-	if DeploymentID(a) != DeploymentID(b) || CooldownID(a) == CooldownID(b) {
+	if CooldownID(a) == CooldownID(b) {
 		t.Fatal("credential identity is not isolated")
 	}
 	st := State{Cooldown: map[string]bool{CooldownID(a): true}, Splits: NewSplitState()}
@@ -71,30 +71,51 @@ func TestCooldownIDUsesConfiguredStablePricingIdentity(t *testing.T) {
 	}
 	a.LiteLLMParams["pricing_id"] = "price-row-a"
 	b.LiteLLMParams["pricing_id"] = "price-row-b"
-	if DeploymentID(a) != DeploymentID(b) {
-		t.Fatal("test setup must keep the physical deployment id equal")
-	}
 	if CooldownID(a) == CooldownID(b) {
 		t.Fatal("configured stable deployment identities must isolate cooldown and billing state")
 	}
 }
 
-func TestTemplateWeightsPreferStableIdentityAndKeepLegacyFallback(t *testing.T) {
+func TestTemplateWeightsRequireStableIdentity(t *testing.T) {
 	a := deployment("shared-name", "same", 1)
 	b := deployment("shared-name", "same", 1)
-	a.LiteLLMParams["deployment_id"] = "supplier-a"
-	b.LiteLLMParams["deployment_id"] = "supplier-b"
+	a.ModelInfo = map[string]any{"id": "supplier-a"}
+	b.ModelInfo = map[string]any{"id": "supplier-b"}
 	weighted := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{
-		DeploymentID(a):         9,
 		"deployment:supplier-a": 3,
 		"deployment:supplier-b": 7,
 	})
 	if paramFloat(weighted[0], "weight", 0) != 3 || paramFloat(weighted[1], "weight", 0) != 7 {
 		t.Fatalf("stable identities did not isolate weights: %#v", weighted)
 	}
-	legacy := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{DeploymentID(a): 5})
-	if paramFloat(legacy[0], "weight", 0) != 5 || paramFloat(legacy[1], "weight", 0) != 5 {
-		t.Fatalf("legacy physical identity stopped applying: %#v", legacy)
+	physical := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{"same|shared-name": 5})
+	if paramFloat(physical[0], "weight", 0) != 1 || paramFloat(physical[1], "weight", 0) != 1 {
+		t.Fatalf("physical identity unexpectedly applied: %#v", physical)
+	}
+	preferred := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{
+		"same|shared-name":      5,
+		"deployment:supplier-a": 3,
+	})
+	if paramFloat(preferred[0], "weight", 0) != 3 || paramFloat(preferred[1], "weight", 0) != 1 {
+		t.Fatalf("physical identity unexpectedly overrode a row: %#v", preferred)
+	}
+}
+
+func TestTemplateWeightIdentityPrefersDeploymentOverSharedPricing(t *testing.T) {
+	a := deployment("shared-name", "same", 1)
+	b := deployment("shared-name", "same", 1)
+	a.ModelInfo = map[string]any{"id": "supplier-a"}
+	b.ModelInfo = map[string]any{"id": "supplier-b"}
+	a.LiteLLMParams["pricing_id"] = "shared-price"
+	b.LiteLLMParams["pricing_id"] = "shared-price"
+
+	weighted := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{
+		"pricing:shared-price":  11,
+		"deployment:supplier-a": 3,
+		"deployment:supplier-b": 7,
+	})
+	if paramFloat(weighted[0], "weight", 0) != 3 || paramFloat(weighted[1], "weight", 0) != 7 {
+		t.Fatalf("shared pricing identity overrode deployment identities: %#v", weighted)
 	}
 }
 
@@ -120,15 +141,15 @@ func TestRuntimeMetricsUseCredentialAwareIDs(t *testing.T) {
 	}
 }
 
-func TestRuntimeMetricsAcceptLegacyPhysicalID(t *testing.T) {
+func TestRuntimeMetricsRejectPhysicalIDForNamedCredentials(t *testing.T) {
 	a := deployment("shared-name", "a", 1)
 	b := deployment("shared-name", "b", 1)
 	a.LiteLLMParams["litellm_credential_name"] = "first"
 	b.LiteLLMParams["litellm_credential_name"] = "second"
 	got := Pick([]config.ModelEntry{a, b}, "shared-name", "lowest-latency", State{Latency: map[string]float64{
-		DeploymentID(a): 100, DeploymentID(b): 1,
+		"a|shared-name": 100, "b|shared-name": 1,
 	}})
-	if got == nil || CooldownID(*got) != CooldownID(b) {
-		t.Fatalf("legacy physical metric was not used: %v", got)
+	if got == nil || CooldownID(*got) != CooldownID(a) {
+		t.Fatalf("physical metric unexpectedly used: %v", got)
 	}
 }

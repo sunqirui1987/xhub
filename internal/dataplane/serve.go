@@ -263,6 +263,12 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			apiBase = llm.DefaultAPIBase(provider)
 			usedDefaultBase = apiBase != ""
 		}
+		if provider == "qiniu" {
+			if apiBase == "" {
+				apiBase = "https://api.qnaigc.com"
+			}
+			apiBase = trimBase(apiBase) + "/bypass/openai/v1"
+		}
 		apiKey := dep.ParamString("api_key", "")
 		if apiKey == "" || apiBase == "" {
 			missingCredential = true
@@ -364,7 +370,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(streamErr))
 					if wrote {
 						h.RememberExchange(callID, r, raw, streamed)
-						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck, SessionID: plan.SessionID, DeploymentID: did})
+						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck, SessionID: plan.SessionID})
 						h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusBadGateway, did)
 						return
 					}
@@ -378,7 +384,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 					h.RememberExchange(callID, r, raw, streamed)
 					h.AnnotateCall(callID, CallNote{
 						TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck,
-						SessionID: plan.SessionID, DeploymentID: depID,
+						SessionID: plan.SessionID,
 					})
 					if resp.StatusCode < 400 {
 						h.CommitRoute(plan, depID, responseID(streamed))
@@ -410,7 +416,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			h.RememberExchange(callID, r, raw, respBody)
 			h.AnnotateCall(callID, CallNote{
 				TTFTMs: ttftMillis(elapsed), Provider: provider, CacheKey: ck,
-				SessionID: plan.SessionID, DeploymentID: depID,
+				SessionID: plan.SessionID,
 			})
 			if resp.StatusCode < 400 {
 				h.CommitRoute(plan, depID, responseID(respBody))
@@ -480,7 +486,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 }
 
 // preferDeployment 把钉住的部署移到候选列表的第一位。id 为空或不在列表里时顺序不变。
-// 参数 pool：路由排序后的部署。id：deployment_affinity 里存的 api_base|model。
+// 参数 pool：路由排序后的部署。id：deployment_affinity 里存的 CooldownID。
 // 返回：同一批部署，钉住的那条在下标 0。
 // 调用：Serve 在 PlanRoute 给出 Pinned 之后。测试：prefer_test.go TestPreferDeployment*。
 func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
@@ -488,7 +494,7 @@ func preferDeployment(pool []config.ModelEntry, id string) []config.ModelEntry {
 		return pool
 	}
 	for i, entry := range pool {
-		if router.CooldownID(entry) != id && router.DeploymentID(entry) != id {
+		if router.CooldownID(entry) != id {
 			continue
 		}
 		if i == 0 {

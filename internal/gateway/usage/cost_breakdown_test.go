@@ -259,3 +259,23 @@ func TestEventRowExposesTheConsoleColumns(t *testing.T) {
 		t.Fatal("end time collapsed onto start")
 	}
 }
+
+func TestCostBreakdownDoesNotRepriceUnpricedAsyncSnapshot(t *testing.T) {
+	u := catalog.Usage{CompletionTokens: 40594, OutputVariant: "unknown", PricingModel: "gpt-oss-120b"}
+	got := costBreakdown(iam.UsageEvent{
+		Model: "gpt-oss-120b", CompletionTokens: 40594, TS: offpeakTestInstant(),
+		PriceSnapshot: catalog.SnapshotUsage(catalog.Charge{}, u, false),
+	})
+	if got["source"] != "snapshot" || got["pricing_status"] != "unpriced" {
+		t.Fatalf("lost unpriced state: %#v", got)
+	}
+	measured, _ := got["usage"].(*catalog.Usage)
+	if measured == nil || *measured != u {
+		t.Fatalf("lost measurements: %#v", got)
+	}
+	for _, key := range []string{"input_cost", "output_cost", "original_cost"} {
+		if _, exists := got[key]; exists {
+			t.Fatalf("invented %s: %#v", key, got)
+		}
+	}
+}

@@ -27,8 +27,18 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   await page.getByTestId("create-key-button").click();
   await chooseKeyTeam(page);
   await page.getByLabel(t("Key Name")).fill(alias);
+  const generated = page.waitForResponse((res) => new URL(res.url()).pathname === "/key/generate" && res.request().method() === "POST");
   await page.getByRole("button", { name: t("pages.apiKeys.createSubmit"), exact: true }).click();
+  const createdKey = await generated;
+  expect(createdKey.status(), "UI key generation accepts the selected team").toBe(200);
+  expect(createdKey.request().postDataJSON().team_id, "UI submits a team for the new key").toBeTruthy();
   await expect(page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ })).toBeVisible({ timeout: 15_000 });
+  const oldSecret = (await page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ }).innerText()).trim();
+  const invoke = (key: string) => page.request.post(GATEWAY + "/v1/chat/completions", {
+    headers: { Authorization: "Bearer " + key },
+    data: { model: "gpt-4o-mini", messages: [{ role: "user", content: "key lifecycle" }] },
+  });
+  expect((await invoke(oldSecret)).status()).toBe(200);
   await page.keyboard.press("Escape");
   await page.getByText(alias, { exact: true }).first().click();
   await expect(page.getByRole("heading", { name: alias })).toBeVisible({ timeout: 15_000 });
@@ -45,7 +55,12 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   await expect(page.getByText(renamed).first()).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: t("Regenerate Key") }).click();
+  const rotated = page.waitForResponse(res => res.url().includes("/regenerate") && res.request().method() === "POST");
   await page.getByRole("button", { name: t("Regenerate"), exact: true }).click();
+  const freshSecret = (await (await rotated).json()).key as string;
+  expect(freshSecret).not.toBe(oldSecret);
+  expect((await invoke(oldSecret)).status()).toBe(401);
+  expect((await invoke(freshSecret)).status()).toBe(200);
   await expect(page.getByRole("dialog").getByText(/sk-/).first()).toBeVisible({ timeout: 15_000 });
   await page
     .getByRole("dialog")
@@ -57,12 +72,18 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   await page.getByRole("menuitem", { name: t("Block Key") }).click();
   await page.getByRole("button", { name: t("Block"), exact: true }).click();
   await expect(page.getByText(t("Blocked")).first()).toBeVisible({ timeout: 15_000 });
+  expect([401, 403]).toContain((await invoke(freshSecret)).status());
+  await page.getByRole("button", { name: t("More key actions") }).click();
+  await page.getByRole("menuitem", { name: t("Unblock Key") }).click();
+  await page.getByRole("button", { name: t("Unblock"), exact: true }).click();
+  await expect.poll(async () => (await invoke(freshSecret)).status()).toBe(200);
 
   await page.getByRole("button", { name: t("More key actions") }).click();
   await page.getByRole("menuitem", { name: t("Delete Key") }).click();
   await page.getByPlaceholder(renamed).fill(renamed);
   await page.getByRole("button", { name: t("common.delete") }).click();
   await expect(page.getByText(renamed)).toHaveCount(0, { timeout: 15_000 });
+  expect((await invoke(freshSecret)).status()).toBe(401);
   guard.assertOk();
 });
 
@@ -79,6 +100,7 @@ test("model update, test connection, and delete", async ({ page }) => {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-model-ops",
+      model_info: { transport: "adapted", endpoint_types: ["chat"] },
       litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });
@@ -123,7 +145,7 @@ test("team member add is listed", async ({ page }) => {
   await page.getByRole("tab", { name: t("Members") }).click();
   const member = await page.request.post(`${GATEWAY}/user/new`, {
     headers: { Authorization: `Bearer ${await sessionFrom(page)}`, "Content-Type": "application/json" },
-    data: { user_id: "e2e-member", user_email: "e2e-member@example.com", user_role: "user" },
+    data: { user_id: "e2e-member", user_email: "e2e-member@example.com", user_role: "user", password: "e2e-member-password" },
   });
   expect(member.ok(), await member.text()).toBeTruthy();
   await page.getByRole("button", { name: t("Add Member") }).click();
@@ -151,6 +173,7 @@ test("router fallback update lists the mapping", async ({ page }) => {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-fallback-model",
+      model_info: { transport: "adapted", endpoint_types: ["chat"] },
       litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });
@@ -172,10 +195,10 @@ test("router fallback update lists the mapping", async ({ page }) => {
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: t("Save"), exact: true }).click();
   await expect(page.getByText(t("pages.routeTemplates.platformSaved"))).toBeVisible();
-  await page.getByRole("button", { name: t("pages.routeTemplates.backToLibrary") }).click();
+  await page.reload();
   await platformRow.getByRole("button", { name: t("pages.routeTemplates.edit") }).click();
   await page.getByRole("tab", { name: t("pages.routeTemplates.advancedSettings") }).click();
-  await expect(page.getByText("e2e-fallback-model", { exact: true })).toBeVisible();
+  await expect(page.getByRole("list").filter({ has: page.getByText("e2e-fallback-model", { exact: true }) }).getByText("e2e-fallback-model", { exact: true })).toBeVisible();
   guard.assertOk();
 });
 

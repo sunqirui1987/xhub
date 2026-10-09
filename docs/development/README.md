@@ -2,6 +2,8 @@
 
 [文档首页](../README.zh-CN.md) · [架构](architecture.md) · [测试](testing.md)
 
+专题参考：[全功能实现](implementation.md) · [模型与端点协议](model-endpoints.md) · [HTTP 接口](api-reference.md) · [配置与存储](configuration.md) · [路由](routing.md) · [护栏与 XGo 脚本](guardrails.md) · [权限](permissions.md) · [计价](pricing.md) · [运行边界](runtime.md) · [运行排查](operations.md) · [全链路回归](regression.md) · [浏览器回归](e2e-regression.md)。[internal 中文目录导航](../../internal/README.zh-CN.md)逐层指向每个包的实现与对外接口。
+
 先确定修改影响的用户行为，再定位模块。文档用于解释边界，代码和有效测试用于核对当前实现；遇到冲突，应修正对应文档，避免用旧方案补出未实现的能力。
 
 ## 开始一次修改

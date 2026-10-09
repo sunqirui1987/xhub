@@ -1,12 +1,12 @@
 package provider
 
 import (
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"strings"
 	"sync"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
 var (
@@ -34,7 +34,10 @@ func RegisterTransport(t Transport) {
 	mu.Unlock()
 }
 
-// Model 是价目表里显示在添加模型选择器上的一行。
+// Model 是内置目录里显示在添加模型选择器上的一行。
+//
+// EndpointType 的历史字段名保留给目录接口使用，但实际语义是模型默认
+// 采用的 transport ID，不是公开的 endpoint_types 能力 ID。
 type Model struct {
 	ID           string
 	Provider     string
@@ -45,9 +48,11 @@ type Model struct {
 	Input        float64
 	Output       float64
 	Priced       bool
+	PriceModel   string
+	PriceSource  string
 }
 
-// RegisterModel 登记一条可选模型。选中这个模型 id 时，表单会带上它的端点类型。
+// RegisterModel 登记一条可选模型，并记录它的默认执行传输。
 // 参数 m（Model）：正在累加或展示的模型。
 // 返回：无。id 为空时不登记。
 // 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
@@ -76,6 +81,7 @@ func RegisterModel(m Model) {
 		Output:       m.Output,
 		Priced:       m.Priced,
 		Official:     m.Official,
+		PriceModel:   m.PriceModel, PriceSource: m.PriceSource,
 	})
 }
 
@@ -157,7 +163,7 @@ func Transports() []Transport {
 	return out
 }
 
-// ModelEndpoints 把价目表模型 id 映射到表单要预选的端点类型。
+// ModelEndpoints 把内置模型 id 映射到表单要预选的默认 transport ID。
 // 参数：无。
 // 返回 map[string]string（map[string]string）：模型 id 到端点类型。
 // 调用：PublicBody。
@@ -172,19 +178,20 @@ func ModelEndpoints() map[string]string {
 	return out
 }
 
-// PublicBody 是添加模型的载荷：能力表、转发方式表和模型默认值。
+// PublicBody 是添加模型的载荷：公开能力、执行传输和模型默认值。
 //
-// 形状从 {types, models} 改成了 {capabilities, transports, models}，
-// 因为原来的 types 正是这次要拆掉的那件东西。调用方只有添加模型表单。
+// endpoint_types 是公开协议能力；capabilities 是能力与路径说明；
+// transports 是后端登记的执行传输；models 是模型到默认 transport 的映射。
 // 参数：无。
 // 返回 map[string]any（map[string]any）：能力、转发方式和模型默认端点。
 // 调用：catalog/classify.go、gateway/bypass.go、gateway/catalog.go
 // 测试：无直接单测
 func PublicBody() map[string]any {
 	return map[string]any{
-		"capabilities": Capabilities(),
-		"transports":   Transports(),
-		"models":       ModelEndpoints(),
+		"endpoint_types": EndpointTypes(),
+		"capabilities":   Capabilities(),
+		"transports":     Transports(),
+		"models":         ModelEndpoints(),
 	}
 }
 
@@ -252,14 +259,6 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 	return names, true
 }
 
-// ApplyOverride 当前是恒等函数。部署上不再支持自带 bypass 文档，
-// 保留这个签名让 dataplane 的调用点不必改。
-// 参数 m（config.ModelEntry）：一条部署，当前不读；hit（Hit）：这次命中的转发方式。
-// 返回 Hit（Hit）：原样返回。
-// 调用：dataplane/official.go
-// 测试：无直接单测
-func ApplyOverride(m config.ModelEntry, hit Hit) Hit { return hit }
-
 // 把动态值收成去掉空白的字符串。不是字符串时为空串。
 // 参数 v（any）：JSON 里读出的动态值。
 // 返回 string（string）：按字符串读出的值。
@@ -272,10 +271,7 @@ func str(v any) string {
 
 // SelectedCapabilities 返回一条部署应答的能力 id 列表。
 //
-// 读顺序：
-//  1. model_info.endpoint_types：新写入是这个字段，里面是能力 id。
-//  2. model_info.mode：旧行只有这个字符串，按存量 id 映射成能力。
-//  3. 都没有：chat。老的部署和不带端点信息的部署都是这个意思。
+// 从 model_info.endpoint_types 读取能力 id；字段缺失时不声明任何能力。
 //
 // 认不出的 id（realtime、batch、ocr）被忽略，不放进任何能力。一项都认不出时
 // 返回空切片，调用方据此拒绝这条部署——不在这里补默认 chat，那会让一条只写了
@@ -287,19 +283,15 @@ func str(v any) string {
 // 测试：registry_test.go
 func SelectedCapabilities(m config.ModelEntry) []string {
 	if m.ModelInfo == nil {
-		return []string{"chat"}
+		return nil
 	}
 	if list := stringList(m.ModelInfo["endpoint_types"]); len(list) > 0 {
 		return normalizeCapabilities(list)
 	}
-	if mode := str(m.ModelInfo["mode"]); mode != "" {
-		return normalizeCapabilities([]string{mode})
-	}
-	return []string{"chat"}
+	return nil
 }
 
-// normalizeCapabilities 把一批 id 收成能力 id，去重并保持顺序。
-// 每个 id 先按能力 id 认，认不出再按存量 id 认，都不认就丢掉。
+// normalizeCapabilities 把一批能力 id 去重并保持顺序，未知 id 丢弃。
 // 参数 list（[]string）：要收的 id。
 // 返回 []string（[]string）：能力 id 列表。
 // 调用：SelectedCapabilities。
@@ -312,67 +304,53 @@ func normalizeCapabilities(list []string) []string {
 		if id == "" {
 			continue
 		}
-		capability := id
-		if !isKnownCapability(capability) {
-			mapped, ok := capabilityByLegacyID(id)
-			if !ok {
-				continue
-			}
-			capability = mapped
-		}
-		if seen[capability] {
+		if !isKnownCapability(id) || seen[id] {
 			continue
 		}
-		seen[capability] = true
-		out = append(out, capability)
+		seen[id] = true
+		out = append(out, id)
 	}
 	return out
 }
 
 // SelectedTransport 返回一条部署的转发方式 id。
 //
-// 判定顺序：
-//  1. model_info.transport 是登记过的内置 id → 那个 id。
-//  2. endpoint_types 或 mode 里出现内置 Bypass id → 那个 id。旧行只写了这个。
-//  3. 其余 → adapted。
+// model_info.transport 必须是登记过的内置 id，否则返回空串。
 //
 // 内置 Bypass 之外的 bypass 形状不存在：后台没登记过的转发方式，运维在界面上
 // 也选不到、存不进。
 //
 // 参数 m（config.ModelEntry）：一条部署。
-// 返回 string（string）：转发方式 id，always 有值。
+// 返回 string（string）：转发方式 id，未配置或无效时为空。
 // 调用：AdaptedPool 过滤适配池；dataplane/official.go 选部署。
 // 测试：registry_test.go
 func SelectedTransport(m config.ModelEntry) string {
 	if m.ModelInfo == nil {
-		return AdaptedTransportID
+		return ""
 	}
 	if id := str(m.ModelInfo["transport"]); id != "" {
-		if _, ok := transportByLegacyID(id); ok {
+		if _, ok := transportByID(id); ok {
 			return id
 		}
 		if id == AdaptedTransportID {
 			return AdaptedTransportID
 		}
 	}
-	for _, id := range append(appendedIDs(m), str(m.ModelInfo["mode"])) {
-		if transport, ok := transportByLegacyID(id); ok {
-			return transport
-		}
-	}
-	return AdaptedTransportID
+	return ""
 }
 
-// appendedIDs 返回 model_info.endpoint_types 里的值。
-// 参数 m（config.ModelEntry）：一条部署。
-// 返回 []string（[]string）：endpoint_types 的值，没有时为空切片。
-// 调用：SelectedTransport、Includes。
-// 测试：无直接单测
-func appendedIDs(m config.ModelEntry) []string {
-	if m.ModelInfo == nil {
-		return nil
+// transportByID 只接受当前登记的 bypass transport。
+// 参数 id（string）：待查找的传输方式标识。
+// 返回 string、bool：登记的 ID 与是否存在。
+// 调用：SelectedTransport。
+// 测试：registry_test.go。
+func transportByID(id string) (string, bool) {
+	for _, transport := range Transports() {
+		if transport.ID == id {
+			return id, true
+		}
 	}
-	return stringList(m.ModelInfo["endpoint_types"])
+	return "", false
 }
 
 // IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径：
@@ -383,7 +361,7 @@ func appendedIDs(m config.ModelEntry) []string {
 // 调用：AdaptedPool。
 // 测试：registry_test.go
 func IsAdapted(m config.ModelEntry) bool {
-	return SelectedTransport(m) == AdaptedTransportID
+	return SelectedTransport(m) == AdaptedTransportID && ValidateDeployment(m) == nil
 }
 
 // AdaptedPool 把适配路径的候选收敛到能应答这个 op 的部署。
@@ -398,14 +376,13 @@ func IsAdapted(m config.ModelEntry) bool {
 // 测试：capability_test.go
 func AdaptedPool(models []config.ModelEntry, op string) []config.ModelEntry {
 	capability, known := CapabilityForOp(op)
+	// 空或未登记操作没有确定的能力边界，不能借用旧的默认对话路径。
+	if !known {
+		return []config.ModelEntry{}
+	}
 	out := make([]config.ModelEntry, 0, len(models))
 	for _, m := range models {
 		if !IsAdapted(m) {
-			continue
-		}
-		if !known {
-			// 认不出的 op 交给原来那条路去处理，不在这里下结论。
-			out = append(out, m)
 			continue
 		}
 		if IncludesCapability(m, capability) {
@@ -429,40 +406,13 @@ func IncludesCapability(m config.ModelEntry, capability string) bool {
 	return false
 }
 
-// Includes 报告这条部署是否选中了这个转发方式 id。Bypass 选部署用它：
-// 路径先命中转发方式，再按转发方式 id 挑部署，能力不参与。
+// Includes 报告这条部署是否选中了这个转发方式 id。
 // 参数 m（config.ModelEntry）：一条部署；typeID（string）：转发方式 id。
 // 返回 bool（bool）：选中时为真。
 // 调用：dataplane/official.go
 // 测试：registry_test.go
 func Includes(m config.ModelEntry, typeID string) bool {
-	if SelectedTransport(m) == typeID {
-		return true
-	}
-	for _, id := range appendedIDs(m) {
-		if id == typeID {
-			return true
-		}
-	}
-	return false
-}
-
-// SelectedTypes 返回一条部署声明的原始端点 id 列表。它只服务 Bypass 选部署：
-// 能力那一路走 SelectedCapabilities。endpoint_types 优先，其次 mode，都没有则 chat。
-// 参数 m（config.ModelEntry）：一条部署。
-// 返回 []string（[]string）：原始 id 列表。
-// 调用：BoundTransports。
-// 测试：registry_test.go
-func SelectedTypes(m config.ModelEntry) []string {
-	if m.ModelInfo != nil {
-		if list := stringList(m.ModelInfo["endpoint_types"]); len(list) > 0 {
-			return list
-		}
-		if mode := str(m.ModelInfo["mode"]); mode != "" {
-			return []string{mode}
-		}
-	}
-	return []string{"chat"}
+	return SelectedTransport(m) == typeID && ValidateDeployment(m) == nil
 }
 
 // BoundTransports 把这条部署声明的转发方式解析成登记好的条目。
@@ -471,22 +421,21 @@ func SelectedTypes(m config.ModelEntry) []string {
 // 调用：测试。
 // 测试：registry_test.go
 func BoundTransports(m config.ModelEntry) []Transport {
-	var out []Transport
-	for _, id := range SelectedTypes(m) {
-		for _, t := range Transports() {
-			if t.ID == id {
-				out = append(out, t)
-				break
-			}
+	if ValidateDeployment(m) != nil {
+		return nil
+	}
+	for _, t := range Transports() {
+		if t.ID == SelectedTransport(m) {
+			return []Transport{t}
 		}
 	}
-	return out
+	return nil
 }
 
 // 把配置里的字符串或数组收成 []string。
 // 参数 v（any）：JSON 里读出的动态值。
 // 返回 []string（[]string）：字符串列表。
-// 调用：SelectedCapabilities、SelectedTransport、SelectedTypes。
+// 调用：SelectedCapabilities、SelectedTransport。
 // 测试：无直接单测
 func stringList(v any) []string {
 	switch list := v.(type) {
@@ -505,8 +454,6 @@ func stringList(v any) []string {
 	}
 }
 
-// init 记一次目录载入，并把已登记的转发方式数写下来。目录是进程启动时
-// 由各供应商包的 init 填好的，这一行是"目录确实装上了"的唯一凭证。
 // init 记一次目录载入。目录是进程启动时由各供应商包的 init 填好的，
 // 这一行是"目录确实装上了"的凭证。
 // 参数：无。

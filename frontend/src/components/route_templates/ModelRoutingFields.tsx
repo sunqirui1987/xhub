@@ -3,9 +3,9 @@
 import React, { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { t } from "@/i18n";
-import { formatStrategyLabel } from "@/components/routing_groups/strategy";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatTemplateStrategyLabel } from "./strategyLabel";
 import WeightedSplitFields from "./WeightedSplitFields";
 import {
   bodyFromForm,
@@ -16,8 +16,45 @@ import {
   type WeightRow,
 } from "./templateForm";
 
-const weightsFromRule = (rule: ModelRoutingRule): WeightRow[] =>
-  formFromBody({ routing_strategy: rule.routing_strategy, routing_strategy_args: rule.routing_strategy_args }).weights;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const textValue = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return "";
+};
+const hasWeightIdentity = (item: Record<string, unknown>) =>
+  [item.deployment_id, item.pricing_id].some((value) => typeof value === "string" && value.trim() !== "");
+const weightsFromRule = (rule: ModelRoutingRule): WeightRow[] => {
+  const parsed = formFromBody({
+    routing_strategy: rule.routing_strategy,
+    routing_strategy_args: rule.routing_strategy_args,
+  }).weights;
+  const raw = rule.routing_strategy_args?.weights;
+  if (!Array.isArray(raw)) return parsed;
+  return raw.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const modelName = textValue(item.model_name);
+    const model = textValue(item.model) || modelName;
+    const apiBase = textValue(item.api_base);
+    if (!hasWeightIdentity(item)) return [];
+    return [
+      {
+        ...(typeof item.deployment_id === "string" ? { deployment_id: item.deployment_id } : {}),
+        ...(typeof item.pricing_id === "string" ? { pricing_id: item.pricing_id } : {}),
+        model_name: modelName || model,
+        api_base: apiBase,
+        model,
+        weight: textValue(item.weight),
+      },
+    ];
+  });
+};
+const nonEmptyRecord = (value: unknown): value is Record<string, unknown> => {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  return Object.keys(value).length > 0;
+};
 
 const ModelRoutingFields: React.FC<{
   rules: ModelRoutingRule[];
@@ -50,11 +87,29 @@ const ModelRoutingFields: React.FC<{
       routing_strategy_args: rule.routing_strategy_args,
     });
     const written = bodyFromForm({ ...parsed, weights });
-    if (!written.ok) return;
+    if (!written.ok) {
+      patch(index, {
+        ...rule,
+        routing_strategy_args: {
+          ...(rule.routing_strategy_args ?? {}),
+          weights: weights.map((row) => ({
+            ...(row.deployment_id ? { deployment_id: row.deployment_id } : {}),
+            ...(row.pricing_id ? { pricing_id: row.pricing_id } : {}),
+            model_name: row.model_name,
+            api_base: row.api_base,
+            model: row.model,
+            weight:
+              row.weight.trim() !== "" && Number.isFinite(Number(row.weight)) && Number(row.weight) >= 0
+                ? Number(row.weight)
+                : row.weight,
+          })),
+        },
+      });
+      return;
+    }
     const args = written.body.routing_strategy_args;
     const next = { ...rule };
-    if (args && typeof args === "object" && !Array.isArray(args) && Object.keys(args).length > 0)
-      next.routing_strategy_args = args as Record<string, unknown>;
+    if (nonEmptyRecord(args)) next.routing_strategy_args = args;
     else delete next.routing_strategy_args;
     patch(index, next);
   };
@@ -64,7 +119,7 @@ const ModelRoutingFields: React.FC<{
       <div>
         <p className="text-sm font-medium text-foreground">{t("pages.routeTemplates.modelRouting.title")}</p>
         <p className="text-xs text-muted-foreground">
-          {t("pages.routeTemplates.modelRouting.hint", { strategy: t(formatStrategyLabel(defaultStrategy)) })}
+          {t("pages.routeTemplates.modelRouting.hint", { strategy: t(formatTemplateStrategyLabel(defaultStrategy)) })}
         </p>
       </div>
       <div className="flex max-w-xl gap-2">
@@ -116,12 +171,12 @@ const ModelRoutingFields: React.FC<{
                   <SelectTrigger
                     aria-label={t("pages.routeTemplates.modelRouting.strategyFor", { model: rule.model_name })}
                   >
-                    <SelectValue>{t(formatStrategyLabel(rule.routing_strategy))}</SelectValue>
+                    <SelectValue>{t(formatTemplateStrategyLabel(rule.routing_strategy))}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {options.map((strategy) => (
                       <SelectItem key={strategy} value={strategy}>
-                        {t(formatStrategyLabel(strategy))}
+                        {t(formatTemplateStrategyLabel(strategy))}
                       </SelectItem>
                     ))}
                   </SelectContent>

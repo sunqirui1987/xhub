@@ -18,6 +18,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
 
@@ -274,7 +275,7 @@ type Bypass interface {
 	// FindDeployment 按钉住的部署 id 找回那条模型配置。进程里已经没有这行时返回假。
 	// 参数 id：PinOfficial 存下来的值。
 	// 返回：找到时 ok 为 true。进程里已经没有这行时 ok 为 false，查询回 404。
-	// 调用：serveBypassFollow。测试：bypass_logic_test.go 按 DeploymentID 扫描夹具。
+	// 调用：serveBypassFollow。测试：bypass_logic_test.go。
 	FindDeployment(id string) (config.ModelEntry, bool)
 
 	// HTTPClient 返回访问上游的客户端。
@@ -302,20 +303,18 @@ type Bypass interface {
 	// 返回：部署 id，或空串。
 	// 调用：serveBypassFollow。测试：bypass_logic_test.go 清掉钉之后再查得到 404。
 	OfficialDeployment(taskID string) string
-
-	// OfficialBilled 判断这个官方任务是否已经记过一次用量。
-	// 参数 taskID：与钉相同的 id。
-	// 返回：旧宿主的本地标记，不能证明持久化成功。
-	// 兼容旧宿主；官方结算不使用此标记，以持久层 request_id 去重为准。
-	// 调用：旧宿主兼容接口。测试：official_settlement_test.go。
-	OfficialBilled(taskID string) bool
-
-	// MarkOfficialBilled 标记这个官方任务已经记过用量，避免后续查询再次扣费。
-	// 参数 taskID：任务 id。返回：无。
-	// 兼容旧宿主；禁止在 RecordSpend 之前以此标记阻止结算重试。
-	// 调用：旧宿主兼容接口，官方结算不调用。
-	// 测试：bypass_logic_test.go
-	MarkOfficialBilled(taskID string)
+	// PinOfficialContext stores creation-time billing facts alongside a task pin.
+	// 参数 taskID（string）：任务标识；facts（provider.TaskContext）：请求中的计费事实。
+	// 返回：无。
+	// 调用：官方任务创建成功后。
+	// 测试：official_settlement_test.go。
+	PinOfficialContext(taskID string, facts provider.TaskContext)
+	// OfficialContext returns the facts recorded when a task was created.
+	// 参数 taskID（string）：任务标识。
+	// 返回 provider.TaskContext：已保存的计费事实；缺失时为零值。
+	// 调用：官方任务查询结算时。
+	// 测试：official_settlement_test.go。
+	OfficialContext(taskID string) provider.TaskContext
 
 	SpendLog
 }
@@ -382,7 +381,7 @@ type RoutePlan struct {
 // TTFTMs 是首字节或同步整次的毫秒数，nil 表示这次没量到。
 // Provider 是 custom_llm_provider，或 Bypass 的供应商前缀。
 // CacheKey 是响应缓存键。CacheHit 为 true 时扣费金额为 0。
-// SessionID 与 RoutePlan.SessionID 相同。DeploymentID 是 api_base|model。
+// SessionID 与 RoutePlan.SessionID 相同。部署身份由 RecordSpend 的 depID 参数传递。
 type CallNote struct {
 	// SettlementID overrides persisted RequestID, never the metadata callID.
 	SettlementID string
@@ -393,7 +392,6 @@ type CallNote struct {
 	CacheKey       string
 	CacheHit       bool
 	SessionID      string
-	DeploymentID   string
 }
 
 // traceHop 在数据面入口记一条日志，只含路径，不含正文和密钥。

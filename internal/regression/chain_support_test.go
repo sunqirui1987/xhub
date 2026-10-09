@@ -26,6 +26,7 @@ type scopeMoney struct {
 func deployment(public, upstream string, extra map[string]any) config.ModelEntry {
 	params := map[string]any{
 		"model":                 upstream,
+		"deployment_id":         strings.TrimPrefix(upstream, "openai/"),
 		"api_key":               "sk-fake",
 		"custom_llm_provider":   "openai",
 		"input_cost_per_token":  testInputRate,
@@ -37,7 +38,7 @@ func deployment(public, upstream string, extra map[string]any) config.ModelEntry
 	return config.ModelEntry{
 		ModelName:     public,
 		LiteLLMParams: params,
-		ModelInfo:     map[string]any{"mode": "chat"},
+		ModelInfo:     map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	}
 }
 
@@ -182,6 +183,11 @@ func (h *harness) assertBilled(t *testing.T, c chained, admin, model, content st
 	beforeMoney := h.moneyOf(t, c)
 	beforeLogs := len(h.successRows(t, admin, model))
 	mark := len(h.upstreamCalls())
+	if h.live {
+		// The content identifies a workflow stage, not a generation task. Keep
+		// real billing probes short instead of asking the model to interpret it.
+		content = "Reply with only the word ok. Regression stage: " + content
+	}
 	r := h.ok(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(model, content))
 	if got := stringField(r.json(), "id"); got == "" {
 		t.Fatalf("a successful call returned no id: %s", r.describe())

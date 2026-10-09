@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/sunqirui1987/xhub/internal/router"
 )
 
 // templateBody 从真实管理接口读配置，不能直接查库，否则漏掉响应丢字段的问题。
@@ -45,7 +46,7 @@ func TestRouteTemplateConfigurationRoundTrip(t *testing.T) {
 	body := map[string]any{
 		"routing_strategy": "weighted-split",
 		"routing_strategy_args": map[string]any{"weights": []any{
-			map[string]any{"api_base": "https://example.invalid/v1", "model": "openai/primary", "weight": 70},
+			map[string]any{"deployment_id": "primary-row", "weight": 70},
 		}},
 		"routing_groups": []any{map[string]any{"group_name": "cheap", "models": []any{"primary"}, "routing_strategy": "lowest-cost"}},
 		"num_retries":    3, "timeout": 1.25, "stream_timeout": 2.5,
@@ -241,12 +242,11 @@ func TestRouteTemplateWeightsDriveTraffic(t *testing.T) {
 			h := newHarness(t, splitDeployment(public, "openai/template-split-a", 9), splitDeployment(public, "openai/template-split-b", 1))
 			admin := h.adminSession()
 			c := h.openScope(t, admin, "template-split")
-			base := h.prices.URL + "/v1"
-			var weights any = map[string]any{base + "|openai/template-split-a": 3, base + "|openai/template-split-b": 7}
+			var weights any = map[string]any{"deployment:template-split-a": 3, "deployment:template-split-b": 7}
 			if shape == "list" {
 				weights = []any{
-					map[string]any{"api_base": base, "model": "openai/template-split-a", "weight": 3},
-					map[string]any{"api_base": base, "model": "openai/template-split-b", "weight": 7},
+					map[string]any{"deployment_id": "template-split-a", "weight": 3},
+					map[string]any{"deployment_id": "template-split-b", "weight": 7},
 				}
 			}
 			id := routeTemplate(t, h, admin, "custom shares", map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{"weights": weights}})
@@ -272,6 +272,55 @@ func TestRouteTemplateWeightsDriveTraffic(t *testing.T) {
 				t.Fatalf("template weights leaked after clearing: %v", got)
 			}
 		})
+	}
+}
+
+func TestRouteTemplateModelRoutingUsesOverridesAndRootDefault(t *testing.T) {
+	const splitName = "template-model-split"
+	const costName = "template-model-cost"
+	const defaultName = "template-model-default"
+	h := newHarness(t,
+		splitDeployment(splitName, "openai/model-split-a", 9),
+		splitDeployment(splitName, "openai/model-split-b", 1),
+		deployment(costName, "openai/model-cost-dear", map[string]any{"weight": 10, "input_cost_per_token": 0.01}),
+		deployment(costName, "openai/model-cost-cheap", map[string]any{"weight": 1, "input_cost_per_token": 0.0000001}),
+		deployment(defaultName, "openai/model-default-heavy", map[string]any{"weight": 10}),
+		deployment(defaultName, "openai/model-default-light", map[string]any{"weight": 1}),
+	)
+	admin := h.adminSession()
+	c := h.openScope(t, admin, "template-model-routing")
+	id := routeTemplate(t, h, admin, "per-model routing", map[string]any{
+		"routing_strategy": "simple-shuffle",
+		"num_retries":      2,
+		"custom_policy":    map[string]any{"preserved": true},
+		"model_routing": []any{
+			map[string]any{
+				"model_name": splitName, "routing_strategy": "weighted-split",
+				"routing_strategy_args": map[string]any{"weights": map[string]any{
+					"deployment:model-split-a": 3,
+					"deployment:model-split-b": 7,
+				}},
+			},
+			map[string]any{"model_name": costName, "routing_strategy": "cost-based-routing"},
+		},
+	})
+	bindTemplate(t, h, admin, "team", c.teamID, id)
+
+	for i := 0; i < 10; i++ {
+		h.ok(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(splitName, fmt.Sprintf("split %d", i)))
+	}
+	if a, b := h.upstreamAttempts("model-split-a"), h.upstreamAttempts("model-split-b"); a != 3 || b != 7 {
+		t.Fatalf("model-specific split produced %d:%d, want 3:7", a, b)
+	}
+	h.resetUpstream()
+	h.ok(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(costName, "cost policy"))
+	if got := strings.Join(h.upstreamSince(0), ","); got != "model-cost-cheap" {
+		t.Fatalf("second model did not use cost policy: %s", got)
+	}
+	h.resetUpstream()
+	h.ok(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(defaultName, "root default"))
+	if got := strings.Join(h.upstreamSince(0), ","); got != "model-default-heavy" {
+		t.Fatalf("unlisted model did not use root default: %s", got)
 	}
 }
 
@@ -346,7 +395,18 @@ func TestRouteTemplateCooldownUsesSelectedThresholds(t *testing.T) {
 	}
 	rdb := redis.NewClient(opt)
 	defer rdb.Close()
-	ttl, err := rdb.PTTL(t.Context(), "xhub:cooldown:"+h.prices.URL+"/v1|openai/template-cool-a").Result()
+	// Models may be reordered after scope configuration. Identify the failed
+	// deployment by its upstream model instead of assuming the first row.
+	cooledID := ""
+	for _, entry := range h.gw.Models() {
+		if entry.ModelName == public && entry.ParamString("model", "") == "openai/template-cool-a" {
+			cooledID = router.CooldownID(entry)
+		}
+	}
+	if cooledID == "" {
+		t.Fatal("failed deployment disappeared from the model pool")
+	}
+	ttl, err := rdb.PTTL(t.Context(), "xhub:cooldown:"+cooledID).Result()
 	if err != nil || ttl <= 0 || ttl > 7*time.Second {
 		t.Fatalf("template cooldown duration=%v err=%v, want a positive TTL <= 7 seconds", ttl, err)
 	}

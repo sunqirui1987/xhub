@@ -301,7 +301,7 @@ func ensurePlaygroundModel(t *testing.T, st *store.Store, upstreamURL string) {
 			"api_base":            upstreamURL + "/v1",
 			"api_key":             "sk-playground-fixture",
 		},
-		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true},
+		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true, "transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 	if err != nil {
 		t.Fatal(err)

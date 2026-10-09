@@ -35,7 +35,7 @@
 
 `Charge.Window` 和 `Charge.Applied` 保存本次使用的费率、数量及降级标记；`price_snapshot` 随 usage 入库。日志详情优先读快照，模型改价不重写历史金额。没有快照的旧记录退回重算，并标明 `source: "recomputed"`。
 
-输入输出费用、缓存字段的显示词由 `frontend/src/lib/rateDisplay.ts` 统一。控制台当前可编辑扁平价格字段，完整 `rates[]` 表需要配置或接口维护。
+输入输出费用、缓存字段的显示词由 `frontend/src/lib/rateDisplay.ts` 统一。控制台模型编辑器通过 `RateEditor.tsx`、`PricingTable.tsx` 和 `modelEditorPricing.ts` 编辑价格行；提交时仍应核对后端 `rates[]` 校验结果，尤其是单位、窗口和明确零价。
 
 ## 持久化链路
 
@@ -57,6 +57,10 @@
 ## 官方任务结算
 
 每次查询都有独立 callID，临时日志和元数据不共享。成功终态且有正用量时，最终账务身份使用调用方、transport、task ID 和部署范围的稳定摘要；重复完成查询经 Redis 和 PostgreSQL 去重。创建、等待、失败或零用量查询不推断生成费。任务查询不重复增加同步生成的路由 TPM。
+
+Seedance 提供协议专用上下文与用量回调，创建时记录原始模型、开始时刻、分辨率和是否有参考视频；七牛只绑定自己的 Modelink 目录价。成功终态按 completion_tokens 与实际分辨率选 wiv/woiv 等档位，不按请求秒数或 total_tokens 估算。已测量档位缺价、上下文丢失或搜索缺价时保存实测用量及 pricing_status: unpriced，日志不重新估价并显示待核价。明确配置的统一输出单价仍可用于人工收费策略。Redis 上下文保存七天，无 Redis 时重启会丢失。
+
+没有后台自动补查，客户端停止查询可能漏记费用；模型与开始时刻已保存，但创建时尚未锁定价格版本。实测见 [七牛验证记录](seedance-qiniu-validation.md)。
 
 结算不依赖预先写入的 billed 标记；第一次持久化失败，后续完成查询仍可重试。重复完成查询折叠为一条账务记录，不能据此统计全部 poll 次数。
 

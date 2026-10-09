@@ -25,9 +25,7 @@ export default function ModelAutocomplete({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const term = value.trim().toLowerCase();
-  const matches = options
-    .filter((option) => (option.value + " " + option.label).toLowerCase().includes(term))
-    .slice(0, 80);
+  const matches = options.filter((option) => (option.value + " " + option.label).toLowerCase().includes(term));
   const choose = (option: Option) => {
     onSelect(option.value);
     setOpen(false);

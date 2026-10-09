@@ -5,7 +5,7 @@
 ## Responsibilities and behavior
 
 List and Available expose authorized deployments. Admin and validation handle writes; builtin imports supplier catalog entries; price, reload, and scheduling handlers manage pricing sources.
-Public and upstream model names differ; deployments sharing a public name form a routing pool. Database entries override YAML. Boolean disabled state removes deployments from discovery and execution without deleting configuration. Named credentials must exist and match provider/protocol; legacy inline configuration remains editable.
+Public and upstream model names differ; deployments sharing a public name form a routing pool. Database entries override YAML. Boolean disabled state removes deployments from discovery and execution without deleting configuration. Named credentials must exist and match provider/protocol; connection fields remain editable.
 pricing_source accepts catalog or manual. Catalog pricing needs a valid base_model; manual pricing needs explicit finite nonnegative rates. Zero is valid. Capabilities filter operations while transports determine sending behavior. Retired auto_router/adaptive_router entries are rejected. Management reads redact credentials.
 
 ## Source responsibilities and entry points
@@ -130,7 +130,7 @@ The registration files below mount these routes. Aliases share handlers. Registr
 | Test file | Scenario entry points |
 | --- | --- |
 | [admin_test.go](admin_test.go) | `TestFailedModelUpdateDoesNotMutateStoredEntry`, `TestModelIDSearchFiltersBeforePagination`, `TestPublicDefaultsEnabledAndReportsDisabled`, `TestStripModelOwnership`, `TestManagementInfoIgnoresTeamFilterAndShowsDisabled` |
-| [builtin_test.go](builtin_test.go) | `TestAddedModelMatchesHandAdded`, `TestClearCopiedMode`, `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestBuiltinsEnabled`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL`, `TestSlashedModelIDStaysTheModelName` |
+| [builtin_test.go](builtin_test.go) | `TestAddedModelMatchesHandAdded`, `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestBuiltinsEnabled`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL`, `TestSlashedModelIDStaysTheModelName` |
 | [list_test.go](list_test.go) | `TestProxyModelNamesSkipsProviderShells`, `TestProxyModelNamesSkipsLegacyProviderNamesWithoutRole`, `TestNonModelEntryKeepsOrdinaryModels`, `TestProxyModelNamesOmitsOnlyFullyDisabledNames` |
 | [price_test.go](price_test.go) | `TestPricePartialUpdatePreservesQualifiedAndUntouchedRates`, `TestPriceCatalogServesTheEmbeddedBaseline`, `TestInvalidPriceDoesNotOverwriteStoredRates`, `TestPriceModelWriteIsStoredAndSurvivesAReload`, `TestPriceModelEditOverridesTheBaselineAndResetRestoresIt`, `TestPriceModelDeleteOfABaselineRowIsRemembered`, `TestPriceModelRejectsAMissingIdOrProvider`, `TestPriceWritesNeedManage`, `TestPriceProviderAddEditAndDeleteReachesTheDropdown`, `TestPriceProviderDeleteOfABaselineSupplierIsRemembered` |
 

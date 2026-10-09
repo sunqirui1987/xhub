@@ -33,6 +33,8 @@ interface GuardrailTestPlaygroundProps {
 interface TestResult {
   guardrailName: string;
   response_text: string;
+  action?: string;
+  reason?: string;
   latency: number;
 }
 
@@ -42,6 +44,13 @@ interface TestError {
   latency: number;
 }
 
+/**
+ * 用途：展示已保存护栏目录，按选择单独调试并聚合结果。
+ * 参数：属性：规则数组、加载状态、令牌和关闭回调。
+ * 返回：React 面板；每条调试独立执行，不模拟正式请求的串行护栏链。
+ * 调用：GuardrailsPanel。
+ * 测试：GuardrailTestPlayground.test.tsx。
+ */
 const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
   guardrailsList,
   isLoading,
@@ -58,6 +67,13 @@ const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
     guardrail.guardrail_name?.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
+  /**
+   * 用途：切换待调试规则，复制 Set 避免直接修改 React 状态。
+   * 参数：guardrailName：待切换的规则名称。
+   * 返回：void；更新选中规则集合。
+   * 调用：目录选择控件。
+   * 测试：GuardrailTestPlayground.test.tsx。
+   */
   const toggleGuardrailSelection = (guardrailName: string) => {
     const newSelection = new Set(selectedGuardrails);
     if (newSelection.has(guardrailName)) {
@@ -68,6 +84,13 @@ const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
     setSelectedGuardrails(newSelection);
   };
 
+  /**
+   * 用途：并发执行独立规则调试，把实际动作和异常分开记录。
+   * 参数：text：待检查文本；metadata：可选客户端元数据，不作为可信身份。
+   * 返回：Promise<void>；更新结果、异常和每条耗时；block 是完成检查的结果。
+   * 调用：GuardrailTestPanel 的 onSubmit。
+   * 测试：GuardrailTestPlayground.test.tsx。
+   */
   const handleTestGuardrails = async (text: string, metadata?: Record<string, unknown> | null) => {
     if (selectedGuardrails.size === 0 || !accessToken) {
       return;
@@ -89,6 +112,8 @@ const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
           results.push({
             guardrailName,
             response_text: result.response_text,
+            action: result.action,
+            reason: result.reason,
             latency,
           });
         } catch (error) {
@@ -108,10 +133,17 @@ const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
     setIsTesting(false);
 
     if (results.length > 0) {
-      toast.success(t("{value0} guardrail{value1} applied successfully", { value0: (results.length), value1: (results.length > 1 ? "s" : "") }));
+      toast.success(
+        t("{value0} guardrail{value1} applied successfully", {
+          value0: results.length,
+          value1: results.length > 1 ? "s" : "",
+        }),
+      );
     }
     if (errors.length > 0) {
-      toast.fromError(t("{value0} guardrail{value1} failed", { value0: (errors.length), value1: (errors.length > 1 ? "s" : "") }));
+      toast.fromError(
+        t("{value0} guardrail{value1} failed", { value0: errors.length, value1: errors.length > 1 ? "s" : "" }),
+      );
     }
   };
 
@@ -187,7 +219,11 @@ const GuardrailTestPlayground: React.FC<GuardrailTestPlaygroundProps> = ({
 
               <div className="border-t border-border bg-muted/40 p-3">
                 <span className="text-xs text-muted-foreground">
-                  {t("{value0} of {value1} selected", { value0: (selectedGuardrails.size), value1: (filteredGuardrails.length) })}</span>
+                  {t("{value0} of {value1} selected", {
+                    value0: selectedGuardrails.size,
+                    value1: filteredGuardrails.length,
+                  })}
+                </span>
               </div>
             </div>
 

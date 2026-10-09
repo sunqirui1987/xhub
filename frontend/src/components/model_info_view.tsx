@@ -18,6 +18,11 @@ import ModelEditor from "./add_model/ModelEditor";
 import PricingTable from "./add_model/PricingTable";
 import { effectivePricing, type EditorModel, type CatalogRow } from "./add_model/modelEditorPricing";
 
+function callType(info: Record<string, unknown>): string {
+  if (typeof info.transport === "string" && info.transport !== "adapted") return info.transport;
+  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "chat") : "chat";
+}
+
 type Props = {
   modelId: string;
   onClose: () => void;
@@ -92,8 +97,8 @@ export default function ModelInfoView({
           custom_llm_provider: model.litellm_params.custom_llm_provider,
           litellm_credential_name: model.litellm_params.litellm_credential_name,
         },
-        { id: modelId, mode: model.model_info.mode },
-        String(model.model_info.mode ?? "chat"),
+        { id: modelId, endpoint_types: model.model_info.endpoint_types, transport: model.model_info.transport },
+        callType(model.model_info),
       );
       if (response.status !== "success") throw new Error(response.result?.error || response.message || "连接测试失败");
       setTestResult({ ok: true, text: "连接正常，模型已响应。" });
@@ -144,7 +149,7 @@ export default function ModelInfoView({
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="break-all text-2xl font-semibold tracking-tight">{model.model_name}</h1>
             <ModelStatusToggle model={model} />
-            <Badge variant="outline">{String(info.mode ?? "chat")}</Badge>
+            <Badge variant="outline">{callType(info)}</Badge>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="break-all font-mono">{modelId}</span>
@@ -215,7 +220,7 @@ export default function ModelInfoView({
                     }
                   />
                 </div>
-                <Detail label="调用方式" value={info.mode || "chat"} />
+                <Detail label="调用方式" value={callType(info)} />
                 <Detail label="传输方式" value={info.transport || "adapted"} />
                 <Detail label="配置来源" value={info.db_model ? "控制台" : "配置文件"} />
                 <Detail

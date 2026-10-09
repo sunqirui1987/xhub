@@ -5,7 +5,36 @@ import CompareUI from "./CompareUI";
 import { makeOpenAIChatCompletionRequest } from "@/components/llm_calls/chat_completion";
 
 vi.mock("@/components/llm_calls/fetch_models", () => ({
-  fetchAvailableModels: vi.fn().mockResolvedValue([{ model_group: "gpt-4" }, { model_group: "gpt-3.5-turbo" }]),
+  fetchAvailableModels: vi.fn().mockResolvedValue([
+    {
+      model_group: "gpt-4",
+      endpoints: [
+        {
+          endpoint_type: "chat",
+          transport: "adapted",
+          kind: "adapted",
+          protocol: "adapted",
+          family: "chat",
+          method: "POST",
+          path: "/v1/chat/completions",
+        },
+      ],
+    },
+    {
+      model_group: "gpt-3.5-turbo",
+      endpoints: [
+        {
+          endpoint_type: "chat",
+          transport: "adapted",
+          kind: "adapted",
+          protocol: "adapted",
+          family: "chat",
+          method: "POST",
+          path: "/v1/chat/completions",
+        },
+      ],
+    },
+  ]),
 }));
 
 vi.mock("@/components/llm_calls/chat_completion", () => ({

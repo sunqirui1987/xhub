@@ -8,12 +8,12 @@ export const routeTemplatesGuideEn = {
     "When an organization, team, or key selects a template, this entire document applies. Fields are not merged with a parent template. New templates start as a copy of the platform default so important values are retained.",
   currentStatusTitle: "Check which fields the current gateway executes",
   currentStatusBody:
-    "The request path currently executes routing_strategy, weighted-split, num_retries, timeout, allowed_fails, and cooldown_time. Fallback chains, per-error retries, routing groups, aliases, pre-call checks, tag filtering, stream timeout, and retry delay are stored and exported but do not yet affect requests. Their complete JSON formats remain documented below for migration and future enablement.",
+    "The request path currently executes routing_strategy, model_routing, weighted-split, num_retries, timeout, allowed_fails, and cooldown_time. Fallback chains, per-error retries, routing groups, aliases, pre-call checks, tag filtering, stream timeout, and retry delay are stored and exported but do not yet affect requests. Their complete JSON formats remain documented below for migration and future enablement.",
   flowTitle: "How one request is processed",
   flowHint: "These four stages distinguish load balancing, retries, cooldown, and cross-model fallback.",
   flow1Title: "Choose a deployment of the current model",
   flow1Body:
-    "routing_strategy selects one deployment under the same public model name. weighted-split uses weights; a routing group can set a separate strategy for a set of models.",
+    "First select the scope template, then match model_routing by the requested public name. A matching rule replaces the default strategy and its arguments. Other public names use the default. Selection stays within deployments of that public name.",
   flow2Title: "Retry the current deployment",
   flow2Body:
     "num_retries currently controls attempts on one deployment, and timeout limits each upstream call. retry_policy and retry_after are compatibility settings that the current request path does not execute.",

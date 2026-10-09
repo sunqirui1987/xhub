@@ -5,7 +5,7 @@
 ## 职责与实现契约
 
 reports.go 提供费用与日志查询，activity.go/entity_activity.go 按日期和作用域聚合，benchmarks.go 保留对应实现，mount.go 登记当前可调用入口。LogsScope 区分个人自有日志、管理团队的服务密钥日志与平台全量；特权正文读取需审计。
-分页默认 50、最大 200。会话详情先按密钥识别调用方，再回退用户；旧数据可回退 session 标识。当前页会话汇总与事件总数不能混淆。每个 HTTP 调用有独立 callID；同一 session 不意味着只记一笔。
+分页默认 50、最大 200。会话汇总先按密钥识别调用方，再使用用户；没有调用方身份的记录分别展示，不根据相同 session ID 合并。当前页会话汇总与事件总数不能混淆。每个 HTTP 调用有独立 callID；同一 session 不意味着只记一笔。
 费用以 USD、token 以原始整数返回。明确零费用调用仍计请求与 token；历史 provider 和价格快照优先。浏览器 timezone offset 按西区为正解释。/spend/calculate 是当前报价，未知价格的零估算不承诺免费。prompt logging 控制正文、头和响应写入；脱敏在写入时进行，读取仍受权限限制。
 
 ## 源码职责与入口

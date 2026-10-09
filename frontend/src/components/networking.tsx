@@ -223,6 +223,8 @@ export interface CredentialItem {
   credential_name: string;
   credential_values: any;
   credential_info: {
+    /** 认证表单唯一标识；区分共用协议的 OpenAI 和兼容端点，旧数据允许缺省。 */
+    provider_id?: string;
     custom_llm_provider?: string;
     description?: string;
     required?: boolean;
@@ -3758,6 +3760,7 @@ interface GuardrailSubmissionSummary {
 }
 
 interface ListGuardrailSubmissionsResponse {
+  supported?: boolean;
   submissions: GuardrailSubmissionItem[];
   summary: GuardrailSubmissionSummary;
 }
@@ -6029,6 +6032,7 @@ export const applyGuardrail = async (
   language?: string | null,
   entities?: string[] | null,
   metadata?: Record<string, unknown> | null,
+ inlineGuardrail?: Record<string, unknown>,
 ) => {
   try {
     const url = proxyBaseUrl ? `${proxyBaseUrl}/guardrails/apply_guardrail` : `/guardrails/apply_guardrail`;
@@ -6038,6 +6042,7 @@ export const applyGuardrail = async (
       text: text,
     };
 
+    if (inlineGuardrail) requestBody.guardrail = inlineGuardrail;
     if (language) {
       requestBody.language = language;
     }

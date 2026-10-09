@@ -16,6 +16,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
+	"github.com/sunqirui1987/xhub/internal/gateway/guard"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"sync"
@@ -555,6 +556,9 @@ func ServeMixed(s Host, w http.ResponseWriter, r *http.Request) {
 // 测试：无直接单测
 func ServeMgmt(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
+		return
+	}
+	if guard.Manage(s, w, r) {
 		return
 	}
 	writeCatalogPersist(s, w, r, readMap(r))

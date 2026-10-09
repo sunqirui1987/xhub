@@ -182,6 +182,7 @@ func ApplyDocument(doc PriceDocument) (int, error) {
 	modelCostMu.Lock()
 	modelCostMapValue = rows
 	modelsByProvider = sets
+	refreshContributionsLocked()
 	if doc.Source != "" {
 		priceSource = doc.Source
 	}

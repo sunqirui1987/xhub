@@ -16,14 +16,8 @@ x-litellm-call-id 关联调用与日志，x-litellm-response-cost 表示这次�
 
 | 方法与路径 | 处理器 | 注册源码 |
 | --- | --- | --- |
-| `GET /health/liveliness` | `healthLive` | [access_log_test.go](../../internal/gateway/access_log_test.go) |
 | `POST /compliance/eu-ai-act` | `complianceEU` | [compliance.go](../../internal/gateway/compliance.go) |
 | `POST /compliance/gdpr` | `complianceGDPR` | [compliance.go](../../internal/gateway/compliance.go) |
-| `GET /health/liveliness` | `healthLive` | [console_split_test.go](../../internal/gateway/console_split_test.go) |
-| `GET /litellm/.well-known/litellm-ui-config` | `uiConfig` | [console_split_test.go](../../internal/gateway/console_split_test.go) |
-| `GET /litellm/.well-known/litellm-ui-config` | `uiConfig` | [console_split_test.go](../../internal/gateway/console_split_test.go) |
-| `POST /v1/chat/completions` | `registration callback` | [dial_log_test.go](../../internal/gateway/dial_log_test.go) |
-| `POST /v1/chat/completions` | `registration callback` | [guardrail_block_test.go](../../internal/gateway/guardrail_block_test.go) |
 | `GET /health/liveliness` | `healthLive` | [routes.go](../../internal/gateway/routes.go) |
 | `GET /health/liveness` | `healthLive` | [routes.go](../../internal/gateway/routes.go) |
 | `GET /health/readiness` | `healthReady` | [routes.go](../../internal/gateway/routes.go) |

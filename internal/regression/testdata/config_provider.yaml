@@ -1,0 +1,50 @@
+# Deterministic suppliers only. The fixture replaces these bases with loopback
+# servers and uses synthetic credentials; key_env is never read in this suite.
+version: 1
+providers:
+  - id: SUPPLIER_A
+    enabled: true
+    credential_name: regression-supplier-a
+    key_env: REGRESSION_FAKE_A_KEY
+    base: http://supplier-a.invalid/v1
+    protocol: openai
+    models: [gpt-5.6-sol, gpt-5.6-terra]
+  - id: SUPPLIER_B
+    enabled: true
+    credential_name: regression-supplier-b
+    key_env: REGRESSION_FAKE_B_KEY
+    base: http://supplier-b.invalid/v1
+    protocol: openai
+    models: [gpt-5.6-sol, gpt-5.6-terra]
+weighted_scenarios:
+  - name: sol-two-suppliers
+    model_name: gpt-5.6-sol
+    requests: 20
+    deployments:
+      - {id: sol-a, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 7}
+      - {id: sol-b, provider: SUPPLIER_B, model: gpt-5.6-sol, weight: 3}
+  - name: sol-scaled-weights
+    model_name: gpt-5.6-sol
+    requests: 20
+    deployments:
+      - {id: sol-a-case2, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 70}
+      - {id: sol-b-case2, provider: SUPPLIER_B, model: gpt-5.6-sol, weight: 30}
+  - name: sol-equal-shares
+    model_name: gpt-5.6-sol
+    requests: 10
+    deployments:
+      - {id: sol-a-case3, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 1}
+      - {id: sol-b-case3, provider: SUPPLIER_B, model: gpt-5.6-sol, weight: 1}
+  - name: sol-zero-share
+    model_name: gpt-5.6-sol
+    requests: 10
+    deployments:
+      - {id: sol-a-case4, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 10}
+      - {id: sol-b-case4, provider: SUPPLIER_B, model: gpt-5.6-sol, weight: 0}
+  - name: sol-three-deployments
+    model_name: gpt-5.6-sol
+    requests: 20
+    deployments:
+      - {id: sol-a-case5, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 7}
+      - {id: sol-b-case5, provider: SUPPLIER_B, model: gpt-5.6-sol, weight: 2}
+      - {id: sol-a-second, provider: SUPPLIER_A, model: gpt-5.6-sol, weight: 1}

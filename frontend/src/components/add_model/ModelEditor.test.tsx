@@ -211,7 +211,7 @@ describe("ModelEditor", () => {
     const model: EditorModel = {
       model_name: "existing-name",
       litellm_params: { model: "custom-upstream", custom_llm_provider: "openai", litellm_credential_name: "relay-a" },
-      model_info: { mode: "chat", pricing_source: "catalog", base_model: "anthropic/claude-sonnet" },
+      model_info: { endpoint_types: ["chat"], transport: "adapted", pricing_source: "catalog", base_model: "anthropic/claude-sonnet" },
     };
     renderEditor({ model });
     expect(screen.getByRole("combobox", { name: "上游模型 *" })).toHaveValue("custom-upstream");
@@ -228,7 +228,8 @@ describe("ModelEditor", () => {
         id: "model-123",
         db_model: true,
         disabled: true,
-        mode: "chat",
+        endpoint_types: ["chat"],
+        transport: "adapted",
         pricing_source: "catalog",
         base_model: "anthropic/claude-sonnet",
       },

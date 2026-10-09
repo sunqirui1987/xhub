@@ -3,6 +3,7 @@ package dataplane
 import (
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/config"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"io"
 	"net/http"
@@ -13,7 +14,7 @@ import (
 )
 
 func officialHost(up *httptest.Server, models ...config.ModelEntry) *logicHost {
-	return &logicHost{cfg: &config.Config{}, client: up.Client(), models: models, pins: map[string]string{}, billed: map[string]bool{}}
+	return &logicHost{cfg: &config.Config{}, client: up.Client(), models: models, pins: map[string]string{}}
 }
 
 func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
@@ -49,16 +50,16 @@ func TestOfficialUsesModelRoutingOverride(t *testing.T) {
 		io.WriteString(w, "{\"id\":\"task-model-policy\"}")
 	}))
 	defer up.Close()
-	a := deployment("video", "provider/model-a", "key-a", up.URL, "ark_contents_generation", map[string]any{"weight": 9.0})
-	b := deployment("video", "provider/model-b", "key-b", up.URL, "ark_contents_generation", map[string]any{"weight": 1.0})
+	a := deployment("video", "provider/model-a", "key-a", up.URL, "ark_contents_generation", map[string]any{"weight": 9.0, "deployment_id": "model-a"})
+	b := deployment("video", "provider/model-b", "key-b", up.URL, "ark_contents_generation", map[string]any{"weight": 1.0, "deployment_id": "model-b"})
 	h := officialHost(up, a, b)
 	h.settings = map[string]any{
 		"routing_strategy":      "simple-shuffle",
-		"routing_strategy_args": map[string]any{"weights": map[string]any{up.URL + "|provider/model-a": 1.0}},
+		"routing_strategy_args": map[string]any{"weights": map[string]any{"deployment:model-a": 1.0}},
 		"model_routing": []any{map[string]any{
 			"model_name": "video", "routing_strategy": "weighted-split",
 			"routing_strategy_args": map[string]any{"weights": map[string]any{
-				up.URL + "|provider/model-a": 0.0, up.URL + "|provider/model-b": 1.0,
+				"deployment:model-a": 0.0, "deployment:model-b": 1.0,
 			}},
 		}},
 	}
@@ -118,7 +119,7 @@ func TestOfficialTaskScopesAndPendingUsage(t *testing.T) {
 	h := officialHost(up, dep)
 	h.pins[officialTaskScope(&auth.Principal{UserID: "test-user"}, "ark_contents_generation", "task")] = router.CooldownID(dep)
 	h.call(t, http.MethodGet, "/api/v3/contents/generations/tasks/task", "")
-	if len(h.spend) != 1 || h.spend[0].usage != nil || len(h.billed) != 0 {
+	if len(h.spend) != 1 || h.spend[0].usage != nil {
 		t.Fatalf("in-progress task billed: %+v", h.spend)
 	}
 }
@@ -141,7 +142,8 @@ func TestOfficialForwardDoesNotLeakGatewayCredentials(t *testing.T) {
 		r.Header.Set(name, "gateway-secret")
 	}
 	r.Header.Set("Connection", "X-Private")
-	_, status, err := forwardOfficial(officialHost(up), r, http.MethodGet, up.URL, "provider-key", nil, r.Header)
+	response, err := forwardOfficial(officialHost(up), r, http.MethodGet, up.URL, "provider-key", nil, r.Header, provider.Transport{Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Bearer"}}, nil)
+	status := response.StatusCode
 	if err != nil || status != 200 {
 		t.Fatal(status, err)
 	}

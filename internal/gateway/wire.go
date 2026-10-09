@@ -196,7 +196,7 @@ func (s *Server) PinnedDeployment(taskID string) string {
 // 测试：bypass_logic_test.go、failure_log_test.go
 func (s *Server) FindDeployment(id string) (config.ModelEntry, bool) {
 	for _, m := range s.Models() {
-		if router.CooldownID(m) == id || router.DeploymentID(m) == id {
+		if router.CooldownID(m) == id {
 			return m, true
 		}
 	}

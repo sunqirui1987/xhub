@@ -5,7 +5,7 @@
 ## 职责与实现契约
 
 seedance.go 登记 ark_contents_generation，默认 ark.cn-beijing.volces.com。上游路径 /api/v3/contents/generations/tasks 支持创建、列表和按 ID 查询；公共入口由 transport 的路径映射决定。
-模型字段与任务 ID 为 model/id，去掉 volcengine 前缀再发送。目录中一条模型按输入/输出各 7 USD/百万 token 定价，fast 条目没有完整价格，不能把缺省费用零当作免费。
+模型字段与任务 ID 为 model/id，去掉 volcengine 前缀再发送。移除不对应火山账户的输入/输出各 7 USD/百万 token 硬编码价，需要配置实际账户价格。共享 Seedance 提取器只结算成功终态 completion_tokens，并按参考视频和分辨率选档；不能把未定价费用零解释为免费。
 供应商注册与模型登记不承担调用身份、预算、错误重试或去重结算；这些在数据面。修改路径、模型前缀或 usage 字段后要跑 seedance_test 与官方任务集成测试；实际费用还需要真实任务终态 usage 证据。
 
 ## 源码职责与入口

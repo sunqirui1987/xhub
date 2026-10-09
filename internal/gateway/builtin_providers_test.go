@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,10 @@ import (
 
 func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 	cfg, st := openTestStore(t)
+	// 启动行为必须从无凭据的状态验证，避免共享测试库中的旧地址影响断言。
+	// 清理时恢复原行，生产逻辑仍不会覆盖操作员保存的连接。
+	isolateBuiltinCredential(t, st, "fennoai")
+	isolateBuiltinCredential(t, st, "qiniu")
 	clearBuiltins(t, st)
 	t.Cleanup(func() {
 		clearBuiltins(t, st)
@@ -71,15 +77,15 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 	}
 	values, _ := cred["credential_values"].(map[string]any)
 	if values["api_base"] != "https://api.fenno.ai" {
-		t.Fatalf("fenno credential %#v", values)
+		t.Fatal("fenno credential has incorrect origin")
 	}
 	qiniuCred, err := st.GetKV("credentials", "qiniu")
 	if err != nil {
 		t.Fatal(err)
 	}
 	qiniuValues, _ := qiniuCred["credential_values"].(map[string]any)
-	if qiniuValues["api_base"] != "https://api.qnaigc.com/bypass/openai/v1" {
-		t.Fatalf("qiniu credential %#v", qiniuValues)
+	if qiniuValues["api_base"] != "https://api.qnaigc.com" {
+		t.Fatal("qiniu credential has incorrect origin")
 	}
 	if len(hits) != 0 {
 		t.Fatalf("startup fetched a model list %#v", hits)
@@ -170,6 +176,35 @@ func TestBuiltinProvidersInstallOnStartup(t *testing.T) {
 	if findModelRow(rows, "extra/id") != nil {
 		t.Fatal("refresh created a model after the retired add endpoint")
 	}
+}
+
+// isolateBuiltinCredential 临时移除指定内置凭据，并在用例结束后恢复原内容。
+// 参数 t：测试上下文；st：共享测试存储；id：供应商凭据名。
+// 返回：无；读取、删除或恢复失败时报告错误，不输出含密钥的行内容。
+// 调用：TestBuiltinProvidersInstallOnStartup。测试：该启动用例。
+func isolateBuiltinCredential(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	previous, err := st.GetKV("credentials", id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("cannot read test credential")
+	}
+	if previous != nil {
+		if err := st.DeleteKV("credentials", id); err != nil {
+			t.Fatal("cannot isolate test credential")
+		}
+	}
+	t.Cleanup(func() {
+		if previous == nil {
+			if err := st.DeleteKV("credentials", id); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				t.Error("cannot remove test credential")
+			}
+			return
+		}
+		body, err := json.Marshal(previous)
+		if err != nil || st.PutKV("credentials", id, string(body)) != nil {
+			t.Error("cannot restore test credential")
+		}
+	})
 }
 
 func TestBuiltinProvidersStayOutWhenDisabled(t *testing.T) {

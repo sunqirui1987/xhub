@@ -8,20 +8,27 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 )
 
-// seedanceDeployment 是内置的 Seedance Bypass 类型。model_info.mode 就是端点类型；
+// seedanceDeployment 是内置的 Seedance Bypass 类型。model_info.transport 选择传输方式；
 // 部署自己的名字就是供应商 id——Bypass 会就地把它上面属于网关的那层前缀去掉，
 // 而不是另读一个"上游模型名"字段。
-// 参数 name（string）：对外模型名，含 qiniu/ 前缀；endpointType（string）：端点类型。
+// 参数 name（string）：对外模型名，含 qiniu/ 前缀；transportID（string）：执行传输标识，据此显式声明 Ark 或 Fal 公开端点。
 // 返回 config.ModelEntry（config.ModelEntry）：可装进模型表的部署。
-func seedanceDeployment(name, endpointType string) config.ModelEntry {
+func seedanceDeployment(name, transportID string) config.ModelEntry {
+	endpointID, supplier := "bypass:ark-video", "qiniu"
+	if strings.HasPrefix(transportID, "qiniu_fal_") {
+		endpointID = "bypass:fal-video"
+	}
+	if strings.HasPrefix(transportID, "volcengine_") {
+		supplier = "volcengine"
+	}
 	return config.ModelEntry{
 		ModelName:     name,
-		LiteLLMParams: map[string]any{"api_key": "sk-fake-upstream"},
-		ModelInfo:     map[string]any{"mode": endpointType},
+		LiteLLMParams: map[string]any{"api_key": "sk-fake-upstream", "model": name, "custom_llm_provider": supplier},
+		ModelInfo:     map[string]any{"transport": transportID, "endpoint_types": []string{endpointID}},
 	}
 }
 
-// embeddingDeployment 是一个向量模型。端点类型同样来自 mode 字段——正是它决定
+// embeddingDeployment 是一个向量模型。能力来自 endpoint_types 字段——正是它决定
 // 这条模型在 /v1/embeddings 上能调，而在 /v1/chat/completions 上不能。
 // 参数 name（string）：对外模型名。
 // 返回 config.ModelEntry（config.ModelEntry）：可装进模型表的部署。
@@ -33,7 +40,7 @@ func embeddingDeployment(name string) config.ModelEntry {
 			"api_key":             "sk-fake-upstream",
 			"custom_llm_provider": "openai",
 		},
-		ModelInfo: map[string]any{"mode": "embedding"},
+		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"embedding"}},
 	}
 }
 
@@ -111,7 +118,7 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 		modelID      string
 	}{
 		{"seedance 2.0", "qiniu_contents_generation", "qiniu/bytedance/doubao-seedance-2-0-260128"},
-		{"seedance 2.5", "qiniu_contents_generation", "qiniu/bytedance/doubao-seedance-2-5-260128"},
+		{"seedance 2.5", "qiniu_contents_generation", "qiniu/bytedance/doubao-seedance-2-5-260628"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			h := newHarness(t, seedanceDeployment(probe.modelID, probe.endpointType))
@@ -133,7 +140,7 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 				t.Fatalf("upstream saw %d calls, want 1", len(calls))
 			}
 			// Bypass 去掉的是网关自己那层前缀，供应商那层留着。
-			if got := stringField(calls[0].Body, "model"); got != "bytedance/doubao-seedance-2-0-260128" && got != "bytedance/doubao-seedance-2-5-260128" {
+			if got := stringField(calls[0].Body, "model"); got != "bytedance/doubao-seedance-2-0-260128" && got != "bytedance/doubao-seedance-2-5-260628" {
 				t.Fatalf("upstream saw model=%q, want the vendor id with only the gateway prefix stripped", got)
 			}
 			if !containsPath(calls[0].Path, "contents/generations/tasks") {

@@ -47,6 +47,7 @@ export interface CostBreakdown {
    *     所以必须标出来，不能假装是原始记录。
    */
   source?: "snapshot" | "recomputed";
+  pricing_status?: "priced" | "unpriced";
 }
 
 interface CostBreakdownViewerProps {
@@ -98,6 +99,7 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const isCached = String(cacheHit ?? "").toLowerCase() === "true";
+  const isUnpriced = !isCached && costBreakdown?.pricing_status === "unpriced";
   const hasTokenCounts = promptTokens !== undefined || completionTokens !== undefined;
 
   const hasCostBreakdown = costBreakdown?.input_cost !== undefined || costBreakdown?.output_cost !== undefined;
@@ -106,12 +108,12 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
     Object.entries(costBreakdown.additional_costs).some(([, value]) => value != null && value !== 0);
   // 缓存那一侧单独出现时也算有明细。一条只收缓存费的调用以前会让整块消失，
   // 而它明明是扣了钱的。
-  const hasCacheCosts =
-    (costBreakdown?.cache_read_cost ?? 0) !== 0 || (costBreakdown?.cache_creation_cost ?? 0) !== 0;
+  const hasCacheCosts = (costBreakdown?.cache_read_cost ?? 0) !== 0 || (costBreakdown?.cache_creation_cost ?? 0) !== 0;
   // 只有真被计费过才有费率可列。命中缓存的那一次是零费用，硬列出来只会让人以为收过钱。
   const appliedRates = isCached ? [] : (costBreakdown?.applied ?? []);
 
   const hasMeaningfulData =
+    isUnpriced ||
     hasCostBreakdown ||
     hasCacheCosts ||
     hasTokenCounts ||
@@ -143,11 +145,9 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
   const outputCost = isCached ? 0 : costBreakdown?.output_cost;
   const pricedOriginal =
     inputCost !== undefined || outputCost !== undefined ? (inputCost ?? 0) + (outputCost ?? 0) : undefined;
-  const originalCost = isCached ? 0 : costBreakdown?.original_cost ?? pricedOriginal;
-  const totalCost = isCached ? 0 : costBreakdown?.total_cost ?? totalSpend;
-  const inputRateLine = isCached
-    ? null
-    : rateLine(promptTokens, "prompt tokens", costBreakdown?.input_cost_per_token);
+  const originalCost = isCached ? 0 : (costBreakdown?.original_cost ?? pricedOriginal);
+  const totalCost = isUnpriced ? undefined : isCached ? 0 : (costBreakdown?.total_cost ?? totalSpend);
+  const inputRateLine = isCached ? null : rateLine(promptTokens, "prompt tokens", costBreakdown?.input_cost_per_token);
   const outputRateLine = isCached
     ? null
     : rateLine(completionTokens, "completion tokens", costBreakdown?.output_cost_per_token);
@@ -177,8 +177,9 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                 </span>
               )}
               <span className="text-sm text-muted-foreground">Total:</span>
+              {isUnpriced && <span className="text-sm text-muted-foreground">{t("Pricing unavailable")}</span>}
               <span className="text-sm font-semibold text-foreground">
-                {formatCost(totalSpend)}
+                {formatCost(isUnpriced ? undefined : totalSpend)}
                 {isCached && t("(Cached)")}
               </span>
             </div>
@@ -353,7 +354,8 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                     {costBreakdown.discount_percent !== undefined && costBreakdown.discount_percent !== 0 && (
                       <div className="flex text-sm text-muted-foreground">
                         <span className="font-medium w-1/3">
-                          Discount ({formatPercent(costBreakdown.discount_percent)}):</span>
+                          Discount ({formatPercent(costBreakdown.discount_percent)}):
+                        </span>
                         <span className="text-foreground">-{formatCost(costBreakdown.discount_amount)}</span>
                       </div>
                     )}
@@ -372,7 +374,8 @@ export const CostBreakdownViewer: React.FC<CostBreakdownViewerProps> = ({
                     {costBreakdown.margin_percent !== undefined && costBreakdown.margin_percent !== 0 && (
                       <div className="flex text-sm text-muted-foreground">
                         <span className="font-medium w-1/3">
-                          Margin ({formatPercent(costBreakdown.margin_percent)}):</span>
+                          Margin ({formatPercent(costBreakdown.margin_percent)}):
+                        </span>
                         <span className="text-foreground">
                           +
                           {formatCost(

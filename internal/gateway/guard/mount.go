@@ -1,4 +1,4 @@
-// Package guard registers the guardrail HTTP routes. The trial endpoint is mounted here. Blocking still happens in PreCall.
+// Package guard 注册护栏调试路由；真实请求拦截由 Evaluate 在上游调用前执行。
 package guard
 
 import (
@@ -11,11 +11,11 @@ import (
 
 var logTraceOnceMount sync.Once
 
-// Module is the guardrail trial API. The data plane calls PreCall before the upstream and does not go through these two paths.
-// 参数 h（Host）：实现这一步所需能力的数据面宿主。聊天、直通和刷写各自只依赖自己的方法。
-// 返回 httpx.Module（httpx.Module）：可挂到网关上的模块。
-// 调用：gateway/family/mount.go、gateway/identity/mount.go、gateway/keys/mount.go、gateway/models/mount.go
-// 测试：无直接单测
+// Module 注册两个共用 Apply 处理器的管理调试接口。
+// 参数：h：提供管理鉴权和规则存储能力的宿主。
+// 返回：httpx.Module：可挂载路由模块；调试不修改持久化规则。
+// 调用：gateway/engine.go 的模块安装流程。
+// 测试：guard_test.go 验证 Apply；模块安装无独立单测。
 func Module(h Host) httpx.Module {
 	logTraceOnceMount.Do(func() { logx.Trace("enter guard.Module") })
 

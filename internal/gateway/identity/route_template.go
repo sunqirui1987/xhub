@@ -657,6 +657,11 @@ func encodeTemplateBody(raw any) (string, error) {
 	}
 }
 
+// validateTemplateModelRouting checks a serialized template's per-model routing rules.
+// 参数 encoded（string）：待校验的 JSON 正文。
+// 返回 error：格式或策略无效时返回错误。
+// 调用：模板创建与更新处理器。
+// 测试：regression/route_template_config_test.go
 func validateTemplateModelRouting(encoded string) error {
 	document := map[string]any{}
 	if err := json.Unmarshal([]byte(encoded), &document); err != nil {

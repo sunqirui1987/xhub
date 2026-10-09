@@ -55,7 +55,12 @@ export function grantedModelCards(
     const info = rowsByName.get(id)?.model_info ?? {};
     if (info.role === "provider") continue;
     const priced = costRow(costMap, id);
-    const category = stringValue(info.category) ?? stringValue(info.mode) ?? stringValue(priced?.mode) ?? "other";
+    const endpointTypes = Array.isArray(info.endpoint_types) ? info.endpoint_types : null;
+    const category = stringValue(info.category)
+      ?? (stringValue(info.transport) && info.transport !== "adapted" ? stringValue(info.transport) : null)
+      ?? (endpointTypes ? endpointTypes.find((value): value is string => typeof value === "string" && value.trim() !== "") : null)
+      ?? stringValue(priced?.mode)
+      ?? "chat";
     cards.push({
       id,
       category,

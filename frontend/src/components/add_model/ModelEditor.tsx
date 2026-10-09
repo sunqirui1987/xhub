@@ -33,6 +33,10 @@ import ModelAutocomplete from "./ModelAutocomplete";
 import { toast } from "@/lib/toast";
 
 const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
+/** ModelEditor 管理供应商连接引用、上游模型、公开端点与独立价格绑定。
+ * 参数 model：编辑的部署；initialSupplier/initialCatalogId：新建预选项；onSaved/onCancel：完成回调。
+ * 返回：模型配置表单；连接凭据由供应商统一管理，表单不复制密钥。
+ * 调用：模型管理页面。测试：ModelEditor.test.tsx、modelEditorPricing.test.ts。 */
 export default function ModelEditor({
   model,
   initialSupplier,
@@ -58,7 +62,9 @@ export default function ModelEditor({
         ? {
             supplier: initialSupplier.credential_name,
             custom_llm_provider:
-              initialSupplier.credential_info?.custom_llm_provider ??
+              (initialSupplier.credential_info?.builtin === "qiniu"
+                ? "qiniu"
+                : initialSupplier.credential_info?.custom_llm_provider) ??
               initialSupplier.credential_values?.custom_llm_provider,
           }
         : {}),
@@ -74,7 +80,7 @@ export default function ModelEditor({
   const rows = catalogRows(catalog?.models);
   const row = rows[String(values.pricing_model ?? "")];
   const provider = String(values.custom_llm_provider ?? "");
-  const builtin = supplier?.credential_info?.builtin;
+  const builtin = supplier?.credential_info?.builtin || (values.supplier === "qiniu" ? "qiniu" : undefined);
   const discovery = useQuery({
     queryKey: ["providerModelList", values.supplier],
     enabled: !!accessToken && !!supplier,
@@ -91,11 +97,15 @@ export default function ModelEditor({
     staleTime: 60_000,
   });
   const modelOptions = (discovery.data ?? []).map((item) => ({ value: item.id, label: item.id }));
+  /** selectModel 更新上游模型并在公开名称仍为自动值时同步名称。
+   * 参数 upstream：供应商模型 ID；返回：无。不会修改独立计价来源；端点字段自行校验新模型。 */
   const selectModel = (upstream: string) => {
     set("model", upstream);
     if (!values.model_name || values.model_name === String(values.model).replace(provider + "/", ""))
       set("model_name", upstream.replace(provider + "/", ""));
   };
+  /** changePricingSource 切换价格来源，并在首次改为手动时复制目录的当前价格。
+   * 参数 event：价格来源选择事件；返回：无。保留规格、时段等费率维度。 */
   const changePricingSource = (event: React.ChangeEvent<HTMLSelectElement>) => {
     set("pricing_source", event.target.value);
     if (event.target.value === "manual" && values.pricing_source !== "manual") {
@@ -104,6 +114,8 @@ export default function ModelEditor({
       set("pricing_format", Array.isArray(row?.rates) && row.rates.length ? "rates" : "flat");
     }
   };
+  /** changeSupplier 切换命名供应商并清除依赖原供应商的模型与端点声明。
+   * 参数 name：凭据名或保留现有连接选项；返回：无。独立价格绑定不跟随供应商自动改变。 */
   const changeSupplier = (name: string) => {
     if (name === values.supplier) return;
     if (name === "__existing__") {
@@ -113,7 +125,7 @@ export default function ModelEditor({
         "custom_llm_provider",
         "model",
         "model_name",
-        "mode",
+        "endpoint_type",
         "transport",
         "endpoint_types",
       ])
@@ -124,11 +136,13 @@ export default function ModelEditor({
     set("supplier", name);
     set(
       "custom_llm_provider",
-      next?.credential_info?.custom_llm_provider ?? next?.credential_values?.custom_llm_provider ?? "",
+      (next?.credential_info?.builtin === "qiniu" || name === "qiniu" ? "qiniu" : next?.credential_info?.custom_llm_provider) ??
+        next?.credential_values?.custom_llm_provider ??
+        "",
     );
     set("model", "");
     set("catalog_model", "");
-    set("mode", "");
+    set("endpoint_type", "");
     set("transport", "adapted");
     set("endpoint_types", []);
     if (values.model_name === String(values.model).replace(provider + "/", "")) set("model_name", "");
@@ -137,17 +151,24 @@ export default function ModelEditor({
   const categories = BILLING_CATEGORIES.filter((category) =>
     category.modes.includes(values.billing_mode as BillingMode),
   );
+  /** set 统一更新表单字段并标记需要保存。参数 key/value：字段和新值；返回：无。 */
   const set = (key: string, value: unknown) => form.setValue(key, value, { shouldDirty: true });
+  /** seedPrices 将目录价格投影到手动基础单价字段。
+   * 参数 selected：选中的价格行，可为空；返回：无。缺失单价保持未设置，避免误记免费。 */
   const seedPrices = (selected: CatalogRow | undefined) => {
     set("billing_mode", billingModeOf(selected));
     PRICE_FIELDS.forEach((field) => set(field.name, catalogFieldValue(selected, field.name)));
   };
+  /** imported 在目录导入完成后刷新价格缓存与供应商模型发现结果。
+   * 参数：无；返回 Promise<void>；刷新完成关闭导入弹窗。 */
   const imported = async () => {
     await queryClient.invalidateQueries({ queryKey: priceCatalogKeys.all });
     await queryClient.invalidateQueries({ queryKey: ["modelCostMap"] });
     await discovery.refetch();
     setImporting(false);
   };
+  /** textField 创建受表单管理的必填文本字段。
+   * 参数 key/label/placeholder：字段名、显示名称和提示；返回：带关联标签的输入控件。 */
   const textField = (key: string, label: string, placeholder?: string) => (
     <div className="space-y-2">
       <Label htmlFor={"editor-" + key}>{label}</Label>
@@ -162,6 +183,9 @@ export default function ModelEditor({
   );
   let submitLabel = model ? "保存修改" : "添加模型";
   if (saving) submitLabel = "正在保存…";
+  /** save 校验连接引用和价格绑定后提交明确的模型部署契约。
+   * 参数 submitted：当前表单值；返回：异步提交处理器，成功刷新列表并调用 onSaved。
+   * 登录、字段或网络失败显示错误；finally 解除保存状态，防止表单永久禁用。 */
   const save = form.handleSubmit(async (submitted) => {
     setError("");
     try {
@@ -268,7 +292,7 @@ export default function ModelEditor({
                     </div>
                     {discovery.data && (
                       <p className="text-xs text-muted-foreground">
-                        已获取 {discovery.data.length} 个上游模型，可在下方输入框中搜索选择。
+                        已获取 {discovery.data.length} 个模型（含供应商目录与已登记原生模型），可在下方搜索选择。原生模型的账号可用性以供应商为准。
                       </p>
                     )}
                     {discovery.error && (
@@ -300,14 +324,14 @@ export default function ModelEditor({
                     required
                   />
                   <p className="text-xs text-muted-foreground">
-                    联想列表仅包含当前模型提供商返回的模型，也可以直接输入模型 ID。
+                    联想列表包含当前供应商目录和已登记的原生模型，也可以直接输入模型 ID。
                   </p>
                   {catalogError && <p className="text-xs text-destructive">模型广场加载失败，仍可手动填写模型 ID。</p>}
                 </div>
                 {textField("model_name", "对外模型名称 *", "客户端请求使用的模型名称")}
                 <EndpointTypeField
                   key={String(values.supplier)}
-                  selectedProvider={String(values.custom_llm_provider ?? "")}
+                  selectedProvider={String(builtin || values.custom_llm_provider || "")}
                   modelCostMap={rows}
                 />
                 <div className="flex items-center justify-between gap-4 rounded-lg border p-4">

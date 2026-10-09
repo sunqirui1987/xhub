@@ -8,12 +8,12 @@ export const routeTemplatesGuideZhCN = {
     "组织、团队或密钥选中模板后，使用的是这一整份文档，不会和上一级模板按字段合并。新建模板会从平台默认复制，以免漏掉关键值。",
   currentStatusTitle: "先确认当前网关真正支持哪些字段",
   currentStatusBody:
-    "当前请求路径已经执行路由策略、weighted-split、num_retries、timeout、allowed_fails 和 cooldown_time。回退链、按错误类型重试、路由组、模型别名、调用前检查、标签过滤、流式超时和重试等待目前只会保存并原样导出，尚未参与实际请求。下面仍完整说明它们的 JSON 格式，便于配置迁移和后续启用。",
+    "当前请求路径已经执行路由策略、model_routing 模型覆盖、weighted-split、num_retries、timeout、allowed_fails 和 cooldown_time。回退链、按错误类型重试、路由组、模型别名、调用前检查、标签过滤、流式超时和重试等待目前只会保存并原样导出，尚未参与实际请求。下面仍完整说明它们的 JSON 格式，便于配置迁移和后续启用。",
   flowTitle: "一次请求如何执行",
   flowHint: "理解这四步，就能区分负载均衡、重试、冷静期和跨模型回退。",
   flow1Title: "选择当前模型的部署",
   flow1Body:
-    "routing_strategy 在同一个公开模型名下选择一条部署。weighted-split 用 weights 分流；路由组可以为一组模型单独指定策略。",
+    "先确定团队或密钥选中的模板，再按请求的公开模型名匹配 model_routing。匹配规则覆盖默认策略及参数；其他模型用默认策略。只在该公开名下的部署之间选择，不混分不同模型的流量。",
   flow2Title: "在当前部署上重试",
   flow2Body:
     "当前由 num_retries 控制同一条部署的尝试次数，timeout 是每次上游调用的时限。retry_policy 和 retry_after 是兼容配置，当前请求路径尚未执行。",

@@ -17,7 +17,34 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   echo "Another browser run owns $LOCK. If interrupted, confirm it stopped before removing this directory." >&2
   exit 1
 fi
-trap 'rmdir "$LOCK"' EXIT
+cleanup() {
+  local exit_code=$?
+  # Playwright may terminate its whole server process group before the gateway
+  # shell runs its EXIT trap. Recover its private schema once ports are free.
+  if python3 - "$E2E_GW_PORT" "$E2E_UP_PORT" <<'PYCLEAN'
+import socket, sys
+for value in sys.argv[1:]:
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", int(value))) == 0:
+            raise SystemExit(1)
+PYCLEAN
+  then
+    rm -f "$E2E_RUN_DIR/c.yaml"
+    if [[ -f "$E2E_RUN_DIR/schema.txt" ]]; then
+      local schema
+      schema="$(cat "$E2E_RUN_DIR/schema.txt")"
+      if [[ "$schema" =~ ^e2e_[0-9]+_[0-9]+$ ]]; then
+        docker exec xhub-postgres psql -X -U xhub -d xhub -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA IF EXISTS $schema CASCADE" >"$E2E_RUN_DIR/cleanup.log" 2>&1 || true
+      fi
+    fi
+  fi
+  rmdir "$LOCK"
+  return "$exit_code"
+}
+trap cleanup EXIT
+mkdir -p "$E2E_RUN_DIR"
+rm -f "$E2E_RUN_DIR/results.json" "$E2E_RUN_DIR/junit.xml"
+echo "Browser preflight: UI=$E2E_UI_PORT gateway=$E2E_GW_PORT upstream=$E2E_UP_PORT"
 python3 - "$E2E_UI_PORT" "$E2E_GW_PORT" "$E2E_UP_PORT" <<'PY'
 import socket, sys
 ports = [int(value) for value in sys.argv[1:]]
@@ -39,5 +66,10 @@ config["include"].append(".next-e2e/types/**/*.ts")
 config["exclude"] = [*config.get("exclude", []), ".next"]
 Path("tsconfig.e2e.json").write_text(json.dumps(config, indent=2) + "\n")
 PYCONFIG
+echo "Building production console (.next-e2e)..."
 npm run build
+echo "Building gateway and catalog sweep before the service readiness timeout..."
+(cd "$ROOT" && go build -o "$E2E_RUN_DIR/xhub" ./cmd/gateway && go build -o "$E2E_RUN_DIR/livesweep" ./e2e/livesweep)
+export E2E_PREBUILT=1
+echo "Starting isolated gateway and console, then executing Playwright..."
 npx playwright test "$@"

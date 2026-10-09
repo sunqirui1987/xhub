@@ -109,7 +109,7 @@ func TestOfficialConcurrentCompletedPollsIsolateMetadata(t *testing.T) {
 }
 
 // Model a failed first persistence attempt: a later poll must submit the same
-// positive event again, even if a legacy host has a billed marker already.
+// positive event again using the durable settlement identity.
 type retrySettlementHost struct {
 	*logicHost
 	attempts []string
@@ -132,7 +132,6 @@ func TestOfficialSettlementRetriesAfterPersistenceFailure(t *testing.T) {
 	h := &retrySettlementHost{logicHost: officialHost(up, dep)}
 	scope := officialTaskScope(&auth.Principal{UserID: "test-user"}, "ark_contents_generation", "task")
 	h.pins[scope] = router.CooldownID(dep)
-	h.billed[scope] = true // Old markers cannot veto durable retries.
 	for i := 0; i < 2; i++ {
 		r := httptest.NewRequest(http.MethodGet, "/api/v3/contents/generations/tasks/task", nil)
 		hit, ok := provider.Match(r.Method, r.URL.Path, h.models)
@@ -175,8 +174,5 @@ func TestOfficialZeroAndPendingPollsKeepUniqueIDs(t *testing.T) {
 			t.Fatalf("poll collapsed or charged: %+v", row)
 		}
 		seen[row.callID] = true
-	}
-	if len(h.billed) != 0 {
-		t.Fatal("pre-persistence marker written")
 	}
 }

@@ -24,6 +24,12 @@ The central development references are in Chinese. Package-level `readme.md` and
 | [Pricing and usage](development/pricing.md) | Rates, time windows, price snapshots, and persistence |
 | [Runtime behavior and limits](development/runtime.md) | Cache, idempotency, protocols, media tasks, and operating limits |
 | [Testing](development/testing.md) | Test layers, database isolation, focused commands, and optional demo data |
+| [Feature implementation](development/implementation.md) | End-to-end contracts and source locations for core features |
+| [HTTP API reference](development/api-reference.md) | Registered endpoints and their handler sources |
+| [Configuration and storage](development/configuration.md) | Settings precedence, model fields, persistence, and runtime defaults |
+| [Regression plan](development/regression.md) | File-by-file backend coverage, live models, template cases, and acceptance procedure |
+| [Browser regression](development/e2e-regression.md) | Console flows, coverage matrix, environment and assertions |
+| [Operations](development/operations.md) | Diagnose failures using call IDs, logs, state, and billing evidence |
 
 ## Maintain these documents
 

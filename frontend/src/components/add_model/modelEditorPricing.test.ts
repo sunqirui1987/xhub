@@ -12,7 +12,7 @@ const baseValues = {
   custom_llm_provider: "openai",
   model: "upstream",
   model_name: "public-name",
-  mode: "chat",
+  endpoint_type: "chat",
   transport: "adapted",
   endpoint_types: ["chat"],
   pricing_source: "manual",
@@ -67,7 +67,7 @@ describe("modelEditorPricing", () => {
         litellm_credential_name: "supplier-a",
         rates,
       },
-      model_info: { mode: "chat", pricing_source: "manual" },
+      model_info: { endpoint_types: ["chat"], transport: "adapted", pricing_source: "manual" },
     };
     const defaults = editorDefaults(original);
     expect(defaults).toMatchObject({ pricing_format: "rates", manual_rates: rates });
@@ -95,7 +95,7 @@ describe("modelEditorPricing", () => {
         aws_region_name: "east",
         organization: "org",
       },
-      model_info: { mode: "chat" },
+      model_info: { endpoint_types: ["chat"], transport: "adapted" },
     };
     const result = buildEditorModel({ ...baseValues, input_cost_per_token: "1" }, original);
     expect(result.litellm_params).toMatchObject({

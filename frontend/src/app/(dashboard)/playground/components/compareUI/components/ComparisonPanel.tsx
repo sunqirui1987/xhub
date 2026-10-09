@@ -13,7 +13,11 @@ import { Slider } from "@/components/ui/slider";
 import { SelectorOption, EndpointConfig, isAgentEndpoint, getComparisonSelection } from "../endpoint_config";
 import { t } from "@/i18n";
 
+import { SearchSelect } from "@/components/shared/SearchSelect";
+
 interface ComparisonPanelProps {
+  supportsGatewaySettings?: boolean;
+  endpointOptions?: { value: string; label: string }[];
   comparison: ComparisonInstance;
   onUpdate: (
     updates: Partial<ComparisonInstance>,
@@ -26,6 +30,11 @@ interface ComparisonPanelProps {
   endpointConfig: EndpointConfig;
   apiKey: string;
 }
+/** ComparisonPanel 展示一张独立对比卡片，先选择模型再选择该模型的文本端点。
+ * 参数 props：模型、端点候选、生成设置及更新回调；返回：卡片界面。
+ * supportsGatewaySettings 只允许已接入客户端的端点显示护栏，避免显示设置却不发送。
+ * 调用：CompareUI。端点和模型改变由父组件验证，不根据 mode 猜测。
+ */
 export function ComparisonPanel({
   comparison,
   onUpdate,
@@ -35,6 +44,8 @@ export function ComparisonPanel({
   isLoadingOptions,
   endpointConfig,
   apiKey,
+  endpointOptions = [],
+  supportsGatewaySettings = false,
 }: ComparisonPanelProps) {
   const isA2AMode = isAgentEndpoint(endpointConfig.id);
   const currentSelection = getComparisonSelection(comparison, endpointConfig.id);
@@ -124,7 +135,9 @@ export function ComparisonPanel({
 
         {/* General Settings */}
         <div>
-          <h4 className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">{t("General Settings")}</h4>
+          <h4 className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+            {t("General Settings")}
+          </h4>
           <div className="space-y-2">
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-0.5">{t("Tags")}</label>
@@ -134,19 +147,21 @@ export function ComparisonPanel({
                 accessToken={apiKey}
               />
             </div>
-            <div>
+            {supportsGatewaySettings && <div>
               <label className="text-xs font-medium text-muted-foreground block mb-0.5">{t("Guardrails")}</label>
               <GuardrailSelector
                 value={comparison.guardrails}
                 onChange={(value) => handleSettingChange("guardrails", value)}
                 accessToken={apiKey}
               />
-            </div>
+            </div>}
           </div>
         </div>
         {/* Advanced Settings */}
         <div>
-          <h4 className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">{t("Advanced Settings")}</h4>
+          <h4 className="text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+            {t("Advanced Settings")}
+          </h4>
           <div className="space-y-2">
             <div className="flex items-center gap-2 pb-1">
               <Checkbox
@@ -214,6 +229,16 @@ export function ComparisonPanel({
             config={endpointConfig}
             onChange={(value) => onUpdate(isA2AMode ? { agent: value } : { model: value })}
           />
+          {!isA2AMode && (
+            <SearchSelect
+              aria-label="端点类型"
+              placeholder="先选模型，再选端点"
+              options={endpointOptions}
+              disabled={!comparison.model || !endpointOptions.length}
+              value={endpointOptions.some((item) => item.value === comparison.endpoint) ? comparison.endpoint : null}
+              onValueChange={(endpoint) => onUpdate({ endpoint })}
+            />
+          )}
           <div className="flex items-center gap-2">
             <Popover
               open={popoverVisible}

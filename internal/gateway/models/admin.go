@@ -11,6 +11,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"github.com/sunqirui1987/xhub/internal/store"
 	"sync"
 )
@@ -335,7 +336,7 @@ func GroupInfo(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"data": playgroundGroups(list)})
 }
 
-// playgroundGroups is the model list behind the playground endpoint picker. Provider shells such as fennoai and qiniu are credentials, not models. A mode copied from the provider wire is reported as chat, matching a hand-added model that leaves mode empty.
+// playgroundGroups 是 Playground 的模型列表；能力从部署的 endpoint_types 读取。
 // 参数 list（[]config.ModelEntry）：候选部署列表，后面按策略挑一条。
 // 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
 // 调用：仅在 admin.go 内使用
@@ -367,10 +368,10 @@ func playgroundGroups(list []config.ModelEntry) []map[string]any {
 			if m.ModelName != name || providerShell(m.ModelInfo) || m.Disabled() {
 				continue
 			}
-			if m.ModelInfo != nil {
-				if v := str(m.ModelInfo["mode"]); v != "" {
-					mode = v
-				}
+			if transport := provider.SelectedTransport(m); transport != provider.AdaptedTransportID {
+				mode = transport
+			} else if caps := provider.SelectedCapabilities(m); len(caps) > 0 {
+				mode = caps[0]
 			}
 			break
 		}
@@ -378,6 +379,7 @@ func playgroundGroups(list []config.ModelEntry) []map[string]any {
 			"model_group": name,
 			"providers":   groups[name],
 			"mode":        mode,
+			"endpoints":   modelEndpointsForAlias(list, name),
 		})
 	}
 	return data
@@ -435,9 +437,6 @@ func LoadStored(s Host) {
 		before := len(row.Info)
 		stripModelOwnership(row.Info)
 		changed = changed || len(row.Info) != before
-		if clearCopiedMode(&row) {
-			changed = true
-		}
 		if changed {
 			if err := s.RecordStore().UpsertProxyModel(row); err != nil {
 				logx.Error("stored model %s: %v", row.ID, err)
@@ -484,4 +483,21 @@ func findModel(list []config.ModelEntry, id string) (int, config.ModelEntry, boo
 		}
 	}
 	return -1, config.ModelEntry{}, false
+}
+
+// modelEndpointsForAlias 合并同一公开模型别名下所有部署的端点绑定。
+// 一个别名可以同时挂在适配对话、原生 Responses 或 Fal 视频 bypass 上，
+// 所以不能只取第一条部署。provider.MergeEndpoints 会按公开协议和传输去重。
+// 参数 list（[]config.ModelEntry）：当前模型部署表；alias（string）：公开模型名。
+// 返回 []provider.EndpointBinding（[]provider.EndpointBinding）：该别名的端点绑定。
+// 调用：Admin/Playground 模型列表。
+// 测试：admin_test.go、bindings_test.go。
+func modelEndpointsForAlias(list []config.ModelEntry, alias string) []provider.EndpointBinding {
+	out := []provider.EndpointBinding{}
+	for _, m := range list {
+		if m.ModelName == alias && !providerShell(m.ModelInfo) {
+			out = provider.MergeEndpoints(out, provider.DeploymentEndpoints(m))
+		}
+	}
+	return out
 }

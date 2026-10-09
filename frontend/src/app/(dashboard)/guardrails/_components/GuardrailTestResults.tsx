@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Clock, Copy } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clock, Copy, ShieldX } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,8 @@ import { t } from "@/i18n";
 interface TestResult {
   guardrailName: string;
   response_text: string;
+  action?: string;
+  reason?: string;
   latency: number;
 }
 
@@ -22,9 +24,23 @@ interface GuardrailTestResultsProps {
   errors: TestError[] | null;
 }
 
+/**
+ * 用途：展示已完成检查和执行异常，区分成功执行后的拦截结果。
+ * 参数：results：含 action/reason 的结果数组；errors：执行错误数组；可为 null。
+ * 返回：React 列表；block 显示拦截样式，保留原因、文本和耗时。
+ * 调用：GuardrailTestPlayground。
+ * 测试：GuardrailTestResults.test.tsx。
+ */
 export function GuardrailTestResults({ results, errors }: GuardrailTestResultsProps) {
   const [collapsedResults, setCollapsedResults] = useState<Set<string>>(new Set());
 
+  /**
+   * 用途：切换指定规则结果的展开状态，复制 Set 以触发 React 更新。
+   * 参数：guardrailName：结果标识。
+   * 返回：void；仅更新折叠状态。
+   * 调用：结果标题点击事件。
+   * 测试：GuardrailTestResults.test.tsx。
+   */
   const toggleResultCollapse = (guardrailName: string) => {
     const newCollapsed = new Set(collapsedResults);
     if (newCollapsed.has(guardrailName)) {
@@ -35,6 +51,13 @@ export function GuardrailTestResults({ results, errors }: GuardrailTestResultsPr
     setCollapsedResults(newCollapsed);
   };
 
+  /**
+   * 用途：复制结果文本，优先使用安全上下文剪贴板，兼容旧浏览器。
+   * 参数：text：待复制结果。
+   * 返回：Promise<boolean>；成功为 true，权限或兼容 API 失败为 false。
+   * 调用：结果复制按钮。
+   * 测试：GuardrailTestResults.test.tsx 的剪贴板用例。
+   */
   const copyToClipboard = async (text: string) => {
     try {
       if (navigator.clipboard && window.isSecureContext) {
@@ -75,8 +98,19 @@ export function GuardrailTestResults({ results, errors }: GuardrailTestResultsPr
       {results &&
         results.map((result) => {
           const isCollapsed = collapsedResults.has(result.guardrailName);
+          // 测试成功表示执行器完成；实际动作仍可能是拦截或修改，不能全部标成放行。
+          let actionLabel = t("已放行");
+          if (result.action === "block") actionLabel = t("已拦截");
+          else if (["modify", "redact"].includes(result.action ?? "")) actionLabel = t("修改后放行");
           return (
-            <Card key={result.guardrailName} className="border-success/20 bg-success/10">
+            <Card
+              key={result.guardrailName}
+              className={
+                result.action === "block"
+                  ? "border-destructive/20 bg-destructive/10"
+                  : "border-success/20 bg-success/10"
+              }
+            >
               <CardContent className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div
@@ -88,8 +122,13 @@ export function GuardrailTestResults({ results, errors }: GuardrailTestResultsPr
                     ) : (
                       <ChevronDown className="size-3 text-muted-foreground" />
                     )}
-                    <Check className="size-4 text-success" />
-                    <span className="text-sm font-medium text-success">{result.guardrailName}</span>
+                    {result.action === "block" ? (
+                      <ShieldX className="size-4 text-destructive" />
+                    ) : (
+                      <Check className="size-4 text-success" />
+                    )}
+                    <span className="text-sm font-medium">{result.guardrailName}</span>
+                    {result.action && <span>{actionLabel}</span>}
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="flex items-center space-x-1 text-xs text-muted-foreground">
@@ -117,6 +156,7 @@ export function GuardrailTestResults({ results, errors }: GuardrailTestResultsPr
                 </div>
                 {!isCollapsed && (
                   <>
+                    {result.reason && <p>{result.reason}</p>}
                     <div className="rounded-sm border border-success/20 bg-background p-3">
                       <label className="mb-2 block text-xs font-medium text-muted-foreground">{t("Output Text")}</label>
                       <div className="font-mono text-sm whitespace-pre-wrap wrap-break-word">
@@ -163,7 +203,8 @@ export function GuardrailTestResults({ results, errors }: GuardrailTestResultsPr
                         className="cursor-pointer text-sm font-medium text-destructive"
                         onClick={() => toggleResultCollapse(errorItem.guardrailName)}
                       >
-                        {t("{value0}- Error", { value0: (errorItem.guardrailName) })}</p>
+                        {t("{value0}- Error", { value0: errorItem.guardrailName })}
+                      </p>
                       <div className="flex items-center space-x-1 text-xs text-muted-foreground">
                         <Clock className="size-3" />
                         <span className="font-medium">{errorItem.latency}ms</span>

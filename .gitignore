@@ -26,3 +26,4 @@ frontend/.e2e-report
 frontend/.next-e2e/
 frontend/tsconfig.e2e.json
 e2e-report.txt
+scripts/__pycache__/

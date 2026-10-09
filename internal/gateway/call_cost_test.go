@@ -64,3 +64,33 @@ func TestCallCostUsesCatalogBaseModelAndManualDoesNotFallThrough(t *testing.T) {
 		t.Fatalf("manual deployment fell through to catalog total=%v ok=%v", total, ok)
 	}
 }
+
+func TestMeasuredVideoBandDoesNotFallThroughExplicitRates(t *testing.T) {
+	dep := config.ModelEntry{ModelName: "video", LiteLLMParams: map[string]any{
+		"model":                 "qiniu/bytedance/doubao-seedance-2-0-260128",
+		"rates":                 []catalog.Rate{{Measure: "token", Side: "output", Variant: "wiv", Window: "all", USD: 1e-6}},
+		"output_cost_per_token": 99.0,
+	}}
+	s := &Server{Cfg: &config.Config{ModelList: []config.ModelEntry{dep}}}
+	u := catalog.Usage{CompletionTokens: 1000, OutputVariant: "woiv"}
+	if _, ok := deploymentCost(dep, u, billingPeak()); ok {
+		t.Fatal("incomplete table fell back to flat price")
+	}
+	if _, _, _, ok, _ := s.callCost("video", "|qiniu/bytedance/doubao-seedance-2-0-260128", u, billingPeak()); ok {
+		t.Fatal("incomplete explicit rates fell through to catalog")
+	}
+}
+
+func TestCallCostKeepsOriginalTaskModelAfterDeploymentEdit(t *testing.T) {
+	const original = "seedance-original-task-model"
+	const changed = "seedance-edited-deployment-model"
+	catalog.SetModel(original, map[string]any{"rates": []catalog.Rate{{Measure: "token", Side: "output", Variant: "woiv", Window: "all", USD: 0.001}}})
+	catalog.SetModel(changed, map[string]any{"rates": []catalog.Rate{{Measure: "token", Side: "output", Variant: "woiv", Window: "all", USD: 0.009}}})
+	t.Cleanup(func() { catalog.RemoveModel(original); catalog.RemoveModel(changed) })
+	dep := config.ModelEntry{ModelName: "task", LiteLLMParams: map[string]any{"model": changed}}
+	s := &Server{Cfg: &config.Config{ModelList: []config.ModelEntry{dep}}}
+	total, _, _, ok, _ := s.callCost("task", "|"+changed, catalog.Usage{CompletionTokens: 1000, OutputVariant: "woiv", PricingModel: original}, billingPeak())
+	if !ok || total != 1 {
+		t.Fatalf("task billed as edited deployment: %v %v", total, ok)
+	}
+}

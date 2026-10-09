@@ -22,6 +22,12 @@
 | [计价与用量](development/pricing.md) | 费率、时段、价格快照、持久化链路 |
 | [运行行为与限制](development/runtime.md) | 缓存、幂等、协议、媒体任务及运行边界 |
 | [测试指南](development/testing.md) | 测试层次、数据库隔离、定向运行、可选演示数据 |
+| [全功能实现说明](development/implementation.md) | 逐项功能契约、实现位置及验收要点 |
+| [HTTP 接口参考](development/api-reference.md) | 实际登记的入口、处理器和源码 |
+| [配置与存储](development/configuration.md) | 设置优先级、模型字段、持久化与运行默认值 |
+| [全链路回归方案](development/regression.md) | 后端逐文件覆盖、真实模型、模板专项及执行流程 |
+| [浏览器回归](development/e2e-regression.md) | 控制台业务矩阵、环境、断言与维护 |
+| [运行排查](development/operations.md) | 按调用 ID、日志、状态与费用证据定位故障 |
 
 各模块的 `readme.md` / `readme_cn.md` 提供英文和中文代码说明。
 

@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RouteTemplatesPanel from "./RouteTemplatesPanel";
-import { createRouteTemplateCall, getRouterSettingsCall, updateRouteTemplateCall } from "@/components/networking";
+import {
+  createRouteTemplateCall,
+  getRouterSettingsCall,
+  updateRouteTemplateCall,
+  setCallbacksCall,
+} from "@/components/networking";
 
 const platform = { routing_strategy: "least-busy", timeout: 45, num_retries: 2, custom_setting: { keep: true } };
 vi.mock("@/components/networking", () => ({
@@ -56,6 +61,24 @@ describe("route template workflow", () => {
           body: expect.objectContaining({ timeout: 30, num_retries: 2, custom_setting: { keep: true } }),
         }),
       ),
+    );
+  });
+
+  it("clears removed model rules in the platform merge patch", async () => {
+    vi.mocked(getRouterSettingsCall).mockResolvedValueOnce({
+      router_settings: { ...platform, model_routing: [{ model_name: "chat", routing_strategy: "cost-based-routing" }] },
+    } as never);
+    const user = setup();
+    await screen.findByText("Fast");
+    const card = screen.getByRole("heading", { name: "Platform default" }).closest("[data-slot=card]")!;
+    await user.click(within(card as HTMLElement).getByRole("button", { name: "Edit" }));
+    const editor = screen.getByRole("region", { name: "Platform default" });
+    await user.click(within(editor).getByRole("button", { name: "Remove rule for chat" }));
+    await user.click(within(editor).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(setCallbacksCall).toHaveBeenCalledWith("fixture", {
+        router_settings: expect.objectContaining({ model_routing: [] }),
+      }),
     );
   });
 

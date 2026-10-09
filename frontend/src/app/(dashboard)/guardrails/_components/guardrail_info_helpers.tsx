@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { scrubBrand } from "@/i18n/brand";
 import aimSecurityLogo from "../../../../../public/assets/logos/aim_security.jpeg";
 import aktoLogo from "../../../../../public/assets/logos/akto.svg";
@@ -40,6 +41,13 @@ export enum GuardrailProviders {
 export let DynamicGuardrailProviders: Record<string, string> = {};
 
 // Function to populate dynamic providers from API response
+/**
+ * 用途：从接口字段声明更新显示名称目录，跳过不含名称的元数据。
+ * 参数：providerParamsResponse：提供商字段响应。
+ * 返回：显示名称映射，同时更新模块目录。
+ * 调用：提供商字段加载。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const populateGuardrailProviders = (providerParamsResponse: Record<string, any>) => {
   const providers: Record<string, string> = {};
 
@@ -69,7 +77,14 @@ export const populateGuardrailProviders = (providerParamsResponse: Record<string
 };
 
 // Function to get current guardrail providers (dynamic or fallback to legacy)
-export const getGuardrailProviders = () => {
+/**
+ * 用途：返回动态提供商目录；尚未加载时使用历史目录。
+ * 参数：无；读取模块内 DynamicGuardrailProviders。
+ * 返回：Record<string, string>，统一键索引类型供未知提供商查询。
+ * 调用：护栏配置、展示名称和字段选择辅助方法。
+ * 测试：guardrail_info_helpers.test.tsx。
+ */
+export const getGuardrailProviders = (): Record<string, string> => {
   return Object.keys(DynamicGuardrailProviders).length > 0 ? DynamicGuardrailProviders : GuardrailProviders;
 };
 
@@ -91,6 +106,13 @@ export const guardrail_provider_map: Record<string, string> = {
 };
 
 // Function to populate provider map from API response - updates the original map
+/**
+ * 用途：从接口维护显示键到执行器 ID 的映射，保留历史映射。
+ * 参数：providerParamsResponse：提供商字段响应。
+ * 返回：void，更新 guardrail_provider_map。
+ * 调用：提供商字段加载。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const populateGuardrailProviderMap = (providerParamsResponse: Record<string, any>) => {
   // Add dynamic providers from API response directly to the main map
   Object.entries(providerParamsResponse).forEach(([key, value]) => {
@@ -109,12 +131,26 @@ export const populateGuardrailProviderMap = (providerParamsResponse: Record<stri
 };
 
 // Normalizes a form "mode" value (string, string[], or empty) into a string array
+/**
+ * 用途：兼容历史字符串与数组格式，过滤非字符串项。
+ * 参数：raw：未知模式值。
+ * 返回：字符串数组，空或对象返回空数组。
+ * 调用：模式表单及展示。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const toModeArray = (raw: unknown): string[] => {
   if (Array.isArray(raw)) return raw.filter((m): m is string => typeof m === "string");
   if (typeof raw === "string") return [raw];
   return [];
 };
 
+/**
+ * 用途：将历史单值、多值和标签模式整理成可读文本，仅负责展示。
+ * 参数：raw：服务器模式值。
+ * 返回：去重后的模式文本，未知格式返回空字符串。
+ * 调用：详情、列表及删除确认。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const formatGuardrailMode = (raw: unknown): string => {
   const flat: string[] = toModeArray(raw);
   if (flat.length > 0) return flat.join(", ");
@@ -127,6 +163,13 @@ export const formatGuardrailMode = (raw: unknown): string => {
 };
 
 // Resolves the supported modes for the selected provider, falling back to the global list
+/**
+ * 用途：优先读取提供商阶段声明，缺失时使用全局声明。
+ * 参数：settings：能力声明；selectedProvider：显示键或 null。
+ * 返回：模式数组或 undefined；不等于执行器实际支持承诺。
+ * 调用：旧版字段编辑器。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const getSupportedModesForProvider = (
   settings: { supported_modes?: string[]; supported_modes_by_provider?: Record<string, string[]> } | null,
   selectedProvider: string | null,
@@ -141,6 +184,13 @@ export const getSupportedModesForProvider = (
 
 // Decides if we should render the PII config settings for a given provider
 // For now we only support PII config settings for Presidio PII
+/**
+ * 用途：判断旧版表单是否展示 Presidio 字段。
+ * 参数：provider：显示键或 null。
+ * 返回：boolean，未知键返回 false。
+ * 调用：历史 PII 配置表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const shouldRenderPIIConfigSettings = (provider: string | null) => {
   if (!provider) {
     return false;
@@ -152,6 +202,13 @@ export const shouldRenderPIIConfigSettings = (provider: string | null) => {
 };
 
 // Decides if we should render the Azure Text Moderation config settings for a given provider
+/**
+ * 用途：判断旧版表单是否展示 Azure 审核字段。
+ * 参数：provider：显示键或 null。
+ * 返回：boolean。
+ * 调用：历史 Azure 配置表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const shouldRenderAzureTextModerationConfigSettings = (provider: string | null) => {
   if (!provider) {
     return false;
@@ -163,6 +220,13 @@ export const shouldRenderAzureTextModerationConfigSettings = (provider: string |
 };
 
 // Decides if we should render the Content Filter config settings for a given provider
+/**
+ * 用途：按显示名称判断旧内容过滤器字段。
+ * 参数：provider：显示键或 null。
+ * 返回：boolean。
+ * 调用：旧版内容过滤器表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const shouldRenderContentFilterConfigSettings = (provider: string | null) => {
   if (!provider) {
     return false;
@@ -173,6 +237,13 @@ export const shouldRenderContentFilterConfigSettings = (provider: string | null)
   return scrubBrand(String(providerEnum ?? "")) === "XHub Content Filter";
 };
 
+/**
+ * 用途：按执行器 ID 判断旧版模型裁判字段。
+ * 参数：provider：显示键或 null。
+ * 返回：boolean。
+ * 调用：历史提供商字段表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const shouldRenderLLMJudgeFields = (provider: string | null) => {
   if (!provider) return false;
   return guardrail_provider_map[provider] === "llm_as_a_judge";
@@ -216,6 +287,13 @@ export const guardrailLogoMap = {
   "Conduct Guard": conductLogo.src,
 } satisfies Record<string, string>;
 
+/**
+ * 用途：查找本地资源图标并兼容品牌名称映射。
+ * 参数：displayName：展示名称。
+ * 返回：图标资源路径或 undefined。
+ * 调用：目录与详情。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const getGuardrailLogo = (displayName: string): string | undefined => {
   const names = [displayName, scrubBrand(displayName)];
   for (const name of names) {
@@ -226,10 +304,21 @@ export const getGuardrailLogo = (displayName: string): string | undefined => {
   return undefined;
 };
 
+/**
+ * 用途：统一解析本地、XGo 和历史提供商名称，未知提供商保留原值。
+ * 参数：guardrailValue：执行器 ID。
+ * 返回：logo 与 displayName 对象。
+ * 调用：列表、详情及统计搜索。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export const getGuardrailLogoAndName = (guardrailValue: string): { logo: string; displayName: string } => {
   if (!guardrailValue) {
     return { logo: "", displayName: "-" };
   }
+
+  if (guardrailValue === "custom_code") return { logo: "", displayName: "XGo" };
+  if (["local", "blocked_words", "redact", "block", "always_block"].includes(guardrailValue))
+    return { logo: "", displayName: t("本地关键词 / 正则") };
 
   // Find the enum key by matching guardrail_provider_map values
   const enumKey = Object.keys(guardrail_provider_map).find(
@@ -251,6 +340,13 @@ export const getGuardrailLogoAndName = (guardrailValue: string): { logo: string;
 /** Tri-state UI value for `litellm_params.skip_system_message_in_guardrail` (inherit = use global). */
 export type SkipSystemMessageChoice = "inherit" | "yes" | "no";
 
+/**
+ * 用途：把系统消息的覆盖值转换为三态选择。
+ * 参数：v：boolean、null 或 undefined。
+ * 返回：继承、跳过或检查选项。
+ * 调用：旧版详情初始化。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export function skipSystemMessageToChoice(v: boolean | null | undefined): SkipSystemMessageChoice {
   if (v === true) return "yes";
   if (v === false) return "no";
@@ -258,6 +354,13 @@ export function skipSystemMessageToChoice(v: boolean | null | undefined): SkipSy
 }
 
 /** Create flow: omit key when inheriting global default. */
+/**
+ * 用途：把系统消息选择转换成创建参数，继承不写覆盖。
+ * 参数：choice：系统消息三态选择。
+ * 返回：boolean 或 undefined。
+ * 调用：旧版创建表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export function choiceToSkipSystemForCreate(choice: SkipSystemMessageChoice | undefined): boolean | undefined {
   if (choice === "yes") return true;
   if (choice === "no") return false;
@@ -267,6 +370,13 @@ export function choiceToSkipSystemForCreate(choice: SkipSystemMessageChoice | un
 /** Tri-state UI value for `litellm_params.skip_tool_message_in_guardrail` (inherit = use global). */
 export type SkipToolMessageChoice = "inherit" | "yes" | "no";
 
+/**
+ * 用途：把工具消息覆盖值转换为三态选择。
+ * 参数：v：boolean、null 或 undefined。
+ * 返回：工具消息三态选项。
+ * 调用：旧版详情初始化。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export function skipToolMessageToChoice(v: boolean | null | undefined): SkipToolMessageChoice {
   if (v === true) return "yes";
   if (v === false) return "no";
@@ -274,6 +384,13 @@ export function skipToolMessageToChoice(v: boolean | null | undefined): SkipTool
 }
 
 /** Create flow: omit key when inheriting global default. */
+/**
+ * 用途：把工具消息选择转换成创建参数，继承不写覆盖。
+ * 参数：choice：工具消息三态选择。
+ * 返回：boolean 或 undefined。
+ * 调用：旧版创建表单。
+ * 测试：guardrail_info_helpers.test.tsx；展示连线由详情集成测试覆盖。
+ */
 export function choiceToSkipToolForCreate(choice: SkipToolMessageChoice | undefined): boolean | undefined {
   if (choice === "yes") return true;
   if (choice === "no") return false;

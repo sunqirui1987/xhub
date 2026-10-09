@@ -3,6 +3,8 @@ package gateway
 import (
 	"testing"
 	"time"
+
+	"github.com/sunqirui1987/xhub/internal/provider"
 )
 
 func TestOfficialTaskPinLastsSevenDays(t *testing.T) {
@@ -14,11 +16,32 @@ func TestOfficialTaskPinLastsSevenDays(t *testing.T) {
 	if got := s.OfficialDeployment("cgt-1"); got != "base|model" {
 		t.Fatalf("pin %q", got)
 	}
-	if s.OfficialBilled("cgt-1") {
-		t.Fatal("new task was already billed")
+}
+
+func TestOfficialContextSurvivesHostReplacement(t *testing.T) {
+	s := &Server{}
+	facts := provider.TaskContext{StartedAt: time.Now().UTC(), Model: "bytedance/model", Resolution: "1080p", HasVideo: true, Known: true}
+	s.PinOfficialContext("scope", facts)
+	restored := &Server{affinity: s.affinity}
+	if got := restored.OfficialContext("scope"); got != facts {
+		t.Fatalf("context lost: %+v", got)
 	}
-	s.MarkOfficialBilled("cgt-1")
-	if !s.OfficialBilled("cgt-1") {
-		t.Fatal("billed flag was not stored")
+	pin := s.affinity["official_context:v1:scope"]
+	if time.Until(pin.until) < officialPinTTL-time.Minute {
+		t.Fatal("wrong context TTL")
+	}
+	if restored.OfficialContext("other").Known {
+		t.Fatal("cross-task context leak")
+	}
+}
+
+func TestOfficialContextSurvivesRedisHostReplacement(t *testing.T) {
+	c := settlementRedis(t)
+	s := &Server{Live: c}
+	facts := provider.TaskContext{StartedAt: time.Now().UTC(), Model: "bytedance/model", Resolution: "480p", Known: true}
+	s.PinOfficialContext("scope", facts)
+	restored := &Server{Live: c}
+	if got := restored.OfficialContext("scope"); got != facts {
+		t.Fatalf("Redis lost billing facts: %+v", got)
 	}
 }

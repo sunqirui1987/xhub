@@ -1,7 +1,7 @@
 // spend.go writes one usage row for every finished inference call, chat and
 // bypass included. recordSpend is the only writer. It copies the exchange
 // (headers, body, response) and the call note (provider, TTFT, session,
-// deployment) that the handler stored under the call id, then deletes them.
+// session) that the handler stored under the call id, then deletes them.
 //
 // Redis, when Live is set, takes the hot spend update and queues the row.
 // Otherwise persistSpend writes PostgreSQL before the response returns.
@@ -101,11 +101,15 @@ func (s *Server) callCost(alias, depID string, usage catalog.Usage, start time.T
 		if c, ok := deploymentCost(dep, usage, start); ok {
 			return c.Total, c.Input, c.Output, true, c
 		}
-		if dep.ModelInfo["pricing_source"] == "manual" {
+		if _, hasRates := deploymentRates(dep.LiteLLMParams); hasRates || dep.ModelInfo["pricing_source"] == "manual" {
 			return 0, 0, 0, false, catalog.Charge{}
 		}
 		if id, _ := dep.ModelInfo["base_model"].(string); id != "" {
 			c, ok := catalog.CostAt(id, usage, start)
+			return c.Total, c.Input, c.Output, ok, c
+		}
+		if usage.PricingModel != "" {
+			c, ok := catalog.CostAt(usage.PricingModel, usage, start)
 			return c.Total, c.Input, c.Output, ok, c
 		}
 		if id := dep.ParamString("model", ""); id != "" && id != alias {
@@ -149,9 +153,7 @@ func deploymentCost(dep config.ModelEntry, usage catalog.Usage, start time.Time)
 	// A rate table on the deployment is the full form and can carry windows and
 	// variants the flat fields have no name for.
 	if rates, ok := deploymentRates(params); ok {
-		if charge, ok := catalog.CostFromRates(rates, usage, start); ok {
-			return charge, true
-		}
+		return catalog.CostFromRates(rates, usage, start)
 	}
 	// Otherwise the flat fields, read through the same biller. A field that is
 	// absent stays absent: the difference between "no price" and "a price of
@@ -316,7 +318,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
 		SessionID: note.SessionID, CachedTokens: cachedColumn(usage),
 		Guardrail:     s.takeGuardrail(callID),
-		PriceSnapshot: catalog.Snapshot(charge),
+		PriceSnapshot: catalog.SnapshotUsage(charge, billed, okc),
 	}
 	if note.SettlementID != "" {
 		row.RequestID = note.SettlementID

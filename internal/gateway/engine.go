@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"strconv"
@@ -118,7 +120,11 @@ func (s *Server) Handler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		raw, _ := io.ReadAll(r.Body)
+		raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<20))
+		if readErr != nil {
+			httpx.WriteTypedError(w, r.URL.Path, http.StatusRequestEntityTooLarge, "invalid_request", "request body exceeds limit or cannot be read")
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
@@ -127,6 +133,22 @@ func (s *Server) Handler() http.Handler {
 			w.Header().Set("x-litellm-model-id", model)
 		}
 		stream, _ := body["stream"].(bool)
+		// 图片编辑可以用 multipart 提交流式请求。必须在幂等响应缓冲之前识别，
+		// 否则 SSE 会被完整缓存后才返回，失去流式行为。这里只读控制字段，不读文件。
+		if media, params, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && media == "multipart/form-data" {
+			parts := multipart.NewReader(bytes.NewReader(raw), params["boundary"])
+			for {
+				part, err := parts.NextPart()
+				if err != nil {
+					break
+				}
+				if part.FormName() == "stream" && part.FileName() == "" {
+					value, _ := io.ReadAll(io.LimitReader(part, 16))
+					stream = strings.TrimSpace(string(value)) == "true"
+				}
+				part.Close()
+			}
+		}
 		idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 		var lease *idempotencyLease
 		if idemKey != "" && !stream {

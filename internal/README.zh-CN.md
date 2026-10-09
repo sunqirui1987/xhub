@@ -27,6 +27,7 @@
 | [logx](logx/readme_cn.md) | 运行日志与秘密脱敏 |
 | [plugin](plugin/readme_cn.md) | 上游调用扩展注册 |
 | [provider](provider/readme_cn.md) | 供应商能力与传输登记 |
+| [providerconfig](providerconfig/readme_cn.md) | 真实供应商测试配置解析与权重周期校验 |
 | [regression](regression/readme_cn.md) | 跨模块业务回归 |
 | [router](router/readme_cn.md) | 部署过滤、排序与加权分流 |
 | [store](store/readme_cn.md) | 框架配置与模型存储 |

@@ -1,4 +1,4 @@
-.PHONY: test run ui tidy e2e e2e-all regression regression-live
+.PHONY: test run ui tidy e2e e2e-all e2e-offline e2e-model-endpoints regression regression-live
 
 test:
 	go test ./...
@@ -11,7 +11,7 @@ regression:
 # The same suite with the live vendor calls enabled. Spends real money and needs
 # XHUB_REGRESSION_FENNO_KEY and XHUB_REGRESSION_QINIU_KEY in the environment.
 regression-live:
-	./scripts/regression.sh -v --live
+	python3 scripts/with-live-vendors.py bash scripts/regression.sh -v --live
 
 run:
 	go run ./cmd/gateway -config configs/config.yaml -addr :4000
@@ -29,8 +29,14 @@ ui:
 tidy:
 	go mod tidy
 
-# Browser e2e: fake upstream + gateway :4000 + Next :3000 + Playwright.
+# Full acceptance includes actual selected suppliers.
 e2e:
+	bash scripts/e2e-all.sh
+
+e2e-all: e2e
+
+e2e-offline:
 	bash scripts/e2e.sh
 
-e2e-all: e2e regression
+e2e-model-endpoints:
+	bash scripts/e2e-model-endpoints.sh

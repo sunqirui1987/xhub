@@ -31,6 +31,19 @@ func TestCollapseSessionsUsesUserForKeylessCalls(t *testing.T) {
 	}
 }
 
+func TestCollapseSessionsDoesNotJoinRowsWithoutCaller(t *testing.T) {
+	rows := []map[string]any{
+		{"request_id": "first", "session_id": "shared"},
+		{"request_id": "second", "session_id": "shared"},
+		{"session_id": "shared"},
+		{"session_id": "shared"},
+	}
+	got := collapseSessions(rows)
+	if len(got) != 4 {
+		t.Fatalf("anonymous calls were merged: %#v", got)
+	}
+}
+
 func assertSessionTotals(t *testing.T, row map[string]any, count int, spend float64, tokens int) {
 	t.Helper()
 	if row["session_total_count"] != count || row["session_total_spend"] != spend || row["session_total_tokens"] != tokens {

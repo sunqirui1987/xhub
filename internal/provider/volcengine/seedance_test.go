@@ -45,7 +45,7 @@ func TestSeedanceModelsAndPaths(t *testing.T) {
 		t.Fatalf("official id %s", got)
 	}
 	in, out, ok := catalog.TokenRates("volcengine/doubao-seedance-2-0-260128")
-	if !ok || in != 7.0/1_000_000 || out != in {
+	if ok {
 		t.Fatalf("price %v %v %v", in, out, ok)
 	}
 	if _, _, ok := catalog.TokenRates("volcengine/doubao-seedance-2-0-fast-260128"); ok {

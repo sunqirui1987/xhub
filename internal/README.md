@@ -27,6 +27,7 @@ iam owns identity and accounting; store owns framework configuration and deploym
 | [logx](logx/readme.md) | Runtime logging and secret redaction |
 | [plugin](plugin/readme.md) | Upstream extension registry |
 | [provider](provider/readme.md) | Provider capabilities and transports |
+| [providerconfig](providerconfig/readme.md) | Live provider test metadata and weight-cycle validation |
 | [regression](regression/readme.md) | Cross-module business regression |
 | [router](router/readme.md) | Deployment filtering, ordering, and weighted split |
 | [store](store/readme.md) | Framework configuration and deployment storage |

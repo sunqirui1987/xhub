@@ -21,16 +21,19 @@ import CredentialModal from "./CredentialModal";
 import CredentialsTable from "./CredentialsTable";
 import { t } from "@/i18n";
 
-const restrictedFields = ["credential_name", "custom_llm_provider"];
+const restrictedFields = ["credential_name", "custom_llm_provider", "provider_id"];
 
+/** 将表单 values 和已过滤的 credentialValues 组成持久化请求；返回凭据契约，新增与编辑共用，无副作用。 */
 const buildCredential = (values: Record<string, unknown>, credentialValues: Record<string, unknown>) => ({
   credential_name: values.credential_name as string,
   credential_values: credentialValues,
   credential_info: {
     custom_llm_provider: values.custom_llm_provider as string,
+    ...(typeof values.provider_id === "string" ? { provider_id: values.provider_id } : {}),
   },
 });
 
+/** 从 values 剔除名称与协议元数据；返回独立认证字典，避免将元数据作为供应商参数。 */
 const withoutRestrictedFields = (values: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(Object.entries(values).filter(([key]) => !restrictedFields.includes(key)));
 
@@ -48,9 +51,10 @@ export default function CredentialsPanel() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isCredentialDeleting, setIsCredentialDeleting] = useState(false);
 
+  /** 保存凭据；values 为表单参数，返回成功布尔值。失败保留弹窗草稿，成功关闭并刷新列表。 */
   const handleUpdateCredential = async (values: Record<string, unknown>) => {
     if (!accessToken) {
-      return;
+      return false;
     }
     try {
       const newCredential = buildCredential(values, stripMaskedSecrets(withoutRestrictedFields(values)));
@@ -58,14 +62,17 @@ export default function CredentialsPanel() {
       toast.success(t("Credential updated successfully"));
       setIsUpdateModalOpen(false);
       await refetchCredentials();
-    } catch (error) {
+      return true;
+    } catch {
       toast.error(t("Failed to update credential"));
+      return false;
     }
   };
 
+  /** 保存凭据；values 为表单参数，返回成功布尔值。失败保留弹窗草稿，成功关闭并刷新列表。 */
   const handleAddCredential = async (values: Record<string, unknown>) => {
     if (!accessToken) {
-      return;
+      return false;
     }
     try {
       const newCredential = buildCredential(values, withoutRestrictedFields(values));
@@ -73,8 +80,10 @@ export default function CredentialsPanel() {
       toast.success(t("Credential added successfully"));
       setIsAddModalOpen(false);
       await refetchCredentials();
-    } catch (error) {
+      return true;
+    } catch {
       toast.error(t("Failed to add credential"));
+      return false;
     }
   };
 

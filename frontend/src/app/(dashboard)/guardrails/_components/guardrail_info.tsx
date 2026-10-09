@@ -1,3 +1,6 @@
+import { GuardrailSectionHeading as SectionHeading } from "./GuardrailSectionHeading";
+import type { GuardrailUISettings } from "./guardrailDetailsTypes";
+import { ModernGuardrailEditor, supportsModernGuardrail } from "./ModernGuardrailEditor";
 import {
   getGuardrailInfo,
   getGuardrailProviderSpecificParams,
@@ -18,7 +21,6 @@ import { FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { SimpleTooltip, TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -52,13 +54,6 @@ const DEFAULT_ON_ITEMS = [
   { label: t("No"), value: false },
 ];
 
-const SectionHeading: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="my-6 flex items-center gap-3">
-    <span className="shrink-0 text-sm font-medium text-foreground">{children}</span>
-    <Separator className="flex-1" />
-  </div>
-);
-
 export interface GuardrailInfoProps {
   guardrailId: string;
   onClose: () => void;
@@ -66,6 +61,13 @@ export interface GuardrailInfoProps {
   isAdmin: boolean;
 }
 
+/**
+ * 用途：读取护栏详情并选择本地、XGo、外部或历史配置编辑器。
+ * 参数：guardrailId、accessToken、isAdmin 和 onClose。
+ * 返回：React 详情；后端负责实际授权。
+ * 调用：GuardrailsPanel。
+ * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+ */
 const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose, accessToken, isAdmin }) => {
   const [guardrailData, setGuardrailData] = useState<any>(null);
   const [guardrailProviderSpecificParams, setGuardrailProviderSpecificParams] = useState<any>(null);
@@ -74,31 +76,7 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
   const form = useForm<GuardrailFormValues>({ defaultValues: {} });
   const [selectedPiiEntities, setSelectedPiiEntities] = useState<string[]>([]);
   const [selectedPiiActions, setSelectedPiiActions] = useState<{ [key: string]: string }>({});
-  const [guardrailSettings, setGuardrailSettings] = useState<{
-    supported_entities: string[];
-    supported_actions: string[];
-    pii_entity_categories: Array<{
-      category: string;
-      entities: string[];
-    }>;
-    supported_modes: string[];
-    content_filter_settings?: {
-      prebuilt_patterns: Array<{
-        name: string;
-        display_name: string;
-        category: string;
-        description: string;
-      }>;
-      pattern_categories: string[];
-      supported_actions: string[];
-      content_categories?: Array<{
-        name: string;
-        display_name: string;
-        description: string;
-        default_action: string;
-      }>;
-    };
-  } | null>(null);
+  const [guardrailSettings, setGuardrailSettings] = useState<GuardrailUISettings | null>(null);
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const [hasUnsavedContentFilterChanges, setHasUnsavedContentFilterChanges] = useState(false);
   const emptyToolPermissionConfig: ToolPermissionConfig = {
@@ -111,7 +89,6 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
   const [toolPermissionDirty, setToolPermissionDirty] = useState(false);
   const [customCodeModalVisible, setCustomCodeModalVisible] = useState(false);
 
-  // Content Filter data ref (managed by ContentFilterManager)
   const contentFilterDataRef = React.useRef<{
     patterns: any[];
     blockedWords: any[];
@@ -124,7 +101,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     categories: [],
   });
 
-  // Memoize onDataChange callback to prevent unnecessary re-renders
+  /**
+   * 用途：记录历史内容过滤器的当前草稿，避免每次变化触发详情刷新。
+   * 参数：patterns、blockedWords、categories 和竞争意图配置。
+   * 返回：void，更新草稿 ref。
+   * 调用：ContentFilterManager。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const handleContentFilterDataChange = useCallback(
     (
       patterns: any[],
@@ -144,6 +127,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     [],
   );
 
+  /**
+   * 用途：加载详情并恢复旧版 PII 选择，失败保留可返回的界面。
+   * 参数：无，读取令牌和规则 ID。
+   * 返回：Promise<void>，更新详情与加载状态。
+   * 调用：初始化和保存后刷新。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const fetchGuardrailInfo = async () => {
     try {
       setLoading(true);
@@ -185,6 +175,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     }
   };
 
+  /**
+   * 用途：加载旧版字段声明，失败不覆盖已有数据。
+   * 参数：无，读取令牌。
+   * 返回：Promise<void>。
+   * 调用：详情初始化。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const fetchGuardrailProviderSpecificParams = async () => {
     try {
       if (!accessToken) return;
@@ -195,6 +192,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     }
   };
 
+  /**
+   * 用途：加载字段能力声明供历史表单展示。
+   * 参数：无，读取令牌。
+   * 返回：Promise<void>。
+   * 调用：详情初始化。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const fetchGuardrailUISettings = async () => {
     try {
       if (!accessToken) return;
@@ -237,6 +241,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     }
   }, [guardrailData, guardrailProviderSpecificParams, form]);
 
+  /**
+   * 用途：恢复已保存工具权限并清除脏状态。
+   * 参数：无，读取规则详情。
+   * 返回：void。
+   * 调用：详情变化及取消编辑。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const resetToolPermissionEditor = useCallback(() => {
     if (guardrailData?.litellm_params?.guardrail === "tool_permission") {
       setToolPermissionConfig({
@@ -260,6 +271,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     resetToolPermissionEditor();
   }, [resetToolPermissionEditor]);
 
+  /**
+   * 用途：更新旧版选中实体列表。
+   * 参数：entity：实体名称。
+   * 返回：void。
+   * 调用：PiiConfiguration。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const handlePiiEntitySelect = (entity: string) => {
     setSelectedPiiEntities((prev) => {
       if (prev.includes(entity)) {
@@ -270,6 +288,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     });
   };
 
+  /**
+   * 用途：记录旧版实体处理动作。
+   * 参数：entity：实体名称；action：动作 ID。
+   * 返回：void。
+   * 调用：PiiConfiguration。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const handlePiiActionSelect = (entity: string, action: string) => {
     setSelectedPiiActions((prev) => ({
       ...prev,
@@ -277,6 +302,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     }));
   };
 
+  /**
+   * 用途：提交旧版配置变化，未修改的内容过滤器字段不覆盖服务器配置。
+   * 参数：values：表单提交值。
+   * 返回：Promise<void>，成功刷新，失败显示错误。
+   * 调用：历史详情保存。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const handleGuardrailUpdate = async (values: GuardrailFormValues) => {
     try {
       if (!accessToken) return;
@@ -476,6 +508,13 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
   useLayoutEffect(() => {
     submitRef.current = handleGuardrailUpdate;
   });
+  /**
+   * 用途：通过 ref 转发最新保存处理器，防止稳定回调读取旧状态。
+   * 参数：values：表单提交值。
+   * 返回：保存处理器的 Promise。
+   * 调用：历史表单提交。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const submitLatest = useCallback((values: GuardrailFormValues) => submitRef.current(values), []);
 
   if (loading) {
@@ -498,11 +537,33 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
     );
   }
 
+  if (supportsModernGuardrail(guardrailData.litellm_params?.guardrail ?? "")) {
+    return (
+      <div className="p-4">
+        {backButton}
+        <ModernGuardrailEditor rule={guardrailData} accessToken={accessToken} isAdmin={isAdmin} onClose={onClose} />
+      </div>
+    );
+  }
+  /**
+   * 用途：格式化历史详情日期用于展示。
+   * 参数：dateString：可选日期字符串。
+   * 返回：本地时间文本或占位符。
+   * 调用：历史详情日期字段。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const formatDate = (dateString?: string) => (dateString ? new Date(dateString).toLocaleString() : "-");
 
   // Format the provider display name and logo
   const { logo, displayName } = getGuardrailLogoAndName(guardrailData.litellm_params?.guardrail || "");
 
+  /**
+   * 用途：复制详情字段并短暂显示成功状态。
+   * 参数：text：可选文本；key：状态索引。
+   * 返回：Promise<void>；空文本不复制。
+   * 调用：历史详情复制按钮。
+   * 测试：guardrail_info.integration.test.tsx；旧工具/PII 分支无新增专门测试。
+   */
   const copyToClipboard = async (text: string | null | undefined, key: string) => {
     const success = await utilCopyToClipboard(text);
     if (success) {
@@ -578,7 +639,7 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                 <p>{t("Created At")}</p>
                 <div className="mt-2">
                   <h3 className="text-lg font-medium">{formatDate(guardrailData.created_at)}</h3>
-                  <p>{t("Last Updated: {value0}", { value0: (formatDate(guardrailData.updated_at)) })}</p>
+                  <p>{t("Last Updated: {value0}", { value0: formatDate(guardrailData.updated_at) })}</p>
                 </div>
               </Card>
             </div>
@@ -589,7 +650,10 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                   <div className="flex justify-between items-center">
                     <p className="font-medium">{t("PII Protection")}</p>
                     <Badge variant="secondary">
-                      {t("{value0} PII entities configured", { value0: (Object.keys(guardrailData.litellm_params.pii_entities_config).length) })}</Badge>
+                      {t("{value0} PII entities configured", {
+                        value0: Object.keys(guardrailData.litellm_params.pii_entities_config).length,
+                      })}
+                    </Badge>
                   </div>
                 </Card>
               )}
@@ -673,7 +737,11 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                   <h3 className="text-lg font-medium">{t("Guardrail Settings")}</h3>
                   {isConfigGuardrail && (
                     <SimpleTooltip content={t("Guardrail is defined in the config file and cannot be edited.")}>
-                      <Info role="img" aria-label={t("Config guardrail details")} className="size-4 text-muted-foreground" />
+                      <Info
+                        role="img"
+                        aria-label={t("Config guardrail details")}
+                        className="size-4 text-muted-foreground"
+                      />
                     </SimpleTooltip>
                   )}
                   {!isEditing &&
@@ -734,7 +802,9 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                           name="skip_system_message_choice"
                           label={labelWithHint(
                             t("Skip system messages in guardrail"),
-                            t("Unified guardrails: omit role: system from guardrail input (LLM still gets full messages). Use global default follows litellm_settings.skip_system_message_in_guardrail."),
+                            t(
+                              "Unified guardrails: omit role: system from guardrail input (LLM still gets full messages). Use global default follows litellm_settings.skip_system_message_in_guardrail.",
+                            ),
                           )}
                         >
                           {(fieldControl) => <SkipMessageSelect control={fieldControl} />}
@@ -745,7 +815,9 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                           name="skip_tool_message_choice"
                           label={labelWithHint(
                             t("Skip tool messages in guardrail"),
-                            t("Unified guardrails: omit role: tool from guardrail input (LLM still gets full messages). Use global default follows litellm_settings.skip_tool_message_in_guardrail."),
+                            t(
+                              "Unified guardrails: omit role: tool from guardrail input (LLM still gets full messages). Use global default follows litellm_settings.skip_tool_message_in_guardrail.",
+                            ),
                           )}
                         >
                           {(fieldControl) => <SkipMessageSelect control={fieldControl} />}
@@ -878,7 +950,10 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                           <p className="font-medium">{t("PII Protection")}</p>
                           <div className="mt-2">
                             <Badge variant="secondary">
-                              {t("{value0} PII entities configured", { value0: (Object.keys(guardrailData.litellm_params.pii_entities_config).length) })}</Badge>
+                              {t("{value0} PII entities configured", {
+                                value0: Object.keys(guardrailData.litellm_params.pii_entities_config).length,
+                              })}
+                            </Badge>
                           </div>
                         </div>
                       )}
@@ -919,7 +994,7 @@ const GuardrailInfoView: React.FC<GuardrailInfoProps> = ({ guardrailId, onClose,
                 guardrail_name: guardrailData.guardrail_name,
                 litellm_params: guardrailData.litellm_params,
               } as EditGuardrailData)
-            : null
+            : undefined
         }
       />
     </div>

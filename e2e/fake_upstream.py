@@ -4,17 +4,72 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class Handler(BaseHTTPRequestHandler):
+    fal_tasks: dict[str, dict] = {}
+
+    def _fal(self, req: dict | None = None) -> bool:
+        """处理本地 Dreamina Fal 创建及查询，供旧七牛凭据的浏览器回归调用。
+
+        参数 req：POST JSON，GET 时为 None；返回：匹配 Fal 路径时为 True。
+        检查 Key 鉴权、固定路径及网关字段移除；保存任务到进程内，服务结束清理，无付费调用。
+        """
+        root = "/queue/byteplus/seedance-2.0"
+        if not self.path.startswith(root):
+            return False
+        if self.headers.get("Authorization") != "Key sk-fake":
+            self.send_error(401)
+            return True
+        if req is not None and self.path == root + "/text-to-video":
+            if "model" in req or req.get("prompt") != "legacy-qiniu-e2e":
+                self.send_error(400, "invalid Fal request body")
+                return True
+            task = "fal-e2e-" + uuid.uuid4().hex
+            self.fal_tasks[task] = req
+            self._json({"request_id": task, "response_url": "https://unused.invalid/" + task,
+                        "status_url": "https://unused.invalid/" + task + "/status"})
+            return True
+        task = self.path.removeprefix(root + "/requests/").removesuffix("/status")
+        if req is None and task in self.fal_tasks:
+            self._json({"status": "COMPLETED", "video": {"url": "https://example.invalid/fal-e2e.mp4"},
+                        "usage": {"completion_tokens": 100}, "resolution": "1080p"})
+        else:
+            self.send_error(404)
+        return True
+
+    def do_GET(self) -> None:
+        """按本地供应商路径返回目录，验证 /v1 双向回退及失败降级。
+
+        参数：无，使用当前 HTTP 请求；返回：无，写入目录或 404 响应。
+        调用：浏览器模型配置 E2E；不访问外部服务，服务器结束即清理。
+        """
+        if self._fal():
+            return
+        if self.path.rstrip("/") in ("/models", "/v1/models",
+                                           "/discovery-v1/v1/models", "/discovery-root/models"):
+            # Deliberately exceed the old 80-option UI limit. Native Fal paths
+            # come from the gateway registry, just as with a real supplier.
+            self._json({"data": [{"id": "gpt-4o-mini"}] + [{"id": f"e2e-model-{i}"} for i in range(154)]})
+            return
+        self.send_error(404)
+
     def do_POST(self) -> None:
+        """读取当前 POST JSON 并返回对应本地推理结果，供浏览器 E2E 调用。
+
+        参数：无；返回：无，写 HTTP 响应；非法 JSON 按空对象处理。
+        Fal 任务由 _fal 校验和保存，其余兼容接口保持原行为，进程结束清理数据。
+        """
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n)
         try:
             req = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError:
             req = {}
+        if self._fal(req):
+            return
         model = req.get("model") or "gpt-4o-mini"
         path = self.path
         if "embeddings" in path:
@@ -86,6 +141,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        # 护栏 E2E 需要观察上游实际收到的请求内容，证明脱敏发生在
+        # 数据面转发之前，而不是只有管理接口的试运行结果正确。
+        message_text = ""
+        for message in req.get("messages", []):
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                message_text += message["content"]
+        if "[手机号已隐藏]" in message_text:
+            self._json({
+                "id": "chatcmpl_e2e_redacted",
+                "object": "chat.completion",
+                "model": model,
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "upstream-saw-redacted"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10},
+            })
             return
         payload = {
             "id": "chatcmpl_e2e",

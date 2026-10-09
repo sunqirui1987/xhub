@@ -30,7 +30,8 @@ func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
 	models := []string{
 		"bytedance/doubao-seedance-2-0-260128",
 		"bytedance/doubao-seedance-2-0-fast-260128",
-		"bytedance/doubao-seedance-2-0-mini-260128",
+		"bytedance/doubao-seedance-2-0-mini-260615",
+		"bytedance/doubao-seedance-2-5-260628",
 	}
 	ends := provider.ModelEndpoints()
 	for _, id := range models {

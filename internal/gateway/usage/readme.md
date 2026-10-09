@@ -5,7 +5,7 @@
 ## Responsibilities and behavior
 
 Reports query spend and logs; activity helpers aggregate dates and scopes; mount.go defines callable endpoints. LogsScope distinguishes owned personal calls, administered team service keys, and platform-wide access. Privileged content reads require audit.
-Pagination defaults to 50 and caps at 200. Session identity uses key first, then user, with legacy session-only fallback. Page summaries differ from total event counts. Every HTTP call has its own call ID, even within one session.
+Pagination defaults to 50 and caps at 200. Session grouping uses the key first, then the user; calls without either identity remain separate even if their session IDs match. Page summaries differ from total event counts. Every HTTP call has its own call ID, even within one session.
 Costs are USD and tokens are raw integers. Zero-cost calls still contribute requests and tokens. Historical provider and rate snapshots are authoritative. Browser timezone offsets use the west-positive convention. Calculate quotes current prices; a zero estimate for unknown pricing is not a free-service guarantee. Prompt logging and write-time redaction govern retained content.
 
 ## Source responsibilities and entry points

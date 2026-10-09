@@ -13,13 +13,16 @@ for (const vendor of vendors) {
       const alias = `e2e-live-${vendor}/${model}`;
       await page.goto(uiPath("/playground"));
       await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
-      await page.getByRole("option", { name: alias, exact: true }).click();
-      const response = page.waitForResponse(res => res.url().includes("/v1/chat/completions") && res.request().method() === "POST", { timeout: 100_000 });
+      await page.getByRole("option").filter({ hasText: alias }).click();
+      const response = page.waitForResponse(res => new URL(res.url()).pathname.endsWith("/chat/completions") && res.request().method() === "POST", { timeout: 100_000 });
       await page.getByTestId("chat-composer-input").fill("Reply with only the word ok.");
       await page.getByTestId("chat-send-button").click();
       const res = await response;
-      expect(res.status(), `real ${vendor} must answer successfully`).toBe(200);
-      await expect(page.getByTestId("message-surface").filter({ hasText: /^ok[.!]?$/i })).toBeVisible({ timeout: 100_000 });
+      const failure = res.status() === 200 ? "" : (await res.text()).slice(0, 600);
+      expect(res.status(), `real ${vendor} must answer successfully; status=${res.status()} ${failure}`).toBe(200);
+      await expect(page.getByTestId("message-surface").filter({
+        has: page.getByText(/^ok[.!]?$/i, { exact: true }),
+      })).toBeVisible({ timeout: 100_000 });
       const callId = res.headers()["x-litellm-call-id"];
       expect(callId, "gateway call id").toBeTruthy();
       const headers = { Authorization: `Bearer ${await sessionBearer(page)}` };

@@ -372,6 +372,7 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                   <MountedFormField label={t("Team")} name="team_id">
                     {(control) => (
                       <Select
+                        items={memberTeams.map((item) => ({ value: item.team_id, label: item.team_alias || item.team_id }))}
                         value={typeof control.value === "string" ? control.value : ""}
                         onValueChange={(value) => chooseMemberTeam(String(value))}
                       >

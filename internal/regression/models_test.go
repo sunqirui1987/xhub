@@ -307,7 +307,7 @@ func TestAddingAModelMakesItCallable(t *testing.T) {
 			"input_cost_per_token":  testInputRate,
 			"output_cost_per_token": testOutputRate,
 		},
-		"model_info": map[string]any{"mode": "chat"},
+		"model_info": map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 
 	// 立刻就能调，不需要重启。
@@ -346,7 +346,7 @@ func TestDeletingAModelStopsIt(t *testing.T) {
 			"api_base":            h.prices.URL + "/v1",
 			"custom_llm_provider": "openai",
 		},
-		"model_info": map[string]any{"mode": "chat"},
+		"model_info": map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 
 	// 删之前能调。
@@ -407,7 +407,7 @@ func TestDisabledModelIsRefused(t *testing.T) {
 			"api_base":            h.prices.URL + "/v1",
 			"custom_llm_provider": "openai",
 		},
-		"model_info": map[string]any{"mode": "chat"},
+		"model_info": map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 	// 停用之前能调，这样后面"调不动"才说明是停用起的效。
 	h.ok(http.MethodPost, "/v1/chat/completions", tn.key, map[string]any{
@@ -456,7 +456,7 @@ func TestUnimplementedProviderNamesItsOwnProblem(t *testing.T) {
 			"api_key":             "sk-fake",
 			"custom_llm_provider": "a-provider-that-does-not-exist",
 		},
-		ModelInfo: map[string]any{"mode": "chat"},
+		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 	admin := h.adminSession()
 	tn := h.provision(t, admin, "noprovider")
@@ -496,7 +496,7 @@ func TestMissingCredentialStillBlamesTheCredential(t *testing.T) {
 			"model":               "openai/regression-nokey",
 			"custom_llm_provider": "openai",
 		},
-		ModelInfo: map[string]any{"mode": "chat"},
+		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 	// newHarness 给没写 api_key 的部署补了一把假密钥，这里显式清掉，
 	// 才能测到"真的没有凭据"这一支。

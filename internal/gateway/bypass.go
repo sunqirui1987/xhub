@@ -27,7 +27,11 @@ func (s *Server) publicEndpoints(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, provider.PublicBody())
 }
 
-// serveBypass handles a request whose path is a bypass endpoint type or a custom endpoint saved on a deployment. Other paths return false.
+// serveBypass 处理已由 provider 目录登记的 bypass 公开路径。
+//
+// bypass 的路径、上游动作、任务字段和用量规则都来自已登记 transport；
+// 部署配置中的自定义 endpoint 不参与匹配。这样模型编辑器、日志和结算
+// 使用同一份结构化事实，不会出现页面能保存但数据面无法执行的声明。
 // 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 返回 bool（bool）：这条请求已经按官方接口处理并写完响应时为真。不是官方路径时为假，继续走后面的路由。
 // 调用：gateway/engine.go
@@ -40,8 +44,8 @@ func (s *Server) serveBypass(w http.ResponseWriter, r *http.Request) bool {
 	if !ok || hit.Transport.Kind != provider.KindBypass {
 		return false
 	}
-	// A pass-through is a real call with a real bill, so which one matched is
-	// worth a line. The adapted loop logs its own choice separately.
+	// bypass 是真实上游调用，也会产生真实费用；记录命中的 transport 和动作，
+	// 便于把请求、任务结算和费用明细对应起来。适配路径由自己的循环记录。
 	logx.Debug("process %s %s step=bypass transport=%s action=%s", r.Method, r.URL.Path, hit.Transport.ID, hit.Action.Name)
 	dataplane.ServeBypass(s, w, r, hit)
 	return true

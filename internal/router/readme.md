@@ -4,15 +4,14 @@
 
 ## Responsibilities and behavior
 
-router.go filters and orders deployments for a public name; adapter.go reads runtime state; split.go performs smooth weighted scheduling. Disabled entries are excluded. Runtime lookup prefers extended deployment identity with legacy fallback.
-DeploymentID is api_base|model for weight overrides. CooldownID also includes pricing/deployment IDs and named credentials without raw secrets. ApplyWeights copies parameters. simple-shuffle favors maximum weight; weighted-split performs proportional scheduling with equal defaults and explicit-zero exclusion.
+router.go filters and orders deployments for a public name; adapter.go reads runtime state; split.go performs smooth weighted scheduling. Disabled entries are excluded. Runtime lookup uses the current deployment identity.
+WeightID uses a stable deployment ID, then pricing ID; without either it is empty and the template cannot override that row. CooldownID combines endpoint, model, pricing/deployment IDs and named credentials without raw secrets. ApplyWeights copies parameters and matches only stable keys. simple-shuffle favors maximum weight; weighted-split performs proportional scheduling with equal defaults and explicit-zero exclusion.
 Routing never grants model access. Ordinary strategies may try an entirely cooled pool; split returns no pool without eligible positive-weight entries. Cost ordering compares current input-token prices, not total predicted request cost. Affinity only reorders eligible candidates.
 
 ## Source responsibilities and entry points
 
 ### adapter.go
 
-- [`func EncodeRequest(op, provider string, body map[string]any, realModel string) ([]byte, error)`](adapter.go) — EncodeRequest turns the public JSON body into the upstream request body. The protocol details live in internal/llm. This wrapper keeps the old name so callers do not each import that package.
 - [`func DecodeResponse(op, provider, alias string, raw []byte) []byte`](adapter.go) — DecodeResponse turns an upstream response into the public shape and puts the caller's model alias back into the model field.
 
 ### router.go
@@ -22,10 +21,10 @@ Exported types: `State`.
 - [`func All(list []config.ModelEntry, alias string) []config.ModelEntry`](router.go) — All returns every deployment under one public model name, before a strategy orders them.
 - [`func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry`](router.go) — Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
 - [`func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry`](router.go) — Pick returns the first deployment from Order. It returns nil when no deployment is usable.
-- [`func DeploymentID(e config.ModelEntry) string`](router.go) — DeploymentID is the physical deployment identity, shaped as api_base|model. Weight overrides use this stable frontend-facing id.
+- [`func WeightID(e config.ModelEntry) string`](router.go) — Weight identity: deployment:<id> from the configured deployment, then pricing:<id>. Returns empty without a stable ID.
 - [`func CooldownID(e config.ModelEntry) string`](router.go) — CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
 - [`func IsSplitStrategy(strategy string) bool`](router.go) — IsSplitStrategy reports whether strategy divides traffic by weight. Hyphens and underscores are the same name. Anything else, including simple-shuffle, is not a split: simple-shuffle still picks the heaviest deployment, and treating it as a split would change that.
-- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — ApplyWeights copies list and sets weight on the deployments named in overrides. The key is DeploymentID (api_base|model). A deployment that is not in the map keeps the weight already on it, which defaults to 1 inside the split. An empty map returns the same slice, so a document that does not configure shares does not allocate or change the pool. The copy matters: ModelList is the process config, and writing weight onto it would leak one request's template into the next request.
+- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — Copies list and applies only a WeightID match. Unmatched deployments retain their own weight (default 1 in split); an empty map returns the input. Copying prevents one request's template from changing shared ModelList.
 - [`func AdapterURL(provider, apiBase, realModel string) string`](router.go) — AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
 - [`func AdapterURLOp(op, provider, apiBase, realModel string) string`](router.go) — AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
 - [`func ValidateStrategy(strategy string) error`](router.go) — ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses. An unknown name returns an error and is not treated as simple-shuffle.
@@ -49,12 +48,14 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Verification and maintenance
 
+
 | Test file | Scenario entry points |
 | --- | --- |
+| [runtime_identity_test.go](runtime_identity_test.go) | TestDatabaseRuntimeIdentityKeepsRetryAndSplitRowsDistinct, TestDatabaseRuntimeIdentityIsolatesCooldown, TestDatabaseRuntimeIdentityIsolatesMetrics, TestCooldownIDPreservesParameterIdentityPrecedence: independent database deployment state. |
 | [cost_regression_test.go](cost_regression_test.go) | `TestCostRoutingUsesSettlementRatePrecedenceAndWindow`, `TestCostRoutingAcceptsValidNumericRates` |
 | [disabled_test.go](disabled_test.go) | `TestAllExcludesDisabledExactAndWildcardDeployments` |
 | [split_test.go](split_test.go) | `TestWeightedSplitFollowsTheConfiguredRatio`, `TestWeightedSplitDoesNotRequireHundred`, `TestSplitWithoutWeightsIsEven`, `TestSplitSkipsACoolingDeployment`, `TestSplitIsEvenAfterACoolingDeploymentReturns`, `TestSplitWithOneDeploymentDoesNotDisturbIt`, `TestSplitWithoutStateFallsBackToHighestWeight`, `TestApplyWeightsUsesTheDocumentWithoutTouchingThePool`, `TestWeightedSplitIsItsOwnStrategy`, `TestSplitKeepsRatioAcrossManyDraws`, `TestCostStrategyDoesNotLetAnUnpricedDeploymentWin` |
-| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsAcceptLegacyPhysicalID` |
+| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsRejectPhysicalIDForNamedCredentials` |
 
 ```bash
 go test ./internal/router -count=1

@@ -28,6 +28,11 @@ function priceSummary(model: EditorModel, rows: Record<string, CatalogRow>) {
     .join(" · ");
 }
 
+function callType(info: Record<string, unknown>): string {
+  if (typeof info.transport === "string" && info.transport !== "adapted") return info.transport;
+  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "chat") : "chat";
+}
+
 export default function AllModelsPanel() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -109,7 +114,7 @@ export default function AllModelsPanel() {
                     </p>
                   </td>
                   <td className="px-5 py-4">
-                    <Badge variant="outline">{String(model.model_info.mode ?? "chat")}</Badge>
+                    <Badge variant="outline">{callType(model.model_info)}</Badge>
                   </td>
                   <td className="px-5 py-4">
                     <p className="whitespace-nowrap">{priceSummary(model, rows)}</p>

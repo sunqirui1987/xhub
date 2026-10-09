@@ -68,7 +68,7 @@ describe("useAuthorized under SERVER_ROOT_PATH", () => {
     });
 
     expect(replaceMock).toHaveBeenCalledTimes(1);
-    const { origin, pathname } = new URL(replaceMock.mock.calls[0][0] as string);
+    const { origin, pathname } = new URL(replaceMock.mock.calls[0][0] as string, window.location.origin);
     expect(origin).toBe("http://proxy.example");
     expect(pathname).toBe("/llmproxy/ui/login/");
   });

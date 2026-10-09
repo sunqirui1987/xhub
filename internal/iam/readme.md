@@ -21,6 +21,10 @@ Exported types: `DB`, `Actor`, `Audit`, `AuditFilter`.
 - [`func (db *DB) ListAudit(ctx context.Context, limit, offset int) ([]AuditEntry, error)`](db.go) — ListAudit returns the newest rows first.
 - [`func (db *DB) QueryAudit(ctx context.Context, filter AuditFilter, limit, offset int) ([]AuditEntry, int64, error)`](db.go) — QueryAudit returns matching rows and their total, newest first.
 
+### audit_display.go
+
+`enrichAudit` fills actor and object display names only after authorization and pagination. Immutable `actor_name`, `actor_email`, and `object_name` snapshots in the audit detail take precedence over current names; rows without snapshots use batched lookups for the current page across users, organizations, teams, projects, keys, and route templates. Deleted objects can remain unnamed rather than broadening scope. `applyAuditSearch` applies the same identity, event, and name predicates before counting and pagination. Its `strpos` predicates treat `%` and `_` literally. These functions implement `QueryAudit` and do not add an HTTP endpoint.
+
 ### keys.go
 
 Exported types: `Key`, `APIKey`, `KeyInput`, `KeyFilter`.
@@ -173,8 +177,10 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Verification and maintenance
 
+
 | Test file | Scenario entry points |
 | --- | --- |
+| [audit_test.go](audit_test.go) | TestQueryAuditFiltersBeforePagination, TestAuditNamesSurviveRenameAndDeletion: filtering before pagination and historical names after changes. |
 | [db_zone_test.go](db_zone_test.go) | `TestSessionZoneIsNamedOnTheConnection`, `TestServerZoneUsesThePosixSign`, `TestSessionZoneIsAppliedByTheServer`, `TestSessionZoneSurvivesAnUnparseableDSN` |
 | [route_template_test.go](route_template_test.go) | `TestTemplateBodyRoundTripsAsRouterSettings`, `TestTemplateWithAnUnreadableBodyFallsBackToEmpty`, `TestTemplateNamesAreUnique`, `TestRenameKeepsTheTemplateUsable`, `TestScopeSelectionRoundTrips`, `TestBindingRefusesAnUnknownTemplate`, `TestBindingRefusesAnUnknownScopeName`, `TestUsageListsEveryScopeThatSelectsTheTemplate`, `TestDeletingATemplateInUseIsRefusedByTheCaller`, `TestDeletingAMissingTemplateReportsIt`, `TestListRouteTemplatesIsOrderedByName`, `TestADanglingTemplateIdIsRejectedByTheDatabase` |
 | [usage_idempotency_test.go](usage_idempotency_test.go) | `TestRecordUsageRejectsInvalidBatchBeforeWriting`, `TestRecordUsageConcurrentSettlement`, `TestRecordUsageIsIdempotentOnRequestID`, `TestRecordUsageDropsDuplicatesWithinOneBatch`, `TestRecordUsageCountsDistinctRequests`, `TestRecordUsageRollsBackTheWholeBatch` |

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -18,6 +19,8 @@ type Row struct {
 	Output       float64
 	Priced       bool
 	Official     string
+	PriceModel   string
+	PriceSource  string
 }
 
 // ProviderField is one credential input appended for a provider the embedded
@@ -42,6 +45,7 @@ type ProviderRow struct {
 var (
 	extraProviders []ProviderRow
 	officialAlias  = map[string]string{}
+	contributions  = map[string]Row{}
 )
 
 // Contribute inserts a model into the price map and the per-provider index. The official id is remembered so a bill for that id finds the same rates.
@@ -58,6 +62,33 @@ func Contribute(row Row) {
 	}
 	modelCostMu.Lock()
 	defer modelCostMu.Unlock()
+	contributions[row.ID] = row
+	contributeLocked(row)
+}
+
+// refreshContributionsLocked restores provider registrations after a feed reload.
+// The caller holds modelCostMu; prices are rebound against the new feed source.
+// 参数：无；调用方已持有 modelCostMu。
+// 返回：无；已登记的贡献按 ID 顺序重新绑定。
+// 调用：价格 feed 重载路径。
+// 测试：price_binding_test.go。
+func refreshContributionsLocked() {
+	ids := make([]string, 0, len(contributions))
+	for id := range contributions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		contributeLocked(contributions[id])
+	}
+}
+
+// contributeLocked writes one registration into the catalog while modelCostMu is held.
+// 参数 row（Row）：要写入价格表和供应商索引的登记。
+// 返回：无；同名官方费率存在时避免用空价格覆盖它。
+// 调用：Contribute、refreshContributionsLocked。
+// 测试：price_binding_test.go。
+func contributeLocked(row Row) {
 	raw, _ := modelCostMapValue.(map[string]any)
 	if raw == nil {
 		raw = map[string]any{}
@@ -68,12 +99,13 @@ func Contribute(row Row) {
 	// 价目表里已经有这个官方 id 时，再插一条没有费率的网关名会挡住它。
 	// 查价先撞上这条空行，带供应商前缀的部署就算不出钱。这种登记只把网关名
 	// 指回已有的那一行，不另造空壳，也不把官方 id 改指到空壳上。
-	shadow := official != "" && official != row.ID && officialExists && !row.Priced
+	shadow := official != "" && official != row.ID && officialExists && !row.Priced && row.PriceModel == ""
 	if _, exists := raw[row.ID]; !exists && !shadow {
 		entry := map[string]any{
 			"litellm_provider": row.Provider,
 			"mode":             row.Mode,
 			"source":           row.Source,
+			"price_binding":    row.PriceModel != "",
 		}
 		if row.Priced {
 			entry["input_cost_per_token"] = row.Input
@@ -81,6 +113,16 @@ func Contribute(row Row) {
 		}
 		if row.EndpointType != "" {
 			entry["endpoint_type"] = row.EndpointType
+		}
+		// Bind a seller's model only to its explicitly verified price source.
+		if row.PriceModel != "" && row.PriceSource != "" {
+			if price, ok := raw[row.PriceModel].(map[string]any); ok && price["source"] == row.PriceSource {
+				if rates, ok := rateTableOf(price); ok {
+					entry["rates"] = rates
+					entry["source"] = row.PriceSource
+					entry["price_model"] = row.PriceModel
+				}
+			}
 		}
 		raw[row.ID] = entry
 	}
@@ -92,7 +134,7 @@ func Contribute(row Row) {
 	if official != "" && official != row.ID {
 		if shadow {
 			officialAlias[row.ID] = official
-		} else {
+		} else if row.PriceModel == "" {
 			officialAlias[official] = row.ID
 		}
 	}

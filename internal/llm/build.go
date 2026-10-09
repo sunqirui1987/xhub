@@ -157,7 +157,7 @@ func buildOpenAIWire(ctx context.Context, in Request) (Upstream, error) {
 		}
 		return up, nil
 	}
-	return legacy(in)
+	return buildNonChatWire(in)
 }
 
 // buildAzure builds a request on the Azure deployment path. The model name goes in the deployment segment of the URL, not in the model field of the body.
@@ -512,12 +512,12 @@ func buildShared(in Request) (Upstream, error) {
 	return Upstream{}, errUnknownProvider
 }
 
-// legacy is the old encoding entry. New callers should not depend on the field names here.
+// buildNonChatWire encodes supported OpenAI-style operations beyond chat.
 // 参数 in（Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 调用：仅在 build.go 内使用
 // 测试：无直接单测
 // 返回 Upstream（Upstream）：编好的上游请求，含 URL、头和正文；error（error）：失败原因，nil 表示成功。
-func legacy(in Request) (Upstream, error) {
+func buildNonChatWire(in Request) (Upstream, error) {
 	raw, err := Encode(in.Op, in.Provider, cloneMap(in.Body), in.Model)
 	if err != nil {
 		return Upstream{}, err

@@ -92,13 +92,6 @@ func TestCompletionIsNotPartOfChat(t *testing.T) {
 // 返回：无。
 func TestUnregisteredOpsAreNotCapabilities(t *testing.T) {
 	for _, op := range []string{"realtime", "batch", "ocr", "count_tokens", ""} {
-		if op == "" {
-			// 空 op 和 chat 是一回事，必须能认出。
-			if got, ok := provider.CapabilityForOp(op); !ok || got != "chat" {
-				t.Fatalf("an empty op must mean chat, got %q known=%v", got, ok)
-			}
-			continue
-		}
 		if got, ok := provider.CapabilityForOp(op); ok {
 			t.Fatalf("op %s was mapped to capability %q; it must not be selectable", op, got)
 		}
@@ -127,12 +120,12 @@ func TestImageCoversGenerationAndEdit(t *testing.T) {
 func TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp(t *testing.T) {
 	chat := capabilityEntry("chat-model", map[string]any{"endpoint_types": []any{"chat"}})
 	embed := capabilityEntry("embed-model", map[string]any{"endpoint_types": []any{"embedding"}})
-	// 旧行只有 mode，值是存量类型 id。
-	legacyEmbed := capabilityEntry("legacy-embed", map[string]any{"mode": "embedding"})
+	// 明确只声明向量能力。
+	legacyEmbed := capabilityEntry("second-embed", map[string]any{"endpoint_types": []any{"embedding"}})
 	// 两种能力都答。
 	both := capabilityEntry("both-model", map[string]any{"endpoint_types": []any{"chat", "embedding"}})
 	// 内置 Bypass：不能进适配池。
-	bypass := capabilityEntry("qiniu/bytedance/doubao-seedance-2-0-260128", map[string]any{"mode": "qiniu_contents_generation"})
+	bypass := capabilityEntry("qiniu/bytedance/doubao-seedance-2-0-260128", map[string]any{"transport": "qiniu_contents_generation"})
 
 	candidates := []config.ModelEntry{chat, embed, legacyEmbed, both, bypass}
 
@@ -145,7 +138,7 @@ func TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp(t *testing.T) {
 
 	t.Run("embedding keeps embedding deployments and drops chat", func(t *testing.T) {
 		got := poolNames(provider.AdaptedPool(candidates, "embeddings"))
-		if !sameSet(got, []string{"embed-model", "legacy-embed", "both-model"}) {
+		if !sameSet(got, []string{"embed-model", "second-embed", "both-model"}) {
 			t.Fatalf("embedding pool %v", got)
 		}
 	})
@@ -167,11 +160,15 @@ func TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp(t *testing.T) {
 		}
 	})
 
-	t.Run("an unknown op is left to the existing path", func(t *testing.T) {
-		// 认不出的 op 不在这里下结论：交给原来那条路去处理，它会给出自己的错误。
+	t.Run("an unknown op cannot select an adapted deployment", func(t *testing.T) {
+		// 新系统没有未声明入口的兼容语义；未知或空操作名必须得到空池，
+		// 让上层返回明确错误，而不是把请求交给任意适配部署。
 		got := poolNames(provider.AdaptedPool(candidates, "something-new"))
-		if !sameSet(got, []string{"chat-model", "embed-model", "legacy-embed", "both-model"}) {
+		if len(got) != 0 {
 			t.Fatalf("unknown op pool %v", got)
+		}
+		if got := provider.AdaptedPool(candidates, ""); len(got) != 0 {
+			t.Fatalf("empty op pool %v", got)
 		}
 	})
 }
@@ -180,6 +177,12 @@ func TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp(t *testing.T) {
 // 参数 name（string）：对外模型名；info（map[string]any）：model_info 的内容。
 // 返回 config.ModelEntry（config.ModelEntry）：可放进候选池的部署。
 func capabilityEntry(name string, info map[string]any) config.ModelEntry {
+	if info == nil {
+		info = map[string]any{}
+	}
+	if _, ok := info["transport"]; !ok {
+		info["transport"] = "adapted"
+	}
 	return config.ModelEntry{ModelName: name, ModelInfo: info}
 }
 

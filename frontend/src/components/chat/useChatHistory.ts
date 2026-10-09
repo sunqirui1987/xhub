@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { AssistantMessageUpdate, ChatMessage, Conversation } from "./types";
 import { t } from "@/i18n";
 import { randomId } from "@/utils/randomId";
@@ -66,11 +66,14 @@ export function useChatHistory(
   renameConversation: (id: string, newTitle: string) => void;
   setActiveConversationId: (id: string | null) => void;
 } {
+  // Storage is unavailable on the server. Hydrate with the server's empty
+  // snapshot before reading saved conversations or showing a storage warning.
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
   const [conversations, setConversations] = useState<Conversation[]>(
-    () => loadFromStorage(storageKeyFor(userId)).conversations,
+    () => hydrated ? loadFromStorage(storageKeyFor(userId)).conversations : [],
   );
   const [storageUnavailable, setStorageUnavailable] = useState<boolean>(
-    () => loadFromStorage(storageKeyFor(userId)).storageUnavailable,
+    () => hydrated ? loadFromStorage(storageKeyFor(userId)).storageUnavailable : false,
   );
   const [staleId, setStaleId] = useState(false);
   const [currentActiveId, setCurrentActiveId] = useState<string | null>(activeConversationId);
@@ -85,8 +88,10 @@ export function useChatHistory(
 
   // Reload conversations from storage whenever userId changes (e.g. auth resolving after mount)
   const [prevUserId, setPrevUserId] = useState(userId);
-  if (userId !== prevUserId) {
+  const [prevHydrated, setPrevHydrated] = useState(hydrated);
+  if (userId !== prevUserId || hydrated !== prevHydrated) {
     setPrevUserId(userId);
+    setPrevHydrated(hydrated);
     const { conversations: loaded, storageUnavailable: unavailable } = loadFromStorage(storageKeyFor(userId));
     setConversations(loaded);
     setStorageUnavailable(unavailable);
@@ -98,14 +103,14 @@ export function useChatHistory(
 
   // Persist to localStorage after every conversations change
   useEffect(() => {
-    if (storageUnavailable) return;
+    if (!hydrated || storageUnavailable) return;
     const success = saveToStorage(storageKeyFor(userId), conversations);
     if (!success) {
       // Defer: a setState call directly in an effect body causes a synchronous
       // cascading render; queuing it as a microtask callback avoids that.
       queueMicrotask(() => setStorageUnavailable(true));
     }
-  }, [conversations, userId, storageUnavailable]);
+  }, [conversations, userId, storageUnavailable, hydrated]);
 
   const createConversation = useCallback((model: string): string => {
     const id = randomId();

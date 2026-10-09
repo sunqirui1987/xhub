@@ -20,6 +20,8 @@ func ProtocolGroup(provider string) (string, bool) {
 	logTraceOnceGroups.Do(func() { logx.Trace("enter llm.ProtocolGroup") })
 
 	switch provider {
+	case "qiniu":
+		return "openai", true
 	case "ai21":
 		return "openai_byte_compatible", true
 	case "aiohttp_openai":

@@ -161,7 +161,7 @@ func PublicBody(path string) any {
 		// catalog so a caller gets an empty list rather than a 404.
 		return []any{}
 	case strings.Contains(p, "/public/providers/fields"):
-		return mergeProviders(Providers())
+		return CredentialProviders()
 	case strings.Contains(p, "/public/autorouter_presets"):
 		return unmarshalOr(Embedded("autorouter_presets", autoRouterPresetsJSON), map[string]any{"presets": []any{}})
 	case strings.Contains(p, "blog_posts"):

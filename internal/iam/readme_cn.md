@@ -21,6 +21,10 @@ schema.sql 定义表与约束；db.go 建库连接并协调应用、会话和数
 - [`func (db *DB) ListAudit(ctx context.Context, limit, offset int) ([]AuditEntry, error)`](db.go) — ListAudit returns the newest rows first.
 - [`func (db *DB) QueryAudit(ctx context.Context, filter AuditFilter, limit, offset int) ([]AuditEntry, int64, error)`](db.go) — QueryAudit returns matching rows and their total, newest first.
 
+### audit_display.go
+
+`enrichAudit` 在已授权、已分页的审计结果上补充操作者和对象的显示名。事件详情中保存的 `actor_name`、`actor_email`、`object_name` 快照优先于当前名称，保证改名后历史记录仍显示当时的事实；缺少快照的记录才按当前页批量查询用户、组织、团队、项目、密钥和路由模板。已删除对象没有可查名称时保持空值，不扩大查询范围。`applyAuditSearch` 在计数与分页之前，对事件编号、动作、身份、对象及名称应用相同的搜索条件，并用 `strpos` 将 `%` 和 `_` 当成普通字符，避免用户输入改变匹配语义。这两个函数是 `QueryAudit` 的内部实现，不新增 HTTP 入口。
+
 ### keys.go
 
 公开类型：`Key`, `APIKey`, `KeyInput`, `KeyFilter`.
@@ -173,8 +177,10 @@ schema.sql 定义表与约束；db.go 建库连接并协调应用、会话和数
 
 ## 验证与维护入口
 
+
 | 测试文件 | 场景入口 |
 | --- | --- |
+| [audit_test.go](audit_test.go) | TestQueryAuditFiltersBeforePagination、TestAuditNamesSurviveRenameAndDeletion：审计搜索先过滤再分页，历史名称在改名及删除后保留。 |
 | [db_zone_test.go](db_zone_test.go) | `TestSessionZoneIsNamedOnTheConnection`, `TestServerZoneUsesThePosixSign`, `TestSessionZoneIsAppliedByTheServer`, `TestSessionZoneSurvivesAnUnparseableDSN` |
 | [route_template_test.go](route_template_test.go) | `TestTemplateBodyRoundTripsAsRouterSettings`, `TestTemplateWithAnUnreadableBodyFallsBackToEmpty`, `TestTemplateNamesAreUnique`, `TestRenameKeepsTheTemplateUsable`, `TestScopeSelectionRoundTrips`, `TestBindingRefusesAnUnknownTemplate`, `TestBindingRefusesAnUnknownScopeName`, `TestUsageListsEveryScopeThatSelectsTheTemplate`, `TestDeletingATemplateInUseIsRefusedByTheCaller`, `TestDeletingAMissingTemplateReportsIt`, `TestListRouteTemplatesIsOrderedByName`, `TestADanglingTemplateIdIsRejectedByTheDatabase` |
 | [usage_idempotency_test.go](usage_idempotency_test.go) | `TestRecordUsageRejectsInvalidBatchBeforeWriting`, `TestRecordUsageConcurrentSettlement`, `TestRecordUsageIsIdempotentOnRequestID`, `TestRecordUsageDropsDuplicatesWithinOneBatch`, `TestRecordUsageCountsDistinctRequests`, `TestRecordUsageRollsBackTheWholeBatch` |

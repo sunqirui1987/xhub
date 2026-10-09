@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -139,12 +140,36 @@ const createQueryClient = () =>
     },
   });
 
+/** 观察 RHF 上传值，返回 output；上传用例调用，无外部请求，RTL 卸载清理。 */
 const VertexCredentialsProbe = () => {
   const { watch } = useFormContext<MountedFormValues>();
   return <output data-testid="vertex-credentials">{String(watch("vertex_credentials") ?? "")}</output>;
 };
 
+/** 观察默认地址的实际表单值，返回 output；供默认值用例使用，无持久化副作用。 */
+const DefaultBaseProbe = () => {
+  const {getValues}=useFormContext<MountedFormValues>();
+  const [value,setValue]=useState("");
+  return <><button onClick={()=>setValue(String(getValues("api_base")??""))}>Read stored default</button><output data-testid="default-base">{value}</output></>;
+};
 describe("ProviderSpecificFields", () => {
+  /** 验证默认地址进入实际 RHF 状态，前置空表单；独立 QueryClient 与 RTL 自动清理。 */
+  it("registers untouched defaults in form state",async()=>{
+    render(<QueryClientProvider client={createQueryClient()}><MountedFormHost>
+      <ProviderSpecificFields selectedProvider="OpenAI"/><DefaultBaseProbe/>
+    </MountedFormHost></QueryClientProvider>);
+    await screen.findByLabelText("OpenAI API Key");
+    fireEvent.click(screen.getByRole("button",{name:"Read stored default"}));
+    await waitFor(()=>expect(screen.getByTestId("default-base")).toHaveTextContent("https://api.openai.com/v1"));
+  });
+  /** 验证未知供应商不会回退到已缓存字段；无前置数据，独立查询及渲染自动清理。 */
+  it("does not render stale fields for an unknown provider",async()=>{
+    render(<QueryClientProvider client={createQueryClient()}><MountedFormHost>
+      <ProviderSpecificFields selectedProvider="does-not-exist"/>
+    </MountedFormHost></QueryClientProvider>);
+    await waitFor(()=>expect(screen.queryByText("Loading provider fields...")).not.toBeInTheDocument());
+    expect(screen.queryByLabelText("API Base")).not.toBeInTheDocument();
+  });
   it("reads a picked service-account file into the vertex credentials field", async () => {
     const queryClient = createQueryClient();
     render(

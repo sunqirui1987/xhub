@@ -11,18 +11,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/provider"
 )
-
-// legacyClaudeUserID is Claude Code's older metadata.user_id:
-// user_{device}_account_{account}_session_{uuid}.
-var legacyClaudeUserID = regexp.MustCompile(`^user_[a-fA-F0-9]{64}_account_[a-fA-F0-9-]*_session_([a-fA-F0-9-]{36})$`)
 
 const affinityTTL = time.Hour
 
@@ -156,9 +152,6 @@ func claudeSession(raw string) string {
 		if json.Unmarshal([]byte(raw), &doc) == nil && doc.SessionID != "" {
 			return doc.SessionID
 		}
-	}
-	if m := legacyClaudeUserID.FindStringSubmatch(raw); len(m) == 2 {
-		return m[1]
 	}
 	return ""
 }
@@ -330,24 +323,6 @@ func (s *Server) OfficialDeployment(taskID string) string {
 	return dep
 }
 
-// 判断这个官方任务是否已经记过用量。
-// 参数 taskID（string）：官方任务 id。后续查询和计费靠它找回创建时的部署。
-// 返回 bool（bool）：这个官方任务已经记过一次用量时为真。没有标记时为假，下一次带用量的请求才记账。
-// 调用：dataplane/host.go、dataplane/official.go
-// 测试：affinity_pin_test.go、bypass_logic_test.go、failure_log_test.go
-func (s *Server) OfficialBilled(taskID string) bool {
-	return s.affinityGet("official_billed:v1:"+taskID) != ""
-}
-
-// 标记这个官方任务已经记过用量，避免创建和后续查询重复扣费。
-// 参数 taskID（string）：官方任务 id。后续查询和计费靠它找回创建时的部署。
-// 返回：无。这个官方任务已标成扣过一次费，有效期与任务钉相同。
-// 调用：dataplane/host.go、dataplane/official.go
-// 测试：affinity_pin_test.go、bypass_logic_test.go、failure_log_test.go
-func (s *Server) MarkOfficialBilled(taskID string) {
-	s.affinitySetFor("official_billed:v1:"+taskID, "1", officialPinTTL)
-}
-
 // 按给定的有效期写入粘滞键。键或部署为空时不做任何事。
 // 参数 key（string）：缓存或配置表的键；deployment（string）：部署 id。空串表示当前没有钉住的部署；ttl（time.Duration）：一段时间。零值表示改用调用方约定的默认时长，例如会话一小时、官方任务七天。
 // 返回：无。粘滞键已按给定有效期写下。有 Redis 时写 Redis，否则只留在进程内。键或部署为空时不写。
@@ -371,4 +346,27 @@ func (s *Server) affinitySetFor(key, deployment string, ttl time.Duration) {
 		}
 	}
 	s.affinity[key] = affinityPin{deployment: deployment, until: time.Now().Add(ttl)}
+}
+
+// PinOfficialContext keeps only creation-time billing facts, with the task pin TTL.
+// 参数 scope（string）：任务作用域键；facts（provider.TaskContext）：创建时的计费事实。
+// 返回：无。
+// 调用：数据面的官方任务创建流程。
+// 测试：affinity_pin_test.go。
+func (s *Server) PinOfficialContext(scope string, facts provider.TaskContext) {
+	raw, err := json.Marshal(facts)
+	if err == nil {
+		s.affinitySetFor("official_context:v1:"+scope, string(raw), officialPinTTL)
+	}
+}
+
+// OfficialContext reads creation-time facts for a pinned official task.
+// 参数 scope（string）：任务作用域键。
+// 返回 provider.TaskContext：保存的事实；缺失时为零值。
+// 调用：数据面的官方任务轮询结算流程。
+// 测试：affinity_pin_test.go。
+func (s *Server) OfficialContext(scope string) provider.TaskContext {
+	var facts provider.TaskContext
+	_ = json.Unmarshal([]byte(s.affinityGet("official_context:v1:"+scope)), &facts)
+	return facts
 }

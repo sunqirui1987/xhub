@@ -212,6 +212,18 @@ describe("CredentialsPanel", () => {
     expect(payload.credential_values).toEqual({ api_base: "https://proxy.e2e.example.com/v1" });
   });
 
+  /** 验证编辑保存失败保留弹窗且不刷新；前置管理员和网络错误，独立 mock 自动清理。 */
+  it("keeps edit modal open when update fails", async () => {
+    mockUseAuthorized.mockReturnValue({ accessToken: "test-token", userRole: "Admin" });
+    const refetch=vi.fn();mockUseCredentials.mockReturnValue({data:{credentials},isLoading:false,refetch});
+    vi.mocked(credentialUpdateCall).mockRejectedValueOnce(new Error("offline"));renderPanel();
+    await userEvent.click(screen.getByTestId("credential-actions-openai-key"));
+    await userEvent.click(await screen.findByTestId("credential-action-edit"));
+    await userEvent.click(screen.getByTestId("credential-modal-edit-submit"));
+    await waitFor(()=>expect(toast.error).toHaveBeenCalledWith("Failed to update credential"));
+    expect(screen.getByTestId("credential-modal-edit-submit")).toBeVisible();expect(refetch).not.toHaveBeenCalled();
+  });
+
   describe("Admin Viewer write-action gating", () => {
     // Admin Viewer can VIEW credentials but must not add / edit / delete them.
     it("hides the Add Credential button but still lists credentials", () => {

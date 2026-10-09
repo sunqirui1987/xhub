@@ -22,6 +22,7 @@ interface ProviderSpecificFieldsProps {
   selectedProvider: string | null;
 }
 
+/** 读取上传文件；file 为服务账号文件，onLoaded 接收文本。返回无；上传控件调用，异步读取不写入磁盘。 */
 const readTextFile = (file: File, onLoaded: (contents: string) => void) => {
   const reader = new FileReader();
   reader.onload = (event) => {
@@ -48,9 +49,11 @@ export interface CredentialValues {
   value: string;
 }
 
+/** 将 value 转为受控文本，fallback 为默认值；返回字符串，供文本与密钥控件调用，无副作用。 */
 const controlledTextValue = (value: unknown, fallback?: string): string =>
   typeof value === "string" ? value : (fallback ?? "");
 
+/** 从 apiBase 查询参数解析 Azure 版本，返回版本或 null；地址变化调用，不修改源地址。 */
 const getApiVersionFromApiBase = (apiBase: string): string | null => {
   const queryStartIndex = apiBase.indexOf("?");
   if (queryStartIndex === -1) {
@@ -63,6 +66,7 @@ const getApiVersionFromApiBase = (apiBase: string): string | null => {
   return searchParams.get("api_version") || searchParams.get("api-version");
 };
 
+/** 将后台 field 转换为 UI 字段；返回类型、默认值和校验定义，未知类型降级文本，不修改源数据。 */
 const mapFieldMetadataToUiField = (field: ProviderCredentialFieldMetadata): ProviderCredentialField => {
   const type: ProviderCredentialField["type"] =
     field.field_type === "password"
@@ -121,10 +125,12 @@ export const createCredentialFromModel = (provider: string, modelData: any): Cre
   return credential;
 };
 
+/** 根据 selectedProvider 标识渲染当前后台认证字段；返回控件列表，供模型与凭据表单使用。默认值进入表单状态，上传读取 JSON，Azure 地址可推导版本。 */
 const ProviderSpecificFields: React.FC<ProviderSpecificFieldsProps> = ({ selectedProvider }) => {
   const selectedProviderEnum = Providers[selectedProvider as keyof typeof Providers] as Providers;
   const form = useFormContext<MountedFormValues>();
   const credentialsFileRef = React.useRef<HTMLInputElement>(null);
+/** 文件选择处理器：onLoaded 写入表单；返回事件回调，非 JSON 忽略，并清空控件以允许重复选择。 */
   const pickCredentialsFile =
     (onLoaded: (contents: string) => void) => (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -173,14 +179,7 @@ const ProviderSpecificFields: React.FC<ProviderSpecificFieldsProps> = ({ selecte
 
   const allFields = React.useMemo(() => {
     if (selectedProvider === null) return [];
-    // First try to resolve from the in-memory cache. We support both the
-    // enum/display-name form and the raw provider slug (e.g. "petals").
-    const cachedFields =
-      providerFieldsByDisplayName[selectedProviderEnum] ?? providerFieldsByDisplayName[selectedProvider];
-    if (cachedFields) {
-      return cachedFields;
-    }
-
+    // 仅使用当前查询定义，避免失败重试时显示历史缓存。
     if (!providerMetadata) {
       return [];
     }
@@ -195,20 +194,22 @@ const ProviderSpecificFields: React.FC<ProviderSpecificFieldsProps> = ({ selecte
       return [];
     }
 
-    const mapped = providerInfo.credential_fields.map(mapFieldMetadataToUiField);
-    providerFieldsByDisplayName[providerInfo.provider_display_name] = mapped;
-    if (providerInfo.provider) {
-      providerFieldsByDisplayName[providerInfo.provider] = mapped;
-    }
-    if (providerInfo.litellm_provider) {
-      providerFieldsByDisplayName[providerInfo.litellm_provider] = mapped;
-    }
-    return mapped;
+    return providerInfo.credential_fields.map(mapFieldMetadataToUiField);
   }, [selectedProviderEnum, selectedProvider, providerMetadata]);
+
+  // Controller 的默认值可能在观察器订阅前注册；显式同步确保未触碰字段进入提交状态。
+  React.useEffect(() => {
+    for (const field of allFields) {
+      if (form.getValues(field.key) == null && field.defaultValue != null) {
+        form.setValue(field.key, field.defaultValue);
+      }
+    }
+  }, [allFields, form]);
 
   const hasApiVersionField = React.useMemo(() => allFields.some((field) => field.key === "api_version"), [allFields]);
   const lastInferredApiVersionRef = React.useRef<string | null>(null);
 
+/** 处理地址事件并同步推导版本；返回回调，仅清除上次自动推导值，保留手工版本。 */
   const handleApiBaseChange = React.useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       if (!hasApiVersionField) {
@@ -230,6 +231,7 @@ const ProviderSpecificFields: React.FC<ProviderSpecificFieldsProps> = ({ selecte
     [form, hasApiVersionField],
   );
 
+/** 用 field 定义和 control 绑定渲染输入；返回 React 元素，上传内容或选择结果写入所属表单。 */
   const renderFieldControl = (field: ProviderCredentialField, control: MountedFieldControlProps) => {
     if (field.type === "select") {
       return (
@@ -324,10 +326,11 @@ const ProviderSpecificFields: React.FC<ProviderSpecificFieldsProps> = ({ selecte
         </p>
       )}
       {allFields.map((field) => (
-        <React.Fragment key={field.key}>
+        <React.Fragment key={selectedProvider + ":" + field.key}>
           <MountedFormField
             label={field.tooltip ? labelWithHint(field.label, field.tooltip) : field.label}
             name={field.key}
+            defaultValue={field.defaultValue}
             required={field.required}
             rules={field.required ? { validate: { required: requiredRule("Required") } } : undefined}
             className={field.key === "vertex_credentials" ? "mb-0" : "mb-4"}

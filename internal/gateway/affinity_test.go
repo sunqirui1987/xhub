@@ -59,15 +59,10 @@ func TestSessionIDPrefersAnExplicitHeader(t *testing.T) {
 }
 
 func TestSessionIDReadsClaudeMetadataAndClientHeaders(t *testing.T) {
-	legacy := "user_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2_account__session_123e4567-e89b-12d3-a456-426614174000"
 	body := map[string]any{
-		"metadata":         map[string]any{"user_id": legacy},
+		"metadata":         map[string]any{"user_id": `{"device_id":"dev","session_id":"json-sess"}`},
 		"prompt_cache_key": "cache-should-lose",
 	}
-	if got := sessionID(nil, body); got != "123e4567-e89b-12d3-a456-426614174000" {
-		t.Fatalf("legacy metadata session %q", got)
-	}
-	body["metadata"] = map[string]any{"user_id": `{"device_id":"dev","session_id":"json-sess"}`}
 	if got := sessionID(nil, body); got != "json-sess" {
 		t.Fatalf("json metadata session %q", got)
 	}

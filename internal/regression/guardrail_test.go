@@ -154,12 +154,28 @@ func TestGuardrailTrialDoesNotChangeStorage(t *testing.T) {
 	admin := h.adminSession()
 	tn := h.provision(t, admin, "trial")
 
-	// 这次试跑点名的规则从来没有被保存过。
-	trial := h.ok(http.MethodPost, "/guardrails/apply_guardrail", admin, map[string]any{
+	// 名称不存在必须明确拒绝，不能返回一个没有实际执行规则的 allow。
+	missing := h.do(http.MethodPost, "/guardrails/apply_guardrail", admin, map[string]any{
 		"guardrail_name": "not-saved-yet", "text": "anything at all",
 	})
-	if action := stringField(trial.json(), "action"); action != "allow" {
-		t.Fatalf("an unsaved rule fired in the trial: action=%q", action)
+	if missing.status != http.StatusNotFound {
+		t.Fatalf("an unknown guardrail trial should return 404: %s", missing.describe())
+	}
+
+	// 显式提供未保存的完整规则，证明试跑确实执行拦截，但不会启用规则。
+	rule := guardrailRow("not-saved-yet", kindBlockedWords, []string{"anything at all"}, "pre_call")
+	trial := h.ok(http.MethodPost, "/guardrails/apply_guardrail", admin, map[string]any{
+		"guardrail": rule, "text": "anything at all",
+	})
+	if action := stringField(trial.json(), "action"); action != "block" {
+		t.Fatalf("the inline trial did not execute its blocking rule: action=%q", action)
+	}
+	rows, err := h.store.ListKV("guardrails")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("the trial persisted a rule: %#v", rows)
 	}
 
 	// 而且什么都没被打开，所以正文里带着那些词的调用照样放行。

@@ -5,8 +5,8 @@
 ## 职责与实现契约
 
 capability.go 把入口能力与发送方式拆开；registry.go 注册 Transport、供应商默认地址和模型贡献；type.go 定义 Capability、Transport 及路径动作结构。RegisterTransport 校验 ID、动作和大写 HTTP 方法。
-SelectedCapabilities 优先 endpoint_types，再识别历史 mode，未明确配置默认 chat；明确未知能力不能默默变 chat。Ops 用于实际入口匹配，Paths 用于展示。官方 bypass 只匹配登记路径，部署自定义文档不能凭空新增公共路由。
-配置 api_base 覆盖供应商默认。OfficialID 只去掉一层供应商前缀并保留模型名后续斜杠；ReadTaskID 支持点路径，Expand 替换路径参数。ApplyOverride 当前是兼容无操作。登记新供应商必须检验能力、协议、路径、usage 和任务结算，RegisterModel 只贡献目录，不证明真实调用可用。
+SelectedCapabilities 只读取 endpoint_types；缺失或空列表表示没有已声明能力，显式未知能力不进入适配池。SelectedTransport 只读取 transport；已登记的 bypass 才能选择官方转发。Ops 用于实际入口匹配，Paths 用于展示。
+配置 api_base 覆盖供应商默认。OfficialID 只去掉一层供应商前缀并保留模型名后续斜杠；ReadTaskID 支持点路径，Expand 替换路径参数。登记新供应商必须检验能力、协议、路径、usage 和任务结算，RegisterModel 只贡献目录，不证明真实调用可用。
 
 ## 子目录与协作边界
 
@@ -28,25 +28,29 @@ SelectedCapabilities 优先 endpoint_types，再识别历史 mode，未明确配
 
 公开类型：`Model`, `ProviderField`, `Supplier`.
 
+### seedance_billing.go
+
+`SeedanceBilling()` 为七牛与火山方舟的 Seedance 任务传输提供创建请求事实和成功任务用量提取。创建时记录是否含参考视频；查询成功后以最终分辨率选择输出费率变体，只传递实际完成 token 和网页搜索次数。失败或未完成任务不产生可计费用量；缺失创建上下文时保留未知变体，不猜成无参考视频价格。
+
 - [`func RegisterTransport(t Transport)`](registry.go) — RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
-- [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型。选中这个模型 id 时，表单会带上它的端点类型。
+- [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型，并为表单记录默认执行传输 ID。
 - [`func RegisterSupplier(s Supplier)`](registry.go) — RegisterSupplier 记下默认 API 根；名字是新的时，连添加模型的凭据字段一起记下。
 - [`func APIBase(slug, configured string) string`](registry.go) — APIBase 返回部署上的根地址；部署没填时用供应商登记的默认根。
 - [`func Transports() []Transport`](registry.go) — Transports 返回已登记的内置转发方式。
-- [`func ModelEndpoints() map[string]string`](registry.go) — ModelEndpoints 把价目表模型 id 映射到表单要预选的端点类型。
-- [`func PublicBody() map[string]any`](registry.go) — PublicBody 是添加模型的载荷：能力表、转发方式表和模型默认值。 形状从 {types, models} 改成了 {capabilities, transports, models}， 因为原来的 types 正是这次要拆掉的那件东西。调用方只有添加模型表单。
+- [`func ModelEndpoints() map[string]string`](registry.go) — ModelEndpoints 把内置模型 id 映射到表单要预选的默认 transport ID。
+- [`func PublicBody() map[string]any`](registry.go) — PublicBody 是添加模型的载荷：公开能力、执行传输和模型默认值。endpoint_types 是公开协议能力，capabilities 是能力与路径说明，transports 是后端登记的执行传输，models 是模型到默认 transport 的映射。
 - [`func Match(method, path string, models []config.ModelEntry) (Hit, bool)`](registry.go) — Match 找出这个方法和路径命中的 bypass 动作，只在已登记的转发方式里找。 它刻意不读部署上的自定义文档：bypass 是后台登记的形状，不是运维在界面上 随手填的一份路径表。一份填错的路径表发不出请求，也就拿不到上游的返回值， 预选、日志和用量都无从谈起。 models（[]config.ModelEntry）：候选部署列表，当前不参与匹配，保留给调用方复用签名。
-- [`func ApplyOverride(m config.ModelEntry, hit Hit) Hit`](registry.go) — ApplyOverride 当前是恒等函数。部署上不再支持自带 bypass 文档， 保留这个签名让 dataplane 的调用点不必改。
-- [`func SelectedCapabilities(m config.ModelEntry) []string`](registry.go) — SelectedCapabilities 返回一条部署应答的能力 id 列表。 读顺序： 1. model_info.endpoint_types：新写入是这个字段，里面是能力 id。 2. model_info.mode：旧行只有这个字符串，按存量 id 映射成能力。 3. 都没有：chat。老的部署和不带端点信息的部署都是这个意思。 认不出的 id（realtime、batch、ocr）被忽略，不放进任何能力。一项都认不出时 realtime 的部署意外应答所有对话请求。
-- [`func SelectedTransport(m config.ModelEntry) string`](registry.go) — SelectedTransport 返回一条部署的转发方式 id。 判定顺序： 1. model_info.transport 是登记过的内置 id → 那个 id。 2. endpoint_types 或 mode 里出现内置 Bypass id → 那个 id。旧行只写了这个。 3. 其余 → adapted。 内置 Bypass 之外的 bypass 形状不存在：后台没登记过的转发方式，运维在界面上 也选不到、存不进。
+- `SelectedCapabilities` 只读取 `model_info.endpoint_types`。未声明或空列表不声明能力；显式填入未知能力时，不匹配任何能力。
+- `SelectedTransport` 只读取 `model_info.transport`。登记过的 bypass ID 选择对应传输；未声明时使用 adapted。
 - [`func IsAdapted(m config.ModelEntry) bool`](registry.go) — IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径： 方舟内容生成的入口是 /api/v3/contents/generations/tasks，不是 /v1/videos， 把它放进适配池会让 /v1/videos 选中它然后打错地址。
-- [`func AdaptedPool(models []config.ModelEntry, op string) []config.ModelEntry`](registry.go) — AdaptedPool 把适配路径的候选收敛到能应答这个 op 的部署。 两件事都做：丢掉不是协议适配的，丢掉能力不含这个 op 的。这是新行为， 不是把现有比较换个写法——原来适配路径完全不过滤端点类型，一条标成 embedding 的部署现在仍能被 /v1/chat/completions 打到。
+- AdaptedPool（registry.go）：适配路径只保留显式声明了对应操作能力的部署；空或未知操作返回空池，禁止未声明入口借用默认对话路径。
 - [`func IncludesCapability(m config.ModelEntry, capability string) bool`](registry.go) — IncludesCapability 报告这条部署是否应答这个能力。
 - [`func Includes(m config.ModelEntry, typeID string) bool`](registry.go) — Includes 报告这条部署是否选中了这个转发方式 id。Bypass 选部署用它： 路径先命中转发方式，再按转发方式 id 挑部署，能力不参与。
-- [`func SelectedTypes(m config.ModelEntry) []string`](registry.go) — SelectedTypes 返回一条部署声明的原始端点 id 列表。它只服务 Bypass 选部署： 能力那一路走 SelectedCapabilities。endpoint_types 优先，其次 mode，都没有则 chat。
 - [`func BoundTransports(m config.ModelEntry) []Transport`](registry.go) — BoundTransports 把这条部署声明的转发方式解析成登记好的条目。
 
 ### type.go
+
+Fal 队列使用 Action.Model 表示路径固定模型，Transport.AuthScheme 指定 Key 鉴权，QueueURLs 指示转发层改写查询链接。TaskBilling 将成功判断和用量提取独立于 HTTP 转发；fal_billing.go 记录创建档位并处理状态包裹/裸结果，缺少完整定价语义时保留待核价原因。新增模型无需向转发层添加供应商分支，详见 [七牛 Fal 扩展](../../docs/development/qiniu-fal.md)。
 
 公开类型：`Action`, `Capability`, `Transport`, `Kind`, `Hit`.
 
@@ -68,7 +72,7 @@ SelectedCapabilities 优先 endpoint_types，再识别历史 mode，未明确配
 | --- | --- |
 | [capability_test.go](capability_test.go) | `TestEveryDeclaredPathBelongsToItsOwnCapability`, `TestChatCoversThreeSpellings`, `TestCompletionIsNotPartOfChat`, `TestUnregisteredOpsAreNotCapabilities`, `TestImageCoversGenerationAndEdit`, `TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp` |
 | [match_test.go](match_test.go) | `TestBypassPathsStayOnTheirProviders`, `TestRegisteredTransportsAreTheOnlyBypassSource`, `TestReadTaskID` |
-| [registry_test.go](registry_test.go) | `TestSelectedCapabilitiesReadsBothSpellings`, `TestOneModelCanAnswerSeveralCapabilities`, `TestBypassTypesStayWithTheirProvider`, `TestABypassIsNeverTakenFromADeploymentDocument` |
+| [registry_test.go](registry_test.go) | `TestSelectedCapabilitiesUsesDeclaredIDs`, `TestTransportRequiresExplicitRegisteredID`, `TestOneModelCanAnswerSeveralCapabilities`, `TestBypassTypesStayWithTheirProvider`, `TestABypassIsNeverTakenFromADeploymentDocument` |
 
 ```bash
 go test ./internal/provider -count=1

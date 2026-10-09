@@ -5,7 +5,7 @@
 ## 职责与实现契约
 
 list.go/available.go 提供按身份可见的模型；admin.go 和 validate.go 校验及持久化部署；builtin.go 从供应商目录导入；price.go、cost_reload.go 和 schedule.go 管理价格目录、来源、刷新及调度。
-公开模型名与上游模型名分开；同名部署组成路由候选池。数据库部署覆盖 YAML。disabled 布尔状态同时影响发现和实际调用，enable/disable 不是删配置。命名凭据必须存在且供应商/协议匹配，历史内联凭据仍需兼容编辑。
+公开模型名与上游模型名分开；同名部署组成路由候选池。数据库部署覆盖 YAML。disabled 布尔状态同时影响发现和实际调用，enable/disable 不是删配置。命名凭据必须存在且供应商/协议匹配；连接字段可编辑。
 价格来源只接受 catalog/manual；目录定价需要有效 base_model，手工定价需要明确费率。单价必须有限且非负，明确零价有效。端点能力和传输方式分别决定入口过滤与发送协议；拒绝已退休的 auto_router/adaptive_router 模型。管理返回隐藏上游秘密串，连接测试不能绕过模型权限。
 
 ## 源码职责与入口
@@ -130,7 +130,7 @@ list.go/available.go 提供按身份可见的模型；admin.go 和 validate.go �
 | 测试文件 | 场景入口 |
 | --- | --- |
 | [admin_test.go](admin_test.go) | `TestFailedModelUpdateDoesNotMutateStoredEntry`, `TestModelIDSearchFiltersBeforePagination`, `TestPublicDefaultsEnabledAndReportsDisabled`, `TestStripModelOwnership`, `TestManagementInfoIgnoresTeamFilterAndShowsDisabled` |
-| [builtin_test.go](builtin_test.go) | `TestAddedModelMatchesHandAdded`, `TestClearCopiedMode`, `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestBuiltinsEnabled`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL`, `TestSlashedModelIDStaysTheModelName` |
+| [builtin_test.go](builtin_test.go) | `TestAddedModelMatchesHandAdded`, `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestBuiltinsEnabled`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL`, `TestSlashedModelIDStaysTheModelName` |
 | [list_test.go](list_test.go) | `TestProxyModelNamesSkipsProviderShells`, `TestProxyModelNamesSkipsLegacyProviderNamesWithoutRole`, `TestNonModelEntryKeepsOrdinaryModels`, `TestProxyModelNamesOmitsOnlyFullyDisabledNames` |
 | [price_test.go](price_test.go) | `TestPricePartialUpdatePreservesQualifiedAndUntouchedRates`, `TestPriceCatalogServesTheEmbeddedBaseline`, `TestInvalidPriceDoesNotOverwriteStoredRates`, `TestPriceModelWriteIsStoredAndSurvivesAReload`, `TestPriceModelEditOverridesTheBaselineAndResetRestoresIt`, `TestPriceModelDeleteOfABaselineRowIsRemembered`, `TestPriceModelRejectsAMissingIdOrProvider`, `TestPriceWritesNeedManage`, `TestPriceProviderAddEditAndDeleteReachesTheDropdown`, `TestPriceProviderDeleteOfABaselineSupplierIsRemembered` |
 

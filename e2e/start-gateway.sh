@@ -25,7 +25,9 @@ sql "CREATE SCHEMA $SCHEMA"
 SCHEMA_CREATED=1
 printf '%s\n' "$SCHEMA" > "$DIR/schema.txt"
 E2E_UP_PORT="$UP_PORT" E2E_MASTER_KEY="$MASTER" E2E_SCHEMA="$SCHEMA" E2E_RUN_DIR="$DIR" python3 "$ROOT/e2e/config.py"
-(cd "$ROOT" && go build -o "$DIR/xhub" ./cmd/gateway && go build -o "$DIR/livesweep" ./e2e/livesweep)
+if [[ "${E2E_PREBUILT:-0}" != 1 ]]; then
+  (cd "$ROOT" && go build -o "$DIR/xhub" ./cmd/gateway && go build -o "$DIR/livesweep" ./e2e/livesweep)
+fi
 python3 "$ROOT/e2e/fake_upstream.py" --port "$UP_PORT" >"$DIR/up.log" 2>&1 &
 UP_PID=$!
 XHUB_PUBLIC_ORIGIN="http://127.0.0.1:$GW_PORT" "$DIR/xhub" -config "$DIR/c.yaml" -addr "127.0.0.1:$GW_PORT" >"$DIR/gw.log" 2>&1 &

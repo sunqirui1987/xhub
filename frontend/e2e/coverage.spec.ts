@@ -84,7 +84,10 @@ test("every page route renders without a dashboard error", async ({ page }) => {
     }
     if (item.route === "/chat/api-keys") {
       await expect(
-        page.getByText(t("No keys found")).or(page.getByRole("cell", { name: /^\$/ })).first(),
+        page
+          .getByText(t("No keys found"))
+          .or(page.getByRole("cell", { name: /^\$/ }))
+          .first(),
       ).toBeVisible({ timeout: 15_000 });
     }
     if (item.route === "/chat/logs") {
@@ -100,7 +103,7 @@ test("every page route renders without a dashboard error", async ({ page }) => {
   guard.assertOk();
 });
 
-test("model hubs enforce login and show configured names after sign in", async ({ page }) => {
+test("model hubs require login then allow searching the public price catalog", async ({ page }) => {
   const guard = watchGateway(page);
   for (const route of ["/model_hub", "/model_hub_table"]) {
     await page.goto(uiPath(route));
@@ -108,8 +111,13 @@ test("model hubs enforce login and show configured names after sign in", async (
     await loginAdmin(page);
     await page.goto(uiPath(route));
     await noDashboardError(page, route);
-    await page.getByPlaceholder(t("Search model names...")).fill("gpt-4o-mini");
-    await expect(page.getByText("gpt-4o-mini").first()).toBeVisible();
+    const catalog = await page.request.get(`${GATEWAY}/public/v1/model_hub?page=1&page_size=1`);
+    expect(catalog.ok()).toBeTruthy();
+    const name = (await catalog.json()).data[0].model_group as string;
+    await page.getByPlaceholder(t("Search model names...")).fill(name);
+    await expect(page.getByRole("row").filter({ hasText: name }).first()).toBeVisible();
+    await page.getByPlaceholder(t("Search model names...")).fill("e2e-model-that-does-not-exist");
+    await expect(page.getByText(t("No matching models"))).toBeVisible();
     await page.context().clearCookies();
     await page.evaluate(() => sessionStorage.clear());
     recordPage(route, "pass");
@@ -124,7 +132,10 @@ test("a created user can sign in with the initial password", async ({ page }) =>
   await page.getByRole("button", { name: `+ ${t("pages.users.invite")}` }).click();
   await page.getByLabel(t("pages.users.userEmail")).fill("e2e-claim@example.com");
   await page.getByLabel(t("Initial password")).fill("claimed-pass");
-  await page.getByRole("dialog").getByRole("button", { name: t("pages.users.invite") }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: t("pages.users.invite") })
+    .click();
   await expect(page.getByText("e2e-claim@example.com").first()).toBeVisible({ timeout: 15_000 });
   await login(page, "e2e-claim@example.com", "claimed-pass");
   await expect(page.getByText(t("nav.apiKeys")).first()).toBeVisible({ timeout: 20_000 });
@@ -149,7 +160,10 @@ test("an administrator resets a password and the account signs in with it", asyn
   await page.getByRole("button", { name: `+ ${t("pages.users.invite")}` }).click();
   await page.getByLabel(t("pages.users.userEmail")).fill(email);
   await page.getByLabel(t("Initial password")).fill("initial-pass");
-  await page.getByRole("dialog").getByRole("button", { name: t("pages.users.invite") }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: t("pages.users.invite") })
+    .click();
   // The dialog closing is what says the create was accepted; the address also
   // appears inside the form while it is open.
   await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 15_000 });
@@ -182,7 +196,11 @@ test("chat shows the fake upstream assistant text", async ({ page }) => {
   const guard = watchGateway(page);
   await loginAdmin(page);
   await page.goto(uiPath("/chat"));
-  await expect(page.getByRole("button", { name: "gpt-4o-mini" })).toBeVisible({ timeout: 20_000 });
+  const composer = page.getByPlaceholder(t("How can I help you today?")).locator("..");
+  // Scope to the textarea's immediate container: the account menu is also a
+  // popover, and its DOM order changes as the page hydrates.
+  await composer.locator('[data-slot="popover-trigger"]').click();
+  await page.getByRole("dialog").getByRole("button", { name: "gpt-4o-mini", exact: true }).click();
   await page.getByPlaceholder(t("How can I help you today?")).fill("hello from chat");
   await page.getByRole("button", { name: t("Send"), exact: true }).click();
   await expect(page.getByText("e2e-ok").first()).toBeVisible({ timeout: 20_000 });
@@ -211,7 +229,23 @@ test("ui create is visible from the live gateway and chat returns e2e-ok", async
   expect(await listed.text()).toContain(name);
   const minted = await page.request.post(`${GATEWAY}/key/generate`, {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
-    data: { key_alias: "e2e-chat-key", key_type: "llm_api", team_id: (await (await page.request.get(GATEWAY + "/v2/team/list?page=1&page_size=500", { headers: { Authorization: "Bearer " + bearer } })).json()).teams.find((x: { team_alias: string }) => x.team_alias === "e2e-fixture-team").team_id, user_id: JSON.parse(Buffer.from((await page.context().cookies()).find(x => x.name === "token")!.value.split(".")[1], "base64url").toString()).user_id },
+    data: {
+      key_alias: "e2e-chat-key",
+      key_type: "llm_api",
+      team_id: (
+        await (
+          await page.request.get(GATEWAY + "/v2/team/list?page=1&page_size=500", {
+            headers: { Authorization: "Bearer " + bearer },
+          })
+        ).json()
+      ).teams.find((x: { team_alias: string }) => x.team_alias === "e2e-fixture-team").team_id,
+      user_id: JSON.parse(
+        Buffer.from(
+          (await page.context().cookies()).find((x) => x.name === "token")!.value.split(".")[1],
+          "base64url",
+        ).toString(),
+      ).user_id,
+    },
   });
   expect(minted.ok()).toBeTruthy();
   const secret = (await minted.json()).key as string;

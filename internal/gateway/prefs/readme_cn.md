@@ -45,11 +45,13 @@ Resolve 按 key→team→organization→platform 选第一份已选择的整文�
 - [`func RequestChain(keyID, teamID, orgID string) []ScopeRef`](route_settings.go) — RequestChain is the inheritance chain for one request, narrowest first. One function for both callers of Resolve, so the request path and the console cannot disagree about the order. A missing id is simply not part of the chain.
 - [`func PlatformSettings(settings map[string]any) RouteSettings`](route_settings.go) — PlatformSettings is the platform-default document as a RouteSettings value. It exists so a caller with no lookup at all - a path with no database, or a test - still expresses "the platform default applies" the same way.
 - [`func (r RouteSettings) Strategy() string`](route_settings.go) — Strategy is the routing strategy to order deployments with.
+- [`func (r RouteSettings) ForModel(modelName string) RouteSettings`](route_settings.go) — 先选整份模板，再按精确公开模型名覆盖策略和参数；不改变其他字段或原始文档。
+- [`func ValidateModelRoutingDocument(settings map[string]any) error`](route_settings.go) — 保存前检查 model_routing 的数组结构、重复或空模型名、非法策略及非对象参数。
 - [`func (r RouteSettings) Retries() int`](route_settings.go) — Retries is how many times one deployment is tried before the next is used. A value below one becomes one: a request that is never attempted cannot succeed, and the caller would see a 502 for what is really a settings mistake.
 - [`func (r RouteSettings) TimeoutSeconds() float64`](route_settings.go) — TimeoutSeconds is how long one upstream call may take.
 - [`func (r RouteSettings) AllowedFails() int`](route_settings.go) — AllowedFails is how many failures a deployment may collect before it is put into cooldown. Zero or less disables cooldown entirely, which is the contract RecordFailure already reads.
 - [`func (r RouteSettings) CooldownSeconds() float64`](route_settings.go) — CooldownSeconds is how long a deployment stays out after it trips the failure count. Zero does not mean "no cooldown": the existing contract reads a non-positive value as one minute, and that contract is kept here.
-- [`func (r RouteSettings) WeightOverrides() map[string]float64`](route_settings.go) — WeightOverrides reads the traffic shares stored on this document. They live under routing_strategy_args.weights, which is part of the same router settings JSON the console edits. Two shapes are accepted, because the form writes a list and a hand-edited file may write a map: {"weights": [{"api_base": "https://a", "model": "gpt-4o", "weight": 70}]} {"weights": {"https://a|gpt-4o": 70}} The key is api_base|model, the same string DeploymentID uses. A missing or empty list means "use each deployment's own weight". Zero disables a deployment. Negative or non-finite weights are ignored.
+- [`func (r RouteSettings) WeightOverrides() map[string]float64`](route_settings.go) — 从 routing_strategy_args.weights 读取列表或映射。列表只接受 deployment_id 或 pricing_id；映射只接受 deployment:<id> 或 pricing:<id>。未指定保留部署原权重；split 中零排除，负数和非有限值忽略。
 
 ### settings.go
 

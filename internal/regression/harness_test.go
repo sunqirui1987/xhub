@@ -297,9 +297,29 @@ func openHarness(t *testing.T, storePrompts bool, models ...config.ModelEntry) *
 			StorePromptsInSpendLogs: storePrompts,
 		},
 	}
+	for _, model := range models {
+		var timeout float64
+		switch value := model.LiteLLMParams["timeout"].(type) {
+		case float64:
+			timeout = value
+		case int:
+			timeout = float64(value)
+		case string:
+			timeout, _ = strconv.ParseFloat(value, 64)
+		}
+		if timeout > cfg.RouterSettings.Timeout {
+			cfg.RouterSettings.Timeout = timeout
+		}
+	}
 	h.gw = gateway.New(cfg, st, db)
 	h.server = httptest.NewServer(h.gw.Handler())
-	t.Cleanup(h.server.Close)
+	t.Cleanup(func() {
+		// Wait for streaming handlers before draining their final events. Otherwise
+		// the next private schema can ingest this harness's shared Redis queue.
+		h.server.Close()
+		h.flushSpend()
+		_ = h.gw.Live.Close()
+	})
 	return h
 }
 
@@ -593,7 +613,7 @@ func addFlatPricedModel(t *testing.T, h *harness, admin, public string, params m
 	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": litellm,
-		"model_info":     map[string]any{"mode": mode},
+		"model_info":     map[string]any{"transport": "adapted", "endpoint_types": []string{mode}},
 	})
 }
 
@@ -620,7 +640,7 @@ func (h *harness) patchRates(t *testing.T, admin, public string, rates []any, ex
 	h.ok(http.MethodPost, "/model/update", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": params,
-		"model_info":     map[string]any{"id": id, "mode": "chat"},
+		"model_info":     map[string]any{"id": id, "transport": "adapted", "endpoint_types": []string{"chat"}},
 	})
 }
 
@@ -785,6 +805,9 @@ func (h *harness) doHeaders(method, path, token string, body any, headers map[st
 	}
 	client := *h.server.Client()
 	client.Timeout = 60 * time.Second
+	if h.live {
+		client.Timeout = 110 * time.Second
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		h.t.Fatalf("%s %s: %v", method, path, err)

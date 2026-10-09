@@ -12,6 +12,7 @@ Sessions and onboarding manage login and one-time bootstrap. Limits and routing 
 
 | Directory | Responsibility |
 | --- | --- |
+| [audit_test.go](audit_test.go) | TestAuditLogsConsoleFiltersAndPagination, TestAuditLogsOnlyPlatformAdmin: audit filtering, pagination and administrator access at the HTTP boundary. |
 | [family](family/readme.md) | API family handlers and resource isolation |
 | [guard](guard/readme.md) | Request guardrails |
 | [identity](identity/readme.md) | Identity, membership, and routing templates |
@@ -33,8 +34,6 @@ Internal implementation and protocol boundaries:  [access.go](access.go)。
 - [`func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID string)`](affinity.go) — CommitRoute remembers which deployment served this session and, when the response has an id, which deployment produced it.
 - [`func (s *Server) PinOfficial(taskID, deploymentID string)`](affinity.go) — 把官方任务 id 钉到创建时的部署，有效期七天。
 - [`func (s *Server) OfficialDeployment(taskID string) string`](affinity.go) — 按官方任务 id 取回创建时的部署。没有钉时为空串。
-- [`func (s *Server) OfficialBilled(taskID string) bool`](affinity.go) — 判断这个官方任务是否已经记过用量。
-- [`func (s *Server) MarkOfficialBilled(taskID string)`](affinity.go) — 标记这个官方任务已经记过用量，避免创建和后续查询重复扣费。
 
 ### bypass.go
 
@@ -141,7 +140,7 @@ Internal implementation and protocol boundaries:  [tokens.go](tokens.go)。
 - [`func (s *Server) RememberExchange(callID string, r *http.Request, reqBody, respBody []byte)`](wire.go) — RememberExchange holds the request and response until this call's spend row is written.
 - [`func (s *Server) PinnedDeployment(taskID string) string`](wire.go) — 按聊天响应 id 取回钉住的部署。这是对话粘滞，不是官方任务钉。
 - [`func (s *Server) FindDeployment(id string) (config.ModelEntry, bool)`](wire.go) — 按部署 id 在当前模型表里查找。找不到时 ok 为假。
-- [`func (s *Server) AnnotateCall(callID string, note dataplane.CallNote)`](wire.go) — 记下这次调用的首字时间、供应商、缓存和部署，等记用量时取走。
+- [`func (s *Server) AnnotateCall(callID string, note dataplane.CallNote)`](wire.go) — 暂存首字时间、供应商、缓存和会话信息，记用量时取走；部署身份由 RecordSpend 的参数传入。
 - [`func (s *Server) WriteCacheHit(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op string, hit []byte, start time.Time)`](wire.go) — WriteCacheHit writes a cached body back and records a cache-hit spend row with a zero delta.
 - [`func (s *Server) WriteChatJSON(w http.ResponseWriter, p *auth.Principal, callID, alias, ck, op, provider string, respBody []byte, status int, start time.Time, depID string)`](wire.go) — WriteChatJSON writes the upstream JSON to the caller and records spend. A non-success status is not cached as a successful body.
 - [`func (s *Server) EnforceIdentityLimits(w http.ResponseWriter, path string, p *auth.Principal, alias string, est int) bool`](wire.go) — EnforceIdentityLimits checks the model allow-list, budget, and RPM or TPM. On rejection it has already written the response.
@@ -180,6 +179,7 @@ The registration files below mount these routes. Aliases share handlers. Registr
 
 | Method / path | Registration |
 | --- | --- |
+| [audit_test.go](audit_test.go) | TestAuditLogsConsoleFiltersAndPagination, TestAuditLogsOnlyPlatformAdmin: audit filtering, pagination and administrator access at the HTTP boundary. |
 | `POST /compliance/eu-ai-act` | [compliance.go](compliance.go) |
 | `POST /compliance/gdpr` | [compliance.go](compliance.go) |
 | `GET /health/liveliness` | [routes.go](routes.go) |

@@ -326,23 +326,25 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 	listed := RouteSettings{Settings: map[string]any{
 		"routing_strategy_args": map[string]any{
 			"weights": []any{
-				map[string]any{"api_base": "https://a", "model": "gpt-4o", "weight": 70.0},
-				map[string]any{"model_name": "other", "weight": 0.0},
-				map[string]any{"deployment_id": "supplier-a", "weight": 11.0},
+				map[string]any{"deployment_id": "first", "weight": 70.0},
+				map[string]any{"deployment_id": "other", "weight": 0.0},
+				map[string]any{"pricing_id": "supplier-a", "weight": 11.0},
+				map[string]any{"api_base": "https://a", "model": "gpt-4o", "weight": 5.0},
+				map[string]any{"model_name": "legacy-name", "weight": 4.0},
 			},
 		},
 	}}
 	got := listed.WeightOverrides()
-	zero, hasZero := got["|other"]
-	if got["https://a|gpt-4o"] != 70 || !hasZero || zero != 0 || got["deployment:supplier-a"] != 11 || len(got) != 3 {
+	zero, hasZero := got["deployment:other"]
+	if got["deployment:first"] != 70 || !hasZero || zero != 0 || got["pricing:supplier-a"] != 11 || len(got) != 3 {
 		t.Fatalf("list weights: %#v", got)
 	}
 	mapped := RouteSettings{Settings: map[string]any{
 		"routing_strategy_args": map[string]any{
-			"weights": map[string]any{"https://b|gpt-4o": 30.0},
+			"weights": map[string]any{"deployment:second": 30.0, "https://b|gpt-4o": 20.0},
 		},
 	}}
-	if mapped.WeightOverrides()["https://b|gpt-4o"] != 30 {
+	if mapped.WeightOverrides()["deployment:second"] != 30 || len(mapped.WeightOverrides()) != 1 {
 		t.Fatalf("map weights: %#v", mapped.WeightOverrides())
 	}
 	if (RouteSettings{Settings: map[string]any{}}).WeightOverrides() != nil {
@@ -351,8 +353,8 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 }
 
 func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
-	rootArgs := map[string]any{"weights": map[string]any{"root|model": 99.0}}
-	chatArgs := map[string]any{"weights": map[string]any{"chat|provider-a": 3.0, "chat|provider-b": 7.0}}
+	rootArgs := map[string]any{"weights": map[string]any{"deployment:root": 99.0}}
+	chatArgs := map[string]any{"weights": map[string]any{"deployment:chat-a": 3.0, "deployment:chat-b": 7.0}}
 	original := map[string]any{
 		"routing_strategy":      "simple-shuffle",
 		"routing_strategy_args": rootArgs,
@@ -367,7 +369,7 @@ func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
 	base := RouteSettings{Settings: original, TemplateID: "template", TemplateName: "team policy", Source: "team"}
 
 	chat := base.ForModel("chat")
-	if chat.Err != nil || chat.Strategy() != "weighted-split" || chat.WeightOverrides()["chat|provider-b"] != 7 {
+	if chat.Err != nil || chat.Strategy() != "weighted-split" || chat.WeightOverrides()["deployment:chat-b"] != 7 {
 		t.Fatalf("chat policy = strategy %q weights %#v err %v", chat.Strategy(), chat.WeightOverrides(), chat.Err)
 	}
 	if chat.Retries() != 4 || chat.TimeoutSeconds() != 25 || chat.Settings["custom_policy"] == nil {
@@ -382,11 +384,11 @@ func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
 		t.Fatalf("an override without args inherited root weights: strategy=%q weights=%#v", embedding.Strategy(), embedding.WeightOverrides())
 	}
 	other := base.ForModel("other")
-	if other.Strategy() != "simple-shuffle" || other.WeightOverrides()["root|model"] != 99 {
+	if other.Strategy() != "simple-shuffle" || other.WeightOverrides()["deployment:root"] != 99 {
 		t.Fatalf("unlisted model did not use root policy: strategy=%q weights=%#v", other.Strategy(), other.WeightOverrides())
 	}
 
-	if base.Strategy() != "simple-shuffle" || base.WeightOverrides()["root|model"] != 99 {
+	if base.Strategy() != "simple-shuffle" || base.WeightOverrides()["deployment:root"] != 99 {
 		t.Fatalf("ForModel mutated its receiver: strategy=%q weights=%#v", base.Strategy(), base.WeightOverrides())
 	}
 	if original["routing_strategy"] != "simple-shuffle" {

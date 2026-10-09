@@ -55,3 +55,14 @@ describe("GuardrailTestResults", () => {
     expect(screen.getByText("This is a very long response text that should be collapsible")).toBeInTheDocument();
   });
 });
+
+it("shows an HTTP-successful blocking evaluation as blocked", () => {
+  render(
+    <GuardrailTestResults
+      results={[{ guardrailName: "policy", response_text: "secret", latency: 1, action: "block", reason: "敏感内容" }]}
+      errors={null}
+    />,
+  );
+  expect(screen.getByText("Blocked")).toBeInTheDocument();
+  expect(screen.getByText("敏感内容")).toBeInTheDocument();
+});

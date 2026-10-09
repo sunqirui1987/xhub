@@ -8,6 +8,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/provider"
 )
 
 // Available serves model cards for the signed-in caller. It exposes only display metadata. A view-only session may read the models granted to it. Calling a model stays on AllowLLM.
@@ -28,15 +29,16 @@ func Available(s Host, w http.ResponseWriter, r *http.Request) {
 	teamID := r.URL.Query().Get("team_id")
 	ctx := r.Context()
 	data := make([]map[string]any, 0)
-	seen := map[string]struct{}{}
+	seen := map[string]int{}
 	for _, entry := range list {
 		if nonModelEntry(entry) || entry.Disabled() || !AllowsModel(s, ctx, p, teamID, entry.ModelName) {
 			continue
 		}
-		if _, ok := seen[entry.ModelName]; ok {
+		if index, ok := seen[entry.ModelName]; ok {
+			data[index]["endpoints"] = provider.MergeEndpoints(data[index]["endpoints"].([]provider.EndpointBinding), provider.DeploymentEndpoints(entry))
 			continue
 		}
-		seen[entry.ModelName] = struct{}{}
+		seen[entry.ModelName] = len(data)
 		data = append(data, availableCard(entry))
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": data})
@@ -51,9 +53,10 @@ func availableCard(entry config.ModelEntry) map[string]any {
 	info := entry.ModelInfo
 	row := availableCostRow(entry.ModelName)
 	card := map[string]any{
+		"endpoints":         provider.DeploymentEndpoints(entry),
 		"id":                entry.ModelName,
 		"provider":          firstString(info, row, "litellm_provider", "provider"),
-		"category":          firstString(info, row, "category", "mode"),
+		"category":          availableCategory(entry, row),
 		"capabilities":      []string{},
 		"max_input_tokens":  availableNumber(info, row, "max_input_tokens"),
 		"max_output_tokens": availableNumber(info, row, "max_output_tokens"),
@@ -65,11 +68,6 @@ func availableCard(entry config.ModelEntry) map[string]any {
 	if card["provider"] == "" {
 		card["provider"] = firstString(entry.LiteLLMParams, nil, "custom_llm_provider")
 	}
-	if card["category"] == "" {
-		// A deployment that never set a mode is a chat model. The playground
-		// hides anything that is not chat from the chat endpoint picker.
-		card["category"] = "chat"
-	}
 	for _, capability := range []struct{ field, name string }{
 		{"supports_function_calling", "tools"}, {"supports_response_schema", "structured"},
 		{"supports_reasoning", "reasoning"}, {"supports_vision", "vision"}, {"supports_prompt_caching", "caching"},
@@ -79,6 +77,28 @@ func availableCard(entry config.ModelEntry) map[string]any {
 		}
 	}
 	return card
+}
+
+// availableCategory uses the deployment's current capability and transport fields.
+// The catalog's mode is pricing metadata, not a deployment configuration fallback.
+// 参数 entry（config.ModelEntry）：候选部署；row（map[string]any）：目录价格元数据。
+// 返回 string：模型卡片的展示类别。
+// 调用：availableCard。
+// 测试：available_test.go。
+func availableCategory(entry config.ModelEntry, row map[string]any) string {
+	if category := firstString(entry.ModelInfo, nil, "category"); category != "" {
+		return category
+	}
+	if provider.ValidateDeployment(entry) != nil {
+		return "other"
+	}
+	if provider.SelectedTransport(entry) == provider.AdaptedTransportID {
+		return provider.SelectedCapabilities(entry)[0]
+	}
+	for _, t := range provider.BoundTransports(entry) {
+		return t.Family
+	}
+	return "other"
 }
 
 // 从内置价目表取出这个模型的价格行。带前缀找不到时再试去掉前缀。

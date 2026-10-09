@@ -15,10 +15,47 @@ const positiveWeight = (raw: string) => {
   return Number.isFinite(value) && value > 0 ? value : 0;
 };
 const rowModel = (row: WeightRow) => row.model_name || row.model;
+const matchesDeployment = (saved: WeightRow, live: SplitDeployment) => {
+  const key = deploymentKey(saved);
+  return key !== "" && key === deploymentKey(live);
+};
+const hasStableIdentity = (row: WeightRow) => Boolean(row.deployment_id?.trim() || row.pricing_id?.trim());
 const label = (row: Pick<SplitDeployment, "model" | "api_base">) =>
   row.api_base ? row.model + " · " + row.api_base : row.model;
 const metadata = (row: SplitDeployment) =>
   [row.supplier, row.provider].filter((value, index, all) => value && all.indexOf(value) === index).join(" · ");
+const sourceKey = (explicit: boolean, deployment: SplitDeployment) => {
+  if (explicit) return "pages.routeTemplates.weights.sourceOverride";
+  if (deployment.weight != null) return "pages.routeTemplates.weights.sourceDeployment";
+  return "pages.routeTemplates.weights.sourceDefault";
+};
+
+const WeightInput: React.FC<{ value: string; ariaLabel: string; onChange: (value: string) => void }> = ({
+  value,
+  ariaLabel,
+  onChange,
+}) => {
+  const parsed = Number(value);
+  const invalid = value.trim() === "" || !Number.isFinite(parsed) || parsed < 0;
+  return (
+    <div className="space-y-1">
+      <Input
+        type="number"
+        min={0}
+        aria-label={ariaLabel}
+        aria-invalid={invalid}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="font-mono"
+      />
+      {invalid && (
+        <p role="alert" className="text-xs text-destructive">
+          {t("pages.routeTemplates.invalidField", { field: t("pages.routeTemplates.weights.weight") })}
+        </p>
+      )}
+    </div>
+  );
+};
 
 const WeightedSplitFields: React.FC<{
   saved: WeightRow[];
@@ -28,10 +65,19 @@ const WeightedSplitFields: React.FC<{
 }> = ({ saved, deployments, onChange, modelName }) => {
   const [selectedModel, setSelectedModel] = useState("");
   const publicModels = useMemo(
-    () => [...new Set(deployments.map((row) => row.model_name).filter(Boolean))],
+    () => [
+      ...new Set(
+        deployments
+          .filter((row) => deploymentKey(row))
+          .map((row) => row.model_name)
+          .filter(Boolean),
+      ),
+    ],
     [deployments],
   );
-  const savedModels = useMemo(() => [...new Set(saved.map(rowModel).filter(Boolean))], [saved]);
+  const savedModel = (row: WeightRow) =>
+    rowModel(row) || deployments.find((deployment) => matchesDeployment(row, deployment))?.model_name || "";
+  const savedModels = [...new Set(saved.map(savedModel).filter(Boolean))];
   const visibleModels = modelName
     ? [modelName]
     : [...new Set([...savedModels, ...(selectedModel ? [selectedModel] : [])])];
@@ -39,7 +85,17 @@ const WeightedSplitFields: React.FC<{
     onChange(saved.map((row, i) => (i === index ? { ...row, weight } : row)));
   const reset = (index: number) => onChange(saved.filter((_, i) => i !== index));
   const add = (row: SplitDeployment, weight: string) =>
-    onChange([...saved, { model_name: row.model_name, model: row.model, api_base: row.api_base, weight }]);
+    onChange([
+      ...saved,
+      {
+        ...(row.deployment_id ? { deployment_id: row.deployment_id } : {}),
+        ...(row.pricing_id ? { pricing_id: row.pricing_id } : {}),
+        model_name: row.model_name,
+        model: row.model,
+        api_base: row.api_base,
+        weight,
+      },
+    ]);
 
   return (
     <div className="space-y-4">
@@ -71,12 +127,16 @@ const WeightedSplitFields: React.FC<{
         </p>
       )}
       {visibleModels.map((name) => {
-        const live = deployments.filter((row) => row.model_name === name);
-        const liveKeys = new Set(live.map(deploymentKey));
+        const live = deployments.filter((row) => row.model_name === name && deploymentKey(row));
         const candidates: Candidate[] = live.map((deployment) => {
-          const savedIndex = saved.findIndex(
-            (row) => rowModel(row) === name && deploymentKey(row) === deploymentKey(deployment),
-          );
+          const namedIndex = saved.findIndex((row) => rowModel(row) === name && matchesDeployment(row, deployment));
+          const scopedIndex = modelName
+            ? saved.findIndex((row) => !rowModel(row) && hasStableIdentity(row) && matchesDeployment(row, deployment))
+            : -1;
+          const inheritedIndex = modelName ? -1 : saved.findIndex((row) => matchesDeployment(row, deployment));
+          let savedIndex = inheritedIndex;
+          if (scopedIndex >= 0) savedIndex = scopedIndex;
+          if (namedIndex >= 0) savedIndex = namedIndex;
           return {
             deployment,
             ...(savedIndex >= 0 ? { savedIndex } : {}),
@@ -85,8 +145,13 @@ const WeightedSplitFields: React.FC<{
         });
         const missing = saved
           .map((row, savedIndex) => ({ row, savedIndex }))
-          .filter(({ row }) => rowModel(row) === name && !liveKeys.has(deploymentKey(row)));
+          .filter(
+            ({ row }) =>
+              (modelName !== undefined || savedModel(row) === name) &&
+              !live.some((deployment) => matchesDeployment(row, deployment)),
+          );
         const total = candidates.reduce((sum, row) => sum + positiveWeight(row.effectiveWeight), 0);
+        const positiveCandidates = candidates.filter((row) => positiveWeight(row.effectiveWeight) > 0).length;
         return (
           <section key={name} className="space-y-3 rounded-md border p-3">
             <div>
@@ -117,32 +182,27 @@ const WeightedSplitFields: React.FC<{
                       <p className="truncate text-xs text-muted-foreground">{metadata(deployment)}</p>
                     )}
                     <Badge variant="outline" className="mt-1 font-normal">
-                      {t(
-                        explicit
-                          ? "pages.routeTemplates.weights.sourceOverride"
-                          : deployment.weight != null
-                            ? "pages.routeTemplates.weights.sourceDeployment"
-                            : "pages.routeTemplates.weights.sourceDefault",
-                      )}
+                      {t(sourceKey(explicit, deployment))}
                     </Badge>
                   </div>
                   {explicit ? (
-                    <Input
-                      type="number"
-                      min={0}
-                      aria-label={name + " " + deployment.model + " " + t("pages.routeTemplates.weights.weight")}
+                    <WeightInput
+                      ariaLabel={name + " " + deployment.model + " " + t("pages.routeTemplates.weights.weight")}
                       value={effectiveWeight}
-                      onChange={(event) => update(savedIndex, event.target.value)}
-                      className="font-mono"
+                      onChange={(weight) => update(savedIndex, weight)}
                     />
                   ) : (
                     <span className="font-mono text-sm tabular-nums">
                       {t("pages.routeTemplates.weights.effectiveWeight", { weight: effectiveWeight })}
                     </span>
                   )}
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {t("pages.routeTemplates.weights.estimatedShare", { percent })}
-                  </span>
+                  {positiveWeight(effectiveWeight) === 0 || positiveCandidates > 1 ? (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {t("pages.routeTemplates.weights.estimatedShare", { percent })}
+                    </span>
+                  ) : (
+                    <span aria-hidden="true" />
+                  )}
                   {explicit ? (
                     <Button
                       type="button"
@@ -176,13 +236,10 @@ const WeightedSplitFields: React.FC<{
                     {t("pages.routeTemplates.weights.missingCatalog")}
                   </Badge>
                 </div>
-                <Input
-                  type="number"
-                  min={0}
-                  aria-label={name + " " + row.model + " " + t("pages.routeTemplates.weights.weight")}
+                <WeightInput
+                  ariaLabel={name + " " + row.model + " " + t("pages.routeTemplates.weights.weight")}
                   value={row.weight}
-                  onChange={(event) => update(savedIndex, event.target.value)}
-                  className="font-mono"
+                  onChange={(weight) => update(savedIndex, weight)}
                 />
                 <span className="text-xs text-muted-foreground">{t("pages.routeTemplates.weights.excluded")}</span>
                 <Button

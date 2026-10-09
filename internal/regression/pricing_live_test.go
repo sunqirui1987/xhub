@@ -40,8 +40,9 @@ func liveModelDeployment(vendor liveVendor, model string) config.ModelEntry {
 			"api_key":             vendor.Key,
 			"api_base":            vendor.Base,
 			"custom_llm_provider": vendor.Protocol,
+			"timeout":             90,
 		},
-		ModelInfo: map[string]any{"mode": "chat"},
+		ModelInfo: map[string]any{"endpoint_types": []string{"chat"}, "transport": "adapted"},
 	}
 }
 
@@ -520,6 +521,9 @@ func sameRatePrices(left, right any) bool {
 		return out
 	}
 	leftKeys, rightKeys := keys(leftRates), keys(rightRates)
+	if len(leftKeys) == 0 || len(rightKeys) == 0 {
+		return false
+	}
 	sort.Strings(leftKeys)
 	sort.Strings(rightKeys)
 	return strings.Join(leftKeys, "\n") == strings.Join(rightKeys, "\n")
@@ -574,6 +578,20 @@ func TestSameRatePricesHandlesUnequalRateListLengths(t *testing.T) {
 	}
 	if sameRatePrices(left, right) {
 		t.Fatal("different rate lists compared equal")
+	}
+}
+
+func TestSameRatePricesRequiresComparableTokenRates(t *testing.T) {
+	input := map[string]any{"measure": "token", "side": "input", "unit_size": float64(1), "usd": float64(1)}
+	output := map[string]any{"measure": "token", "side": "output", "unit_size": float64(1), "usd": float64(2)}
+	if sameRatePrices([]any{}, []any{}) || sameRatePrices([]any{map[string]any{"measure": "query"}}, []any{map[string]any{"measure": "query"}}) {
+		t.Fatal("missing token-rate evidence compared equal")
+	}
+	if !sameRatePrices([]any{input, output}, []any{output, input}) {
+		t.Fatal("the same input and output prices should compare equal regardless of order")
+	}
+	if sameRatePrices([]any{input}, []any{map[string]any{"measure": "token", "side": "input", "unit_size": float64(1), "usd": float64(3)}}) {
+		t.Fatal("a changed input rate compared equal")
 	}
 }
 

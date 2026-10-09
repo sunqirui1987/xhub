@@ -59,6 +59,8 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Verification and maintenance
 
+The optional [qiniu_live_test.go](qiniu_live_test.go) calls a real Qiniu Seedance task and checks task creation, polling, and measured billing. It runs only when the corresponding bypass model, base, and endpoint are configured.
+
 | Test file | Scenario entry points |
 | --- | --- |
 | [bypass_logic_test.go](bypass_logic_test.go) | `TestEndpointAndModelLogic` |

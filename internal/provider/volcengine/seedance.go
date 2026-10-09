@@ -18,25 +18,24 @@ func init() {
 		APIBase: "https://ark.cn-beijing.volces.com",
 	})
 	provider.RegisterTransport(provider.Transport{
-		ID: "ark_contents_generation", Kind: provider.KindBypass,
+		EndpointType: "bypass:ark-video", Protocol: "ark", Family: "video", ModelGroup: "Seedance",
+		Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Bearer"},
+		ID:   "ark_contents_generation", Kind: provider.KindBypass,
 		Label:     "Bypass - 方舟内容生成 /api/v3/contents/generations/tasks",
 		Providers: []string{"volcengine"}, APIBase: "https://ark.cn-beijing.volces.com",
 		ModelField: "model", TaskID: "id", StripPrefix: "volcengine",
+		Billing: provider.SeedanceBilling(),
 		Actions: []provider.Action{
 			{Name: "create", Method: "POST", PublicPath: "/api/v3/contents/generations/tasks", UpstreamPath: "/api/v3/contents/generations/tasks"},
 			{Name: "get", Method: "GET", PublicPath: "/api/v3/contents/generations/tasks/{id}", UpstreamPath: "/api/v3/contents/generations/tasks/{id}"},
 			{Name: "list", Method: "GET", PublicPath: "/api/v3/contents/generations/tasks", UpstreamPath: "/api/v3/contents/generations/tasks"},
 		},
 	})
-	// Ark lists this band at CNY 46 per million tokens. The price map is USD,
-	// so the row stores the BytePlus list of $7 per million for 480p and 720p
-	// without video input. Other bands are set on the deployment.
-	const perToken = 7.0 / 1_000_000
+	// Configure actual Ark account prices on the deployment.
 	provider.RegisterModel(provider.Model{
 		ID: "volcengine/doubao-seedance-2-0-260128", Provider: "volcengine",
 		Official: "doubao-seedance-2-0-260128", EndpointType: "ark_contents_generation",
 		Source: "https://www.volcengine.com/docs/82379/1544106",
-		Input:  perToken, Output: perToken, Priced: true,
 	})
 	provider.RegisterModel(provider.Model{
 		ID: "volcengine/doubao-seedance-2-0-fast-260128", Provider: "volcengine",

@@ -194,6 +194,10 @@ func (r RouteSettings) Strategy() string {
 // routing_strategy_args; retries, timeouts, cooldown settings, and unknown
 // fields continue to come from the already-resolved whole template document.
 // The source document is never mutated.
+// 参数 modelName（string）：请求中的公开模型名。
+// 返回 RouteSettings：应用精确模型规则后的设置或原设置。
+// 调用：数据面选路前读取设置。
+// 测试：route_settings_test.go
 func (r RouteSettings) ForModel(modelName string) RouteSettings {
 	if r.Err != nil {
 		return r
@@ -229,11 +233,20 @@ func (r RouteSettings) ForModel(modelName string) RouteSettings {
 
 // ValidateModelRoutingDocument validates the optional exact-name model routing
 // rules. Unknown fields elsewhere in the document are deliberately ignored.
+// 参数 settings（map[string]any）：完整路由文档。
+// 返回 error：model_routing 结构无效时返回错误。
+// 调用：模板和平台配置写入验证。
+// 测试：route_settings_test.go
 func ValidateModelRoutingDocument(settings map[string]any) error {
 	_, _, err := modelRoutingRules(settings)
 	return err
 }
 
+// modelRoutingRules parses the optional per-model policy rows.
+// 参数 settings（map[string]any）：完整路由文档。
+// 返回规则列表、字段是否存在及错误。
+// 调用：ForModel、ValidateModelRoutingDocument。
+// 测试：route_settings_test.go
 func modelRoutingRules(settings map[string]any) ([]map[string]any, bool, error) {
 	if settings == nil {
 		return nil, false, nil
@@ -338,12 +351,12 @@ func (r RouteSettings) CooldownSeconds() float64 {
 // router settings JSON the console edits. Two shapes are accepted, because the
 // form writes a list and a hand-edited file may write a map:
 //
-//	{"weights": [{"api_base": "https://a", "model": "gpt-4o", "weight": 70}]}
-//	{"weights": {"https://a|gpt-4o": 70}}
+//	{"weights": [{"deployment_id": "model_123", "weight": 70}]}
+//	{"weights": {"deployment:model_123": 70}}
 //
-// The key is api_base|model, the same string DeploymentID uses. A missing or
-// empty list means "use each deployment's own weight". Zero disables a deployment.
-// Negative or non-finite weights are ignored.
+// Rows require deployment_id or pricing_id. A missing or empty list means
+// "use each deployment's own weight". Zero disables a deployment. Negative or non-finite
+// weights are ignored.
 // 参数：无。
 // 返回 map[string]float64（map[string]float64）：部署 id 到份额。文档没写份额时为 nil。
 // 调用：dataplane/serve.go，只在策略是按权重分流时。
@@ -361,27 +374,24 @@ func (r RouteSettings) WeightOverrides() map[string]float64 {
 			if !ok {
 				continue
 			}
-			apiBase, _ := row["api_base"].(string)
-			model, _ := row["model"].(string)
-			if model == "" {
-				model, _ = row["model_name"].(string)
-			}
 			weight, ok := numberIn(row["weight"])
 			if !ok || weight < 0 {
 				continue
 			}
-			if id, _ := row["pricing_id"].(string); strings.TrimSpace(id) != "" {
-				out["pricing:"+strings.TrimSpace(id)] = weight
-			} else if id, _ := row["deployment_id"].(string); strings.TrimSpace(id) != "" {
+			if id, _ := row["deployment_id"].(string); strings.TrimSpace(id) != "" {
 				out["deployment:"+strings.TrimSpace(id)] = weight
-			} else {
-				out[apiBase+"|"+model] = weight
+			} else if id, _ := row["pricing_id"].(string); strings.TrimSpace(id) != "" {
+				out["pricing:"+strings.TrimSpace(id)] = weight
 			}
 		}
 	case map[string]any:
 		for id, value := range raw {
 			weight, ok := numberIn(value)
-			if !ok || weight < 0 || strings.TrimSpace(id) == "" {
+			id = strings.TrimSpace(id)
+			if !ok || weight < 0 || (!strings.HasPrefix(id, "deployment:") && !strings.HasPrefix(id, "pricing:")) {
+				continue
+			}
+			if (strings.HasPrefix(id, "deployment:") || strings.HasPrefix(id, "pricing:")) && strings.TrimSpace(strings.SplitN(id, ":", 2)[1]) == "" {
 				continue
 			}
 			out[id] = weight

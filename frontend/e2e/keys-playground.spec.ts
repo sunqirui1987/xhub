@@ -85,4 +85,3 @@ test("Organizations create lists the new org", async ({ page }) => {
   await page.getByRole("button", { name: t("pages.organizations.createTitle"), exact: true }).click();
   await expect(page.getByText("e2e-org").first()).toBeVisible({ timeout: 15_000 });
 });
-

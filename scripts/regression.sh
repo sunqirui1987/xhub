@@ -58,7 +58,7 @@ elif [[ -z "${XHUB_TEST_DATABASE_URL:-}" ]]; then
   fi
 fi
 
-ARGS=(-count=1 -timeout=600s)
+ARGS=(-count=1 -timeout="${XHUB_REGRESSION_TIMEOUT:-1800s}")
 export XHUB_REGRESSION_STRICT=1
 if [[ "$VERBOSE" == 1 ]]; then
   ARGS+=(-v)

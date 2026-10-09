@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
+	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/provider"
 )
 
 var logTraceOnceValidate sync.Once
@@ -25,6 +27,9 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 	}
 	if strings.HasPrefix(str(params["model"]), "auto_router/") || strings.HasPrefix(str(params["model"]), "adaptive_router/") {
 		return fmt.Errorf("auto routers are no longer supported")
+	}
+	if err := provider.ValidateDeployment(config.ModelEntry{LiteLLMParams: params, ModelInfo: info}); err != nil {
+		return err
 	}
 	for _, field := range rateFields {
 		if value := params[field]; value != nil {
@@ -98,15 +103,32 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 		if err != nil || record == nil {
 			return fmt.Errorf("model provider %s is not configured", supplier)
 		}
-		credentialInfo, _ := record["credential_info"].(map[string]any)
-		credentialValues, _ := record["credential_values"].(map[string]any)
-		provider := str(credentialInfo["custom_llm_provider"])
-		if provider == "" {
-			provider = str(credentialValues["custom_llm_provider"])
-		}
-		if current := str(params["custom_llm_provider"]); provider != "" && current != "" && !strings.EqualFold(provider, current) {
+		if !credentialProtocolMatches(supplier, record, str(params["custom_llm_provider"])) {
 			return fmt.Errorf("model protocol does not match its provider")
 		}
 	}
 	return nil
+}
+
+// credentialProtocolMatches 校验部署协议与已存凭据的兼容性，供创建和更新模型调用。
+// 参数 name：凭据名称；record：已存凭据（允许缺字段）；current：部署声明的协议。
+// 返回 bool：兼容时为真；不修改凭据或部署，空协议沿用历史允许行为。
+// 七牛同时提供 OpenAI 兼容接口和原生接口；只有明确七牛身份的凭据可跨这两个声明使用，
+// 不能依据请求模型名或地址把任意 OpenAI 凭据升级为七牛。旧内置名称仅在缺少 builtin 时兜底。
+// 测试：validate_credential_test.go、regression/model_credential_test.go。
+func credentialProtocolMatches(name string, record map[string]any, current string) bool {
+	info, _ := record["credential_info"].(map[string]any)
+	values, _ := record["credential_values"].(map[string]any)
+	protocol := credentialText(info, "custom_llm_provider")
+	if protocol == "" {
+		protocol = credentialText(values, "custom_llm_provider")
+	}
+	protocol = strings.ToLower(protocol)
+	current = strings.ToLower(strings.TrimSpace(current))
+	if protocol == "" || current == "" || protocol == current {
+		return true
+	}
+	builtin := credentialText(info, "builtin")
+	qiniu := builtin == BuiltinQiniu || (builtin == "" && name == BuiltinQiniu)
+	return qiniu && (protocol == "openai" || protocol == "qiniu") && (current == "openai" || current == "qiniu")
 }

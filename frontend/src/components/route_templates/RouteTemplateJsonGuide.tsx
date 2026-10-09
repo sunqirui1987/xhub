@@ -9,13 +9,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const ROUTE_TEMPLATE_EXAMPLE = {
-  routing_strategy: "weighted-split",
-  routing_strategy_args: {
-    weights: [
-      { model_name: "gpt-main", api_base: "https://api-a.example.com", model: "gpt-4o", weight: 7 },
-      { model_name: "gpt-main", api_base: "https://api-b.example.com", model: "gpt-4o", weight: 3 },
-    ],
-  },
+  routing_strategy: "least-busy",
+  model_routing: [
+    {
+      model_name: "gpt-main",
+      routing_strategy: "weighted-split",
+      routing_strategy_args: {
+        weights: [
+          { deployment_id: "supplier-a", model_name: "gpt-main", weight: 7 },
+          { deployment_id: "supplier-b", model_name: "gpt-main", weight: 3 },
+        ],
+      },
+    },
+    { model_name: "claude-main", routing_strategy: "cost-based-routing" },
+  ],
   routing_groups: [
     {
       group_name: "fast-chat",
@@ -95,6 +102,14 @@ const fieldGroups = (): Array<{ title: string; description: string; rows: FieldR
         defaultValue: "{}",
         description: t("pages.routeTemplates.jsonGuide.fieldRoutingStrategyArgs"),
         example: '{"weights":[…]}',
+        support: "active",
+      }),
+      field({
+        name: "model_routing",
+        type: "array",
+        defaultValue: "[]",
+        description: t("pages.routeTemplates.modelRouting.schemaHint"),
+        example: '[{"model_name":"gpt-main","routing_strategy":"weighted-split",…}]',
         support: "active",
       }),
       field({
@@ -282,9 +297,9 @@ const RouteTemplateJsonGuide: React.FC = () => {
               <div className="mb-2 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                 {step}
               </div>
-              <p className="font-medium text-foreground">{t("pages.routeTemplates.jsonGuide.flow" + step + "Title")}</p>
+              <p className="font-medium text-foreground">{t(`pages.routeTemplates.jsonGuide.flow${step}Title`)}</p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {t("pages.routeTemplates.jsonGuide.flow" + step + "Body")}
+                {t(`pages.routeTemplates.jsonGuide.flow${step}Body`)}
               </p>
             </li>
           ))}

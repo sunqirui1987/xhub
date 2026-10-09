@@ -43,23 +43,34 @@ export const toTemplateRows = (templates: RouteTemplate[]): RouteTemplateRow[] =
  * defaults rather than to blank, because a template seeded from the default has
  * no reason to spell them out.
  */
-export const summarizeTemplate = (body: Record<string, unknown>, labels: {
-  strategy: (value: string) => string;
-  retries: (value: number) => string;
-  timeout: (seconds: number) => string;
-  fallbacks: (value: number) => string;
-  none: string;
-}): string => {
-  const strategy = typeof body.routing_strategy === "string" && body.routing_strategy !== ""
-    ? labels.strategy(body.routing_strategy)
-    : labels.strategy("simple-shuffle");
-  const retries = typeof body.num_retries === "number" && Number.isFinite(body.num_retries) && body.num_retries >= 1
-    ? Math.trunc(body.num_retries) : 1;
+export const summarizeTemplate = (
+  body: Record<string, unknown>,
+  labels: {
+    strategy: (value: string) => string;
+    retries: (value: number) => string;
+    timeout: (seconds: number) => string;
+    fallbacks: (value: number) => string;
+    none: string;
+    models?: (value: number) => string;
+  },
+): string => {
+  const strategy =
+    typeof body.routing_strategy === "string" && body.routing_strategy !== ""
+      ? labels.strategy(body.routing_strategy)
+      : labels.strategy("simple-shuffle");
+  const retries =
+    typeof body.num_retries === "number" && Number.isFinite(body.num_retries) && body.num_retries >= 1
+      ? Math.trunc(body.num_retries)
+      : 1;
   // A missing or non-positive timeout is 60 on the request path. The summary
   // says that, so the row does not claim a timeout the call will not use.
-  const timeout = typeof body.timeout === "number" && Number.isFinite(body.timeout) && body.timeout > 0 ? body.timeout : 60;
+  const timeout =
+    typeof body.timeout === "number" && Number.isFinite(body.timeout) && body.timeout > 0 ? body.timeout : 60;
   const fallbacks = Array.isArray(body.fallbacks) ? body.fallbacks.length : 0;
   const parts = [strategy, labels.retries(retries), labels.timeout(timeout)];
+  if (Array.isArray(body.model_routing) && body.model_routing.length && labels.models) {
+    parts.push(labels.models(body.model_routing.length));
+  }
   parts.push(fallbacks > 0 ? labels.fallbacks(fallbacks) : labels.none);
   return parts.join(" · ");
 };

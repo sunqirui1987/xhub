@@ -497,38 +497,52 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
-// DeploymentID is the physical deployment identity, shaped as api_base|model. Weight overrides use this stable frontend-facing id.
-// 调用：dataplane/live.go、dataplane/official.go、dataplane/serve.go、gateway/wire.go
-// 测试：bypass_logic_test.go
-// 参数 e（config.ModelEntry）：一条部署。用它的 api_base 和 model 参数，model 空则用公开名。
-// 返回：api_base|model。权重覆盖继续使用这个 id；两端都空时是 "|"。
-func DeploymentID(e config.ModelEntry) string {
-	return e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
-}
-
-// WeightID is the preferred template-weight identity. Stable catalog IDs let
-// two rows sharing an endpoint and upstream model receive independent shares.
-// Rows without one retain the legacy api_base|model identity.
+// WeightID is the template-weight identity. A deployment id wins
+// because it names one configured row even when several suppliers share a
+// pricing record, endpoint, and upstream model. Database-backed deployments
+// keep that stable id in model_info.id; configuration files may provide it as
+// litellm_params.deployment_id. A configured pricing_id is the next-best
+// stable identity. Rows without either stable ID have no template-weight identity.
+// 参数 e（config.ModelEntry）：候选部署。
+// 返回 string：部署或定价的稳定权重身份；没有稳定 ID 时返回空串。
+// 调用：模板权重匹配与部署筛选。
+// 测试：router_test.go
 func WeightID(e config.ModelEntry) string {
-	if id := e.ParamString("pricing_id", ""); id != "" {
-		return "pricing:" + id
-	}
-	if id := e.ParamString("deployment_id", ""); id != "" {
+	if id := strings.TrimSpace(e.ParamString("deployment_id", "")); id != "" {
 		return "deployment:" + id
 	}
-	return DeploymentID(e)
+	if id, _ := e.ModelInfo["id"].(string); strings.TrimSpace(id) != "" {
+		return "deployment:" + strings.TrimSpace(id)
+	}
+	if id := strings.TrimSpace(e.ParamString("pricing_id", "")); id != "" {
+		return "pricing:" + id
+	}
+	if id, _ := e.ModelInfo["pricing_id"].(string); strings.TrimSpace(id) != "" {
+		return "pricing:" + strings.TrimSpace(id)
+	}
+	return ""
 }
 
-// CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
-// 参数 e（config.ModelEntry）：一条部署；命名凭证从 litellm_credential_name 读取；稳定计费身份可从 pricing_id 或 deployment_id 读取。
-// 返回 string（string）：运行时部署 id；没有稳定计费身份时为 api_base|model，并在有命名凭证时追加 |credential:<name>。
+// CooldownID is the runtime deployment identity. It isolates cooldown, busy,
+// latency, usage, session pinning, and billing state. Existing parameter IDs
+// keep their precedence and key shape. Database-backed rows use model_info.id,
+// only when neither parameter ID is configured, so
+// otherwise identical database deployments still have independent runtime state.
+// No API key is included.
+// 参数 e（config.ModelEntry）：一条部署；命名凭证从 litellm_credential_name 读取；稳定身份优先从参数 pricing_id、deployment_id 读取，再使用 model_info.id。
+// 返回 string（string）：运行时部署 id；稳定身份追加为 |pricing:<id>，命名凭证追加为 |credential:<name>。
 // 调用：路由冷却、分流、运行指标、会话钉住和调用记账。
-// 测试：template_regression_test.go。
+// 测试：runtime_identity_test.go、template_regression_test.go。
 func CooldownID(e config.ModelEntry) string {
-	id := DeploymentID(e)
+	id := e.ParamString("api_base", "") + "|" + e.ParamString("model", e.ModelName)
 	stable := e.ParamString("pricing_id", "")
 	if stable == "" {
 		stable = e.ParamString("deployment_id", "")
+	}
+	if stable == "" {
+		if modelID, _ := e.ModelInfo["id"].(string); strings.TrimSpace(modelID) != "" {
+			stable = strings.TrimSpace(modelID)
+		}
 	}
 	if stable != "" {
 		id += "|pricing:" + stable
@@ -539,38 +553,24 @@ func CooldownID(e config.ModelEntry) string {
 	return id
 }
 
-// stateInt reads runtime integer state by credential-aware identity, then falls back to the physical deployment id for snapshots written by older processes.
+// stateInt reads runtime integer state by credential-aware identity.
 // 参数 values（map[string]int）：按运行时部署 id 保存的整数状态；e（config.ModelEntry）：要查找的部署。
 // 返回 int（int）：找到的状态值，未找到时为 0；bool（bool）：是否找到对应状态。
 // 调用：Pick 的 least-busy 分支。
 // 测试：template_regression_test.go。
 func stateInt(values map[string]int, e config.ModelEntry) (int, bool) {
-	id := CooldownID(e)
-	if value, ok := values[id]; ok {
-		return value, true
-	}
-	if legacy := DeploymentID(e); legacy != id {
-		value, ok := values[legacy]
-		return value, ok
-	}
-	return 0, false
+	value, ok := values[CooldownID(e)]
+	return value, ok
 }
 
-// stateFloat reads runtime floating-point state by credential-aware identity, then falls back to the physical deployment id for snapshots written by older processes.
+// stateFloat reads runtime floating-point state by credential-aware identity.
 // 参数 values（map[string]float64）：按运行时部署 id 保存的浮点状态；e（config.ModelEntry）：要查找的部署。
 // 返回 float64（float64）：找到的状态值，未找到时为 0；bool（bool）：是否找到对应状态。
 // 调用：Pick 的 latency 和 tpm 分支。
 // 测试：template_regression_test.go。
 func stateFloat(values map[string]float64, e config.ModelEntry) (float64, bool) {
-	id := CooldownID(e)
-	if value, ok := values[id]; ok {
-		return value, true
-	}
-	if legacy := DeploymentID(e); legacy != id {
-		value, ok := values[legacy]
-		return value, ok
-	}
-	return 0, false
+	value, ok := values[CooldownID(e)]
+	return value, ok
 }
 
 // IsSplitStrategy reports whether strategy divides traffic by weight.
@@ -592,10 +592,9 @@ func IsSplitStrategy(strategy string) bool {
 
 // ApplyWeights copies list and sets weight on the deployments named in overrides.
 //
-// The key is DeploymentID (api_base|model). A deployment that is not in the map
-// keeps the weight already on it, which defaults to 1 inside the split. An empty
-// map returns the same slice, so a document that does not configure shares does
-// not allocate or change the pool.
+// Keys are deployment:<id> or pricing:<id>. A deployment that is not in the map keeps the weight
+// already on it, which defaults to 1 inside the split. An empty map returns the
+// same slice, so a document without shares does not allocate or change the pool.
 //
 // The copy matters: ModelList is the process config, and writing weight onto it
 // would leak one request's template into the next request.
@@ -609,13 +608,9 @@ func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []conf
 	}
 	out := make([]config.ModelEntry, len(list))
 	for i, entry := range list {
-		weight, ok := overrides[WeightID(entry)]
-		if !ok && WeightID(entry) != DeploymentID(entry) {
-			// Existing templates continue to apply their physical endpoint key. A
-			// stable key wins when both forms are present.
-			weight, ok = overrides[DeploymentID(entry)]
-		}
-		if !ok {
+		id := WeightID(entry)
+		weight, ok := overrides[id]
+		if id == "" || !ok {
 			out[i] = entry
 			continue
 		}

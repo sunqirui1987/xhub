@@ -7,7 +7,7 @@ import { ENDPOINT_OPTIONS } from "./chatConstants";
 describe("EndpointSelector", () => {
   Object.values(ENDPOINT_OPTIONS).forEach((endpointType) => {
     it(`should render the endpoint selector for ${endpointType.value}`, async () => {
-      render(<EndpointSelector endpointType={endpointType.value} onEndpointChange={() => {}} />);
+      render(<EndpointSelector endpointType={endpointType.value} onEndpointChange={() => {}} options={ENDPOINT_OPTIONS} />);
       await waitFor(() => {
         expect(screen.getByRole("combobox")).toHaveValue(endpointType.label);
       });
@@ -16,7 +16,7 @@ describe("EndpointSelector", () => {
 
   it("should filter and show audio endpoints when user inputs 'audio'", async () => {
     const user = userEvent.setup();
-    render(<EndpointSelector endpointType={ENDPOINT_OPTIONS[0].value} onEndpointChange={() => {}} />);
+    render(<EndpointSelector endpointType={ENDPOINT_OPTIONS[0].value} onEndpointChange={() => {}} options={ENDPOINT_OPTIONS} />);
 
     const input = screen.getByRole("combobox");
     await user.click(input);

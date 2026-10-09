@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   bodyFromForm,
+  deploymentKey,
+  deploymentsFromInfo,
   documentFromSettingsResponse,
   emptyForm,
   formFromBody,
@@ -42,6 +44,49 @@ describe("formFromBody", () => {
 });
 
 describe("bodyFromForm", () => {
+  it("round-trips independent model rules and custom rule arguments", () => {
+    const rules = [
+      {
+        model_name: "chat",
+        routing_strategy: "weighted-split",
+        routing_strategy_args: {
+          weights: [{ deployment_id: "chat-row", model_name: "chat", model: "m", api_base: "a", weight: 7 }],
+          custom: true,
+        },
+        note: "keep",
+      },
+      { model_name: "reasoning", routing_strategy: "cost-based-routing" },
+    ];
+    const form = formFromBody({ routing_strategy: "least-busy", model_routing: rules });
+    expect(form.model_routing).toEqual(rules);
+    const result = bodyFromForm(form);
+    expect(result.ok && result.body.model_routing).toEqual(rules);
+    expect(result.ok && result.body.routing_strategy).toBe("least-busy");
+    form.model_routing = [];
+    const removed = bodyFromForm(form);
+    expect(removed.ok && removed.body).not.toHaveProperty("model_routing");
+  });
+
+  it("refuses duplicate model rules and invalid weights without losing future JSON shapes", () => {
+    const form = emptyForm();
+    form.model_routing = [
+      { model_name: "chat", routing_strategy: "least-busy" },
+      { model_name: " chat ", routing_strategy: "weighted-split" },
+    ];
+    expect(bodyFromForm(form)).toEqual({ ok: false, field: "model_routing" });
+    form.model_routing = [
+      {
+        model_name: "chat",
+        routing_strategy: "weighted-split",
+        routing_strategy_args: { weights: [{ model: "m", weight: -1 }] },
+      },
+    ];
+    expect(bodyFromForm(form)).toEqual({ ok: false, field: "model_routing" });
+    const unknown = { future_shape: true };
+    const preserved = bodyFromForm(formFromBody({ model_routing: unknown }));
+    expect(preserved.ok && preserved.body.model_routing).toEqual(unknown);
+  });
+
   it("round-trips a chain and the keys it did not edit", () => {
     const form = formFromBody({
       routing_strategy: "weighted-split",
@@ -93,15 +138,59 @@ describe("prefillFromPlatform", () => {
 });
 
 describe("weights", () => {
+  it("ignores retired model_info.deployment_id when discovering weight targets", () => {
+    expect(deploymentsFromInfo([{
+      model_name: "chat",
+      model_info: { deployment_id: "retired" },
+      litellm_params: { model: "same", api_base: "https://shared" },
+    }])).toEqual([]);
+  });
+
+  it("keeps two suppliers at the same endpoint individually addressable across a save", () => {
+    const deployments = deploymentsFromInfo(
+      ["supplier-a", "supplier-b"].map((id) => ({
+        model_name: "chat",
+        model_info: { id },
+        litellm_params: { api_base: "https://shared", model: "same", litellm_credential_name: id },
+      })),
+    );
+    expect(deployments.map(deploymentKey)).toEqual(["deployment:supplier-a", "deployment:supplier-b"]);
+    const weights = deployments.map((deployment, index) => ({ ...deployment, weight: String(index + 1) }));
+    const result = bodyFromForm({ ...emptyForm(), weights });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(formFromBody(result.body).weights.map(deploymentKey)).toEqual(deployments.map(deploymentKey));
+    expect(formFromBody(result.body).weights.map((row) => row.weight)).toEqual(["1", "2"]);
+  });
+
+  it("blocks malformed per-model weight drafts rather than saving the previous value", () => {
+    for (const weight of ["", "invalid", "Infinity", "-1"]) {
+      const form = formFromBody({
+        model_routing: [
+          {
+            model_name: "chat",
+            routing_strategy: "weighted-split",
+            routing_strategy_args: { weights: [{ deployment_id: "supplier-a", weight }] },
+          },
+        ],
+      });
+      expect(bodyFromForm(form)).toEqual({ ok: false, field: "model_routing" });
+    }
+  });
+
   it("round-trips shares inside the same document and keeps other strategy args", () => {
     const form = formFromBody({
       routing_strategy: "weighted-split",
       routing_strategy_args: {
         ttl: 60,
-        weights: [{ model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: 70 }],
+        weights: [
+          { deployment_id: "gpt-row", model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: 70 },
+        ],
       },
     });
-    expect(form.weights).toEqual([{ model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: "70" }]);
+    expect(form.weights).toEqual([
+      { deployment_id: "gpt-row", model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: "70" },
+    ]);
     expect(form.ttl).toBe("60");
     expect(form.extra).toBe("");
     const written = bodyFromForm(form);
@@ -109,14 +198,14 @@ describe("weights", () => {
     if (!written.ok) return;
     expect(written.body.routing_strategy_args).toEqual({
       ttl: 60,
-      weights: [{ model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: 70 }],
+      weights: [{ deployment_id: "gpt-row", model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o", weight: 70 }],
     });
   });
 
   it("offers a row per live deployment and keeps a share the catalog does not have yet", () => {
     const rows = weightRowsForEditor(
-      [{ model_name: "old", api_base: "https://old", model: "old", weight: "4" }],
-      [{ model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o" }],
+      [{ deployment_id: "old-row", model_name: "old", api_base: "https://old", model: "old", weight: "4" }],
+      [{ deployment_id: "gpt-row", model_name: "gpt-4o", api_base: "https://a", model: "gpt-4o" }],
     );
     expect(rows.map((row) => row.model)).toEqual(["gpt-4o", "old"]);
     expect(rows[0].weight).toBe("1");
@@ -161,11 +250,18 @@ describe("ui and json", () => {
 
 describe("nextCopyName", () => {
   it("preserves zero weights and rejects malformed shares", () => {
-    const form = formFromBody({ routing_strategy_args: { weights: [{ api_base: "a", model: "m", weight: 0 }] } });
+    const form = formFromBody({
+      routing_strategy_args: { weights: [{ deployment_id: "row", api_base: "a", model: "m", weight: 0 }] },
+    });
     const result = bodyFromForm(form);
-    expect(result.ok && result.body.routing_strategy_args).toEqual({ weights: [{ model_name: "m", api_base: "a", model: "m", weight: 0 }] });
+    expect(result.ok && result.body.routing_strategy_args).toEqual({
+      weights: [{ deployment_id: "row", model_name: "m", api_base: "a", model: "m", weight: 0 }],
+    });
     for (const weight of ["-1", "invalid", "Infinity"]) {
-      expect(bodyFromForm({ ...form, weights: [{ ...form.weights[0], weight }] })).toEqual({ ok: false, field: "weights" });
+      expect(bodyFromForm({ ...form, weights: [{ ...form.weights[0], weight }] })).toEqual({
+        ok: false,
+        field: "weights",
+      });
     }
   });
   it("numbers a second copy so the two names stay distinct", () => {
@@ -193,9 +289,7 @@ describe("omitUntouchedRoutingGroups", () => {
 
 describe("template routing groups", () => {
   it("round-trips groups used by the visual editor", () => {
-    const groups = [
-      { group_name: "fast", models: ["gpt-4o", "gpt-4o-mini"], routing_strategy: "least-busy" },
-    ];
+    const groups = [{ group_name: "fast", models: ["gpt-4o", "gpt-4o-mini"], routing_strategy: "least-busy" }];
     expect(parseRoutingGroups(prettyRoutingGroups(groups))).toEqual({ ok: true, groups });
   });
 
@@ -206,6 +300,8 @@ describe("template routing groups", () => {
 
   it("refuses malformed groups instead of losing them", () => {
     expect(parseRoutingGroups('{"group_name":"fast"}')).toEqual({ ok: false });
-    expect(parseRoutingGroups('[{"group_name":"fast","models":"gpt-4o","routing_strategy":"least-busy"}]')).toEqual({ ok: false });
+    expect(parseRoutingGroups('[{"group_name":"fast","models":"gpt-4o","routing_strategy":"least-busy"}]')).toEqual({
+      ok: false,
+    });
   });
 });

@@ -80,7 +80,7 @@ func TestLiveBypassCreatesAndPollsARealTask(t *testing.T) {
 					"api_key":  vendor.Key,
 					"api_base": vendor.BypassBase,
 				},
-				ModelInfo: map[string]any{"mode": endpointType},
+				ModelInfo: map[string]any{"transport": endpointType},
 			})
 			h.live = true
 			admin := h.adminSession()

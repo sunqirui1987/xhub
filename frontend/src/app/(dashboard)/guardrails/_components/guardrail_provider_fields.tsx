@@ -52,8 +52,9 @@ interface ProviderParam {
   step?: number;
 }
 
+/** 提供商字段集合同时包含 ui_friendly_name 字符串元数据和配置字段描述。 */
 interface ProviderParamsResponse {
-  [provider: string]: { [key: string]: ProviderParam };
+  [provider: string]: { [key: string]: ProviderParam | string };
 }
 
 const BOOLEAN_ITEMS = [
@@ -61,14 +62,35 @@ const BOOLEAN_ITEMS = [
   { label: t("False"), value: false },
 ];
 
+/**
+ * 用途：识别历史字段中的密钥命名，决定密码输入显示。
+ * 参数：fieldKey：字段完整路径。
+ * 返回：boolean；只是展示判断，不代替后端密钥处理。
+ * 调用：ProviderFieldInput。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const isSecretKey = (fieldKey: string): boolean =>
   fieldKey.includes("password") || fieldKey.includes("secret") || fieldKey.includes("key");
 
+/**
+ * 用途：检查 JSON 值是否为普通对象，排除 null 与数组。
+ * 参数：value：未知值。
+ * 返回：类型谓词，符合对象约束时为 true。
+ * 调用：对象校验与失焦提交。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 // Object fields hold the raw text while the user types, so submission must be
 // blocked until the value parses to a plain JSON object (or is cleared).
+/**
+ * 用途：构建对象字段校验规则，非法输入不能提交。
+ * 参数：fieldKey：用于错误信息的字段名。
+ * 返回：校验声明对象。
+ * 调用：fieldRules。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const jsonObjectRule = (fieldKey: string): GuardrailFieldRules => ({
   validate: (value: unknown) =>
     value === undefined || isPlainObject(value) ? true : `${fieldKey} must be a valid JSON object`,
@@ -76,6 +98,13 @@ const jsonObjectRule = (fieldKey: string): GuardrailFieldRules => ({
 
 // Commits a parsed object (or undefined for a cleared field) to the form on
 // blur; anything else stays as raw text so jsonObjectRule blocks submission.
+/**
+ * 用途：失焦时解析 JSON 对象，清空转 undefined，非法输入保留并提示。
+ * 参数：raw：输入字符串；onChange：表单回调。
+ * 返回：void；有效对象写入表单。
+ * 调用：对象文本框失焦事件。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const commitObjectField = (raw: string, onChange: (value: unknown) => void): void => {
   const next = raw.trim();
   if (next === "") {
@@ -95,6 +124,13 @@ const commitObjectField = (raw: string, onChange: (value: unknown) => void): voi
   }
 };
 
+/**
+ * 用途：选择对象校验或必填校验声明。
+ * 参数：field：字段描述；fieldKey：字段名。
+ * 返回：校验声明或 undefined。
+ * 调用：renderFields。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const fieldRules = (field: ProviderParam, fieldKey: string): GuardrailFieldRules | undefined => {
   if (field.type === "object") {
     return jsonObjectRule(fieldKey);
@@ -108,8 +144,38 @@ interface ProviderFieldInputProps {
   control: GuardrailFieldControlProps;
 }
 
+/**
+ * 用途：按字段类型展示控件，并转发表单标识与无障碍属性。
+ * 参数：descriptor：字段描述；fieldKey：路径；control：表单绑定。
+ * 返回：React 输入控件。
+ * 调用：递归提供商字段渲染。
+ * 测试：guardrail_provider_fields.integration.test.tsx。
+ */
 const ProviderFieldInput: React.FC<ProviderFieldInputProps> = ({ descriptor, fieldKey, control }) => {
   const { id, value, onChange, onBlur, ref, name, ...aria } = control;
+
+  if (descriptor.type === "list") {
+    return (
+      <Textarea
+        id={id}
+        name={name}
+        ref={ref}
+        placeholder={descriptor.description}
+        value={asStringArray(value).join("\n")}
+        onChange={(event) => onChange(event.target.value.split("\n"))}
+        onBlur={(event) => {
+          onChange(
+            event.target.value
+              .split("\n")
+              .map((entry) => entry.trim())
+              .filter(Boolean),
+          );
+          onBlur();
+        }}
+        {...aria}
+      />
+    );
+  }
 
   if (descriptor.type === "select" && descriptor.options) {
     return (
@@ -246,6 +312,13 @@ const ProviderFieldInput: React.FC<ProviderFieldInputProps> = ({ descriptor, fie
   );
 };
 
+/**
+ * 用途：按字段描述生成表单，区分字符串元数据与真正配置项。
+ * 参数：selectedProvider：目录键；control：表单控制器；providerParams/accessToken：静态配置或远端加载；value：已有值。
+ * 返回：React 字段组或加载/错误提示；逐行转换列表，保留正则中的逗号。
+ * 调用：护栏创建及详情表单。
+ * 测试：guardrail_provider_fields.integration.test.tsx、guardrail_provider_fields.test.tsx。
+ */
 const GuardrailProviderFields: React.FC<GuardrailProviderFieldsProps> = ({
   selectedProvider,
   control,
@@ -336,13 +409,20 @@ const GuardrailProviderFields: React.FC<GuardrailProviderFieldsProps> = ({
   const isContentFilterProvider = shouldRenderContentFilterConfigSettings(selectedProvider);
 
   // Convert object to array of entries and render fields
-  const renderFields = (fields: { [key: string]: ProviderParam }, parentKey = "", parentValue?: unknown) => {
+  /**
+   * 用途：递归渲染字段描述，跳过 UI 名称元数据和专用编辑器已处理字段。
+   * 参数：fields：字段声明；parentKey：父路径；parentValue：父对象。
+   * 返回：React 节点数组。
+   * 调用：GuardrailProviderFields。
+   * 测试：guardrail_provider_fields.integration.test.tsx。
+   */
+  const renderFields = (fields: { [key: string]: ProviderParam | string }, parentKey = "", parentValue?: unknown) => {
     return Object.entries(fields).map(([fieldKey, field]) => {
       // ":" keeps nested children out of the submitted object graph: nothing binds the parent
       const fullFieldKey = parentKey ? `${parentKey}:${fieldKey}` : fieldKey;
       const fieldValue = parentValue ? readRecord(parentValue, fieldKey) : value?.[fieldKey];
       // Skip ui_friendly_name - it's metadata for the UI dropdown, not a user configuration field
-      if (fieldKey === "ui_friendly_name") {
+      if (fieldKey === "ui_friendly_name" || typeof field === "string") {
         return null;
       }
 

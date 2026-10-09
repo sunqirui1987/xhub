@@ -165,6 +165,6 @@ func (h *harness) addDBModel(t *testing.T, admin, public, upstream, id string, e
 	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": params,
-		"model_info":     map[string]any{"mode": "chat", "id": id},
+		"model_info":     map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}, "id": id},
 	})
 }

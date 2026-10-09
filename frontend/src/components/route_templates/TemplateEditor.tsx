@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { t } from "@/i18n";
 import { fetchAvailableModels } from "@/components/llm_calls/fetch_models";
-import { formatStrategyLabel } from "@/components/routing_groups/strategy";
+import { formatTemplateStrategyLabel } from "./strategyLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,7 +42,7 @@ const NumberField: React.FC<{
 );
 
 const StrategyOption: React.FC<{ option: string }> = ({ option }) => (
-  <SelectItem value={option}>{t(formatStrategyLabel(option))}</SelectItem>
+  <SelectItem value={option}>{t(formatTemplateStrategyLabel(option))}</SelectItem>
 );
 
 /**
@@ -170,7 +170,7 @@ const TemplateEditor: React.FC<{
             <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.modelRouting.defaultHint")}</p>
             <Select value={form.routing_strategy} onValueChange={(value) => value && chooseStrategy(value)}>
               <SelectTrigger className="w-full" aria-label={t("pages.routeTemplates.strategy")}>
-                <SelectValue>{t(formatStrategyLabel(form.routing_strategy))}</SelectValue>
+                <SelectValue>{t(formatTemplateStrategyLabel(form.routing_strategy))}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {options.map((option) => (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/sunqirui1987/xhub/internal/logx"
 	"xorm.io/xorm"
 )
 
@@ -20,6 +21,11 @@ var auditNameSources = []struct {
 	{"route_templates", []string{"route_template"}},
 }
 
+// auditText reads an optional immutable display snapshot from audit detail.
+// 参数 detail（map[string]any）、key（string）：事件详情和字段名。
+// 返回 string：字符串快照或空值。
+// 调用：enrichAudit。
+// 测试：audit_test.go
 func auditText(detail map[string]any, key string) string {
 	value, _ := detail[key].(string)
 	return value
@@ -27,6 +33,10 @@ func auditText(detail map[string]any, key string) string {
 
 // Historical snapshots win over current names. Old records without snapshots
 // use batch lookups restricted to the current page, including deleted actors.
+// 参数 ctx（context.Context）、rows（[]AuditEntry）：请求上下文和已授权事件页。
+// 返回 error：补充旧事件显示名时的数据库错误。
+// 调用：审计日志分页读取。
+// 测试：audit_test.go
 func (db *DB) enrichAudit(ctx context.Context, rows []AuditEntry) error {
 	actorIDs := make([]string, 0, len(rows))
 	for i := range rows {
@@ -44,6 +54,7 @@ func (db *DB) enrichAudit(ctx context.Context, rows []AuditEntry) error {
 		err := s.In("id", actorIDs).Cols("id", "name", "email").Find(&users)
 		s.Close()
 		if err != nil {
+			logx.Error("audit actor name lookup failed: %v", err)
 			return err
 		}
 		byID := make(map[string]User, len(users))
@@ -93,6 +104,7 @@ func (db *DB) enrichAudit(ctx context.Context, rows []AuditEntry) error {
 		err := s.Table(source.table).In("id", ids).Select("id, name").Find(&names)
 		s.Close()
 		if err != nil {
+			logx.Error("audit object name lookup failed for %s: %v", source.table, err)
 			return err
 		}
 		byID := make(map[string]string, len(names))
@@ -114,6 +126,10 @@ func (db *DB) enrichAudit(ctx context.Context, rows []AuditEntry) error {
 
 // Search the visible identities and event codes before counting/pagination.
 // strpos treats %, _ and other characters literally rather than as wildcards.
+// 参数 query（*xorm.Session）、search（string）：授权查询与搜索词。
+// 返回：无；在查询上追加可见字段条件。
+// 调用：审计日志分页读取。
+// 测试：audit_test.go
 func applyAuditSearch(query *xorm.Session, search string) {
 	parts := []string{}
 	args := []any{}

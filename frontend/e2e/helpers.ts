@@ -123,10 +123,21 @@ export async function ensureFixtureTeam(page: Page) {
 }
 
 export async function chooseKeyTeam(page: Page) {
+  // The selector mounts only after both membership and team queries resolve.
+  // A one-shot count() can see zero controls and submit an empty team_id.
+  const identity = await page.request.get(GATEWAY + "/auth/me", {
+    headers: { Authorization: "Bearer " + await sessionBearer(page) },
+  });
+  expect(identity.ok(), "read team memberships before choosing a key team").toBeTruthy();
+  const { teams } = await identity.json();
+  expect(Array.isArray(teams), "session membership list").toBeTruthy();
+  expect(teams.length, "key fixture has at least one team membership").toBeGreaterThan(0);
   const control = page.getByRole("dialog").getByRole("combobox", { name: t("Team"), exact: true });
-  if (await control.count()) {
+  if (teams.length > 1) {
+    await expect(control).toBeVisible();
     await control.click();
     await page.getByRole("option", { name: /e2e-fixture-team/ }).click();
+    await expect(control).toContainText("e2e-fixture-team");
   }
 }
 

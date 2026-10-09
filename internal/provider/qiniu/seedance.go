@@ -1,4 +1,4 @@
-// Package qiniu registers Qiniu Modelink's Seedance API as a bypass endpoint type.
+// Package qiniu 登记七牛的 Ark 和 Fal 视频协议、供应商连接与模型目录。
 package qiniu
 
 import (
@@ -22,10 +22,13 @@ func init() {
 		},
 	})
 	provider.RegisterTransport(provider.Transport{
-		ID: "qiniu_contents_generation", Kind: provider.KindBypass,
+		EndpointType: "bypass:ark-video", Protocol: "ark", Family: "video", ModelGroup: "Seedance",
+		Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Bearer"},
+		ID:   "qiniu_contents_generation", Kind: provider.KindBypass,
 		Label:     "Bypass - 七牛内容生成 /v3/contents/generations/tasks",
 		Providers: []string{"qiniu"}, APIBase: "https://api.qnaigc.com",
 		ModelField: "model", TaskID: "id", StripPrefix: "qiniu",
+		Billing: provider.SeedanceBilling(),
 		Actions: []provider.Action{
 			{Name: "create", Method: "POST", PublicPath: "/v3/contents/generations/tasks", UpstreamPath: "/v3/contents/generations/tasks"},
 			{Name: "get", Method: "GET", PublicPath: "/v3/contents/generations/tasks/{id}", UpstreamPath: "/v3/contents/generations/tasks/{id}"},
@@ -34,12 +37,14 @@ func init() {
 	for _, id := range []string{
 		"bytedance/doubao-seedance-2-0-260128",
 		"bytedance/doubao-seedance-2-0-fast-260128",
-		"bytedance/doubao-seedance-2-0-mini-260128",
+		"bytedance/doubao-seedance-2-0-mini-260615",
+		"bytedance/doubao-seedance-2-5-260628",
 	} {
 		provider.RegisterModel(provider.Model{
 			ID: "qiniu/" + id, Provider: "qiniu", Official: id,
 			EndpointType: "qiniu_contents_generation",
 			Source:       "https://docs.modelink.ai/api/video-doubao-seedance-20",
+			PriceModel:   id, PriceSource: "https://api.modelink.ai/v1/market/models",
 		})
 	}
 }

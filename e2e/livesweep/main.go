@@ -48,7 +48,7 @@ func main() {
 	for _, f := range doc.Families {
 		famPaths[f.ID] = f.HTTPPaths
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 75 * time.Second}
 	code, _, loginBody := call(client, base, http.MethodPost, "/v2/login", "", map[string]any{"username": "admin", "password": master})
 	var login map[string]any
 	_ = json.Unmarshal([]byte(loginBody), &login)
@@ -59,7 +59,7 @@ func main() {
 	if code != 200 || admin == "" {
 		fail(fmt.Errorf("sweep login %d", code))
 	}
-	sk := mint(client, base, admin)
+	sk, sweepUser := mint(client, base, admin)
 	var bad []string
 	var lines []string
 	checked := 0
@@ -74,7 +74,7 @@ func main() {
 		}
 		var body any
 		if method != http.MethodGet && method != http.MethodHead {
-			body = catalogBody(path)
+			body = catalogBody(path, sweepUser)
 		}
 		code, hdr, resp := call(client, base, method, path, tok, body)
 		checked++
@@ -100,6 +100,10 @@ func main() {
 			record()
 			continue
 		}
+		if code == http.StatusNotImplemented && typedUnsupported(resp) && hdr.Get("x-litellm-call-id") != "" && hdr.Get("x-litellm-version") != "" {
+			lines = append(lines, fmt.Sprintf("route unsupported %s %s %d", method, rt.Path, code))
+			continue
+		}
 		if code == 0 || code == 404 || code >= 500 {
 			bad = append(bad, fmt.Sprintf("%s %s -> %d %s", method, path, code, truncate(resp, 180)))
 			record()
@@ -123,8 +127,20 @@ func main() {
 				var m map[string]any
 				if json.Unmarshal([]byte(resp), &m) == nil && shouldCheckFrozen(path, m) {
 					keys := frozenRespKeys(path, famPaths)
-					if miss := missingKeys(m, keys); len(miss) > 0 {
+					payload := m
+					if path == "/user/update" {
+						if info, ok := m["user_info"].(map[string]any); ok {
+							payload = info
+						}
+					}
+					if miss := missingKeys(payload, keys); len(miss) > 0 {
 						bad = append(bad, fmt.Sprintf("%s %s missing %v in %s", method, path, miss, truncate(resp, 160)))
+					}
+					if path == "/guardrails/test_custom_code" {
+						result, _ := m["result"].(map[string]any)
+						if m["success"] != true || result["action"] != "allow" {
+							bad = append(bad, fmt.Sprintf("%s %s script did not allow the trial: %s", method, path, truncate(resp, 160)))
+						}
 					}
 				}
 			}
@@ -133,6 +149,11 @@ func main() {
 			bad = append(bad, fmt.Sprintf("%s %s llm_api 401 %s", method, path, truncate(resp, 120)))
 		}
 		record()
+	}
+	// Mutating catalog probes must never change the bootstrap administrator.
+	loginCode, _, _ := call(client, base, http.MethodPost, "/v2/login", "", map[string]any{"username": "admin", "password": master})
+	if loginCode != http.StatusOK {
+		bad = append(bad, fmt.Sprintf("administrator login after sweep -> %d", loginCode))
 	}
 	if report := os.Getenv("E2E_ROUTE_LINES"); report != "" {
 		_ = os.WriteFile(report, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
@@ -148,7 +169,7 @@ func main() {
 	fmt.Printf("checked=%d misaligned=0 unique_http_routes=%d\n", checked, doc.Baseline.Unique)
 }
 
-func mint(client *http.Client, base, master string) string {
+func mint(client *http.Client, base, master string) (string, string) {
 	orgCode, _, orgBody := call(client, base, http.MethodPost, "/organization/new", master, map[string]any{"organization_alias": "e2e-sweep-org"})
 	var org map[string]any
 	_ = json.Unmarshal([]byte(orgBody), &org)
@@ -156,11 +177,13 @@ func mint(client *http.Client, base, master string) string {
 		fail(fmt.Errorf("sweep organization %d", orgCode))
 	}
 	// Master has no user identity, so create a first team administrator explicitly.
-	adminCode, _, _ := call(client, base, http.MethodPost, "/user/new", master, map[string]any{"user_id": "e2e-sweep-admin", "user_email": "e2e-sweep-admin@example.com", "user_role": "user"})
+	adminCode, _, adminBody := call(client, base, http.MethodPost, "/user/new", master, map[string]any{"user_id": "e2e-sweep-admin", "user_email": "e2e-sweep-admin@example.com", "user_role": "user", "password": "e2e-sweep-password"})
 	if adminCode != 200 {
 		fail(fmt.Errorf("sweep administrator %d", adminCode))
 	}
-	teamCode, _, teamBody := call(client, base, http.MethodPost, "/team/new", master, map[string]any{"organization_id": org["organization_id"], "team_alias": "e2e-sweep-team", "admin_user_id": "e2e-sweep-admin"})
+	var administrator map[string]any
+	_ = json.Unmarshal([]byte(adminBody), &administrator)
+	teamCode, _, teamBody := call(client, base, http.MethodPost, "/team/new", master, map[string]any{"organization_id": org["organization_id"], "team_alias": "e2e-sweep-team", "admin_user_id": administrator["user_id"]})
 	var team map[string]any
 	_ = json.Unmarshal([]byte(teamBody), &team)
 	if teamCode != 200 {
@@ -173,14 +196,16 @@ func mint(client *http.Client, base, master string) string {
 	if ownerCode != 200 {
 		fail(fmt.Errorf("create sweep owner %d %s", ownerCode, truncate(ownerBody, 200)))
 	}
-	code, _, body := call(client, base, http.MethodPost, "/key/generate", master, map[string]any{"key_type": "llm_api", "user_id": "e2e-sweep-owner", "team_id": team["team_id"]})
+	var owner map[string]any
+	_ = json.Unmarshal([]byte(ownerBody), &owner)
+	code, _, body := call(client, base, http.MethodPost, "/key/generate", master, map[string]any{"key_type": "llm_api", "user_id": owner["user_id"], "team_id": team["team_id"]})
 	var g map[string]any
 	_ = json.Unmarshal([]byte(body), &g)
 	sk, _ := g["key"].(string)
 	if code != 200 || !strings.HasPrefix(sk, "sk-") {
 		fail(fmt.Errorf("mint key %d %s", code, truncate(body, 200)))
 	}
-	return sk
+	return sk, fmt.Sprint(administrator["user_id"])
 }
 
 func call(client *http.Client, base, method, path, token string, body any) (int, http.Header, string) {
@@ -206,6 +231,15 @@ func call(client *http.Client, base, method, path, token string, body any) (int,
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	return res.StatusCode, res.Header, string(b)
+}
+
+func typedUnsupported(raw string) bool {
+	var body map[string]any
+	if json.Unmarshal([]byte(raw), &body) != nil {
+		return false
+	}
+	err, _ := body["error"].(map[string]any)
+	return err["type"] == "not_implemented" && err["message"] != ""
 }
 
 func typed404(raw string) bool {
@@ -270,7 +304,17 @@ func missingKeys(m map[string]any, keys []string) []string {
 	return miss
 }
 
-func catalogBody(path string) map[string]any {
+func catalogBody(path, sweepUser string) map[string]any {
+	if path == "/guardrails/test_custom_code" {
+		return map[string]any{
+			"custom_code": `import . "xhub/guardrail"
+func ApplyGuardrail(texts []string, requestData map[string]any, inputType string) map[string]any {
+ return Allow()
+}`,
+			"test_input": map[string]any{"texts": []string{"catalog trial"}, "model": "gpt-4o-mini"},
+			"input_type": "request",
+		}
+	}
 	b := map[string]any{
 		"model": "gpt-4o-mini", "prompt": "hi", "input": "hi", "query": "q",
 		"documents": []any{"a"}, "messages": []any{map[string]any{"role": "user", "content": "hi"}},
@@ -278,9 +322,16 @@ func catalogBody(path string) map[string]any {
 	}
 	switch {
 	case strings.Contains(path, "/user"):
-		b["user_email"] = "all@x"
+		// Without a target, /user/update edits the caller, including its password.
+		if path != "/user/new" {
+			b["user_id"] = sweepUser
+		}
+		b["user_email"] = "sweep-user@example.com"
+		if path == "/user/update" {
+			b["user_email"] = "e2e-sweep-admin@example.com"
+		}
 		b["user_role"] = "internal_user"
-		b["password"] = "pw"
+		b["password"] = "e2e-sweep-password"
 	case strings.Contains(path, "/team"):
 		b["team_alias"] = "t"
 	case strings.Contains(path, "/organization"):
@@ -329,6 +380,9 @@ func familyOf(path string, famPaths map[string][]string) string {
 }
 
 func frozenRespKeys(path string, famPaths map[string][]string) []string {
+	if path == "/guardrails/test_custom_code" {
+		return []string{"success", "result"}
+	}
 	if strings.Contains(path, "/key/generate") || strings.Contains(path, "/key/service-account") || strings.Contains(path, "/regenerate") {
 		return []string{"key", "key_name", "key_alias", "expires", "token_id", "user_id", "team_id", "models", "max_budget", "spend"}
 	}

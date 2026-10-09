@@ -24,19 +24,20 @@ os.environ/NAME 只在环境取值，不应把解析后的密钥写回文档。�
 
 ## ModelEntry 字段契约
 
-model_name 是客户端模型名。litellm_params.model 是供应商模型标识，两者均必填。同一公开模型多个部署参与选路。params 包括上游 api_base、协议 custom_llm_provider、命名凭据 litellm_credential_name 和兼容内联连接字段。默认供应商地址只有在部署未覆盖时使用。
+model_name 是客户端模型名。litellm_params.model 是供应商模型标识，两者均必填。同一公开模型多个部署参与选路。params 包括上游 api_base、协议 custom_llm_provider、命名凭据 litellm_credential_name 和连接字段。默认供应商地址只有在部署未覆盖时使用。
 
-model_info.endpoint_types 表示入口能力；历史 mode 仍被识别，显式未知能力拒绝。model_info.disabled 仅布尔 true 表示暂停；字符串不是正式布尔状态。暂停部署不出现在可调用发现和实际路由池，不能由已有粘性恢复。
+model_info.endpoint_types 表示入口能力；未声明时默认为 chat，显式未知能力拒绝。model_info.transport 指定已登记的官方转发方式；未声明时使用 adapted。model_info.mode 不参与部署选路。model_info.disabled 仅布尔 true 表示暂停；字符串不是正式布尔状态。暂停部署不出现在可调用发现和实际路由池，不能由已有粘性恢复。
 
 pricing_source 支持 catalog/manual。catalog 需要真实存在、有价格的 base_model。manual 需要至少一个明确费率/价格字段，非有限数和负价拒绝，明确 0 合法。rates 每个元素必须有效，不能只跳过坏行后保存剩下几行。支持 token/picture/second/query；窗口 all/offpeak/peak；输入输出、缓存读写及 batch 侧。实际使用维度取决于协议能提供的 usage。
 
-pricing_id / deployment_id 和命名凭据参与运行状态隔离。没有稳定 ID 的相同端点/模型/凭据可能合并状态。模板权重仍按 api_base|model，目前不能分别覆盖同端点同模型的不同凭据份额。详见 [router](../../internal/router/readme_cn.md)。
+pricing_id / deployment_id 和命名凭据参与运行状态隔离。没有稳定 ID 的相同端点/模型/凭据可能合并状态。模板权重只使用稳定身份：优先 deployment_id（数据库部署的 model_info.id 或文件配置的 litellm_params.deployment_id），其次 pricing_id。没有稳定 ID 的部署保留自身权重，不能被模板覆盖。同端点不同部署有独立稳定 ID 时可分别设置份额。详见 [router](../../internal/router/readme_cn.md)。
 
 ## 模板执行字段
 
 | 字段 | 类型 | 未提供时 | 当前执行语义 |
 | --- | --- | --- | --- |
 | routing_strategy | string | simple-shuffle | 同公开模型部署排序，不扩大权限 |
+| model_routing | array | 无模型专属覆盖 | 精确匹配请求的公开模型名，只替换已选模板的策略和策略参数；其他字段仍由该模板提供 |
 | num_retries | number | 1 | 每条部署总尝试次数，非正转 1 |
 | timeout | number 秒 | 60 | 每次上游尝试时限，非正转 60 |
 | allowed_fails | number | 3 | 非正关闭冷却失败累计 |
@@ -48,14 +49,24 @@ pricing_id / deployment_id 和命名凭据参与运行状态隔离。没有稳�
 权重列表形状：
 
 ```json
-{"routing_strategy":"weighted-split","routing_strategy_args":{"weights":[{"api_base":"https://provider.example/v1","model":"upstream-model","weight":70}]}}
+{"routing_strategy":"weighted-split","routing_strategy_args":{"weights":[{"deployment_id":"model_123","weight":70}]}}
 ```
 
 权重 map 形状：
 
 ```json
-{"routing_strategy_args":{"weights":{"https://provider.example/v1|upstream-model":70}}}
+{"routing_strategy_args":{"weights":{"deployment:model_123":70}}}
 ```
+
+同端点的部署必须使用稳定身份。列表行可写 `{"deployment_id":"model_123","weight":70}` 或 `{"pricing_id":"price_123","weight":70}`；映射键可写 `deployment:model_123` 或 `pricing:price_123`。没有稳定 ID 的行不能由模板覆盖。
+
+`model_routing` 示例：
+
+```json
+{"routing_strategy":"simple-shuffle","num_retries":2,"model_routing":[{"model_name":"public-chat","routing_strategy":"weighted-split","routing_strategy_args":{"weights":{"deployment:model_123":70}}}]}
+```
+
+`model_name` 必须非空且不能重复，策略必须有效，`routing_strategy_args` 如果提供则须为对象。匹配行未提供参数时使用空对象，不继承顶层策略参数；未匹配模型继续使用顶层策略。模板和平台设置写入时都会校验这些规则，其他未知字段可往返保存。
 
 列表未匹配的部署使用自身权重。创建模板补齐平台基线，后续平台修改不改变旧模板；更新接口完整替换正文，缺失字段由运行 reader 默认决定。不是每字段与父级合并。
 

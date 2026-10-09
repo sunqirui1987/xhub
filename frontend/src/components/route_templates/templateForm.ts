@@ -29,10 +29,12 @@ export type ChainRow = { primary: string; targets: string };
 /**
  * One deployment's share of traffic under weighted-split.
  *
- * The id the router matches is api_base|model. model_name is the public name
- * the operator groups by. A deployment left out of this list keeps its own weight.
+ * The router matches a stable deployment_id or pricing_id. model_name is the
+ * public name the operator groups by. An omitted row keeps its own weight.
  */
 export type WeightRow = {
+  deployment_id?: string;
+  pricing_id?: string;
   model_name: string;
   api_base: string;
   model: string;
@@ -41,6 +43,8 @@ export type WeightRow = {
 
 /** A live deployment the weight table can offer a row for. */
 export type SplitDeployment = {
+  deployment_id?: string;
+  pricing_id?: string;
   model_name: string;
   api_base: string;
   model: string;
@@ -230,9 +234,16 @@ export const omitUntouchedRoutingGroups = (
   return next;
 };
 
-export const deploymentKey = (row: { api_base: string; model: string; model_name?: string }): string => {
-  const model = row.model.trim() || row.model_name?.trim() || "";
-  return `${row.api_base.trim()}|${model}`;
+export const deploymentKey = (row: {
+  api_base: string;
+  model: string;
+  model_name?: string;
+  deployment_id?: string;
+  pricing_id?: string;
+}): string => {
+  if (row.deployment_id?.trim()) return `deployment:${row.deployment_id.trim()}`;
+  if (row.pricing_id?.trim()) return `pricing:${row.pricing_id.trim()}`;
+  return "";
 };
 
 const weightsFrom = (value: unknown): WeightRow[] => {
@@ -242,15 +253,34 @@ const weightsFrom = (value: unknown): WeightRow[] => {
       const modelName = typeof item.model_name === "string" ? item.model_name : "";
       const model = typeof item.model === "string" ? item.model : modelName;
       const apiBase = typeof item.api_base === "string" ? item.api_base : "";
-      return [{ model_name: modelName || model, api_base: apiBase, model, weight: numberText(item.weight) }];
+      if (typeof item.deployment_id !== "string" && typeof item.pricing_id !== "string") return [];
+      return [
+        {
+          model_name: modelName || model,
+          api_base: apiBase,
+          model,
+          ...(typeof item.deployment_id === "string" ? { deployment_id: item.deployment_id } : {}),
+          ...(typeof item.pricing_id === "string" ? { pricing_id: item.pricing_id } : {}),
+          weight: typeof item.weight === "string" ? item.weight : numberText(item.weight),
+        },
+      ];
     });
   }
   if (isRecord(value)) {
     return Object.entries(value).flatMap(([id, weight]) => {
-      const splitAt = id.indexOf("|");
-      const apiBase = splitAt >= 0 ? id.slice(0, splitAt) : "";
-      const model = splitAt >= 0 ? id.slice(splitAt + 1) : id;
-      return [{ model_name: model, api_base: apiBase, model, weight: numberText(weight) }];
+      if ((id.startsWith("deployment:") || id.startsWith("pricing:")) && id.slice(id.indexOf(":") + 1).trim()) {
+        const key = id.startsWith("deployment:") ? "deployment_id" : "pricing_id";
+        return [
+          {
+            model_name: "",
+            api_base: "",
+            model: "",
+            [key]: id.slice(id.indexOf(":") + 1),
+            weight: typeof weight === "string" ? weight : numberText(weight),
+          },
+        ];
+      }
+      return [];
     });
   }
   return [];
@@ -260,10 +290,12 @@ const weightsTo = (rows: WeightRow[]): Array<Record<string, unknown>> => {
   const out: Array<Record<string, unknown>> = [];
   for (const row of rows) {
     const model = row.model.trim() || row.model_name.trim();
-    if (!model && !row.api_base.trim()) continue;
+    if (!deploymentKey(row)) continue;
     const parsed = writeNumber(row.weight);
     if (!parsed.ok || parsed.value === undefined || parsed.value < 0) continue;
     const stored = {
+      ...(row.deployment_id ? { deployment_id: row.deployment_id } : {}),
+      ...(row.pricing_id ? { pricing_id: row.pricing_id } : {}),
       model_name: row.model_name.trim() || model,
       api_base: row.api_base.trim(),
       model,
@@ -282,14 +314,17 @@ const weightsTo = (rows: WeightRow[]): Array<Record<string, unknown>> => {
  * when nobody set a weight. Saving that 1 makes the document say so.
  */
 export const weightRowsForEditor = (saved: WeightRow[], deployments: SplitDeployment[]): WeightRow[] => {
-  const byId = new Map(saved.map((row) => [deploymentKey(row), row]));
+  const byId = new Map(saved.filter((row) => deploymentKey(row)).map((row) => [deploymentKey(row), row]));
   const seen = new Set<string>();
   const rows: WeightRow[] = [];
   for (const deployment of deployments) {
     const key = deploymentKey(deployment);
+    if (!key) continue;
     seen.add(key);
     const existing = byId.get(key);
     const row = {
+      ...(deployment.deployment_id ? { deployment_id: deployment.deployment_id } : {}),
+      ...(deployment.pricing_id ? { pricing_id: deployment.pricing_id } : {}),
       model_name: deployment.model_name,
       api_base: deployment.api_base,
       model: deployment.model,
@@ -298,7 +333,7 @@ export const weightRowsForEditor = (saved: WeightRow[], deployments: SplitDeploy
     rows.push(row);
   }
   for (const row of saved) {
-    if (!seen.has(deploymentKey(row)) && (row.model.trim() || row.model_name.trim())) rows.push(row);
+    if (deploymentKey(row) && !seen.has(deploymentKey(row))) rows.push(row);
   }
   return rows;
 };
@@ -314,8 +349,18 @@ export const deploymentsFromInfo = (rows: unknown[]): SplitDeployment[] => {
     if (!model || model.startsWith("auto_router/")) continue;
     const apiBase = typeof params.api_base === "string" ? params.api_base.trim() : "";
     const weight = numberText(params.weight);
+    const info = isRecord(row.model_info) ? row.model_info : {};
+    const deploymentId = [params.deployment_id, info.id].find(
+      (value) => typeof value === "string" && value.trim(),
+    );
+    const pricingId = [params.pricing_id, info.pricing_id].find((value) => typeof value === "string" && value.trim());
+    if (!deploymentId && !pricingId) continue;
     out.push({
-      model_name: modelName || model, api_base: apiBase, model,
+      ...(typeof deploymentId === "string" ? { deployment_id: deploymentId.trim() } : {}),
+      ...(typeof pricingId === "string" ? { pricing_id: pricingId.trim() } : {}),
+      model_name: modelName || model,
+      api_base: apiBase,
+      model,
       ...(weight ? { weight } : {}),
       ...(typeof params.custom_llm_provider === "string" ? { provider: params.custom_llm_provider } : {}),
       ...(typeof params.litellm_credential_name === "string" ? { supplier: params.litellm_credential_name } : {}),
@@ -343,10 +388,15 @@ export const formFromBody = (body: Record<string, unknown> | undefined): Templat
     if (!EDITED_KEYS.has(key)) extra[key] = value;
   }
   const modelRules = source.model_routing;
-  const validModelRules = Array.isArray(modelRules) && modelRules.every((rule) =>
-    isRecord(rule) && typeof rule.model_name === "string" && typeof rule.routing_strategy === "string" &&
-    (rule.routing_strategy_args === undefined || isRecord(rule.routing_strategy_args)),
-  );
+  const validModelRules =
+    Array.isArray(modelRules) &&
+    modelRules.every(
+      (rule) =>
+        isRecord(rule) &&
+        typeof rule.model_name === "string" &&
+        typeof rule.routing_strategy === "string" &&
+        (rule.routing_strategy_args === undefined || isRecord(rule.routing_strategy_args)),
+    );
   // Keep malformed or future shapes visible in JSON instead of silently dropping them.
   if (modelRules !== undefined && !validModelRules) extra.model_routing = modelRules;
   const strategy =
@@ -376,7 +426,7 @@ export const formFromBody = (body: Record<string, unknown> | undefined): Templat
     content_policy_fallbacks: chainsFrom(source.content_policy_fallbacks),
     default_fallbacks: listText(source.default_fallbacks),
     weights,
-    model_routing: validModelRules ? modelRules as ModelRoutingRule[] : [],
+    model_routing: validModelRules ? (modelRules as ModelRoutingRule[]) : [],
     ttl,
     lowest_latency_buffer: lowestLatencyBuffer,
     stream_timeout: numberText(source.stream_timeout),
@@ -459,6 +509,19 @@ export const bodyFromForm = (form: TemplateFormState): BodyResult => {
       const argsForm = formFromBody({ routing_strategy_args: rule.routing_strategy_args });
       const checked = bodyFromForm(argsForm);
       if (!checked.ok) return { ok: false, field: "model_routing" };
+      const rawWeights = rule.routing_strategy_args?.weights;
+      if (
+        Array.isArray(rawWeights) &&
+        rawWeights.some(
+          (item) =>
+            isRecord(item) &&
+            (() => {
+              const parsed = writeNumber(item.weight == null ? "" : String(item.weight));
+              return !parsed.ok || parsed.value === undefined || parsed.value < 0;
+            })(),
+        )
+      )
+        return { ok: false, field: "model_routing" };
     }
     body.model_routing = form.model_routing.map((rule) => ({ ...rule, model_name: rule.model_name.trim() }));
   }
@@ -490,9 +553,10 @@ export const bodyFromForm = (form: TemplateFormState): BodyResult => {
   delete carried.lowest_latency_buffer;
   const args: Record<string, unknown> = { ...carried };
   for (const row of form.weights) {
-    if (!row.model.trim() && !row.model_name.trim() && !row.api_base.trim()) continue;
+    if (!row.model.trim() && !row.model_name.trim() && !row.api_base.trim() && !row.deployment_id && !row.pricing_id)
+      continue;
     const parsed = writeNumber(row.weight);
-    if (!parsed.ok || (parsed.value !== undefined && parsed.value < 0)) return { ok: false, field: "weights" };
+    if (!parsed.ok || parsed.value === undefined || parsed.value < 0) return { ok: false, field: "weights" };
   }
   const weights = weightsTo(form.weights);
   if (weights.length > 0) args.weights = weights;

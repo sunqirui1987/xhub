@@ -74,7 +74,7 @@ npx playwright install chromium
 make e2e
 ```
 
-目标会停掉 `3000/4000/4010` 上的监听进程，构建控制台，再启动 Playwright。运行前确认这些端口没有需要保留的开发服务。Playwright 的 webServer 启动假上游、网关和控制台；网关使用独立 e2e schema。
+`make e2e` 运行 `scripts/e2e-all.sh`：浏览器流程之后执行含真实供应商的严格后端回归，需要可用的真实供应商凭据并会产生费用。只运行本地模拟浏览器测试可执行 `make e2e-offline`。浏览器脚本默认使用独立的 `3100/4100/4110` 端口及 `.next-e2e` 构建目录；端口占用时直接失败，可用 `E2E_UI_PORT`、`E2E_GW_PORT`、`E2E_UP_PORT` 覆盖。Playwright 的 webServer 启动假上游、网关和控制台；网关使用独立 e2e schema。完整场景矩阵见[浏览器回归](e2e-regression.md)，后端场景和真实模型条件见[全链路回归](regression.md)。
 
 权限界面重点看 `frontend/e2e/visibility-chain.spec.ts`；密钥与 Playground 看 `keys-playground.spec.ts`；创建和写操作看 wizards/writes 相关 spec。浏览器检查不代替数据库并发和故障测试。测试输出是临时产物，不加入正式文档。
 

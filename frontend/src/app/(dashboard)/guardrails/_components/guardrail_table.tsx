@@ -19,6 +19,13 @@ interface GuardrailTableProps {
 
 const DEFAULT_SORTING: SortingState = [{ id: "created_at", desc: true }];
 
+/**
+ * 用途：展示空规则目录，并引导用户添加可执行规则。
+ * 参数：无。
+ * 返回：React 空态。
+ * 调用：GuardrailTable 的 noDataMessage。
+ * 测试：guardrail_table.test.tsx。
+ */
 function EmptyState() {
   return (
     <div className="flex flex-col items-center gap-1 py-6">
@@ -26,11 +33,18 @@ function EmptyState() {
         <Inbox className="size-5 text-muted-foreground" />
       </div>
       <div className="text-sm font-medium text-foreground">{t("No guardrails yet")}</div>
-      <div className="text-sm text-muted-foreground">{t("Add a guardrail to start filtering requests and responses.")}</div>
+      <div className="text-sm text-muted-foreground">{t("添加护栏以开始检查请求文本。")}</div>
     </div>
   );
 }
 
+/**
+ * 用途：展示规则列表，维护客户端排序并转发详情/删除操作。
+ * 参数：属性：规则数组、加载状态和详情/删除回调。
+ * 返回：React 数据表；使用规则 ID 作为稳定行标识。
+ * 调用：GuardrailsPanel。
+ * 测试：guardrail_table.test.tsx。
+ */
 const GuardrailTable: React.FC<GuardrailTableProps> = ({
   guardrailsList,
   isLoading,
@@ -45,19 +59,21 @@ const GuardrailTable: React.FC<GuardrailTableProps> = ({
   );
 
   return (
-    <DataTable
-      data={guardrailsList}
-      paginationMode="client"
-      columns={columns}
-      getRowId={(guardrail, index) => guardrail.guardrail_id || String(index)}
-      sortingMode="client"
-      sorting={sorting}
-      onSortingChange={setSorting}
-      isLoading={isLoading}
-      loadingMessage={t("Loading guardrails…")}
-      noDataMessage={<EmptyState />}
-      size="compact"
-    />
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <DataTable
+        data={guardrailsList}
+        paginationMode="client"
+        columns={columns}
+        getRowId={(guardrail, index) => guardrail.guardrail_id || String(index)}
+        sortingMode="client"
+        sorting={sorting}
+        onSortingChange={setSorting}
+        isLoading={isLoading}
+        loadingMessage={t("Loading guardrails…")}
+        noDataMessage={<EmptyState />}
+        size="compact"
+      />
+    </div>
   );
 };
 

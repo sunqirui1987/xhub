@@ -5,7 +5,7 @@
 ## Responsibilities and behavior
 
 seedance.go registers ark_contents_generation with ark.cn-beijing.volces.com. The upstream /api/v3/contents/generations/tasks path supports create, list, and get-by-ID; transport mappings define public gateway paths.
-model and id are the request/model and task ID fields, and the volcengine prefix is stripped. One contributed model has input/output token rates of USD 7 per million; the fast entry lacks complete pricing, so zero fallback is not a free-service promise.
+model and id are the request/model and task ID fields, and the volcengine prefix is stripped. The unsupported USD 7/million input/output baseline was removed; configure rates for the actual Ark account. Shared Seedance billing extracts completion tokens only on successful terminal responses and selects the resolution/reference-video band. Unpriced zero cost does not mean free service.
 Dataplane owns identity, budgets, retry rules, and settlement deduplication. Changes need registration and official-task integration tests, with terminal live usage required for real billing evidence.
 
 ## Source responsibilities and entry points

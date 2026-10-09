@@ -88,6 +88,13 @@ const EMPTY_SUBMIT_VALUES: SubmitGuardrailValues = {
   guardrail_info: "",
 };
 
+/**
+ * 用途：展示提交字段提示，供历史审核服务使用。
+ * 参数：label：标签；hint：提示。
+ * 返回：React 标签与帮助提示。
+ * 调用：旧版提交表单。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 const labelWithHint = (label: string, hint: string): React.ReactNode => (
   <>
     {label}
@@ -123,12 +130,26 @@ type TeamGuardrail = {
   guardrailType?: string;
 };
 
+/**
+ * 用途：将审核 API 状态转换为页面状态。
+ * 参数：apiStatus：API 状态字符串。
+ * 返回：页面状态枚举；保留历史兼容行为，未知状态显示为 active。
+ * 调用：submissionToTeamGuardrail。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function mapStatus(apiStatus: string): GuardrailStatus {
   if (apiStatus === "pending_review") return "pending";
   if (apiStatus === "active" || apiStatus === "rejected") return apiStatus;
   return "active";
 }
 
+/**
+ * 用途：格式化审核日期并兼容缺失数据。
+ * 参数：value：可空日期字符串。
+ * 返回：可读日期或占位符。
+ * 调用：submissionToTeamGuardrail。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function formatSubmissionDate(value: string | null | undefined): string {
   if (!value) return "—";
   try {
@@ -139,6 +160,13 @@ function formatSubmissionDate(value: string | null | undefined): string {
   }
 }
 
+/**
+ * 用途：把服务器提交记录转换为展示模型，兼容缺失参数。
+ * 参数：item：提交记录。
+ * 返回：独立的展示记录。
+ * 调用：fetchSubmissions。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function submissionToTeamGuardrail(item: GuardrailSubmissionItem): TeamGuardrail {
   const params = item.litellm_params ?? {};
   const info = item.guardrail_info ?? {};
@@ -211,6 +239,13 @@ const TEAM_COLORS: Record<string, string> = {
   Finance: "bg-success/15 text-success",
 };
 
+/**
+ * 用途：生成历史提交配置供查看；不代表当前 XHub 可直接执行该 YAML。
+ * 参数：g：提交展示记录。
+ * 返回：历史 LiteLLM YAML 文本。
+ * 调用：DetailPanel。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function buildEquivalentConfigYaml(g: TeamGuardrail): string {
   const lines: string[] = [
     "litellm_settings:",
@@ -249,6 +284,13 @@ function buildEquivalentConfigYaml(g: TeamGuardrail): string {
   return lines.join("\n");
 }
 
+/**
+ * 用途：渲染审核统计卡片。
+ * 参数：label、value 和 color：标题、数量、颜色。
+ * 返回：React 卡片。
+ * 调用：审核页统计区。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="bg-card border border-border rounded-lg px-4 py-3">
@@ -258,6 +300,13 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
+/**
+ * 用途：显示审核配置开关并转发用户切换。
+ * 参数：组件属性：状态、可操作性及回调。
+ * 返回：React 开关。
+ * 调用：审核卡片与详情。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function Toggle({
   enabled,
   onToggle,
@@ -299,6 +348,13 @@ type GuardrailCardProps = {
   onReject: () => void;
 };
 
+/**
+ * 用途：展示提交记录及当前审核动作。
+ * 参数：g：记录；其余属性：选择与操作回调。
+ * 返回：React 卡片。
+ * 调用：提交目录。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function GuardrailCard({
   guardrail: g,
   isSelected,
@@ -418,6 +474,13 @@ function GuardrailCard({
   );
 }
 
+/**
+ * 用途：统一提交详情配置行。
+ * 参数：label：标题；children：值。
+ * 返回：React 配置行。
+ * 调用：DetailPanel。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function ConfigRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -438,6 +501,13 @@ type DetailPanelProps = {
   onUpdateExtraHeaders: (extraHeaders: string[]) => Promise<void>;
 };
 
+/**
+ * 用途：展示历史审核详情和头部配置操作。
+ * 参数：组件属性：记录、权限与操作回调。
+ * 返回：React 详情；当前 XHub 未启用审核服务时不可达。
+ * 调用：提交记录选择。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function DetailPanel({
   guardrail: g,
   isAdmin,
@@ -470,7 +540,7 @@ function DetailPanel({
             </div>
             <h2 className="text-base font-semibold text-foreground">{g.name}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {t("Submitted by {value0} on {value1}", { value0: (g.submittedBy), value1: (g.submittedAt) })}
+              {t("Submitted by {value0} on {value1}", { value0: g.submittedBy, value1: g.submittedAt })}
             </p>
           </div>
           <button
@@ -512,7 +582,10 @@ function DetailPanel({
             </div>
             <p className="text-xs text-info leading-relaxed">
               {t("When enabled, the caller's LiteLLM API key is forwarded as an")}{" "}
-              <code className="font-mono bg-info/15 px-1 rounded-sm">Authorization</code> {t("header to your guardrail endpoint. This allows your guardrail to authenticate model calls using the original caller's credentials.")}
+              <code className="font-mono bg-info/15 px-1 rounded-sm">Authorization</code>{" "}
+              {t(
+                "header to your guardrail endpoint. This allows your guardrail to authenticate model calls using the original caller's credentials.",
+              )}
             </p>
           </div>
           <div>
@@ -542,7 +615,7 @@ function DetailPanel({
                         type="button"
                         onClick={() => onUpdateCustomHeaders(g.customHeaders.filter((_, idx) => idx !== i))}
                         className="text-muted-foreground hover:text-destructive shrink-0"
-                        aria-label={t("Remove {value0}", { value0: (h.key) })}
+                        aria-label={t("Remove {value0}", { value0: h.key })}
                       >
                         <XIcon className="h-3.5 w-3.5" />
                       </button>
@@ -702,11 +775,10 @@ function DetailPanel({
           <div className="flex items-start gap-2 bg-muted border border-border rounded-lg p-3">
             <InfoIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground leading-relaxed">
-              {t("This guardrail runs on a separate instance. It receives the user request and forwards the result to the next step in the pipeline. See")}{" "}
-              
-                {t("LiteLLM Generic Guardrail API docs")}
-              {" "}
-              {t("for configuration details.")}
+              {t(
+                "This guardrail runs on a separate instance. It receives the user request and forwards the result to the next step in the pipeline. See",
+              )}{" "}
+              {t("LiteLLM Generic Guardrail API docs")} {t("for configuration details.")}
             </p>
           </div>
         </div>
@@ -751,6 +823,13 @@ type ConfirmDialogProps = {
   onCancel: () => void;
 };
 
+/**
+ * 用途：展示批准或拒绝确认。
+ * 参数：action、guardrailName、onConfirm 和 onCancel。
+ * 返回：React 确认弹窗。
+ * 调用：审核操作。
+ * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+ */
 function ConfirmDialog({ action, guardrailName, onConfirm, onCancel }: ConfirmDialogProps) {
   const isApprove = action === "approve";
   return (
@@ -806,9 +885,17 @@ interface TeamGuardrailsTabProps {
   accessToken: string | null;
 }
 
+/**
+ * 用途：显示团队护栏提交和审核能力，未接入时展示能力说明。
+ * 参数：accessToken：调用提交列表的令牌。
+ * 返回：React 标签页；管理写入控件受角色和实际接口能力限制。
+ * 调用：GuardrailsPanel 的已提交护栏标签页。
+ * 测试：TeamGuardrailsTab.integration.test.tsx。
+ */
 export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
   const { userRole } = useAuthorized();
   const isAdmin = userRole ? isProxyAdminRole(userRole) : false;
+  const [supported, setSupported] = useState(true);
   const [guardrails, setGuardrails] = useState<TeamGuardrail[]>([]);
   const [summary, setSummary] = useState({
     total: 0,
@@ -831,6 +918,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
   const submitForm = useZodForm(submitGuardrailSchema, { defaultValues: EMPTY_SUBMIT_VALUES });
   const registerGuardrail = useRegisterGuardrail();
 
+  /**
+   * 用途：按筛选条件加载提交，兼容 submissions 缺失并识别 supported:false。
+   * 参数：无；读取令牌、状态筛选和防抖搜索词。
+   * 返回：Promise<void>；更新列表、统计、能力状态和错误，结束加载。
+   * 调用：首次加载、筛选变化及提交/审核后的刷新。
+   * 测试：TeamGuardrailsTab.integration.test.tsx 的缺失列表与能力关闭场景。
+   */
   const fetchSubmissions = useCallback(async () => {
     if (!accessToken) {
       setIsLoading(false);
@@ -845,8 +939,14 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
         status: statusParam,
         search: searchDebounced.trim() || undefined,
       });
-      setGuardrails(res.submissions.map(submissionToTeamGuardrail));
-      setSummary(res.summary);
+      setSupported(res.supported !== false);
+      setGuardrails((Array.isArray(res.submissions) ? res.submissions : []).map(submissionToTeamGuardrail));
+      setSummary({
+        total: res.summary?.total ?? 0,
+        pending_review: res.summary?.pending_review ?? 0,
+        active: res.summary?.active ?? 0,
+        rejected: res.summary?.rejected ?? 0,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Failed to load submissions"));
       setGuardrails([]);
@@ -859,6 +959,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
     fetchSubmissions();
   }, [fetchSubmissions]);
 
+  /**
+   * 用途：提交历史审核表单，当前后端不支持时入口隐藏。
+   * 参数：values：表单校验后的数据。
+   * 返回：异步提交并刷新或显示错误。
+   * 调用：旧审核表单提交。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   const handleSubmitGuardrail = submitForm.handleSubmit(async (values) => {
     const litellm_params: Record<string, unknown> = {
       ...(values.extra_litellm_params ? JSON.parse(values.extra_litellm_params) : {}),
@@ -889,6 +996,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
   const activeCount = summary.active;
   const rejectedCount = summary.rejected;
 
+  /**
+   * 用途：切换旧提交记录的密钥转发设置并刷新。
+   * 参数：id：提交 ID。
+   * 返回：Promise<void>。
+   * 调用：DetailPanel 开关。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   async function toggleForwardKey(id: string) {
     if (!accessToken) return;
     const g = guardrails.find((x) => x.id === id);
@@ -905,6 +1019,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
     }
   }
 
+  /**
+   * 用途：更新旧提交记录的静态头部。
+   * 参数：id：提交 ID；customHeaders：键值数组。
+   * 返回：Promise<void>。
+   * 调用：DetailPanel 头部编辑。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   async function updateCustomHeaders(id: string, customHeaders: { key: string; value: string }[]) {
     if (!accessToken) return;
     const headersObj: Record<string, string> = {};
@@ -931,6 +1052,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
     }
   }
 
+  /**
+   * 用途：更新旧提交记录的额外头部名称。
+   * 参数：id：提交 ID；extraHeaders：名称数组。
+   * 返回：Promise<void>。
+   * 调用：DetailPanel 头部编辑。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   async function updateExtraHeaders(id: string, extraHeaders: string[]) {
     if (!accessToken) return;
     try {
@@ -944,6 +1072,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
     }
   }
 
+  /**
+   * 用途：批准旧提交记录并刷新；后端仍需审核授权。
+   * 参数：id：提交 ID。
+   * 返回：Promise<void>。
+   * 调用：批准确认。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   async function handleApprove(id: string) {
     if (!accessToken) return;
     try {
@@ -957,6 +1092,13 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
     }
   }
 
+  /**
+   * 用途：拒绝旧提交记录并刷新；后端仍需审核授权。
+   * 参数：id：提交 ID。
+   * 返回：Promise<void>。
+   * 调用：拒绝确认。
+   * 测试：TeamGuardrailsTab.integration.test.tsx；隐藏的历史审核写入分支未新增端到端覆盖。
+   */
   async function handleReject(id: string) {
     if (!accessToken) return;
     try {
@@ -978,6 +1120,14 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
       return next;
     });
   }
+
+  if (!isLoading && !supported)
+    return (
+      <div className="p-6 space-y-2">
+        <h2 className="font-semibold">{t("团队提交审核尚未接入")}</h2>
+        <p>{t("当前可以由管理员在“护栏”页创建关键词、正则或 XGo 脚本，并在“测试调试台”验证后启用。")}</p>
+      </div>
+    );
 
   return (
     <div className="flex h-full">
@@ -1020,10 +1170,14 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
           </button>
         </div>
         <div className="space-y-3">
-          {isLoading && <div className="text-center py-12 text-muted-foreground text-sm">{t("Loading submissions…")}</div>}
+          {isLoading && (
+            <div className="text-center py-12 text-muted-foreground text-sm">{t("Loading submissions…")}</div>
+          )}
           {error && <div className="text-center py-12 text-destructive text-sm">{error}</div>}
           {!isLoading && !error && filtered.length === 0 && (
-            <div className="text-center py-12 text-muted-foreground text-sm">{t("No guardrails match your filters.")}</div>
+            <div className="text-center py-12 text-muted-foreground text-sm">
+              {t("No guardrails match your filters.")}
+            </div>
           )}
           {!isLoading &&
             !error &&
@@ -1127,7 +1281,9 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
                   name="extra_litellm_params"
                   label={labelWithHint(
                     t("Additional litellm_params (optional)"),
-                    t("JSON object merged into litellm_params. e.g. forward_api_key, headers, model, unreachable_fallback"),
+                    t(
+                      "JSON object merged into litellm_params. e.g. forward_api_key, headers, model, unreachable_fallback",
+                    ),
                   )}
                 >
                   {({ ref, ...field }) => (
@@ -1147,7 +1303,7 @@ export function TeamGuardrailsTab({ accessToken }: TeamGuardrailsTabProps) {
                       ref={ref}
                       rows={3}
                       className="font-mono text-xs"
-                      placeholder={t("{\"description\": \"Detects PII in requests\"}")}
+                      placeholder={t('{"description": "Detects PII in requests"}')}
                     />
                   )}
                 </FormField>

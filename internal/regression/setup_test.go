@@ -31,7 +31,7 @@ func chatDeployment(name string) config.ModelEntry {
 			"input_cost_per_token":  testInputRate,
 			"output_cost_per_token": testOutputRate,
 		},
-		ModelInfo: map[string]any{"mode": "chat"},
+		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 	}
 }
 

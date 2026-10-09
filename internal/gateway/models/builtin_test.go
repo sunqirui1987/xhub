@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/config"
-	"github.com/sunqirui1987/xhub/internal/store"
 )
 
 func TestAddedModelMatchesHandAdded(t *testing.T) {
@@ -28,27 +27,12 @@ func TestAddedModelMatchesHandAdded(t *testing.T) {
 	}
 }
 
-func TestClearCopiedMode(t *testing.T) {
-	row := store.ProxyModel{Info: map[string]any{"builtin": "fennoai", "mode": "responses"}}
-	if !clearCopiedMode(&row) || row.Info["mode"] != nil {
-		t.Fatal("copied mode stayed on the model")
-	}
-	row.Info["mode"] = "embedding"
-	if clearCopiedMode(&row) || row.Info["mode"] != "embedding" {
-		t.Fatal("an explicit mode was removed")
-	}
-	plain := store.ProxyModel{Info: map[string]any{"mode": "responses"}}
-	if clearCopiedMode(&plain) {
-		t.Fatal("a hand-added mode was treated as copied")
-	}
-}
-
 func TestPlaygroundGroupSkipsProviderShellsAndUsesChat(t *testing.T) {
 	list := []config.ModelEntry{
-		{ModelName: "fennoai", ModelInfo: map[string]any{"role": "provider", "builtin": "fennoai", "wire_api": "responses", "mode": "responses"}},
+		{ModelName: "fennoai", ModelInfo: map[string]any{"role": "provider", "builtin": "fennoai", "wire_api": "responses", "endpoint_types": []string{"chat"}}},
 		{ModelName: "qiniu", ModelInfo: map[string]any{"role": "provider", "builtin": "qiniu", "wire_api": "responses"}},
-		{ModelName: "gpt-5.6-terra", LiteLLMParams: map[string]any{"custom_llm_provider": "openai", "litellm_credential_name": "fennoai"}},
-		{ModelName: "gpt-5.6-luna", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"id": "model_5e85e4e8398a"}},
+		{ModelName: "gpt-5.6-terra", LiteLLMParams: map[string]any{"custom_llm_provider": "openai", "litellm_credential_name": "fennoai"}, ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}}},
+		{ModelName: "gpt-5.6-luna", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"id": "model_5e85e4e8398a", "transport": "adapted", "endpoint_types": []string{"chat"}}},
 	}
 	got := playgroundGroups(list)
 	if len(got) != 2 {
@@ -72,7 +56,7 @@ func TestPlaygroundGroupSkipsProviderShellsAndUsesChat(t *testing.T) {
 func TestPlaygroundGroupsExcludeDisabledDeployments(t *testing.T) {
 	got := playgroundGroups([]config.ModelEntry{
 		{ModelName: "mixed", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"disabled": true}},
-		{ModelName: "mixed", LiteLLMParams: map[string]any{"custom_llm_provider": "anthropic"}, ModelInfo: map[string]any{"disabled": false, "mode": "chat"}},
+		{ModelName: "mixed", LiteLLMParams: map[string]any{"custom_llm_provider": "anthropic"}, ModelInfo: map[string]any{"disabled": false, "endpoint_types": []string{"chat"}}},
 		{ModelName: "off", ModelInfo: map[string]any{"disabled": true}},
 	})
 	if len(got) != 1 || got[0]["model_group"] != "mixed" {

@@ -52,11 +52,15 @@ import { createChatDisplayMessage, createChatMultimodalMessage } from "./ChatIma
 import CodeInterpreterTool from "./CodeInterpreterTool";
 import { generateCodeSnippet } from "@/components/chat_ui/CodeSnippets";
 import EndpointSelector from "./EndpointSelector";
-import { filterModelsForEndpoint, isModelCompatibleWithEndpoint } from "./EndpointUtils";
+import { isModelCompatibleWithEndpoint } from "./EndpointUtils";
+import { modelEndpoints, endpointUIType } from "@/components/llm_calls/model_endpoints";
+import NativeEndpointPlayground from "./NativeEndpointPlayground";
+import { getProxyBaseUrl } from "@/components/networking";
+import { callTextEndpoint } from "@/components/llm_calls/model_endpoints";
 import FilePreviewCard from "./FilePreviewCard";
 import ChatMessageBubble from "./ChatMessageBubble";
 import MCPEventsDisplay from "@/components/chat_ui/MCPEventsDisplay";
-import { EndpointType, getEndpointType } from "@/components/chat_ui/mode_endpoint_mapping";
+import { EndpointType } from "@/components/chat_ui/mode_endpoint_mapping";
 import ResponsesImageUpload from "./ResponsesImageUpload";
 import { createDisplayMessage, createMultimodalMessage } from "./ResponsesImageUtils";
 import SessionManagement from "./SessionManagement";
@@ -108,6 +112,9 @@ const CUSTOM_MODEL_DEBOUNCE_WAIT_MS = 500;
 
 const NO_VECTOR_STORES: string[] = [];
 
+/** ChatUI 提供模型调试工作区；参数为会话、权限及可选固定模型，返回 React 界面。
+ * 先选择模型与端点，连接和标签配置按需展开；原生任务交给独立面板执行。
+ * 调用：Playground 与 Agent Builder；切换端点保持原有能力校验和请求清理行为。 */
 const ChatUI: React.FC<ChatUIProps> = ({
   accessToken,
   token,
@@ -187,13 +194,13 @@ const ChatUI: React.FC<ChatUIProps> = ({
   const debouncedSetSelectedModel = useDebouncedCallback((value: string) => setSelectedModel(value), {
     wait: CUSTOM_MODEL_DEBOUNCE_WAIT_MS,
   });
-  const [endpointType, setEndpointType] = useState<string | null>(() => {
-    const saved = sessionStorage.getItem("endpointType");
-    if (!saved || saved === EndpointType.MCP || saved === EndpointType.A2A_AGENTS) {
-      return EndpointType.CHAT;
-    }
-    return saved;
-  });
+  // 选择状态使用真实公开路径；同一表单协议可以对应 adapted 和 bypass 两个入口。
+  const [endpointPath, setEndpointPath] = useState<string | null>(null);
+  const selectedModelInfo = modelInfo.find((model) => model.model_group === selectedModel);
+  const supportedEndpoints = modelEndpoints(selectedModelInfo);
+  const selectedBinding = supportedEndpoints.find((endpoint) => endpoint.path === endpointPath);
+  const endpointType = selectedBinding ? (endpointUIType(selectedBinding) ?? selectedBinding.path) : null;
+  const isNativeBinding = selectedBinding?.kind === "bypass";
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>(() => {
@@ -263,7 +270,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
   useEffect(() => {
     if (simplified && fixedModel) {
       setSelectedModel(fixedModel);
-      setEndpointType(EndpointType.CHAT);
     }
   }, [simplified, fixedModel]);
 
@@ -349,7 +355,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
       if (selectedModel) {
         sessionStorage.setItem("selectedModel", selectedModel);
       } else {
-        sessionStorage.removeItem("selectedModel");
       }
     }
     // Note: codeInterpreterEnabled and selectedContainerId are persisted by useCodeInterpreter hook
@@ -408,9 +413,8 @@ const ChatUI: React.FC<ChatUIProps> = ({
       }
     };
 
-    if (!simplified) {
-      void loadModels();
-    }
+    // 精简界面也必须获取固定模型的明确端点声明；隐藏配置栏不等于跳过能力校验。
+    void loadModels();
 
     return () => {
       cancelled = true;
@@ -573,10 +577,12 @@ const ChatUI: React.FC<ChatUIProps> = ({
     setUploadedAudio(file);
   };
 
+  /** handleEndpointChange 切换已声明的公开路径并清理端点专属会话选择。
+   * 参数 value：实际端点路径或空；返回：无。模型选择保持不变。调用：EndpointSelector。
+   */
   const handleEndpointChange = (value: string | null) => {
-    setEndpointType(value);
+    setEndpointPath(value);
     setGeneratedCode("");
-    setSelectedModel(null);
     setSelectedAgent(null);
     setShowCustomModelInput(false);
     setSelectedMCPDirectTool(undefined);
@@ -584,7 +590,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
       setSelectedMCPServers((prev) => (prev.length === 1 && prev[0] !== "__all__" ? prev : []));
     }
     try {
-      sessionStorage.removeItem("selectedModel");
       sessionStorage.removeItem("selectedAgent");
     } catch {}
   };
@@ -609,8 +614,17 @@ const ChatUI: React.FC<ChatUIProps> = ({
     setUploadedAudio(null);
   };
 
+  /** handleSendMessage 校验模型绑定后按协议发送请求并写入对话历史。
+   * 参数：无，读取当前表单状态。返回 Promise<void>；错误在界面展示，取消由 AbortController 控制。
+   * 原生文本调用真实 bypass 路径；适配协议使用对应协议客户端。测试：ChatUI.integration.test.tsx。
+   */
   const handleSendMessage = async () => {
-    if (endpointType === null) {
+    if (
+      endpointType === null ||
+      !modelInfo.some(
+        (model) => model.model_group === selectedModel && isModelCompatibleWithEndpoint(model, endpointType),
+      )
+    ) {
       toast.fromError(t("Please select an endpoint before sending a request"));
       return;
     }
@@ -775,7 +789,27 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
     try {
       if (selectedModel) {
-        if (endpointType === EndpointType.CHAT) {
+        if (selectedBinding?.kind === "bypass") {
+          await callTextEndpoint({
+            endpoint: selectedBinding,
+            base: customProxyBaseUrl || getProxyBaseUrl(),
+            key: effectiveApiKey,
+            model: selectedModel,
+            messages: [
+              ...chatHistory
+                .filter((msg) => !msg.isImage && !msg.isAudio)
+                .map(({ role, content }) => ({ role, content })),
+              newUserMessage,
+            ],
+            onText: (chunk) => updateTextUI("assistant", chunk, selectedModel),
+            onUsage: updateUsageData,
+            onTiming: updateTimingData,
+            onLatency: updateTotalLatency,
+            streaming: streamingEnabled,
+            tags: selectedTags,
+            signal,
+          });
+        } else if (endpointType === EndpointType.CHAT) {
           // Create chat history for API call - strip out model field and isImage field
           // For chat completions, we preserve the multimodal content structure
           const apiChatHistory = [
@@ -790,7 +824,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
           const requestProxyBaseUrl =
             simplified && proxySettings
-              ? proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined
+              ? (proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined)
               : customProxyBaseUrl || undefined;
           await makeOpenAIChatCompletionRequest(
             apiChatHistory,
@@ -1060,34 +1094,25 @@ const ChatUI: React.FC<ChatUIProps> = ({
   const onModelChange = (value: string | null) => {
     setSelectedModel(value);
     setShowCustomModelInput(value === "custom");
-
-    const model = modelInfo.find((option) => option.model_group === value);
-    if (model?.mode && !isModelCompatibleWithEndpoint(model, endpointType as EndpointType)) {
-      setEndpointType(getEndpointType(model.mode));
-    }
   };
 
-  // Check if the selected model is a chat model
-  const isChatModel = () => {
-    if (!selectedModel || selectedModel === "custom") {
-      return false;
-    }
-    const model = modelInfo.find((m) => m.model_group === selectedModel);
-    if (!model) {
-      return false;
-    }
-    // Check if mode is explicitly "chat" or undefined (which defaults to chat per backend)
-    return !model.mode || model.mode === "chat";
-  };
+  // 根据实际选择的端点决定对话设置，不再从价格目录中的 mode 推断协议能力。
+  const isChatModel = () =>
+    [EndpointType.CHAT, EndpointType.RESPONSES, EndpointType.ANTHROPIC_MESSAGES].includes(endpointType as EndpointType);
 
   const supportsStreamingToggle =
     endpointType === EndpointType.CHAT ||
     endpointType === EndpointType.RESPONSES ||
     endpointType === EndpointType.ANTHROPIC_MESSAGES;
-  const modelsForEndpoint = useMemo(
-    () => filterModelsForEndpoint(modelInfo, endpointType as EndpointType),
-    [modelInfo, endpointType],
-  );
+  const modelsForEndpoint = modelInfo;
+  const endpointOptions = supportedEndpoints.map((endpoint) => ({ value: endpoint.path, label: endpoint.path }));
+  // 切换模型仅保留仍受支持的路径，不能因两个端点使用同一表单而混淆它们。
+  useEffect(() => {
+    const options = modelEndpoints(modelInfo.find((model) => model.model_group === selectedModel));
+    setEndpointPath((previous) =>
+      options.some((item) => item.path === previous) ? previous : (options[0]?.path ?? null),
+    );
+  }, [selectedModel, modelInfo]);
   let modelEmptyText = "No models available for this key";
   if (modelLoadError) {
     modelEmptyText = "Unable to load models for this key";
@@ -1125,106 +1150,86 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
   return (
     <div className={`min-h-0 min-w-0 bg-card ${simplified ? "flex h-full w-full flex-col" : "h-full w-full p-3"}`}>
-      <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden rounded-xl bg-card shadow-md ring-1 ring-foreground/10">
+      <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden rounded-xl bg-card ring-1 ring-border">
         <div className="flex h-full min-h-0 min-w-0 w-full flex-col lg:flex-row">
           {!simplified && (
-            <div className="max-h-[42%] w-full shrink-0 overflow-y-auto border-b border-border bg-muted p-4 lg:max-h-none lg:w-72 lg:border-r lg:border-b-0 xl:w-80">
-              <h2 className="mb-6 mt-2 text-xl font-semibold">{t("Configurations")}</h2>
+            <div className="max-h-[42%] w-full shrink-0 overflow-y-auto border-b border-border bg-card p-4 lg:max-h-none lg:w-64 lg:border-r lg:border-b-0 xl:w-72">
+              <h2 className="mb-4 text-sm font-semibold">模型与端点</h2>
               <div className="space-y-4">
-                <div>
-                  <label className="mb-2 flex items-center text-sm font-medium text-foreground">
-                    <Key className="mr-2 size-4" aria-hidden="true" /> {t("Virtual Key Source")}
-                  </label>
-                  <ShadcnSelect
-                    disabled={disabledPersonalKeyCreation}
-                    value={apiKeySource}
-                    onValueChange={(value) => {
-                      setApiKeySource(value as "session" | "custom");
-                    }}
-                  >
-                    <SelectTrigger className="w-full" size="sm" aria-label={t("Virtual Key Source")}>
-                      <SelectValue>{apiKeySource === "custom" ? t("Virtual Key") : t("Current UI Session")}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="session">{t("Current UI Session")}</SelectItem>
-                      <SelectItem value="custom">{t("Virtual Key")}</SelectItem>
-                    </SelectContent>
-                  </ShadcnSelect>
-                  {apiKeySource === "custom" && (
-                    <div className="relative mt-2">
-                      <Key className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        className="h-8 pl-8"
-                        placeholder={t("Enter custom Virtual Key")}
-                        type="password"
-                        onChange={(event) => setApiKey(event.target.value)}
-                        value={apiKey}
-                      />
+                {endpointType !== EndpointType.A2A_AGENTS && endpointType !== EndpointType.MCP && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between text-sm font-medium text-foreground">
+                      <span className="flex items-center">
+                        <Bot className="mr-2 size-4" aria-hidden="true" /> {t("Select Model")}
+                      </span>
+                      {isChatModel() || supportsStreamingToggle ? (
+                        <Popover>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                className="text-muted-foreground hover:text-foreground"
+                                aria-label={t("Model Settings")}
+                                data-testid="model-settings-button"
+                              />
+                            }
+                          >
+                            <Settings className="size-3.5" />
+                          </PopoverTrigger>
+                          <PopoverContent side="right" className="w-auto p-0">
+                            <div className="border-b border-border px-4 py-2 text-sm font-medium">
+                              {t("Model Settings")}
+                            </div>
+                            <AdditionalModelSettings
+                              showAdvancedParams={isChatModel()}
+                              temperature={temperature}
+                              maxTokens={maxTokens}
+                              useAdvancedParams={useAdvancedParams}
+                              onTemperatureChange={setTemperature}
+                              onMaxTokensChange={setMaxTokens}
+                              onUseAdvancedParamsChange={setUseAdvancedParams}
+                              mockTestFallbacks={mockTestFallbacks}
+                              onMockTestFallbacksChange={isNativeBinding ? undefined : setMockTestFallbacks}
+                              streamingEnabled={streamingEnabled}
+                              onStreamingChange={supportsStreamingToggle ? setStreamingEnabled : undefined}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      ) : null}
                     </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="flex items-center text-sm font-medium text-foreground">
-                      <Settings className="mr-2 size-4" aria-hidden="true" /> {t("Custom Proxy Base URL")}
-                    </label>
-                    {proxySettings?.LITELLM_UI_API_DOC_BASE_URL && !customProxyBaseUrl && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="xs"
-                        className="h-auto p-0 text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setCustomProxyBaseUrl(proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
-                          sessionStorage.setItem("customProxyBaseUrl", proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
-                        }}
-                      >
-                        <Link2 className="size-3" />
-                        {t("Fill")}
-                      </Button>
-                    )}
-                    {customProxyBaseUrl && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="xs"
-                        className="h-auto p-0 text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setCustomProxyBaseUrl("");
-                          sessionStorage.removeItem("customProxyBaseUrl");
-                        }}
-                      >
-                        <Eraser className="size-3" />
-                        {t("Clear")}
-                      </Button>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <Wrench className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      className="h-8 pl-8"
-                      placeholder={t("Optional: Enter custom proxy URL (e.g., http://localhost:5000)")}
-                      value={customProxyBaseUrl}
-                      onChange={(event) => {
-                        setCustomProxyBaseUrl(event.target.value);
-                        sessionStorage.setItem("customProxyBaseUrl", event.target.value);
-                      }}
+                    <SearchSelect
+                      value={selectedModel}
+                      placeholder={isLoadingModels ? t("Loading models...") : t("Select a Model")}
+                      emptyText={modelEmptyText}
+                      disabled={isLoadingModels}
+                      onValueChange={onModelChange}
+                      options={[
+                        ...modelsForEndpoint.map((model) => ({
+                          value: model.model_group,
+                          label: model.model_group,
+                        })),
+                      ]}
                     />
+                    {showCustomModelInput && (
+                      <Input
+                        className="mt-2 h-8"
+                        placeholder={t("Enter custom model name")}
+                        onChange={(event) => debouncedSetSelectedModel(event.target.value)}
+                      />
+                    )}
                   </div>
-                  {customProxyBaseUrl && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      API calls will be sent to: {customProxyBaseUrl}
-                    </p>
-                  )}
-                </div>
+                )}
 
                 <div>
                   <label className="mb-2 flex items-center text-sm font-medium text-foreground">
                     <Wrench className="mr-2 size-4" aria-hidden="true" /> {t("Endpoint Type")}
                   </label>
                   <EndpointSelector
-                    endpointType={endpointType}
+                    options={endpointOptions}
+                    disabled={!selectedModel || !endpointOptions.length}
+                    endpointType={selectedBinding ? endpointPath : null}
                     onEndpointChange={handleEndpointChange}
                     className="mb-4"
                   />
@@ -1254,99 +1259,15 @@ const ChatUI: React.FC<ChatUIProps> = ({
                     </div>
                   )}
 
-                  <SessionManagement
-                    endpointType={endpointType}
-                    responsesSessionId={responsesSessionId}
-                    useApiSessionManagement={useApiSessionManagement}
-                    onToggleSessionManagement={handleToggleSessionManagement}
-                  />
-                </div>
-
-                {endpointType !== EndpointType.A2A_AGENTS && endpointType !== EndpointType.MCP && (
-                  <div>
-                    <div className="mb-2 flex items-center justify-between text-sm font-medium text-foreground">
-                      <span className="flex items-center">
-                        <Bot className="mr-2 size-4" aria-hidden="true" /> {t("Select Model")}
-                      </span>
-                      {isChatModel() || supportsStreamingToggle ? (
-                        <Popover>
-                          <PopoverTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="text-muted-foreground hover:text-foreground"
-                                aria-label={t("Model Settings")}
-                                data-testid="model-settings-button"
-                              />
-                            }
-                          >
-                            <Settings className="size-3.5" />
-                          </PopoverTrigger>
-                          <PopoverContent side="right" className="w-auto p-0">
-                            <div className="border-b border-border px-4 py-2 text-sm font-medium">{t("Model Settings")}</div>
-                            <AdditionalModelSettings
-                              showAdvancedParams={isChatModel()}
-                              temperature={temperature}
-                              maxTokens={maxTokens}
-                              useAdvancedParams={useAdvancedParams}
-                              onTemperatureChange={setTemperature}
-                              onMaxTokensChange={setMaxTokens}
-                              onUseAdvancedParamsChange={setUseAdvancedParams}
-                              mockTestFallbacks={mockTestFallbacks}
-                              onMockTestFallbacksChange={setMockTestFallbacks}
-                              streamingEnabled={streamingEnabled}
-                              onStreamingChange={supportsStreamingToggle ? setStreamingEnabled : undefined}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                      ) : (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="cursor-not-allowed text-muted-foreground"
-                                disabled
-                                aria-label={t("Model Settings unavailable")}
-                              />
-                            }
-                          >
-                            <Settings className="size-3.5" />
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {t("Advanced parameters are only supported for chat models currently")}
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <SearchSelect
-                      value={selectedModel}
-                      placeholder={isLoadingModels ? t("Loading models...") : t("Select a Model")}
-                      emptyText={modelEmptyText}
-                      disabled={isLoadingModels}
-                      onValueChange={onModelChange}
-                      options={[
-                        { value: "custom", label: t("Enter custom model") },
-                        ...modelsForEndpoint.map((model) => ({
-                          value: model.model_group,
-                          label: model.model_group,
-                          sublabel: model.mode ? `Mode: ${model.mode}` : undefined,
-                        })),
-                      ]}
+                  {!isNativeBinding && (
+                    <SessionManagement
+                      endpointType={endpointType}
+                      responsesSessionId={responsesSessionId}
+                      useApiSessionManagement={useApiSessionManagement}
+                      onToggleSessionManagement={handleToggleSessionManagement}
                     />
-                    {showCustomModelInput && (
-                      <Input
-                        className="mt-2 h-8"
-                        placeholder={t("Enter custom model name")}
-                        onChange={(event) => debouncedSetSelectedModel(event.target.value)}
-                      />
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {endpointType === EndpointType.A2A_AGENTS && (
                   <div>
@@ -1371,43 +1292,33 @@ const ChatUI: React.FC<ChatUIProps> = ({
                   </div>
                 )}
 
-                <div>
-                  <label className="mb-2 flex items-center text-sm font-medium text-foreground">
-                    <Tags className="mr-2 size-4" aria-hidden="true" /> {t("Tags")}
-                  </label>
-                  <TagSelector
-                    value={selectedTags}
-                    onChange={setSelectedTags}
-                    className="mb-4"
-                    accessToken={accessToken || ""}
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-2 flex items-center gap-1 text-sm font-medium text-foreground">
-                    <Shield className="mr-1 size-4" aria-hidden="true" /> {t("Guardrails")}
-                    <Tooltip>
-                      <TooltipTrigger aria-label={t("About guardrails")}>
-                        <Info className="size-3.5 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs">
-                        {t("Select guardrail(s) to use for this LLM API call. You can set up your guardrails")}{" "}
-                        <a href={uiHref("guardrails")} className="text-info underline">
-                          {t("here")}
-                        </a>
-                        .
-                      </TooltipContent>
-                    </Tooltip>
+                {!isNativeBinding && (
+                  <div>
+                    <div className="mb-2 flex items-center gap-1 text-sm font-medium text-foreground">
+                      <Shield className="mr-1 size-4" aria-hidden="true" /> {t("Guardrails")}
+                      <Tooltip>
+                        <TooltipTrigger aria-label={t("About guardrails")}>
+                          <Info className="size-3.5 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          {t("Select guardrail(s) to use for this LLM API call. You can set up your guardrails")}{" "}
+                          <a href={uiHref("guardrails")} className="text-info underline">
+                            {t("here")}
+                          </a>
+                          .
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <GuardrailSelector
+                      value={selectedGuardrails}
+                      onChange={setSelectedGuardrails}
+                      className="mb-4"
+                      accessToken={accessToken || ""}
+                    />
                   </div>
-                  <GuardrailSelector
-                    value={selectedGuardrails}
-                    onChange={setSelectedGuardrails}
-                    className="mb-4"
-                    accessToken={accessToken || ""}
-                  />
-                </div>
+                )}
 
-                {endpointType === EndpointType.RESPONSES && (
+                {!isNativeBinding && endpointType === EndpointType.RESPONSES && (
                   <div>
                     <CodeInterpreterTool
                       accessToken={apiKeySource === "session" ? accessToken || "" : apiKey}
@@ -1419,12 +1330,134 @@ const ChatUI: React.FC<ChatUIProps> = ({
                     />
                   </div>
                 )}
+                {/* 低频连接配置放在模型之后；保留挂载以避免展开动作触发重复目录请求。 */}
+                <details className="border-t border-border pt-4">
+                  <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">连接设置</summary>
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="mb-2 flex items-center text-sm font-medium text-foreground">
+                        <Key className="mr-2 size-4" aria-hidden="true" /> {t("Virtual Key Source")}
+                      </label>
+                      <ShadcnSelect
+                        disabled={disabledPersonalKeyCreation}
+                        value={apiKeySource}
+                        onValueChange={(value) => {
+                          setApiKeySource(value as "session" | "custom");
+                        }}
+                      >
+                        <SelectTrigger className="w-full" size="sm" aria-label={t("Virtual Key Source")}>
+                          <SelectValue>
+                            {apiKeySource === "custom" ? t("Virtual Key") : t("Current UI Session")}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="session">{t("Current UI Session")}</SelectItem>
+                          <SelectItem value="custom">{t("Virtual Key")}</SelectItem>
+                        </SelectContent>
+                      </ShadcnSelect>
+                      {apiKeySource === "custom" && (
+                        <div className="relative mt-2">
+                          <Key className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            className="h-8 pl-8"
+                            placeholder={t("Enter custom Virtual Key")}
+                            type="password"
+                            onChange={(event) => setApiKey(event.target.value)}
+                            value={apiKey}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="flex items-center text-sm font-medium text-foreground">
+                          <Settings className="mr-2 size-4" aria-hidden="true" /> {t("Custom Proxy Base URL")}
+                        </label>
+                        {proxySettings?.LITELLM_UI_API_DOC_BASE_URL && !customProxyBaseUrl && (
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="xs"
+                            className="h-auto p-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setCustomProxyBaseUrl(proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
+                              sessionStorage.setItem("customProxyBaseUrl", proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
+                            }}
+                          >
+                            <Link2 className="size-3" />
+                            {t("Fill")}
+                          </Button>
+                        )}
+                        {customProxyBaseUrl && (
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="xs"
+                            className="h-auto p-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setCustomProxyBaseUrl("");
+                              sessionStorage.removeItem("customProxyBaseUrl");
+                            }}
+                          >
+                            <Eraser className="size-3" />
+                            {t("Clear")}
+                          </Button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Wrench className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          className="h-8 pl-8"
+                          placeholder={t("Optional: Enter custom proxy URL (e.g., http://localhost:5000)")}
+                          value={customProxyBaseUrl}
+                          onChange={(event) => {
+                            setCustomProxyBaseUrl(event.target.value);
+                            sessionStorage.setItem("customProxyBaseUrl", event.target.value);
+                          }}
+                        />
+                      </div>
+                      {customProxyBaseUrl && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          API calls will be sent to: {customProxyBaseUrl}
+                        </p>
+                      )}
+                    </div>
+
+                  </div>
+                </details>
+                {!isNativeBinding && (
+                  <details className="border-t border-border pt-4">
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{t("Tags")}</summary>
+                    <div className="mt-4">
+                      <div>
+                        <label className="mb-2 flex items-center text-sm font-medium text-foreground">
+                          <Tags className="mr-2 size-4" aria-hidden="true" /> {t("Tags")}
+                        </label>
+                        <TagSelector
+                          value={selectedTags}
+                          onChange={setSelectedTags}
+                          className="mb-4"
+                          accessToken={accessToken || ""}
+                        />
+                      </div>
+
+                    </div>
+                  </details>
+                )}
               </div>
             </div>
           )}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
-            {endpointType === EndpointType.REALTIME ? (
+            {selectedBinding && !endpointUIType(selectedBinding) ? (
+              <NativeEndpointPlayground
+                endpoint={selectedBinding}
+                model={selectedModel || ""}
+                apiKey={apiKeySource === "session" ? accessToken || "" : apiKey}
+                base={customProxyBaseUrl || undefined}
+              />
+            ) : endpointType === EndpointType.REALTIME ? (
               <RealtimePlayground
                 accessToken={apiKeySource === "session" ? accessToken || "" : apiKey}
                 selectedModel={selectedModel || ""}
@@ -1440,7 +1473,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                       <Eraser className="size-3.5" />
                       {t("Clear Chat")}
                     </Button>
-                    {!simplified && (
+                    {!simplified && !isNativeBinding && (
                       <Button type="button" variant="outline" size="sm" onClick={() => setIsGetCodeModalVisible(true)}>
                         <Code2 className="size-3.5" />
                         {t("Get Code")}
@@ -1538,7 +1571,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                                     return "";
                                   }
                                 })()}
-                                alt={t("Upload preview {value0}", { value0: (index + 1) })}
+                                alt={t("Upload preview {value0}", { value0: index + 1 })}
                                 className="max-h-32 max-w-32 rounded-md border border-border object-cover"
                               />
                               <Button
@@ -1546,7 +1579,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                                 variant="outline"
                                 size="icon-xs"
                                 className="absolute top-1 right-1 bg-card text-destructive hover:bg-destructive/10"
-                                aria-label={t("Remove {value0}", { value0: (file.name) })}
+                                aria-label={t("Remove {value0}", { value0: file.name })}
                                 onClick={() => handleRemoveImage(index)}
                               >
                                 <X className="size-3" />
@@ -1638,7 +1671,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                     />
                   )}
 
-                  {endpointType === EndpointType.RESPONSES && codeInterpreter.enabled && (
+                  {!isNativeBinding && endpointType === EndpointType.RESPONSES && codeInterpreter.enabled && (
                     <div className="mb-2 space-y-2">
                       <div className="flex items-center justify-between rounded-lg border border-info/20 bg-linear-to-r from-blue-50 to-purple-50 px-3 py-2 dark:from-blue-950 dark:to-purple-950">
                         <div className="flex items-center gap-2">
@@ -1695,8 +1728,16 @@ const ChatUI: React.FC<ChatUIProps> = ({
                     showSuggestions={chatHistory.length === 0 && !isLoading && endpointType !== EndpointType.MCP}
                     suggestions={
                       endpointType === EndpointType.A2A_AGENTS
-                        ? [t("What can you help me with?"), t("Tell me about yourself"), t("What tasks can you perform?")]
-                        : [t("Write me a poem"), t("Explain quantum computing"), t("Draft a polite email requesting a meeting")]
+                        ? [
+                            t("What can you help me with?"),
+                            t("Tell me about yourself"),
+                            t("What tasks can you perform?"),
+                          ]
+                        : [
+                            t("Write me a poem"),
+                            t("Explain quantum computing"),
+                            t("Draft a polite email requesting a meeting"),
+                          ]
                     }
                     onSuggestionSelect={setInputMessage}
                     tools={
@@ -1717,7 +1758,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                             onRemoveImage={handleRemoveChatImage}
                           />
                         )}
-                        {endpointType === EndpointType.RESPONSES && (
+                        {!isNativeBinding && endpointType === EndpointType.RESPONSES && (
                           <CodeInterpreterToggle
                             enabled={codeInterpreter.enabled}
                             onToggle={() => {
@@ -1823,7 +1864,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
           </SyntaxHighlighter>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 };

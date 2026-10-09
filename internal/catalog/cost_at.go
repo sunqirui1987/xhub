@@ -17,6 +17,14 @@ import (
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	// OutputVariant is measured by the provider.
+	OutputVariant string
+	ImageVariant  string
+	PricingModel  string
+	// PricingBlocked preserves measurements without presenting incomplete rates as a bill.
+	PricingBlocked string
+	InputSeconds   float64
+	InputImages    int
 	// CachedTokens is the prompt side that hit the cache. It selects the cached
 	// rate for the input side when the model prices one.
 	CachedTokens int
@@ -71,8 +79,10 @@ type AppliedRate struct {
 // is a different statement from "charged double", and only the first one
 // explains a bill.
 type PriceSnapshot struct {
-	Window  string        `json:"window"`
-	Applied []AppliedRate `json:"applied"`
+	Window        string        `json:"window"`
+	Applied       []AppliedRate `json:"applied"`
+	PricingStatus string        `json:"pricing_status,omitempty"`
+	Usage         *Usage        `json:"usage,omitempty"`
 }
 
 // windowOf returns the window a rate lookup should prefer for a call that
@@ -279,6 +289,12 @@ func NormalizeUsage(usage map[string]any) Usage {
 	}
 	out.PromptTokens = firstIntField(usage, "prompt_tokens", "input_tokens")
 	out.CompletionTokens = firstIntField(usage, "completion_tokens", "output_tokens")
+	out.OutputVariant, _ = usage["output_variant"].(string)
+	out.ImageVariant, _ = usage["image_variant"].(string)
+	out.PricingModel, _ = usage["pricing_model"].(string)
+	out.PricingBlocked, _ = usage["pricing_blocked"].(string)
+	out.InputSeconds = firstFloatField(usage, "input_seconds")
+	out.InputImages = firstIntField(usage, "input_image_count")
 
 	// A cache read in its own top-level field is a second count, so the prompt
 	// count beside it excludes it and both have to be added up. The nested
@@ -682,6 +698,30 @@ func CostAt(model string, usage Usage, startedAt time.Time) (Charge, bool) {
 // 调用：CostAt 和 CostFromRates。
 // 测试：cost_at_test.go
 func price(lookup rateLookup, usage Usage, window string) (Charge, bool) {
+	if usage.PricingBlocked != "" {
+		return Charge{}, false
+	}
+	if usage.Images > 0 && usage.ImageVariant != "" {
+		if _, ok := lookup.find("picture", "output", usage.ImageVariant, window); !ok {
+			return Charge{}, false
+		}
+	}
+	if usage.Seconds > 0 && usage.OutputVariant != "" {
+		if _, ok := lookup.find("second", "output", usage.OutputVariant, window); !ok {
+			return Charge{}, false
+		}
+	}
+	// A measured band must be priceable; a different band's minimum is not evidence.
+	if usage.CompletionTokens > 0 && usage.OutputVariant != "" {
+		if _, ok := lookup.find("token", "output", usage.OutputVariant, window); !ok {
+			return Charge{}, false
+		}
+	}
+	if usage.OutputVariant != "" && usage.Searches > 0 {
+		if _, ok := findFirst(lookup, window, [3]string{"query", "output", ""}, [3]string{"query", "input", ""}); !ok {
+			return Charge{}, false
+		}
+	}
 	var charge Charge
 	charge.Window = window
 
@@ -717,16 +757,22 @@ func price(lookup rateLookup, usage Usage, window string) (Charge, bool) {
 	}
 
 	chargeFirst(&charge, lookup, window, float64(usage.CompletionTokens),
-		[3]string{"token", "output", ""})
+		[3]string{"token", "output", usage.OutputVariant})
 	chargeFirst(&charge, lookup, window, float64(usage.CacheWriteTokens),
 		[3]string{"token", "cache_write", ""})
 
 	// Non-token measures. Pictures, seconds and queries have no input/output
 	// split in the feed's common case, so the output spelling is tried first.
-	chargeFirst(&charge, lookup, window, float64(usage.Images),
-		[3]string{"picture", "output", ""}, [3]string{"picture", "input", ""})
-	chargeFirst(&charge, lookup, window, usage.Seconds,
-		[3]string{"second", "output", ""}, [3]string{"second", "input", ""})
+	if usage.ImageVariant != "" {
+		chargeFirst(&charge, lookup, window, float64(usage.Images), [3]string{"picture", "output", usage.ImageVariant})
+	} else {
+		chargeFirst(&charge, lookup, window, float64(usage.Images), [3]string{"picture", "output", ""}, [3]string{"picture", "input", ""})
+	}
+	if usage.OutputVariant != "" {
+		chargeFirst(&charge, lookup, window, usage.Seconds, [3]string{"second", "output", usage.OutputVariant})
+	} else {
+		chargeFirst(&charge, lookup, window, usage.Seconds, [3]string{"second", "output", ""}, [3]string{"second", "input", ""})
+	}
 	chargeFirst(&charge, lookup, window, float64(usage.Searches),
 		[3]string{"query", "output", ""}, [3]string{"query", "input", ""})
 
@@ -916,6 +962,9 @@ func priceRowForLocked(model string) (map[string]any, bool) {
 		// 没有费率的空壳不能赢。供应商登记时常把「网关名 → 官方 id」写成一条
 		// 没有单价的行，它和价目表里那条真正报价的行同名不同键。先撞上的空壳
 		// 会让后面的报价变成看不见，调用就被记成没有价格。
+		if bound, _ := row["price_binding"].(bool); bound {
+			return row, true
+		}
 		if rowHasPrice(row) {
 			return row, true
 		}
@@ -1000,4 +1049,24 @@ func dedupeStrings(keys []string) []string {
 		out = append(out, key)
 	}
 	return out
+}
+
+// SnapshotUsage preserves async measurements when a band or tool rate is missing.
+// 参数 c（Charge）：已计算的费用；u（Usage）：供应商上报的原始用量；priced（bool）：能否按当前费率计价。
+// 返回 string：包含计价状态与用量的 JSON 快照；序列化失败时为空串。
+// 调用：异步任务结算的费用快照写入。
+// 测试：cost_at_test.go、regression/pricing_test.go。
+func SnapshotUsage(c Charge, u Usage, priced bool) string {
+	if u.OutputVariant == "" {
+		return Snapshot(c)
+	}
+	status := "unpriced"
+	if priced {
+		status = "priced"
+	}
+	raw, err := json.Marshal(PriceSnapshot{Window: c.Window, Applied: c.Applied, PricingStatus: status, Usage: &u})
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }

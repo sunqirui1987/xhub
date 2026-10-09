@@ -59,9 +59,15 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 		"litellm_params": map[string]any{"mode": "post_call", "default_on": true, "blocked_words": []any{"later"}},
 	})
 
+	captured := make(chan map[string]any, 4)
 	var hits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		captured <- request
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
 	}))
@@ -85,6 +91,7 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 		Cfg: &config.Config{
 			ModelList: []config.ModelEntry{{
 				ModelName: "gpt-4o-mini",
+				ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
 				LiteLLMParams: map[string]any{
 					"model":    "openai/gpt-4o-mini",
 					"api_key":  "sk-test",
@@ -158,4 +165,33 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 	if !sawBlock || !sawPass {
 		t.Fatalf("logs missing a guardrail outcome: blocked=%v passed=%v", sawBlock, sawPass)
 	}
+	<-captured // The earlier allowed request.
+	put("xgo", map[string]any{
+		"guardrail_name": "xgo-policy",
+		"litellm_params": map[string]any{
+			"guardrail": "custom_code", "custom_code_language": "xgo", "mode": "pre_call", "default_on": true,
+			"custom_code": `import . "xhub/guardrail"
+func ApplyGuardrail(texts []string, requestData map[string]any, inputType string) map[string]any {
+ for i, text := range texts {
+  if Contains(text, "credential") { return Block("script rejected credential") }
+  texts[i] = RegexReplace(text, "1[3-9][0-9]{9}", "[PHONE]")
+ }
+ return Modify(texts)
+}`,
+		},
+	})
+	blocked = call("credential")
+	if blocked.Code != http.StatusBadRequest || !bytes.Contains(blocked.Body.Bytes(), []byte("script rejected credential")) || hits.Load() != 1 {
+		t.Fatalf("XGo failed to stop upstream: %d hits=%d %s", blocked.Code, hits.Load(), blocked.Body.String())
+	}
+	allowed = call("contact 13812345678")
+	if allowed.Code != http.StatusOK || hits.Load() != 2 {
+		t.Fatalf("XGo modified call: %d %s", allowed.Code, allowed.Body.String())
+	}
+	forwarded := <-captured
+	messages, ok := forwarded["messages"].([]any)
+	if !ok || len(messages) != 1 || messages[0].(map[string]any)["content"] != "contact [PHONE]" {
+		t.Fatalf("original sensitive text sent upstream: %#v", forwarded)
+	}
+
 }

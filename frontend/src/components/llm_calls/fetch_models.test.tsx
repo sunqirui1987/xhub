@@ -47,8 +47,8 @@ describe("fetchAvailableModels", () => {
     });
 
     expect(await fetchAvailableModels("token")).toEqual([
-      { model_group: "embed-small", mode: "embedding", supports_reasoning: true },
-      { model_group: "kimi-k2", mode: "chat" },
+      { model_group: "embed-small", endpoints: [], mode: "embedding", supports_reasoning: true },
+      { model_group: "kimi-k2", endpoints: [], mode: "chat" },
     ]);
     expect(availableMock).toHaveBeenCalledWith("token");
   });
@@ -62,12 +62,12 @@ describe("fetchAvailableModels", () => {
       ],
     });
 
-    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "gpt-5.6-sol", mode: "chat" }]);
+    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "gpt-5.6-sol", endpoints: [], mode: "chat" }]);
   });
 
-  it("treats a model with no endpoint type as chat", async () => {
+  it("keeps a model without endpoint metadata unbound", async () => {
     availableMock.mockResolvedValue({ data: [{ id: "plain" }] });
-    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "plain", mode: "chat" }]);
+    expect(await fetchAvailableModels("token")).toEqual([{ model_group: "plain", endpoints: [] }]);
   });
 
   it.each([

@@ -15,6 +15,9 @@ import { createChatDisplayMessage, createChatMultimodalMessage } from "../chat_u
 import type { TokenUsage } from "@/components/chat_ui/ResponseMetrics";
 import type { MessageType, VectorStoreSearchResponse } from "@/components/chat_ui/types";
 import { makeOpenAIChatCompletionRequest } from "@/components/llm_calls/chat_completion";
+import { getProxyBaseUrl } from "@/components/networking";
+import { callTextEndpoint, selectEndpoint, textEndpoints } from "@/components/llm_calls/model_endpoints";
+import type { ModelGroup } from "@/components/llm_calls/fetch_models";
 import { fetchAvailableModels } from "@/components/llm_calls/fetch_models";
 import { Agent, fetchAvailableAgents } from "../../llm_calls/fetch_agents";
 import { makeA2AStreamMessageRequest } from "../../llm_calls/a2a_send_message";
@@ -31,9 +34,13 @@ import {
   agentOptionsToSelectorOptions,
 } from "./endpoint_config";
 import { t } from "@/i18n";
+/** ComparisonInstance 保存一张对比卡片的模型、真实端点路径与独立请求状态。
+ * endpoint 只从所选模型的明确文本绑定中选择；卡片之间不共享协议选择。
+ */
 export interface ComparisonInstance {
   id: string;
   model: string;
+  endpoint?: string | null;
   agent: string;
   messages: MessageType[];
   isLoading: boolean;
@@ -58,6 +65,11 @@ const GENERIC_FOLLOW_UPS = [
 ];
 const SUGGESTED_PROMPTS = ["Write me a poem", "Explain quantum computing", "Draft a polite email requesting a meeting"];
 const DEFAULT_ENDPOINT = EndpointId.CHAT_COMPLETIONS;
+/** CompareUI 为每个模型独立选择支持的文本端点，并并行显示输出与实测用量。
+ * 参数 accessToken：会话令牌；disabledPersonalKeyCreation：是否要求自定义测试密钥。
+ * 返回：模型对比界面；模型先选择，端点后校验，不使用 mode 推断调用方式。
+ * 调用：Playground 对比标签。测试：CompareUI.test.tsx。
+ */
 export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: CompareUIProps) {
   const [comparisons, setComparisons] = useState<ComparisonInstance[]>([
     {
@@ -91,6 +103,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       useAdvancedParams: false,
     },
   ]);
+  const [modelInfo, setModelInfo] = useState<ModelGroup[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [agentOptions, setAgentOptions] = useState<Agent[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -137,6 +150,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     const loadModels = async () => {
       if (!effectiveApiKey) {
         setModelOptions([]);
+        setModelInfo([]);
         return;
       }
       setIsLoadingModels(true);
@@ -145,10 +159,12 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
         if (!active) return;
         const nextOptions = Array.from(new Set(uniqueModels.map((model) => model.model_group)));
         setModelOptions(nextOptions);
+        setModelInfo(uniqueModels);
       } catch (error) {
         console.error("CompareUI: failed to fetch models", error);
         if (active) {
           setModelOptions([]);
+          setModelInfo([]);
         }
       } finally {
         if (active) {
@@ -213,7 +229,18 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   }, [modelOptions]);
+  useEffect(() => {
+    setComparisons((previous) =>
+      previous.map((comparison) => {
+        const model = modelInfo.find((item) => item.model_group === comparison.model);
+        const endpoints = textEndpoints(model);
+        const endpoint = selectEndpoint(model ? { ...model, endpoints } : undefined, comparison.endpoint ?? null);
+        return comparison.endpoint === endpoint ? comparison : { ...comparison, endpoint };
+      }),
+    );
+  }, [modelInfo, comparisons.map((comparison) => comparison.model).join("\n")]);
   const maxComparisons = 3;
+  /** addComparison 创建独立对比卡片，最多三张。参数：无；返回：无；新卡片等待选择模型及其端点。 */
   const addComparison = () => {
     if (comparisons.length >= maxComparisons) {
       return;
@@ -237,6 +264,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     };
     setComparisons((prev) => [...prev, newComparison]);
   };
+  /** removeComparison 删除指定卡片并保留至少一张。参数 id：卡片身份；返回：无。 */
   const removeComparison = (id: string) => {
     if (comparisons.length > 1) {
       setComparisons((prev) => {
@@ -249,6 +277,8 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     applyToAll?: boolean;
     keysToApply?: (keyof ComparisonInstance)[];
   };
+  /** updateComparison 更新卡片状态，可显式共享指定生成设置。
+   * 参数 id：卡片身份；updates：字段变更；options：共享范围；返回：无。模型和端点选择保持独立。 */
   const updateComparison = (id: string, updates: Partial<ComparisonInstance>, options?: UpdateOptions) => {
     setComparisons((prev) => {
       if (options?.applyToAll && options.keysToApply?.length) {
@@ -286,6 +316,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       );
     });
   };
+  /** handleFileUpload 保存待发送附件与预览地址。参数 file：用户文件；返回 false，阻止自动上传。 */
   const handleFileUpload = (file: File): false => {
     if (uploadedFilePreviewUrl) {
       URL.revokeObjectURL(uploadedFilePreviewUrl);
@@ -294,6 +325,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     setUploadedFilePreviewUrl(URL.createObjectURL(file));
     return false;
   };
+  /** handleRemoveFile 释放附件预览地址并清除附件。参数：无；返回：无。 */
   const handleRemoveFile = () => {
     if (uploadedFilePreviewUrl) {
       URL.revokeObjectURL(uploadedFilePreviewUrl);
@@ -301,6 +333,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     setUploadedFile(null);
     setUploadedFilePreviewUrl(null);
   };
+  /** clearAllChats 清空所有卡片对话和指标，保留当前模型与端点设置。参数：无；返回：无。 */
   const clearAllChats = () => {
     setComparisons((prev) =>
       prev.map((comparison) => ({
@@ -313,6 +346,8 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     setInputValue("");
     handleRemoveFile();
   };
+  /** appendAssistantChunk 将文本增量写入指定卡片的最后一条助手消息。
+   * 参数 comparisonId：卡片身份；chunk：文本增量；model：实际回答模型；返回：无。 */
   const appendAssistantChunk = (comparisonId: string, chunk: string, model?: string) => {
     if (!chunk) {
       return;
@@ -345,6 +380,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   };
+  /** appendReasoningContent 累加指定卡片的推理增量。参数 comparisonId/chunk：卡片身份和文本；返回：无。 */
   const appendReasoningContent = (comparisonId: string, chunk: string) => {
     if (!chunk) {
       return;
@@ -375,6 +411,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   };
+  /** updateTimingDataForComparison 写入本次回答的首字延迟。参数 comparisonId：卡片身份；timeToFirstToken：秒；返回：无。 */
   const updateTimingDataForComparison = (comparisonId: string, timeToFirstToken: number) => {
     setComparisons((prev) =>
       prev.map((comparison) => {
@@ -402,6 +439,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   };
+  /** updateTotalLatencyForComparison 写入本次回答的总延迟。参数 comparisonId：卡片身份；totalLatency：秒；返回：无。 */
   const updateTotalLatencyForComparison = (comparisonId: string, totalLatency: number) => {
     setComparisons((prev) =>
       prev.map((comparison) => {
@@ -429,6 +467,8 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   };
+  /** updateUsageDataForComparison 写入供应商报告的规范用量，不在浏览器估算费用。
+   * 参数 comparisonId：卡片身份；usage：实测 token 等事实；toolName：可选工具标识；返回：无。 */
   const updateUsageDataForComparison = (comparisonId: string, usage: TokenUsage, toolName?: string) => {
     setComparisons((prev) =>
       prev.map((comparison) => {
@@ -451,6 +491,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       }),
     );
   };
+  /** updateSearchResultsForComparison 保存指定卡片的检索结果。参数 comparisonId/searchResults：身份和结果列表；返回：无。 */
   const updateSearchResultsForComparison = (comparisonId: string, searchResults: VectorStoreSearchResponse[]) => {
     if (!searchResults) {
       return;
@@ -476,6 +517,9 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     );
   };
   const canUseSessionKey = Boolean(accessToken);
+  /** handleSendMessage 校验每张卡片所选模型的真实文本端点，再并发发送同一输入。
+   * 参数 input：用户输入；返回 Promise<void>；各请求独立更新文本、用量和错误状态。
+   * adapted 聊天保留原有富交互；其他协议使用真实公开路径，原生协议不混入网关专属字段。 */
   const handleSendMessage = async (input: string) => {
     const trimmed = input.trim();
     const hasAttachment = Boolean(uploadedFile);
@@ -496,6 +540,18 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       return;
     }
 
+    if (
+      !isA2AMode &&
+      targetComparisons.some(
+        (comparison) =>
+          !textEndpoints(modelInfo.find((model) => model.model_group === comparison.model)).some(
+            (endpoint) => endpoint.path === comparison.endpoint,
+          ),
+      )
+    ) {
+      toast.fromError("请先为每个模型选择支持的对话端点");
+      return;
+    }
     const apiUserMessage = hasAttachment
       ? await createChatMultimodalMessage(trimmed, uploadedFile as File)
       : { role: "user", content: trimmed };
@@ -602,28 +658,45 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
             undefined, // onA2AMetadata
             customProxyBaseUrl || undefined,
           )
-        : makeOpenAIChatCompletionRequest(
-            prepared.apiChatHistory,
-            (chunk, model) => appendAssistantChunk(prepared.id, chunk, model),
-            prepared.model,
-            effectiveApiKey,
-            tags,
-            undefined,
-            (content) => appendReasoningContent(prepared.id, content),
-            (time) => updateTimingDataForComparison(prepared.id, time),
-            (usage) => updateUsageDataForComparison(prepared.id, usage),
-            prepared.traceId,
-            vectorStoreIds,
-            guardrails,
-            undefined,
-            undefined,
-            undefined,
-            (searchResults) => updateSearchResultsForComparison(prepared.id, searchResults),
-            useAdvancedParams ? prepared.temperature : undefined,
-            useAdvancedParams ? prepared.maxTokens : undefined,
-            (latency) => updateTotalLatencyForComparison(prepared.id, latency),
-            customProxyBaseUrl || undefined,
-          );
+        : comparison?.endpoint === "/v1/chat/completions"
+          ? makeOpenAIChatCompletionRequest(
+              prepared.apiChatHistory,
+              (chunk, model) => appendAssistantChunk(prepared.id, chunk, model),
+              prepared.model,
+              effectiveApiKey,
+              tags,
+              undefined,
+              (content) => appendReasoningContent(prepared.id, content),
+              (time) => updateTimingDataForComparison(prepared.id, time),
+              (usage) => updateUsageDataForComparison(prepared.id, usage),
+              prepared.traceId,
+              vectorStoreIds,
+              guardrails,
+              undefined,
+              undefined,
+              undefined,
+              (results) => updateSearchResultsForComparison(prepared.id, results),
+              useAdvancedParams ? prepared.temperature : undefined,
+              useAdvancedParams ? prepared.maxTokens : undefined,
+              (latency) => updateTotalLatencyForComparison(prepared.id, latency),
+              customProxyBaseUrl || undefined,
+            )
+          : callTextEndpoint({
+              endpoint: textEndpoints(modelInfo.find((model) => model.model_group === prepared.model)).find(
+                (endpoint) => endpoint.path === comparison?.endpoint,
+              )!,
+              base: customProxyBaseUrl || getProxyBaseUrl(),
+              key: effectiveApiKey,
+              model: prepared.model,
+              messages: prepared.apiChatHistory,
+              onText: (chunk) => appendAssistantChunk(prepared.id, chunk, prepared.model),
+              tags,
+              onUsage: (usage) => updateUsageDataForComparison(prepared.id, usage),
+              onTiming: (time) => updateTimingDataForComparison(prepared.id, time),
+              onLatency: (time) => updateTotalLatencyForComparison(prepared.id, time),
+              temperature: useAdvancedParams ? prepared.temperature : undefined,
+              maxTokens: useAdvancedParams ? prepared.maxTokens : undefined,
+            });
 
       requestPromise
         .catch((error) => {
@@ -643,7 +716,8 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
                 messages[messages.length - 1] = {
                   ...last,
                   content: assistantContent
-                    ? `${assistantContent}\nError fetching response: ${errorMessage}`
+                    ? `${assistantContent}
+Error fetching response: ${errorMessage}`
                     : `Error fetching response: ${errorMessage}`,
                 };
               } else {
@@ -673,12 +747,15 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
         });
     });
   };
+  /** handleInputChange 更新公共输入。参数 value：文本；返回：无。 */
   const handleInputChange = (value: string) => {
     setInputValue(value);
   };
+  /** handleSubmit 提交当前公共输入。参数：无；返回：无。 */
   const handleSubmit = () => {
     void handleSendMessage(inputValue);
   };
+  /** handleFollowUpSelect 将选中的追问发送到各卡片。参数 question：追问文本；返回：无。 */
   const handleFollowUpSelect = (question: string) => {
     setInputValue(question);
   };
@@ -720,15 +797,15 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">{t("Endpoint")}</span>
+              <span className="text-sm font-medium text-muted-foreground">{t("Comparison mode")}</span>
               <Select value={selectedEndpoint} onValueChange={(value) => setSelectedEndpoint(value as EndpointIdType)}>
-                <SelectTrigger className="w-56" aria-label={t("Endpoint")}>
-                  <SelectValue>{endpointConfig.label}</SelectValue>
+                <SelectTrigger className="w-56" aria-label={t("Comparison mode")}>
+                  <SelectValue>{isA2AMode ? "Agents" : "Models"}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {getAvailableEndpoints().map((endpoint) => (
                     <SelectItem key={endpoint.value} value={endpoint.value}>
-                      {endpoint.label}
+                      {endpoint.value === EndpointId.A2A_AGENTS ? "Agents" : "Models"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -747,7 +824,9 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {comparisons.length >= maxComparisons ? t("Compare up to 3 models at a time") : t("Add another comparison")}
+                  {comparisons.length >= maxComparisons
+                    ? t("Compare up to 3 models at a time")
+                    : t("Add another comparison")}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -764,13 +843,23 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
             <ComparisonPanel
               key={comparison.id}
               comparison={comparison}
-              onUpdate={(updates, options) => updateComparison(comparison.id, updates, options)}
+              onUpdate={(updates, options) =>
+                updateComparison(
+                  comparison.id,
+                  updates.model !== undefined ? { ...updates, endpoint: null } : updates,
+                  options,
+                )
+              }
               onRemove={() => removeComparison(comparison.id)}
               canRemove={comparisons.length > 1}
               selectorOptions={selectorOptions}
               isLoadingOptions={isLoadingOptions}
               endpointConfig={endpointConfig}
               apiKey={effectiveApiKey}
+              supportsGatewaySettings={comparison.endpoint === "/v1/chat/completions"}
+              endpointOptions={textEndpoints(modelInfo.find((model) => model.model_group === comparison.model)).map(
+                (endpoint) => ({ value: endpoint.path, label: endpoint.path }),
+              )}
             />
           ))}
         </div>

@@ -19,6 +19,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/plugin"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"github.com/sunqirui1987/xhub/internal/router"
 )
 
@@ -83,8 +84,6 @@ func (h *logHost) PinnedDeployment(string) string                  { return "" }
 func (h *logHost) FindDeployment(string) (config.ModelEntry, bool) { return config.ModelEntry{}, false }
 func (h *logHost) PinOfficial(string, string)                      {}
 func (h *logHost) OfficialDeployment(string) string                { return "" }
-func (h *logHost) OfficialBilled(string) bool                      { return false }
-func (h *logHost) MarkOfficialBilled(string)                       {}
 func (h *logHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, string, []byte, time.Time) {
 }
 func (h *logHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {
@@ -98,6 +97,13 @@ func (h *logHost) BusyMap() map[string]int     { return map[string]int{} }
 func (h *logHost) Identity() *iam.DB           { return nil }
 
 func chatConfig(entries ...config.ModelEntry) *config.Config {
+	for i := range entries {
+		if entries[i].ModelInfo == nil {
+			entries[i].ModelInfo = map[string]any{}
+		}
+		entries[i].ModelInfo["transport"] = "adapted"
+		entries[i].ModelInfo["endpoint_types"] = []string{"chat"}
+	}
 	return &config.Config{
 		ModelList: entries,
 		RouterSettings: config.RouterSettings{
@@ -394,3 +400,6 @@ func TestServeLogsCacheHitAndStreamMetrics(t *testing.T) {
 		t.Fatalf("log included a full upstream url: %s", sline)
 	}
 }
+
+func (h *logHost) PinOfficialContext(string, provider.TaskContext) {}
+func (h *logHost) OfficialContext(string) provider.TaskContext     { return provider.TaskContext{} }

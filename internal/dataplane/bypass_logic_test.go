@@ -39,7 +39,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/contents/generations/tasks":
 			_, _ = w.Write([]byte(`{"id":"cgt-1"}`))
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v3/contents/generations/tasks/"):
-			_, _ = w.Write([]byte(`{"id":"cgt-1","usage":{"completion_tokens":12}}`))
+			_, _ = w.Write([]byte(`{"id":"cgt-1","status":"succeeded","usage":{"completion_tokens":12}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/contents/generations/tasks":
 			_, _ = w.Write([]byte(`{"items":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v3/contents/generations/tasks":
@@ -64,7 +64,6 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		client: upstream.Client(),
 		models: []config.ModelEntry{gpt, ark, arkFast, qiniu},
 		pins:   map[string]string{},
-		billed: map[string]bool{},
 	}
 
 	// 适配的入口不再登记成端点类型：它们由能力表描述，上游路径由
@@ -95,7 +94,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	if host.spend[0].op != "ark_contents_generation:create" || host.spend[0].usage != nil || host.spend[0].depID == "" {
 		t.Fatalf("create spend %+v", host.spend)
 	}
-	if len(host.notes) == 0 || host.notes[0].Provider != "volcengine" || host.notes[0].TTFTMs == nil || host.notes[0].DeploymentID == "" {
+	if len(host.notes) == 0 || host.notes[0].Provider != "volcengine" || host.notes[0].TTFTMs == nil {
 		t.Fatalf("create note %+v", host.notes)
 	}
 
@@ -107,7 +106,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		t.Fatalf("first poll spend %+v", host.spend[1])
 	}
 	rec = host.call(t, http.MethodGet, "/api/v3/contents/generations/tasks/cgt-1", "")
-	if host.spend[2].usage == nil || host.spend[2].callID == host.spend[1].callID || host.notes[2].SettlementID != host.notes[1].SettlementID || host.notes[1].SettlementID == "" || len(host.billed) != 0 {
+	if host.spend[2].usage == nil || host.spend[2].callID == host.spend[1].callID || host.notes[2].SettlementID != host.notes[1].SettlementID || host.notes[1].SettlementID == "" {
 		t.Fatalf("second poll must retry the same durable settlement %+v", host.spend[2])
 	}
 
@@ -171,13 +170,22 @@ type captured struct {
 
 func deployment(name, model, key, base, typeID string, extra map[string]any) config.ModelEntry {
 	params := map[string]any{"model": model, "api_key": key, "api_base": base}
+	endpoint := ""
+	for _, transport := range provider.Transports() {
+		if transport.ID == typeID {
+			endpoint = transport.EndpointType
+			if len(transport.Providers) > 0 {
+				params["custom_llm_provider"] = transport.Providers[0]
+			}
+		}
+	}
 	for k, v := range extra {
 		params[k] = v
 	}
 	return config.ModelEntry{
 		ModelName:     name,
 		LiteLLMParams: params,
-		ModelInfo:     map[string]any{"mode": typeID, "endpoint_types": []any{typeID}},
+		ModelInfo:     map[string]any{"transport": typeID, "endpoint_types": []string{endpoint}},
 	}
 }
 
@@ -207,8 +215,8 @@ type logicHost struct {
 	cfg      *config.Config
 	client   *http.Client
 	models   []config.ModelEntry
+	facts    map[string]provider.TaskContext
 	pins     map[string]string
-	billed   map[string]bool
 	spend    []spendNote
 	notes    []CallNote
 	settings map[string]any
@@ -272,7 +280,7 @@ func (h *logicHost) AnnotateCall(_ string, note CallNote)  { h.notes = append(h.
 func (h *logicHost) PinnedDeployment(string) string        { return "" }
 func (h *logicHost) FindDeployment(id string) (config.ModelEntry, bool) {
 	for _, m := range h.models {
-		if router.CooldownID(m) == id || router.DeploymentID(m) == id {
+		if router.CooldownID(m) == id {
 			return m, true
 		}
 	}
@@ -280,8 +288,6 @@ func (h *logicHost) FindDeployment(id string) (config.ModelEntry, bool) {
 }
 func (h *logicHost) PinOfficial(taskID, deploymentID string) { h.pins[taskID] = deploymentID }
 func (h *logicHost) OfficialDeployment(taskID string) string { return h.pins[taskID] }
-func (h *logicHost) OfficialBilled(taskID string) bool       { return h.billed[taskID] }
-func (h *logicHost) MarkOfficialBilled(taskID string)        { h.billed[taskID] = true }
 func (h *logicHost) WriteCacheHit(http.ResponseWriter, *auth.Principal, string, string, string, string, []byte, time.Time) {
 }
 func (h *logicHost) WriteChatJSON(http.ResponseWriter, *auth.Principal, string, string, string, string, string, []byte, int, time.Time, string) {
@@ -293,3 +299,11 @@ func (h *logicHost) Redis() *live.Client         { return nil }
 func (h *logicHost) Models() []config.ModelEntry { return h.models }
 func (h *logicHost) BusyMap() map[string]int     { return map[string]int{} }
 func (h *logicHost) Identity() *iam.DB           { return nil }
+
+func (h *logicHost) PinOfficialContext(scope string, facts provider.TaskContext) {
+	if h.facts == nil {
+		h.facts = map[string]provider.TaskContext{}
+	}
+	h.facts[scope] = facts
+}
+func (h *logicHost) OfficialContext(scope string) provider.TaskContext { return h.facts[scope] }

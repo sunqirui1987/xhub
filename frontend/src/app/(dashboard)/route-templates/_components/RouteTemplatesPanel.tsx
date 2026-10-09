@@ -5,7 +5,7 @@ import { ArrowLeft, Copy, FileJson, Loader2, Pencil, Plus, Shield } from "lucide
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
-import { formatStrategyLabel } from "@/components/routing_groups/strategy";
+import { formatTemplateStrategyLabel } from "@/components/route_templates/strategyLabel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -56,13 +56,21 @@ type Draft = {
   form: TemplateFormState;
   lockedName: boolean;
   routingGroupsAtOpen: string;
+  hadModelRouting: boolean;
 };
 type UsageView = { name: string; rows: RouteTemplateUsage[]; refused: boolean };
 type JsonView = { name: string; body: Record<string, unknown> };
 
 const draftFrom = (id: string, name: string, body: Record<string, unknown>, lockedName: boolean): Draft => {
   const form = formFromBody(body);
-  return { id, name, form, lockedName, routingGroupsAtOpen: lockedName ? form.routing_groups : "" };
+  return {
+    id,
+    name,
+    form,
+    lockedName,
+    routingGroupsAtOpen: lockedName ? form.routing_groups : "",
+    hadModelRouting: "model_routing" in body,
+  };
 };
 
 const editorTitle = (draft: Draft | null) => {
@@ -135,10 +143,11 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
 
   const summaryLabels = useMemo(
     () => ({
-      strategy: (value: string) => t(formatStrategyLabel(value)),
+      strategy: (value: string) => t(formatTemplateStrategyLabel(value)),
       retries: (value: number) => t("pages.routeTemplates.attemptsSummary", { count: value }),
       timeout: (seconds: number) => t("pages.routeTemplates.timeoutSummary", { seconds }),
       fallbacks: (value: number) => t("pages.routeTemplates.fallbacksSummary", { count: value }),
+      models: (value: number) => t("pages.routeTemplates.modelsSummary", { count: value }),
       none: t("no fallbacks"),
     }),
     [],
@@ -161,6 +170,8 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     try {
       if (draft.lockedName) {
         const patch = omitUntouchedRoutingGroups(written.body, draft.form.routing_groups, draft.routingGroupsAtOpen);
+        // The platform endpoint merges a patch: omission would keep deleted rules.
+        if (draft.hadModelRouting && !("model_routing" in patch)) patch.model_routing = [];
         await setCallbacksCall(accessToken, { router_settings: patch });
         toast.success(t("pages.routeTemplates.platformSaved"));
       } else {

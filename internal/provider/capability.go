@@ -6,7 +6,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// 这个文件是这次拆分的事实来源：能力表、存量 id 的映射，以及"一条部署到底
+// 这个文件是能力表，以及"一条部署到底
 // 应答什么、怎么转发"的判定。读路径全部集中在这里，调用方只拿能力列表和
 // transport id，不自己去猜字符串。
 
@@ -18,9 +18,9 @@ import (
 var capabilities = []Capability{
 	{
 		ID: "chat", Label: "Chat",
-		// messages 和 responses 说的是同一件事的另外两种拼法，所以它们和
-		// chat 同属一条能力。gemini 是 generateContent 这个入口，
-		// 不是给运维勾的选项，所以它只在 Ops 里，没有展示路径。
+		// messages、responses 和 chat 是三种公开协议入口，但都由对话适配器
+		// 承担，因此属于同一个“对话能力”。gemini 是内部路由识别出的
+		// generateContent 入口，不作为配置页面上的独立选项，也没有展示路径。
 		Ops:   []string{"chat", "messages", "responses", "gemini"},
 		Paths: []string{"/v1/chat/completions", "/v1/messages", "/v1/responses"},
 	},
@@ -95,8 +95,9 @@ func Capabilities() []Capability {
 func CapabilityForOp(op string) (string, bool) {
 	op = strings.TrimSpace(op)
 	if op == "" {
-		// 空 op 和 chat 是一回事：老的部署和 /chat 这种老路径都走这一支。
-		return "chat", true
+		// 新系统要求数据面在进入能力过滤前明确给出操作名。空值没有足够
+		// 信息判断它是对话、图片还是其他入口，不能偷偷退回 chat。
+		return "", false
 	}
 	for _, c := range capabilities {
 		for _, covered := range c.Ops {
@@ -112,59 +113,6 @@ func CapabilityForOp(op string) (string, bool) {
 // (op, 供应商) 决定，没有可登记的数据。
 const AdaptedTransportID = "adapted"
 
-// CustomTransportID 是部署自带文档那一档的 id。
-const CustomTransportID = "custom"
-
-// legacyCapabilities 是存量端点类型 id 到能力 id 的映射。
-//
-// 键是库里真实存在的值，来自添加模型表单写进 model_info.mode 的那些字符串。
-// 注意这些是**类型 id**，不是数据面 op：表单写的是 image_generation 而不是
-// images。三套词并存（类型 id、inferenceOp 的 op、Playground 的 EndpointType），
-// 这张表只认存量 id。
-//
-// 认不出的 id（realtime、batch、ocr）刻意不在这里：它们要么是假会话，
-// 要么根本没登记成端点，放进能力表会让运维以为可以勾选。
-var legacyCapabilities = map[string]string{
-	"chat":                "chat",
-	"responses":           "chat",
-	"anthropic_messages":  "chat",
-	"completion":          "completion",
-	"embedding":           "embedding",
-	"image_generation":    "image",
-	"image_edit":          "image",
-	"video_generation":    "video",
-	"audio_speech":        "audio_speech",
-	"audio_transcription": "audio_transcription",
-	"rerank":              "rerank",
-}
-
-// legacyTransports 是存量端点类型 id 到内置转发方式 id 的映射。
-// 只有内置 Bypass 在这里；协议适配不进表。
-var legacyTransports = map[string]string{
-	"ark_contents_generation":   "ark_contents_generation",
-	"qiniu_contents_generation": "qiniu_contents_generation",
-}
-
-// capabilityByLegacyID 把存量 id 收成能力 id。认不出时返回假。
-// 参数 id（string）：存量端点类型 id，例如 image_generation。
-// 返回 string（string）：对应的能力 id；bool（bool）：这个 id 是一条能力时为真。
-// 调用：SelectedCapabilities。
-// 测试：registry_test.go
-func capabilityByLegacyID(id string) (string, bool) {
-	capability, ok := legacyCapabilities[strings.TrimSpace(id)]
-	return capability, ok
-}
-
-// transportByLegacyID 把存量 id 收成内置转发方式 id。不是内置 Bypass 时返回假。
-// 参数 id（string）：存量端点类型 id，例如 qiniu_contents_generation。
-// 返回 string（string）：对应的转发方式 id；bool（bool）：这个 id 是内置转发时为真。
-// 调用：SelectedTransport。
-// 测试：registry_test.go
-func transportByLegacyID(id string) (string, bool) {
-	transport, ok := legacyTransports[strings.TrimSpace(id)]
-	return transport, ok
-}
-
 // isKnownCapability 判断这个 id 是不是一条登记过的能力。
 // 参数 id（string）：要判断的 id。
 // 返回 bool（bool）：这个 id 在能力表里时为真。
@@ -179,7 +127,6 @@ func isKnownCapability(id string) bool {
 	return false
 }
 
-// init 记一次能力表的载入，并把条数写下来。能力表是这次拆分的事实来源，
 // 条数变了通常意味着有人加了一条能力而没想清楚它的 op 覆盖。
 // init 记一次能力表的载入，并把条数写下来。能力表是这次拆分的事实来源，
 // 条数变了通常意味着有人加了一条能力而没想清楚它的 op 覆盖。

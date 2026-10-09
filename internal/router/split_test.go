@@ -93,7 +93,7 @@ func TestSplitSkipsACoolingDeployment(t *testing.T) {
 	}
 	st := State{
 		Splits:   NewSplitState(),
-		Cooldown: map[string]bool{DeploymentID(pool[0]): true},
+		Cooldown: map[string]bool{CooldownID(pool[0]): true},
 	}
 	for i := 0; i < 6; i++ {
 		picked := Pick(pool, "shared-name", "weighted_split", st)
@@ -118,7 +118,7 @@ func TestSplitIsEvenAfterACoolingDeploymentReturns(t *testing.T) {
 		deployment("shared-name", "https://b.example.com", 1),
 	}
 	splits := NewSplitState()
-	cooling := State{Splits: splits, Cooldown: map[string]bool{DeploymentID(pool[0]): true}}
+	cooling := State{Splits: splits, Cooldown: map[string]bool{CooldownID(pool[0]): true}}
 	// 第一条掉线期间，全部流量都给第二条。
 	for i := 0; i < 10; i++ {
 		Pick(pool, "shared-name", "weighted_split", cooling)
@@ -185,9 +185,11 @@ func TestApplyWeightsUsesTheDocumentWithoutTouchingThePool(t *testing.T) {
 		deployment("shared-name", "https://a.example.com", 1),
 		deployment("shared-name", "https://b.example.com", 9),
 	}
+	pool[0].LiteLLMParams["deployment_id"] = "a"
+	pool[1].LiteLLMParams["deployment_id"] = "b"
 	overrides := map[string]float64{
-		"https://a.example.com|shared-name": 3,
-		"https://b.example.com|shared-name": 7,
+		"deployment:a": 3,
+		"deployment:b": 7,
 	}
 	weighted := ApplyWeights(pool, overrides)
 	counts := drawSplit(t, weighted, 10)

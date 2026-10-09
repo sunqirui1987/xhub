@@ -10,6 +10,20 @@ async function expandCostBreakdown() {
 }
 
 describe("CostBreakdownViewer", () => {
+  it("shows unknown pricing instead of a free bill for unpriced tasks", async () => {
+    renderWithProviders(
+      <CostBreakdownViewer
+        costBreakdown={{ total_cost: 0, source: "snapshot", pricing_status: "unpriced" }}
+        totalSpend={0}
+        completionTokens={40594}
+      />,
+    );
+    expect(screen.getByText("Pricing unavailable")).toBeInTheDocument();
+    await expandCostBreakdown();
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+    expect(screen.getByText(/40,594 completion tokens/)).toBeInTheDocument();
+  });
+
   it("renders nothing when costBreakdown is null", () => {
     const { container } = renderWithProviders(<CostBreakdownViewer costBreakdown={null} totalSpend={0} />);
 
@@ -424,4 +438,3 @@ describe("CostBreakdownViewer", () => {
     expect(document.body.textContent).toContain("$0.00");
   });
 });
-

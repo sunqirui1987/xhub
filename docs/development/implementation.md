@@ -112,8 +112,8 @@ model_name 是客户端公开名，litellm_params.model 是供应商接受的名
 
 ## 06 供应商能力、命名凭据与官方传输
 
-Capability 将 chat、completion、embedding、image、video、audio、rerank、moderation 等入口操作收束；Transport 描述 adapted、custom 或已登记官方路径。入口 Paths 用于展示，Ops 才是执行过滤依据。
-能力选择优先 endpoint_types，再认历史 mode，完全未配置默认 chat；明确未知类型拒绝。新增能力不自动实现上游转换，新增 transport 不自动授予任何人访问。
+Capability 将 chat、completion、embedding、image、video、audio、rerank、moderation 等入口操作收束；Transport 描述 adapted 或已登记官方路径。入口 Paths 用于展示，Ops 才是执行过滤依据。
+能力只从 endpoint_types 读取，未配置默认 chat；显式未知类型拒绝。传输只从 transport 读取；未配置使用 adapted。新增能力不自动实现上游转换，新增 transport 不自动授予任何人访问。
 命名凭据减少模型编辑中直接携带 api_key，发送时解析其供应商信息。配置 api_base 覆盖默认地址。provider/all 的空白导入保证 init 登记；openai 包当前占位，实际适配在 llm。
 
 ### 实现位置
@@ -147,7 +147,7 @@ Capability 将 chat、completion、embedding、image、video、audio、rerank、
 ## 08 策略、权重、重试、超时与冷却
 
 num_retries 是每部署总尝试次数，包含首次，至少 1；timeout 是每次尝试时限，默认 60 秒。allowed_fails 默认 3，非正值关闭冷却；cooldown_time 非正时实际记录使用 60 秒。修改所选模板后下一请求读取新文档。
-普通排序支持忙碌、延迟、费用、用量等策略；simple-shuffle 当前偏向最高权重。weighted-split 用平滑加权调度，覆盖按 api_base|model 匹配；0 排除，负数和非有限值忽略。ApplyWeights 不修改共享原始参数。
+普通排序支持忙碌、延迟、费用、用量等策略；simple-shuffle 当前偏向最高权重。weighted-split 用平滑加权调度，模板覆盖只按 deployment_id 或 pricing_id 的稳定身份匹配；0 排除，负数和非有限值忽略。ApplyWeights 不修改共享原始参数。
 每次尝试重新检查身份及限制。429/5xx 按策略重试，普通其它 4xx 不自动换部署。流输出后不重试。普通策略全冷却仍可尝试，split 无正权重开放候选为空。
 fallbacks、context_window_fallbacks、content_policy_fallbacks、retry_policy、model_group_alias、stream_timeout 等当前主要是保存和往返；跨公开模型名回退没有完整执行能力。
 

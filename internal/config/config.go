@@ -17,6 +17,7 @@ type Config struct {
 	ModelList       []ModelEntry    `yaml:"model_list"`
 	RouterSettings  RouterSettings  `yaml:"router_settings"`
 	LiteLLMSettings map[string]any  `yaml:"litellm_settings"`
+	Guardrails      []map[string]any `yaml:"guardrails"`
 	GeneralSettings GeneralSettings `yaml:"general_settings"`
 	// Raw maps keep YAML keys the typed structs do not name. Database overlay wins per key.
 	RouterRaw  map[string]any `yaml:"-"`
@@ -159,7 +160,7 @@ func resolve(s string) string {
 // ParamString 从一条部署的 litellm_params 里按名字读字符串。缺键或类型不对时返回 fallback。
 // 参数 e：一条模型部署。key：参数名，例如 model 或 api_base。fallback：缺值或类型不对时的结果。
 // 返回：读到的字符串，或 fallback。
-// 调用：router.DeploymentID、数据面选上游地址。测试：bypass_logic_test.go 间接使用。
+// 调用：router.CooldownID、router.WeightID、数据面选上游地址。测试：bypass_logic_test.go 间接使用。
 func (e ModelEntry) ParamString(key, fallback string) string {
 	if e.LiteLLMParams == nil {
 		return fallback

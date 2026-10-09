@@ -11,6 +11,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
+	_ "github.com/sunqirui1987/xhub/internal/provider/all"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
@@ -32,6 +33,29 @@ func (h *modelTestHost) Resolve(*http.Request) (*auth.Principal, error) {
 	return &auth.Principal{Kind: authz.KindSession, Role: iam.RoleAdmin, UserID: "admin"}, nil
 }
 func (h *modelTestHost) AllowLLM(*auth.Principal) bool { return true }
+
+func TestAvailableCategoryIgnoresRetiredDeploymentMode(t *testing.T) {
+	row := map[string]any{"mode": "embedding"}
+	entry := config.ModelEntry{ModelInfo: map[string]any{"mode": "video"}}
+	if got := availableCategory(entry, nil); got != "other" {
+		t.Fatalf("retired mode selected category %q", got)
+	}
+	entry.ModelInfo["transport"] = "adapted"
+	entry.ModelInfo["endpoint_types"] = []string{"image"}
+	if got := availableCategory(entry, row); got != "image" {
+		t.Fatalf("capability lost to price category: %q", got)
+	}
+	entry.ModelInfo["endpoint_types"] = []string{"unregistered"}
+	if got := availableCategory(entry, row); got != "other" {
+		t.Fatalf("unknown capability fell back to catalog mode: %q", got)
+	}
+	entry.ModelInfo["transport"] = "qiniu_contents_generation"
+	entry.ModelInfo["endpoint_types"] = []string{"bypass:ark-video"}
+	entry.LiteLLMParams = map[string]any{"custom_llm_provider": "qiniu"}
+	if got := availableCategory(entry, row); got != "video" {
+		t.Fatalf("registered transport category: %q", got)
+	}
+}
 
 func TestFailedModelUpdateDoesNotMutateStoredEntry(t *testing.T) {
 	h := &modelTestHost{models: []config.ModelEntry{{

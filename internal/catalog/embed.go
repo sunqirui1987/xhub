@@ -33,3 +33,8 @@ var autoRouterPresetsJSON []byte
 
 //go:embed publicdata/pricedata.json
 var pricedataJSON []byte
+
+// providerFieldsJSON 保存 LiteLLM 的供应商认证字段快照，独立于模型价格发行方。
+//
+//go:embed publicdata/provider_fields.json
+var providerFieldsJSON []byte
