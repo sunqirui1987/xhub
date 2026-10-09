@@ -129,7 +129,7 @@ LiteLLM 的本地 `auth.json` 模式可供开发参考，XHub 的多个连接和
 
 ## 实施文件与完成标准
 
-- 后台：扩展 `internal/provider` 的定义登记；新增连接领域服务与存储边界、管理模块和认证模块；调整 `gateway/models`、`gateway/limits.go`、`llm` 和数据面解析。不要把当前用于测试 YAML 的 `internal/providerconfig` 当作产品连接持久化服务。
+- 后台：扩展 `internal/provider` 的定义登记；新增连接领域服务与存储边界、管理模块和认证模块；调整 `gateway/models`、`gateway/limits.go`、`llm` 和数据面解析。不要把当前用于测试 YAML 的 `cmd/regression/providerconfig` 当作产品连接持久化服务。
 - 前端：以 ProviderConnection 页面/表单/表格替代 `model_add/CredentialModal`、`CredentialsPanel`、`CredentialsTable` 和列定义；统一类型、请求、查询缓存、中英文文案；调整 ModelEditor、复用连接和导入流程。
 - 目录与文档：`internal/catalog/feed.go` 保留价格/发行方资料，退出认证字段职责；同步 OpenAPI 生成、接口参考、配置导入导出和用户指南。
 

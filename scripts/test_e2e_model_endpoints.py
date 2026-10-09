@@ -61,10 +61,10 @@ touch backend-started
 echo '=== RUN   TestBusiness'
 if [[ "$TEST_BACKEND_CODE" == 0 ]]; then
   echo '--- PASS: TestBusiness (0.01s)'
-  echo 'ok github.com/sunqirui1987/xhub/internal/regression 0.01s'
+  echo 'ok github.com/sunqirui1987/xhub/cmd/regression 0.01s'
 else
   echo '--- FAIL: TestBusiness (0.01s)'
-  echo 'FAIL github.com/sunqirui1987/xhub/internal/regression 0.01s'
+  echo 'FAIL github.com/sunqirui1987/xhub/cmd/regression 0.01s'
 fi
 exit "$TEST_BACKEND_CODE"
 ''')

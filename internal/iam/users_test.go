@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sunqirui1987/xhub/internal/testsupport"
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 // testDB opens the identity store on a private schema, so a test never touches

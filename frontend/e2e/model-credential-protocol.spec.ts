@@ -107,7 +107,13 @@ test("official Ark credential saves edits and calls its native task model", asyn
   await page.getByRole("button", { name: "删除", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "删除模型" });
   await dialog.getByPlaceholder(name + "-edited", { exact: true }).fill(name + "-edited");
+  // 删除提交是异步请求；先等待后台确认，避免立即导航取消尚未完成的写操作。
+  const deleting = page.waitForResponse(r =>
+    new URL(r.url()).pathname === "/model/delete" && r.request().method() === "POST",
+  );
   await dialog.getByRole("button", { name: /删除|确认/ }).click();
+  const deleted = await deleting;
+  expect(deleted.status(), await deleted.text()).toBe(200);
   await stableGoto(page, "/models-and-endpoints");
   await page.getByRole("tab", { name: t("pages.models.all") }).click();
   await expect(page.getByRole("region", { name: "公开模型 " + name + "-edited", exact: true })).toHaveCount(0);

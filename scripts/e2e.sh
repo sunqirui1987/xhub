@@ -9,6 +9,8 @@ export E2E_GATEWAY="http://127.0.0.1:$E2E_GW_PORT"
 export E2E_UPSTREAM="http://127.0.0.1:$E2E_UP_PORT"
 export E2E_RUN_DIR="$ROOT/.e2e/current"
 export E2E_BUILD_DIR=.next-e2e
+# 完整浏览器套件包含 Responses 三轮续接场景，始终装载其本地离线模型夹具。
+export E2E_RESPONSES_CONTINUATION=1
 export XHUB_GATEWAY_ORIGIN="$E2E_GATEWAY"
 export NEXT_PUBLIC_BASE_URL="$E2E_GATEWAY"
 LOCK="$ROOT/.e2e/browser.lock"

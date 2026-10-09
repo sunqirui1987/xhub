@@ -95,6 +95,10 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 	if str(info["id"]) == "" {
 		info["id"] = "model_" + httpx.CallID()[:12]
 	}
+	if err := validateNewDeploymentSurface(params, info); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	if err := validateDeployment(s, name, params, info); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return

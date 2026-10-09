@@ -300,7 +300,9 @@ class Handler(BaseHTTPRequestHandler):
         for message in req.get("messages", []):
             if isinstance(message, dict) and isinstance(message.get("content"), str):
                 message_text += message["content"]
-        if "[手机号已隐藏]" in message_text:
+        # 浏览器验收同时覆盖 UI 自定义替换文本和 API 默认替换文本；命中任一值都证明
+        # 上游收到的是护栏处理后的正文，而不是仅有管理接口调试结果。
+        if "[手机号已隐藏]" in message_text or "[REDACTED]" in message_text:
             self._json({
                 "id": "chatcmpl_e2e_redacted",
                 "object": "chat.completion",

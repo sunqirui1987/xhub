@@ -27,7 +27,7 @@ browser_started = bool(re.search(r"Running \d+ tests? using", browser_log))
 incomplete_stages = []
 if not browser and browser_started:
     incomplete_stages.append("浏览器已开始执行，但没有完整结果；运行中断或报告未写出，不能计为通过。")
-if backend and not re.search(r"^(?:ok|FAIL)\s+.*internal/regression", backend, re.M):
+if backend and not re.search(r"^(?:ok|FAIL)\s+.*cmd/regression", backend, re.M):
     incomplete_stages.append("后端已开始执行，但没有套件结束记录；不能计为通过。")
 metadata = json.loads(os.environ.get("E2E_PROVIDER_METADATA", "{}"))
 backend_mode = os.environ.get("E2E_BACKEND_MODE", "live")
@@ -59,7 +59,7 @@ for line in backend.splitlines():
 for case in backend_cases:
     case["errors"] = diagnostics.get(case["name"], [])
 top = [c for c in backend_cases if "/" not in c["name"]]
-backend_completed = bool(re.search(r"^(?:ok|FAIL)\s+.*internal/regression", backend, re.M))
+backend_completed = bool(re.search(r"^(?:ok|FAIL)\s+.*cmd/regression", backend, re.M))
 failed_assertions = [error for case in backend_cases if case["status"] == "fail" for error in case["errors"]]
 build_diagnostics = [line.strip() for line in backend.splitlines() if re.search(
     r"missing go.sum entry|no required module provides package|^[^\s]+\.go:\d+:\d+:|\[setup failed\]|\[build failed\]", line)]
@@ -83,7 +83,7 @@ summary = {
     "backend_pass": sum(c["status"] == "pass" for c in top),
     "backend_fail": sum(c["status"] == "fail" for c in top),
     "backend_skip": [c["name"] for c in backend_cases if c["status"] == "skip"],
-    "backend_ok": bool(re.search(r"^ok\s+.*internal/regression", backend, re.M)),
+    "backend_ok": bool(re.search(r"^ok\s+.*cmd/regression", backend, re.M)),
     "backend_completed": backend_completed,
     "backend_diagnostics": list(dict.fromkeys(failed_assertions + build_diagnostics)),
     "preflight_errors": preflight.splitlines()[-20:] if not browser and not browser_log and not backend else [],

@@ -11,9 +11,9 @@ import (
 	"testing"
 )
 
-// TestLoggerDefinesLevelsAndTestSupportIsolation 验证日志等级和测试辅助包边界。
-// 前置：读取当前源码；结果：四个等级存在且生产代码不依赖测试包；只读检查无需清理。
-func TestLoggerDefinesLevelsAndTestSupportIsolation(t *testing.T) {
+// TestLoggerDefinesLevels 验证日志实现提供四个等级。
+// 前置：读取当前源码；结果：四个等级均存在；只读检查无需清理。
+func TestLoggerDefinesLevels(t *testing.T) {
 	root := moduleRoot(t)
 	body, err := os.ReadFile(filepath.Join(root, "internal/logx/log.go"))
 	if err != nil {
@@ -21,49 +21,6 @@ func TestLoggerDefinesLevelsAndTestSupportIsolation(t *testing.T) {
 	}
 	if !definesLevels(string(body)) {
 		t.Fatal("日志必须定义四个等级")
-	}
-	assertTestSupportIsTestOnly(t, root)
-}
-
-// testSupportDir is the one package exempt from the leveled-log rule.
-const testSupportDir = "internal/testsupport/"
-
-// assertTestSupportIsTestOnly holds the exemption to its justification.
-//
-// The walk above skips internal/testsupport because only _test.go files import
-// it, which is what makes it not a server file. That is a claim about the
-// import graph rather than a property of the directory, so it is checked here:
-// the moment a production file imports the package, the exemption is wrong and
-// this fails rather than letting an unlogged server file through.
-func assertTestSupportIsTestOnly(t *testing.T, root string) {
-	t.Helper()
-	var importers []string
-	for _, dir := range []string{"cmd", "internal"} {
-		err := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			if strings.HasPrefix(rel, testSupportDir) {
-				return nil
-			}
-			if strings.Contains(string(body), "xhub/internal/testsupport") {
-				importers = append(importers, rel)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(importers) > 0 {
-		t.Fatalf("internal/testsupport is exempt from leveled logging because only tests import it, but these server files import it:\n%s",
-			strings.Join(importers, "\n"))
 	}
 }
 

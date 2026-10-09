@@ -75,10 +75,10 @@
 | 行为 | 实现入口 | 相关测试 |
 | --- | --- | --- |
 | 费率解析、窗口、计算 | `internal/catalog/rates.go`、`cost_at.go`、`holiday.go` | `cost_at_test.go`、`holiday_test.go`、`usage_regression_test.go` |
-| 部署价格与快照 | `internal/gateway/spend.go`、`internal/gateway/usage/reports.go` | `internal/gateway/usage/cost_breakdown_test.go`、`internal/regression/pricing_test.go` |
+| 部署价格与快照 | `internal/gateway/spend.go`、`internal/gateway/usage/reports.go` | `internal/gateway/usage/cost_breakdown_test.go`、`cmd/regression/pricing_test.go` |
 | 数据库去重与事务 | `internal/iam/usage.go` | `usage_idempotency_test.go` |
 | Redis 入队与确认 | `internal/live/redis.go` | `redis_test.go` |
 | 官方任务结算 | `internal/dataplane/official.go`、`internal/gateway/spend.go` | `official_settlement_test.go` |
-| 完整调用计价 | `internal/regression` | `pricing_test.go` |
+| 完整调用计价 | `cmd/regression` | `pricing_test.go` |
 
 相关测试入口存在不代表本次修改已经执行；检查报告应列出实际运行结果。

@@ -4,7 +4,7 @@
 
 ## 职责与实现契约
 
-本目录实现 XHub 的身份、管理控制面、模型数据面、路由、计价、持久化和跨模块回归。cmd 负责组合和启动，internal 的包负责可测试的业务行为；Go 的 internal 导入规则限制外部项目直接依赖这些实现。对外稳定边界是 HTTP 协议和配置文档，不是所有导出的 Go 符号。
+本目录实现 XHub 的身份、管理控制面、模型数据面、路由、计价、持久化。跨模块回归及共用测试夹具集中在 [cmd/regression](../cmd/regression/readme_cn.md)。cmd 负责组合和启动，internal 的包负责可测试的业务行为；Go 的 internal 导入规则限制外部项目直接依赖这些实现。对外稳定边界是 HTTP 协议和配置文档，不是所有导出的 Go 符号。
 一次推理先识别会话或虚拟密钥，从数据库恢复组织、团队、项目和所有者，再检查动作、模型范围、预算与限流。控制面解析本次路由模板，数据面选择可用部署、构造协议并发送；成功响应提取 usage、保存价格快照和调用归属，最后提交成功缓存及粘性状态。
 身份数据和账务在 iam，框架配置及模型部署在 store，Redis 热状态在 live，进程内响应缓存在 cache。五个费用作用域是同一次消费的视图，不能相加成为总消费。流输出后禁止拼接第二个供应商响应；数据库提交前不能确认队列。
 
@@ -27,11 +27,8 @@
 | [logx](logx/readme_cn.md) | 运行日志与秘密脱敏 |
 | [plugin](plugin/readme_cn.md) | 上游调用扩展注册 |
 | [provider](provider/readme_cn.md) | 供应商能力与传输登记 |
-| [providerconfig](providerconfig/readme_cn.md) | 真实供应商测试配置解析与权重周期校验 |
-| [regression](regression/readme_cn.md) | 跨模块业务回归 |
 | [router](router/readme_cn.md) | 部署过滤、排序与加权分流 |
 | [store](store/readme_cn.md) | 框架配置与模型存储 |
-| [testsupport](testsupport/readme_cn.md) | 隔离数据库测试支持 |
 
 ## 源码职责与入口
 

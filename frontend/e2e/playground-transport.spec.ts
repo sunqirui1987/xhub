@@ -23,11 +23,10 @@ for (const stream of [true, false]) {
       );
       await page.getByRole("button", { name: t("Send message") }).click();
       const response = await pending;
-      const raw = await response.text();
-      expect(response.status(), raw).toBe(200);
+      // SSE 响应会被页面持续读取，Chromium 不保证测试端还能二次取得响应体。
+      expect(response.status(), "Playground 客户接口应成功返回").toBe(200);
       expect(response.request().postDataJSON()).toMatchObject({ model: "gpt-4o-mini", stream });
       expect(response.request().headers().authorization).toMatch(/^Bearer /);
-      expect(raw).toContain("e2e-ok");
       await expect(page.getByText("e2e-ok", { exact: true })).toBeVisible();
       const callId = response.headers()["x-litellm-call-id"];
       expect(callId, "实际模型调用必须有关联账单").toBeTruthy();
@@ -37,7 +36,7 @@ for (const stream of [true, false]) {
           const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callId, { headers });
           return detail.ok() ? (await detail.json()).model : "";
         })
-        .toBeGreaterThan(0);
+        .toBe("gpt-4o-mini");
     });
   }
 }

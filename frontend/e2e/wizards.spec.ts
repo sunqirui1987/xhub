@@ -38,10 +38,9 @@ test.describe("write wizards create then list", () => {
     await add.getByLabel("模型提供商 *").selectOption("e2e-wizard-provider");
     await add.getByLabel("上游模型 *").fill("gpt-4o-mini");
     await add.getByLabel("对外模型名称 *").fill("e2e-added-model");
-    await add.getByRole("combobox", { name: t("Endpoint type"), exact: true }).click();
-    await page.getByRole("option", { name: t("Chat"), exact: true }).click();
-    await add.getByRole("combobox", { name: "上游接口协议", exact: true }).click();
-    await page.getByRole("option", { name: "Chat Completions", exact: true }).click();
+    // 当前模型向导按供应商和上游模型自动选择协议，并由协议派生对外接口。
+    await expect(add.getByRole("combobox", { name: "上游接口协议", exact: true }))
+      .toContainText("OpenAI · Chat Completions");
     await add.getByLabel("价格来源").selectOption("manual");
     await add.locator("#editor-input_cost_per_token").fill("0.15");
     await add.locator("#editor-output_cost_per_token").fill("0.60");
@@ -53,7 +52,7 @@ test.describe("write wizards create then list", () => {
     expect(created.ok(), await created.text()).toBeTruthy();
     expect(created.request().postDataJSON().model_info).toMatchObject({
       transport: "bypass_openai_chat",
-      endpoint_types: ["chat"],
+      endpoint_types: ["chat", "gemini", "vertex", "responses", "messages"],
     });
     await page.getByRole("tab", { name: t("pages.models.all") }).click();
     await expect(page.getByText("e2e-added-model").first()).toBeVisible({ timeout: 15_000 });

@@ -8,7 +8,7 @@ import (
 	_ "github.com/sunqirui1987/xhub/internal/provider/qiniu"
 )
 
-// TestCredentialCatalogHydration 验证内联目录校验、无目录兼容、缺凭据库失败及复制隔离。
+// TestCredentialCatalogHydration 验证内联目录校验、未注册中转目录兼容、缺凭据库失败及复制隔离。
 // 参数 t 为单测上下文；前置编译时七牛注册，无外部服务或数据库；仅内存数据，无需清理。
 func TestCredentialCatalogHydration(t *testing.T) {
 	for _, tc := range []struct {
@@ -16,7 +16,7 @@ func TestCredentialCatalogHydration(t *testing.T) {
 		want                                        error
 	}{
 		{"registered", "qiniu", "bytedance/doubao-seedance-2-0-260128", "qiniu_contents_generation", "", nil},
-		{"unknown directory", "missing", "unknown", "qiniu_contents_generation", "", errCredentialInvalid},
+		{"unregistered relay", "missing", "unknown", "qiniu_contents_generation", "", nil},
 		{"wrong implementation", "qiniu", "bytedance/seedance-2.0/text-to-video", "qiniu_contents_generation", "", errCredentialInvalid},
 		{"unknown model", "qiniu", "unknown", "qiniu_contents_generation", "", errCredentialInvalid},
 		{"legacy", "", "unknown", "qiniu_contents_generation", "", nil},

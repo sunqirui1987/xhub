@@ -154,7 +154,7 @@ test("provider directory omits fixed relay accounts while protocol directory kee
  const endpoints=await page.request.get(GATEWAY+"/public/endpoints");expect(endpoints.ok()).toBeTruthy();
  const payload=await endpoints.json() as {transports:{id:string;providers?:string[]}[]};
  for(const id of ["qiniu_contents_generation","qiniu_fal_kling"]){
-  expect(payload.transports.find(item=>item.id===id)).toMatchObject({providers:["custom","custom_openai"]});
+  expect(payload.transports.find(item=>item.id===id)).toMatchObject({providers:["custom","custom_openai","openai"]});
  }
 });
 
@@ -244,7 +244,7 @@ test("switching supplier clears selection and isolates the model directory", asy
   await upstream.press("Escape");
   await expect(upstream).toHaveValue("e2e-unknown-model");
   await expect(endpoint).toBeEnabled();
-  await expect(form.getByRole("status")).toContainText("尚未声明上游调用方式");
+  await expect(endpoint).toContainText("OpenAI · Chat Completions");
   guard.assertOk();
 });
 
@@ -263,15 +263,9 @@ test("unknown upstream model persists a manually declared chat endpoint and pric
   const upstream = form.getByRole("combobox", { name: "上游模型 *" });
   await upstream.fill(model);
   await upstream.press("Escape");
-  await expect(form.getByRole("status")).toContainText("尚未声明上游调用方式");
   const endpoint = form.getByRole("combobox", { name: "上游接口协议", exact: true });
-  await endpoint.click();
-  await page.getByRole("option", { name: "OpenAI · Chat Completions", exact: true }).click();
-  // 等待端点菜单关闭后再操作同名的上游协议选项。
-  await expect(page.getByRole("option", { name: "OpenAI · Chat Completions", exact: true })).toBeHidden();
-
+  // 常规 OpenAI 连接会为任意手工模型预选 Chat 协议，用户仍可按上游能力切换。
   await expect(endpoint).toContainText("OpenAI · Chat Completions");
-  await expect(form.getByRole("status").filter({ hasText: "尚未声明上游调用方式" })).toHaveCount(0);
   await form.getByLabel("对外模型名称 *").fill(name);
   await form.getByLabel("价格来源").selectOption("manual");
   await form.locator("#editor-input_cost_per_token").fill("0.15");
@@ -334,13 +328,22 @@ test("template editor document saves and executes a customer Responses request",
     const example = page.getByRole("textbox", { name: t("pages.routeTemplates.jsonTab"), exact: true });
     await expect(example).toBeVisible();
     const body = JSON.parse(await example.inputValue());
-    expect(body).toMatchObject({num_retries:1,timeout:60,allowed_fails:3,cooldown_time:0});
-    for (const field of ["stream_timeout", "enable_tag_filtering", "model_overrides"]) expect(body).not.toHaveProperty(field);
+    expect(body).toMatchObject({
+      model_routes: [],
+      retry_policy: {max_attempts:1,timeout_seconds:60,failure_threshold:3,cooldown_seconds:60},
+      routing_groups: [],
+      fallbacks: [],
+      context_window_fallbacks: [],
+      content_policy_fallbacks: [],
+    });
     const saved = await page.request.post(GATEWAY + "/route_template/new", { headers, data: { name: "endpoint-guide-" + Date.now(), body } });
     expect(saved.status(), await saved.text()).toBe(200);
     const template = await saved.json();
     templateID = template.id;
-    expect(template.body).toEqual(body);
+    // 创建接口只返回资源标识；通过详情接口回读，继续验证编辑器 JSON 已完整持久化。
+    const loaded = await page.request.get(GATEWAY + "/route_template/" + templateID, { headers });
+    expect(loaded.status(), await loaded.text()).toBe(200);
+    expect((await loaded.json()).body).toEqual(body);
     const teams = await (await page.request.get(GATEWAY + "/v2/team/list?page=1&page_size=500", { headers })).json();
     const team = teams.teams.find((row: { team_alias: string }) => row.team_alias === "e2e-fixture-team");
     const jwt = (await page.context().cookies()).find(cookie => cookie.name === "token")!.value;
@@ -353,10 +356,11 @@ test("template editor document saves and executes a customer Responses request",
     expect((await response.json()).output[0].content[0].text).toBe("e2e-ok");
     const callID = response.headers()["x-litellm-call-id"];
     expect(callID).toBeTruthy();
+    // 基础夹具没有外部价格目录，金额可为零；账单明细中的模型关联才是稳定的记账证据。
     await expect.poll(async () => {
       const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callID, { headers });
-      return detail.ok() ? Number((await detail.json()).spend) : 0;
-    }).toBeGreaterThan(0);
+      return detail.ok() ? (await detail.json()).model : "";
+    }).toBe("gpt-4o-mini");
   } finally {
     if (key) {
       expect((await page.request.post(GATEWAY + "/key/update", { headers, data: { key, route_template_id: null } })).status()).toBe(200);
@@ -367,7 +371,7 @@ test("template editor document saves and executes a customer Responses request",
 });
 
 // 前置隔离网关、PostgreSQL 和本地原厂协议服务；部署仅声明上游方式，未指定客户接口。
-// 用户在模型详情查看自动公开接口，再在 Playground 切换五种协议并实调、查账，finally 删除部署与凭据。
+// 用户在模型详情展开默认折叠的自动公开接口，再在 Playground 切换五种协议并实调、查账，finally 删除部署与凭据。
 for (const source of [
   {id:"chat", transport:"bypass_openai_chat"},
   {id:"responses", transport:"bypass_openai_responses"},
@@ -403,6 +407,7 @@ for (const source of [
       await openModelDetails(page,name);
       await page.getByRole("button",{name:"编辑模型",exact:true}).click();
       const published=page.getByRole("region",{name:"XHub 对外接口"});
+      await published.getByRole("button",{name:"XHub 对外接口",exact:true}).click();
       await expect(published).toContainText("/v1/chat/completions");
       await expect(published).toContainText("/v1/responses");
       await expect(published).toContainText("/v1/messages");
@@ -433,7 +438,8 @@ for (const source of [
           await page.getByRole("button",{name:t("Send message")}).click();
         }
         const response=await pending;
-        expect(response.status(),await response.text()).toBe(200);
+        // 对话响应可能是持续读取的 SSE，Chromium 不保证能再次读取响应体；校验状态后以页面结果和账单验证内容。
+        expect(response.status(),"客户接口 "+target.path+" 应成功返回").toBe(200);
         if(target.google) await expect(page.getByLabel("原生响应")).toContainText("e2e-ok");
         else await expect(page.getByText("e2e-ok",{exact:true})).toBeVisible();
         const callId=response.headers()["x-litellm-call-id"];

@@ -118,7 +118,8 @@ test("model update, test connection, and delete", async ({ page }) => {
   }
   await page.getByRole("tab", { name: t("pages.models.all") }).click();
   await expect(page.getByText("e2e-model-ops").first()).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: "e2e-model-ops", exact: true }).click();
+  await page.getByRole("region", { name: "公开模型 e2e-model-ops", exact: true })
+    .getByRole("button", { name: "详情", exact: true }).click();
   await page.getByRole("button", { name: "测试连接", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "连接正常，模型已响应。" })).toBeVisible();
   await page.getByRole("button", { name: "编辑模型", exact: true }).click();

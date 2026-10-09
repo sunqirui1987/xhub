@@ -28,7 +28,7 @@ docker compose up -d postgres
 XHUB_REGRESSION_STRICT=1 go test ./... -count=1
 ```
 
-`internal/testsupport/postgres.go` 中的 `Postgres` 为各测试创建独立 schema，用 search_path 隔离，并通过 `t.Cleanup` 清理。数据库测试只在测试文件中引用 testsupport。不要把生产数据库的数据关系用作 fixture。
+`cmd/regression/testsupport/postgres.go` 中的 `Postgres` 为各测试创建独立 schema，用 search_path 隔离，并通过 `t.Cleanup` 清理。数据库测试只在测试文件中引用 testsupport。不要把生产数据库的数据关系用作 fixture。
 
 关键入口：`internal/authz/authz_test.go` 验证动作矩阵；`internal/gateway/permission_test.go` 验证 HTTP 边界；`visibility_chain_test.go` 用两个组织的不同角色检查正反向读取和列表范围。`internal/iam/usage_idempotency_test.go` 验证重复写入、并发结算和事务回滚；`internal/live/redis_test.go` 验证队列与去重。
 
@@ -78,29 +78,11 @@ make e2e
 
 权限界面重点看 `frontend/e2e/visibility-chain.spec.ts`；密钥与 Playground 看 `keys-playground.spec.ts`；创建和写操作看 wizards/writes 相关 spec。浏览器检查不代替数据库并发和故障测试。测试输出是临时产物，不加入正式文档。
 
-## 可选演示租户
+## 隔离回归数据
 
-这套数据不是启动默认。仅在开发或测试实例上执行：
+演示数据命令已删除。运行 bash scripts/regression.sh 时，每个测试通过真实后台接口创建组织、团队、项目、用户和密钥，并在测试结束后删除独立 PostgreSQL schema；不会写入已有租户的数据。
 
-```bash
-go run ./cmd/seed -config configs/config.yaml
-# 网关监听后再核对范围
-go run ./cmd/seed -config configs/config.yaml -verify -gateway http://127.0.0.1:4000
-```
-
-启动只建表、按配置创建尚不存在的初始管理员，并登记内置供应商凭据；不会自动创建演示组织、团队、项目或这些账号。演示用户密码是 `demo-pass-1234`；平台管理员仍使用配置里原有密码。
-
-| 演示账号 | 身份与预期范围 |
-| --- | --- |
-| `org-a-admin@xhub.local` | 组织甲管理员兼甲一组成员；看甲一组和甲二组 |
-| `team-a1-admin@xhub.local` | 甲一组管理员；看本组成员与用量 |
-| `member-a1@xhub.local` | 甲一组成员；只看自己的用量与日志 |
-| `team-a2-admin@xhub.local` | 甲二组管理员 |
-| `org-b-admin@xhub.local` | 组织乙管理员兼乙一组管理员 |
-| `member-b1@xhub.local` | 乙一组成员 |
-| `outsider@xhub.local` | 无团队；没有可用模型 |
-
-平台管理员应看见两个组织和三个团队。组织甲用户不得看见乙的人员与日志；没有团队的用户只看自身账号。
+启动只建表、按配置创建尚不存在的初始管理员，并登记内置供应商凭据；不会自动创建演示组织、团队、项目或账号。
 
 ## 解释验证结果
 

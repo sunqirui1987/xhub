@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/iam"
-	"github.com/sunqirui1987/xhub/internal/testsupport"
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 // testIdentityStore opens the identity store on a private schema for one test.

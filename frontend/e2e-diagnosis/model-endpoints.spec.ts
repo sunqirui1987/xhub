@@ -367,7 +367,7 @@ test("template editor document saves and executes a customer Responses request",
 });
 
 // 前置隔离网关、PostgreSQL 和本地原厂协议服务；部署仅声明上游方式，未指定客户接口。
-// 用户在模型详情查看自动公开接口，再在 Playground 切换五种协议并实调、查账，finally 删除部署与凭据。
+// 用户在模型详情展开默认折叠的自动公开接口，再在 Playground 切换五种协议并实调、查账，finally 删除部署与凭据。
 for (const source of [
   {id:"chat", transport:"bypass_openai_chat"},
   {id:"responses", transport:"bypass_openai_responses"},
@@ -403,6 +403,7 @@ for (const source of [
       await openModelDetails(page,name);
       await page.getByRole("button",{name:"编辑模型",exact:true}).click();
       const published=page.getByRole("region",{name:"XHub 对外接口"});
+      await published.getByRole("button",{name:"XHub 对外接口",exact:true}).click();
       await expect(published).toContainText("/v1/chat/completions");
       await expect(published).toContainText("/v1/responses");
       await expect(published).toContainText("/v1/messages");

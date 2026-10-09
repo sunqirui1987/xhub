@@ -1,4 +1,4 @@
-.PHONY: test run ui tidy e2e e2e-all e2e-offline e2e-model-endpoints regression regression-live
+.PHONY: test run ui tidy testdata e2e e2e-all e2e-offline e2e-model-endpoints regression regression-live
 
 test:
 	go test ./...
@@ -16,24 +16,23 @@ regression-live:
 run:
 	go run ./cmd/gateway -config configs/config.yaml -addr :4000
 
-# Optional verification tenant. Not part of `make run`.
-seed:
-	go run ./cmd/seed -config configs/config.yaml
-
-verify-seed:
-	go run ./cmd/seed -config configs/config.yaml -verify -gateway http://127.0.0.1:4000
-
 ui:
 	cd frontend && npm install && npm run dev
 
 tidy:
 	go mod tidy
 
-# Full acceptance includes actual selected suppliers.
-e2e:
-	bash scripts/e2e-all.sh
+# 清空指定 xhub/public 与 Redis DB 1，并保留 real-acceptance 真实数据基线。
+testdata:
+	python3 scripts/e2e-real-dataset.py --shared-target --phase seed --directory .e2e/real-acceptance-current
 
-e2e-all: e2e
+# 基于 make testdata 的保留数据执行真实浏览器、计量核对和后台回归。
+e2e:
+	python3 scripts/e2e-real-dataset.py --shared-target --phase verify --with-regression --directory .e2e/real-acceptance-current
+
+# 原有全套隔离验收保留为显式入口。
+e2e-all:
+	bash scripts/e2e-all.sh
 
 e2e-offline:
 	bash scripts/e2e.sh

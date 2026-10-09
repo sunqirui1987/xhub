@@ -2,7 +2,7 @@ import {expect,test} from "@playwright/test";
 import {GATEWAY,UPSTREAM,loginAdmin,sessionBearer,stableGoto,t} from "./helpers";
 
 /** 前置真实浏览器、隔离后台及本地 Ark/Fal；创建 OpenAI 兼容目录连接、切换模型能力、保存刷新、任务实调和无效目录降级。
- * 不使用外部密钥；finally 删除模型和连接，schema 清理任务账单。 */
+ * 验证专用接口默认折叠后可展开查看已选直通入口；不使用外部密钥，finally 删除模型和连接，schema 清理任务账单。 */
 for (const catalogId of ["qiniu", "fennoai"]) {
 test(`supplier directory ${catalogId} binds Seedance and Fal to implemented video capabilities`,async({page})=>{
  test.setTimeout(120_000);await loginAdmin(page);
@@ -41,6 +41,10 @@ test(`supplier directory ${catalogId} binds Seedance and Fal to implemented vide
    await protocol.click();
    await expect(page.getByRole("listbox").getByRole("option",{name:"OpenAI · Chat Completions",exact:true})).toBeVisible();
    await page.getByRole("listbox").getByRole("option",{name:new RegExp(spec.label)}).click();
+   const published=form.getByRole("region",{name:"XHub 对外接口"});
+   const toggle=published.getByRole("button",{name:"XHub 对外接口",exact:true});
+   await expect(toggle).toHaveAttribute("aria-expanded","false");
+   await toggle.click();
    await expect(form.getByRole("region",{name:"XHub 对外接口"}).getByRole("checkbox")).toBeChecked();
    // 普通型号恢复 OpenAI 默认；FAL 仍可选择，错误型号明确解释并由保存接口校验。
    await upstream.fill("unimplemented-video");await upstream.press("Escape");

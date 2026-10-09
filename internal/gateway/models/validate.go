@@ -117,6 +117,31 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 	return nil
 }
 
+// validateNewDeploymentSurface 收紧管理 API 的上架契约，避免保存没有上游或没有正费率的空壳部署。
+// 参数 params 是 /model/new 的上游和费率字段，info 是计价来源；返回可展示错误，合法时为 nil。
+// 调用方仅为 New；配置文件和历史更新继续由 validateDeployment 保持兼容，不触发网络或持久化副作用。
+func validateNewDeploymentSurface(params, info map[string]any) error {
+	if strings.TrimSpace(str(params["litellm_credential_name"])) == "" && strings.TrimSpace(str(params["api_base"])) == "" {
+		return fmt.Errorf("deployment requires litellm_credential_name or api_base")
+	}
+	if str(info["pricing_source"]) != "manual" {
+		return nil
+	}
+	if rates, ok := catalog.DecodeRates(params["rates"]); ok {
+		for _, rate := range rates {
+			if rate.USD > 0 {
+				return nil
+			}
+		}
+	}
+	for _, field := range rateFields {
+		if value, ok := numberField(params[field]); ok && value > 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("manual pricing requires at least one positive price")
+}
+
 // credentialProtocolMatches 校验部署协议与已存凭据的兼容性，供创建和更新模型调用。
 // 参数 name：凭据名称；record：已存凭据（允许缺字段）；current：部署声明的协议。
 // 返回 bool：兼容时为真；不修改凭据或部署，空协议沿用历史允许行为。

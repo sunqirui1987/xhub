@@ -9,7 +9,7 @@ import (
 )
 
 // PriceDocument is the embedded price catalog. It is generated from the
-// configured price feed by ./cmd/pricedata and embedded in the binary.
+// configured price feed and embedded in the binary.
 //
 // Models and Providers are the two halves the console needs: a price row per
 // model, and the supplier list an operator picks from when adding a model.

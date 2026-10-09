@@ -42,8 +42,8 @@ function EndpointForm({ defaultValues = {}, catalogId = "" }: { defaultValues?: 
 }
 
 describe("model scoped endpoint transports", () => {
-  /** 前置对话目录和真实表单；验证各接口独立列出路径、无路径项正常、直通可选且不影响标准入口；自动卸载清理。 */
-  it("renders separate endpoint cards and an optional bypass control", async () => {
+  /** 前置对话目录和真实表单；验证默认折叠、键盘展开、无路径项、直通勾选及反复折叠不丢声明；自动卸载清理。 */
+  it("collapses endpoint cards by default and preserves optional bypass selections", async () => {
     vi.mocked(apiClient.get).mockResolvedValue({
       endpoint_types: [
         {id:"chat",label:"OpenAI · Chat Completions",kind:"adapted",protocol:"openai-chat",paths:["/v1/chat/completions"]},
@@ -55,6 +55,15 @@ describe("model scoped endpoint transports", () => {
     const user = userEvent.setup();
     render(<EndpointForm defaultValues={{model:"group/model",transport:"bypass_openai_responses",endpoint_types:["chat","gemini","messages"]}}/>);
     const region = await screen.findByRole("region", {name:"XHub 对外接口"});
+    const toggle = within(region).getByRole("button", {name:"XHub 对外接口"});
+    expect(toggle).toHaveAttribute("type", "button");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(region).queryByRole("list")).not.toBeInTheDocument();
+    expect(within(region).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(region).getByText("/v1/chat/completions")).not.toBeVisible();
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(region).getAllByRole("listitem")).toHaveLength(3);
     const gemini = within(region).getByRole("listitem", {name:"Gemini · Generate Content"});
     expect(within(gemini).getByText("/v1beta/models/{model}:generateContent").tagName).toBe("CODE");
@@ -64,6 +73,11 @@ describe("model scoped endpoint transports", () => {
     await user.click(bypass);
     expect(bypass).toBeChecked();
     expect(screen.getByLabelText("部署声明")).toHaveTextContent("bypass:openai-responses");
+    await user.click(toggle);
+    expect(bypass).not.toBeVisible();
+    expect(screen.getByLabelText("部署声明")).toHaveTextContent("bypass:openai-responses");
+    await user.click(toggle);
+    expect(bypass).toBeChecked();
     await user.click(bypass);
     expect(screen.getByLabelText("部署声明")).toHaveTextContent('"endpoint_types":["chat","gemini","messages"]');
   });
@@ -120,6 +134,7 @@ describe("model scoped endpoint transports", () => {
     expect(screen.getByLabelText("部署声明")).toHaveTextContent('"endpoint_types":["chat"]');
     await act(async () => rejectCatalog(new Error("offline")));
     expect(await screen.findByRole("alert")).toHaveTextContent("已保存的端点声明已保留");
+    expect(screen.queryByRole("button", {name:"XHub 对外接口"})).not.toBeInTheDocument();
     expect(screen.getByLabelText("部署声明")).toHaveTextContent('"transport":"bypass_openai_chat"');
   });
 
@@ -223,12 +238,12 @@ it("defaults dedicated models while keeping connection-compatible choices", asyn
  expect(screen.getByLabelText("部署声明")).toHaveTextContent('"transport":""');
 });
 
-/** 前置未知目录模型或不兼容连接；验证具体不可保存原因及 FAL/Ark 模型区别；测试库卸载，无持久数据清理。 */
-it("explains unsupported connection types and the FAL task path", async () => {
+/** 前置未知目录模型或不兼容连接；验证具体不可保存原因且不显示无关 FAL 提示；测试库卸载，无持久数据清理。 */
+it("explains unsupported connection types without unrelated FAL help", async () => {
  vi.mocked(apiClient.get).mockResolvedValue({endpoint_types:[],transports:[{id:"fal",protocol:"fal",label:"Dreamina",endpoint_id:"fal:queue",catalog_id:"qiniu",providers:["custom"]}],catalogs:{qiniu:{"registered/model":["fal"]}}});
  const view=render(<EndpointForm catalogId="qiniu" defaultValues={{model:"unknown/model"}}/>);
  expect(await screen.findByText(/目录未提供可用的上游接口协议/)).toBeVisible();
- expect(screen.getByText(/FAL 使用具体任务模型路径/)).toHaveTextContent("bytedance/doubao-seedance-2-0-260128 对应 Ark Video");
+ expect(screen.queryByText(/上游模型需填写 FAL 任务路径/)).not.toBeInTheDocument();
  view.unmount();
  render(<EndpointForm catalogId="qiniu" defaultValues={{model:"registered/model"}}/>);
  expect(await screen.findByText(/当前连接类型 test_supplier 不支持该模型登记的上游协议/)).toBeVisible();
@@ -246,12 +261,14 @@ it("allows explicit FAL task paths on an unregistered relay catalog", async () =
  expect(screen.getByRole("combobox",{name:"上游接口协议"})).toBeEnabled();
 });
 
-/** 前置真实表单、七牛目录与常规协议；普通上架模型默认 OpenAI，仍可切换 Responses，卸载清理。 */
+/** 前置真实表单、七牛目录与常规协议；普通型号默认 OpenAI 且无无关 FAL 说明，折叠时仍可切换 Responses，卸载清理。 */
 it("defaults an ordinary listed model to OpenAI even with a qiniu catalog", async () => {
  vi.mocked(apiClient.get).mockResolvedValue({endpoint_types:[{id:"chat",label:"Chat",kind:"adapted",protocol:"openai-chat"}],transports:dialogueTransports,catalogs:{qiniu:{video:["fal"]}}});
  render(<OpenAIEndpointForm/>);
  await waitFor(()=>expect(screen.getByRole("combobox",{name:"上游接口协议"})).toHaveTextContent("OpenAI · Chat Completions"));
  expect(screen.getByRole("combobox",{name:"上游接口协议"})).toBeEnabled();
+ expect(screen.queryByText(/上游模型需填写 FAL 任务路径/)).not.toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"XHub 对外接口"})).toHaveAttribute("aria-expanded","false");
  const user=userEvent.setup();await user.click(screen.getByRole("combobox",{name:"上游接口协议"}));
  await user.click(await screen.findByRole("option",{name:"OpenAI · Responses",exact:true}));
  expect(screen.getByRole("combobox",{name:"上游接口协议"})).toHaveTextContent("OpenAI · Responses");
@@ -262,12 +279,14 @@ function OpenAIEndpointForm() {
  return <FormProvider {...form}><MountedFormProvider value={{control:form.control,registry}}><EndpointTypeField selectedProvider="openai" catalogId="qiniu"/></MountedFormProvider></FormProvider>;
 }
 
-/** 前置 FAL 专用实现与不支持的型号；用户可以选择，页面解释限制，后台负责拒绝错误路径；卸载清理。 */
+/** 前置 FAL 专用实现与不支持的型号；用户选择后显示简短路径提示，折叠区外直接解释限制，后台拒绝错误路径；卸载清理。 */
 it("lets users select an implemented FAL protocol and explains an unsupported model", async () => {
  vi.mocked(apiClient.get).mockResolvedValue({endpoint_types:[],transports:[{id:"fal",protocol:"fal",label:"Dreamina",model_group:"Dreamina",endpoint_id:"fal:queue",catalog_id:"qiniu",providers:["test_supplier"],actions:[{name:"create",model:"byteplus/seedance-2.0/text-to-video"}]}],catalogs:{qiniu:{"byteplus/seedance-2.0/text-to-video":["fal"]}}});
  render(<EndpointForm catalogId="qiniu" defaultValues={{model:"unknown/model"}}/>);
  const user=userEvent.setup();await waitFor(()=>expect(screen.getByRole("combobox")).toBeEnabled());
  await user.click(screen.getByRole("combobox"));await user.click(await screen.findByRole("option",{name:"FAL · Dreamina",exact:true}));
  expect(await screen.findByRole("alert")).toHaveTextContent("尚未实现当前模型或目录的调用");
+ expect(screen.getByText(/上游模型需填写 FAL 任务路径/)).toBeVisible();
+ expect(screen.getByRole("button",{name:"XHub 对外接口"})).toHaveAttribute("aria-expanded","false");
  expect(screen.getByLabelText("部署声明")).toHaveTextContent('"transport":"fal"');
 });

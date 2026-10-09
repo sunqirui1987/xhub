@@ -59,13 +59,18 @@ elif [[ -z "${XHUB_TEST_DATABASE_URL:-}" ]]; then
 fi
 
 ARGS=(-count=1 -timeout="${XHUB_REGRESSION_TIMEOUT:-1800s}")
+# 指定报告文件时对全部生产模块插桩，保留后台覆盖证据供 internal-coverage.py 审计。
+if [[ -n "${XHUB_REGRESSION_COVERPROFILE:-}" ]]; then
+  mkdir -p "$(dirname "$XHUB_REGRESSION_COVERPROFILE")"
+  ARGS+=(-coverpkg=./internal/... -coverprofile="$XHUB_REGRESSION_COVERPROFILE")
+fi
 export XHUB_REGRESSION_STRICT=1
 if [[ "$VERBOSE" == 1 ]]; then
   ARGS+=(-v)
 fi
 if [[ -n "$PATTERN" ]]; then
   # -list only matches top-level names. Capture first to avoid SIGPIPE with pipefail.
-  TEST_NAMES="$(go test ./internal/regression/ -list "${PATTERN%%/*}")"
+  TEST_NAMES="$(go test ./cmd/regression/ -list "${PATTERN%%/*}")"
   if ! rg -q '^Test' <<< "$TEST_NAMES"; then
     echo "no regression tests matched: $PATTERN" >&2
     exit 1
@@ -81,4 +86,4 @@ else
   echo "running the deterministic suite (fake provider); --live to call real vendors"
 fi
 
-go test ./internal/regression/ "${ARGS[@]}"
+go test ./cmd/regression/ "${ARGS[@]}"

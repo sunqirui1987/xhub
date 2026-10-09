@@ -43,13 +43,26 @@ export function uiPath(path: string): string {
   return `/ui${withSlash}${query}`;
 }
 
+/**
+ * stableGoto 打开控制台路径并吸收开发代理偶发的导航中断或短暂 5xx。
+ * 参数：page 为当前浏览器页面，path 为不带 /ui 前缀的控制台路径。
+ * 返回：页面完成 DOM 加载后结束；调用方随后验证目标页面的可访问内容。
+ * 异常与副作用：最多导航三次，持续 5xx、最终导航异常或始终被重定向到登录页时抛错。
+ * 调用场景：长时间串行 E2E 在页面切换或重新登录前使用。
+ */
 export async function stableGoto(page: Page, path: string) {
   const target = uiPath(path);
   let last: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await page.goto(target, { waitUntil: "commit" });
+      const response = await page.goto(target, { waitUntil: "commit" });
       await page.waitForLoadState("domcontentloaded");
+      if (response && response.status() >= 500) {
+        last = new Error(`navigation to ${path} returned HTTP ${response.status()}`);
+        if (attempt === 2) throw last;
+        await page.waitForTimeout(300);
+        continue;
+      }
       if (!page.url().includes("/login") || path === "/login") return;
     } catch (err) {
       last = err;

@@ -29,3 +29,7 @@ e2e-report.txt
 scripts/__pycache__/
 docs/development/model-marketplace-proof
 frontend/.next-playground-diagnosis
+frontend/.next-real-dataset/
+.artifacts
+frontend/.next-acceptance-surfaces
+regression-report-20261009.md

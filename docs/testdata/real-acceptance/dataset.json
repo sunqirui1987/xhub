@@ -1,0 +1,595 @@
+{
+  "version": 1,
+  "organizations": [
+    {
+      "slug": "qiniu",
+      "name": "七牛云",
+      "members": [
+        "陈晨",
+        "林悦",
+        "周宁",
+        "张航",
+        "李明",
+        "王磊",
+        "赵敏",
+        "刘洋",
+        "孙锐"
+      ]
+    },
+    {
+      "slug": "lingxi",
+      "name": "灵矽",
+      "members": [
+        "许言",
+        "宋雨",
+        "吴昊",
+        "郑宇",
+        "冯凯",
+        "程远",
+        "韩雪",
+        "唐林",
+        "沈青"
+      ]
+    },
+    {
+      "slug": "tencent",
+      "name": "腾讯云",
+      "members": [
+        "顾辰",
+        "夏禾",
+        "陆川",
+        "高阳",
+        "马骏",
+        "杜衡",
+        "叶清",
+        "方舟",
+        "江南"
+      ]
+    }
+  ],
+  "teams": [
+    {
+      "slug": "frontend",
+      "name": "前端"
+    },
+    {
+      "slug": "backend",
+      "name": "后端"
+    },
+    {
+      "slug": "platform",
+      "name": "中台"
+    }
+  ],
+  "key_profiles": [
+    "inherit",
+    "fenno-only",
+    "modelink-only"
+  ],
+  "providers": [
+    {
+      "id": "fennoai",
+      "name": "Fenno AI",
+      "base": "https://api.fenno.ai",
+      "base_env": "FENNO_AI_API_BASE",
+      "key_env": "FENNO_AI_API_KEY"
+    },
+    {
+      "id": "qiniu",
+      "name": "七牛 Modelink",
+      "base": "https://api.modelink.ai",
+      "base_env": "QINIU_API_BASE",
+      "key_env": "QINIU_API_KEY"
+    }
+  ],
+  "routing": {
+    "alias": "企业智能助手",
+    "backup_alias": "企业智能助手备用",
+    "weights": [
+      7,
+      3
+    ],
+    "max_attempts": 1,
+    "timeout_seconds": 90,
+    "templates": {
+      "organization-default": {
+        "model_routes": [
+          {
+            "model": "$alias",
+            "strategy": "traffic-split",
+            "allocations": [
+              {
+                "deployment_id": "$fenno_deployment",
+                "weight": 7
+              },
+              {
+                "deployment_id": "$modelink_deployment",
+                "weight": 3
+              }
+            ]
+          }
+        ],
+        "retry_policy": {
+          "max_attempts": 1,
+          "timeout_seconds": 90,
+          "failure_threshold": 0,
+          "cooldown_seconds": 60
+        },
+        "fallbacks": [
+          {
+            "$alias": [
+              "$backup_alias"
+            ]
+          }
+        ]
+      },
+      "team-default": {
+        "model_routes": [
+          {
+            "model": "$alias",
+            "strategy": "traffic-split",
+            "allocations": [
+              {
+                "deployment_id": "$fenno_deployment",
+                "weight": 3
+              },
+              {
+                "deployment_id": "$modelink_deployment",
+                "weight": 7
+              }
+            ]
+          }
+        ],
+        "retry_policy": {
+          "max_attempts": 1,
+          "timeout_seconds": 90,
+          "failure_threshold": 0,
+          "cooldown_seconds": 60
+        },
+        "fallbacks": [
+          {
+            "$alias": [
+              "$backup_alias"
+            ]
+          }
+        ]
+      },
+      "fenno-only": {
+        "model_routes": [
+          {
+            "model": "$alias",
+            "strategy": "traffic-split",
+            "allocations": [
+              {
+                "deployment_id": "$fenno_deployment",
+                "weight": 100
+              },
+              {
+                "deployment_id": "$modelink_deployment",
+                "weight": 0
+              }
+            ]
+          }
+        ],
+        "retry_policy": {
+          "max_attempts": 1,
+          "timeout_seconds": 90,
+          "failure_threshold": 0,
+          "cooldown_seconds": 60
+        },
+        "fallbacks": [
+          {
+            "$alias": [
+              "$backup_alias"
+            ]
+          }
+        ]
+      },
+      "modelink-only": {
+        "model_routes": [
+          {
+            "model": "$alias",
+            "strategy": "traffic-split",
+            "allocations": [
+              {
+                "deployment_id": "$fenno_deployment",
+                "weight": 0
+              },
+              {
+                "deployment_id": "$modelink_deployment",
+                "weight": 100
+              }
+            ]
+          }
+        ],
+        "retry_policy": {
+          "max_attempts": 1,
+          "timeout_seconds": 90,
+          "failure_threshold": 0,
+          "cooldown_seconds": 60
+        },
+        "fallbacks": [
+          {
+            "$alias": [
+              "$backup_alias"
+            ]
+          }
+        ]
+      }
+    },
+    "inheritance": [
+      "key",
+      "team",
+      "organization",
+      "builtin"
+    ],
+    "document_semantics": "最近作用域整体覆盖；零权重不得转发；7:3为随机流量比例，不保证有限样本精确比例。"
+  },
+  "billing": {
+    "currency": "USD",
+    "input_cost_per_token": 1e-06,
+    "output_cost_per_token": 2e-06
+  },
+  "limits": {
+    "max_probe_models_per_provider": 5,
+    "max_output_tokens": 32,
+    "max_upstream_attempts": 150
+  },
+  "guardrails": [
+    {
+      "guardrail_name": "手机号脱敏",
+      "litellm_params": {
+        "guardrail": "local",
+        "mode": "pre_call",
+        "default_on": true,
+        "priority": 10,
+        "patterns": [
+          "1[3-9][0-9]{9}"
+        ],
+        "action": "redact",
+        "replacement": "[手机号已隐藏]"
+      }
+    },
+    {
+      "guardrail_name": "邮箱脱敏",
+      "litellm_params": {
+        "guardrail": "local",
+        "mode": "pre_call",
+        "default_on": true,
+        "priority": 20,
+        "patterns": [
+          "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+        ],
+        "action": "redact",
+        "replacement": "[邮箱已隐藏]"
+      }
+    },
+    {
+      "guardrail_name": "敏感内容拦截",
+      "litellm_params": {
+        "guardrail": "local",
+        "mode": "pre_call",
+        "default_on": true,
+        "priority": 30,
+        "blocked_words": [
+          "验收禁止外发"
+        ],
+        "action": "block"
+      }
+    },
+    {
+      "guardrail_name": "XGo-敏感信息拦截",
+      "litellm_params": {
+        "guardrail": "custom_code",
+        "custom_code_language": "xgo",
+        "custom_code": "import . \"xhub/guardrail\"\nfunc ApplyGuardrail(texts []string, requestData map[string]any, inputType string) map[string]any {\n // 仅允许请求阶段，按文本检查敏感测试标记。\n if inputType != \"request\" { return Block(\"unexpected input type\") }\n for text <- texts { if Contains(text, \"XGO_SECRET\") { return Block(\"验收敏感信息禁止外发\") } }\n return Allow()\n}",
+        "mode": "pre_call",
+        "default_on": false,
+        "priority": 40
+      },
+      "acceptance": {
+        "text": "XGO_SECRET",
+        "action": "block",
+        "expected_http_status": 400,
+        "replacement": null
+      }
+    },
+    {
+      "guardrail_name": "XGo-工单脱敏",
+      "litellm_params": {
+        "guardrail": "custom_code",
+        "custom_code_language": "xgo",
+        "custom_code": "import . \"xhub/guardrail\"\nfunc ApplyGuardrail(texts []string, requestData map[string]any, inputType string) map[string]any {\n // 修改文本后交给真实供应商，禁止原始标记外发。\n for i, text := range texts { texts[i] = RegexReplace(text, \"XGO_PRIVATE\", \"[工单已隐藏]\") }\n return Modify(texts)\n}",
+        "mode": "pre_call",
+        "default_on": false,
+        "priority": 40
+      },
+      "acceptance": {
+        "text": "XGO_PRIVATE",
+        "action": "modify",
+        "expected_http_status": 200,
+        "replacement": "[工单已隐藏]"
+      }
+    },
+    {
+      "guardrail_name": "XGo-审计标记",
+      "litellm_params": {
+        "guardrail": "custom_code",
+        "custom_code_language": "xgo",
+        "custom_code": "import . \"xhub/guardrail\"\nfunc ApplyGuardrail(texts []string, requestData map[string]any, inputType string) map[string]any {\n // 审计标记保留业务可用性，真实模型继续处理。\n for text <- texts { if Contains(text, \"XGO_REVIEW\") { return Flag(\"人工复核\", map[string]any{\"category\":\"acceptance-review\"}) } }\n return Allow()\n}",
+        "mode": "pre_call",
+        "default_on": false,
+        "priority": 40
+      },
+      "acceptance": {
+        "text": "XGO_REVIEW",
+        "action": "flag",
+        "expected_http_status": 200,
+        "replacement": null
+      }
+    }
+  ],
+  "description": "通过公开接口持久化的企业验收资源；成员为虚构测试身份，不代表实际公司员工。目录和响应必须实时获得。",
+  "budgets": {
+    "organization": 100,
+    "team": 30,
+    "project": 20,
+    "user": 10,
+    "key": 3
+  },
+  "project_profiles": [
+    {
+      "team": "frontend",
+      "name": "企业门户与智能客服"
+    },
+    {
+      "team": "backend",
+      "name": "业务API与知识检索"
+    },
+    {
+      "team": "platform",
+      "name": "AI网关与数据治理"
+    }
+  ],
+  "personas": [
+    {
+      "role": "platform_admin",
+      "login_env": "E2E_DATASET_ADMIN",
+      "password_env": "E2E_DATASET_PASSWORD"
+    },
+    {
+      "role": "organization_admin",
+      "organization": "qiniu",
+      "team": "frontend",
+      "member_index": 0
+    },
+    {
+      "role": "team_admin",
+      "organization": "qiniu",
+      "team": "backend",
+      "member_index": 0
+    },
+    {
+      "role": "member",
+      "organization": "qiniu",
+      "team": "backend",
+      "member_index": 1
+    }
+  ],
+  "permission_scenarios": [
+    {
+      "role": "platform_admin",
+      "own_team_update": 200,
+      "foreign_team_update": 200,
+      "global_guardrail_create": 200,
+      "visible_teams": 9
+    },
+    {
+      "role": "organization_admin",
+      "own_team_update": 200,
+      "foreign_team_update": 403,
+      "global_guardrail_create": 403,
+      "visible_teams": 3
+    },
+    {
+      "role": "team_admin",
+      "own_team_update": 200,
+      "foreign_team_update": 403,
+      "global_guardrail_create": 403,
+      "visible_teams": 1
+    },
+    {
+      "role": "member",
+      "own_team_update": 403,
+      "foreign_team_update": 403,
+      "global_guardrail_create": 403,
+      "visible_teams": 1
+    }
+  ],
+  "lifecycle_scenarios": [
+    {
+      "resource": "personal_key",
+      "steps": [
+        "owner_login",
+        "generate",
+        "real_request",
+        "block",
+        "refuse_without_egress",
+        "unblock",
+        "regenerate",
+        "old_secret_refused",
+        "new_secret_real_request",
+        "delete",
+        "refuse_without_egress"
+      ],
+      "cleanup": true
+    },
+    {
+      "resource": "guardrail",
+      "steps": [
+        "create",
+        "read_source",
+        "debug",
+        "request_select",
+        "edit",
+        "default_enable",
+        "real_redact",
+        "delete"
+      ],
+      "cleanup": true
+    }
+  ],
+  "frontend_workflows": [
+    {
+      "page": "organizations",
+      "resources": "3组织、预算、组织管理员",
+      "verification": "浏览器列表和跨组织隔离"
+    },
+    {
+      "page": "teams",
+      "resources": "9团队、管理员、成员、模型白名单",
+      "verification": "四角色登录和权限"
+    },
+    {
+      "page": "users",
+      "resources": "27成员、组织和团队管理角色",
+      "verification": "真实密码登录"
+    },
+    {
+      "page": "keys",
+      "resources": "81个人密钥、临时生命周期密钥",
+      "verification": "真实请求、禁用、轮换、删除"
+    },
+    {
+      "page": "projects",
+      "resources": "9项目与预算",
+      "verification": "账单五级归属"
+    },
+    {
+      "page": "models",
+      "resources": "实时目录选取的模型与备用部署",
+      "verification": "目录发现、探测、权重、回退"
+    },
+    {
+      "page": "route-templates",
+      "resources": "11个作用域模板",
+      "verification": "持久化与继承"
+    },
+    {
+      "page": "guardrails",
+      "resources": "3默认规则、3XGo规则",
+      "verification": "源码、调试、拦截、脱敏、审计、编辑删除"
+    },
+    {
+      "page": "playground",
+      "resources": "真实模型和虚拟密钥",
+      "verification": "浏览器提交显示回答"
+    },
+    {
+      "page": "logs",
+      "resources": "真实请求与价格快照",
+      "verification": "浏览器和费用核对"
+    },
+    {
+      "page": "usage",
+      "resources": "事件、每日用量、五级累计费用",
+      "verification": "SQL一致性"
+    },
+    {
+      "page": "guardrails-monitor",
+      "resources": "真实默认护栏与XGo动作事件",
+      "verification": "overview/logs/detail和浏览器监控"
+    }
+  ],
+  "external_boundaries": [
+    {
+      "feature": "post_call/during_call/pre_mcp_call护栏",
+      "status": "unsupported"
+    },
+    {
+      "feature": "外部Moderation护栏",
+      "status": "requires_additional_credentials"
+    },
+    {
+      "feature": "图像、音频、视频、Responses原生协议",
+      "status": "covered_by_separate_protocol_suites_not_this_chat_dataset"
+    },
+    {
+      "feature": "供应商实际账单金额",
+      "status": "gateway_fixed_prices_only"
+    }
+  ],
+  "limit_scenarios": {
+    "budgets": [
+      {
+        "scope": "organization",
+        "route": "/organization/update",
+        "field": "organization_id",
+        "method": "PATCH",
+        "expected_http_status": 429,
+        "expected_upstream_attempts": 0
+      },
+      {
+        "scope": "team",
+        "route": "/team/update",
+        "field": "team_id",
+        "method": "POST",
+        "expected_http_status": 429,
+        "expected_upstream_attempts": 0
+      },
+      {
+        "scope": "project",
+        "route": "/project/update",
+        "field": "project_id",
+        "method": "POST",
+        "expected_http_status": 429,
+        "expected_upstream_attempts": 0
+      },
+      {
+        "scope": "user",
+        "route": "/user/update",
+        "field": "user_id",
+        "method": "POST",
+        "expected_http_status": 429,
+        "expected_upstream_attempts": 0
+      },
+      {
+        "scope": "key",
+        "route": "/key/update",
+        "field": "key",
+        "method": "POST",
+        "expected_http_status": 429,
+        "expected_upstream_attempts": 0
+      }
+    ],
+    "rate_limits": [
+      {
+        "field": "rpm_limit",
+        "blocked_value": 0,
+        "restored_value": 100000
+      },
+      {
+        "field": "tpm_limit",
+        "blocked_value": 0,
+        "restored_value": 100000
+      }
+    ],
+    "model_allowlist": {
+      "disallowed_alias": "未授权模型",
+      "expected_status": 401
+    }
+  },
+  "model_lifecycle": {
+    "alias": "企业广场生命周期模型",
+    "steps": [
+      "add_from_live_catalog",
+      "real_request",
+      "disable_alias",
+      "access_refused_without_egress",
+      "enable_alias",
+      "real_request",
+      "delete"
+    ],
+    "cleanup": true
+  }
+}

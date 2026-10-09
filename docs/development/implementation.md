@@ -350,8 +350,8 @@ strict 阻止数据库不可达静默跳过，但不会禁止所有显式 Skip�
 
 ### 实现位置
 
-- [regression](../../internal/regression/readme_cn.md)
-- [testsupport](../../internal/testsupport/readme_cn.md)
+- [regression](../../cmd/regression/readme_cn.md)
+- [testsupport](../../cmd/regression/testsupport/readme_cn.md)
 
 ### 验收要点
 

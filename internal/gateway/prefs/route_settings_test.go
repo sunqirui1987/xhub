@@ -54,7 +54,7 @@ func (f *fakeScopes) Load(id string) *iam.RouteTemplate { return f.templates[id]
 // TestNoTemplateUsesBuiltinModelDefault 验证没有任何绑定时直接使用模型管理默认分配。
 // 测试不读取平台 router_settings，也不访问数据库，无需清理。
 func TestNoTemplateUsesBuiltinModelDefault(t *testing.T) {
-	got := Resolve(newFakeScopes(), ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	got := Resolve(newFakeScopes(), ScopeRef{Kind: "key", ID: "k1"}, ScopeRef{Kind: "team", ID: "t1"}, ScopeRef{Kind: "organization", ID: "o1"})
 	if got.Source != BuiltinSource || got.TemplateID != "" || got.Strategy() != "traffic-split" || got.Retries() != 1 || got.TimeoutSeconds() != 60 {
 		t.Fatalf("未绑定模板没有使用内置模型默认: %+v", got)
 	}
@@ -68,7 +68,7 @@ func TestNarrowestTemplateSelectionWins(t *testing.T) {
 		template("team-template", "team", templateDocument(5)).
 		template("org-template", "org", templateDocument(3)).
 		bind("key", "k1", "key-template").bind("team", "t1", "team-template").bind("organization", "o1", "org-template")
-	got := Resolve(f, ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	got := Resolve(f, ScopeRef{Kind: "key", ID: "k1"}, ScopeRef{Kind: "team", ID: "t1"}, ScopeRef{Kind: "organization", ID: "o1"})
 	if got.TemplateID != "key-template" || got.Source != "key" || got.Retries() != 9 {
 		t.Fatalf("最窄范围没有生效: %+v", got)
 	}
@@ -78,7 +78,7 @@ func TestNarrowestTemplateSelectionWins(t *testing.T) {
 // 这是范围选择继承，不是模型规则合并；测试仅使用内存数据。
 func TestUnselectedNarrowScopesInheritWiderTemplate(t *testing.T) {
 	f := newFakeScopes().template("org-template", "org", templateDocument(4)).bind("organization", "o1", "org-template")
-	got := Resolve(f, ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	got := Resolve(f, ScopeRef{Kind: "key", ID: "k1"}, ScopeRef{Kind: "team", ID: "t1"}, ScopeRef{Kind: "organization", ID: "o1"})
 	if got.TemplateID != "org-template" || got.Source != "organization" || got.Retries() != 4 {
 		t.Fatalf("组织模板没有被继承: %+v", got)
 	}
@@ -88,7 +88,7 @@ func TestUnselectedNarrowScopesInheritWiderTemplate(t *testing.T) {
 // 解析应回到模型管理默认分配；测试构造悬空引用后无需额外清理。
 func TestDanglingSelectionFallsBackToModelDefault(t *testing.T) {
 	f := newFakeScopes().template("team-template", "team", templateDocument(2)).template("org-template", "org", templateDocument(8)).bind("team", "t1", "team-template").bind("organization", "o1", "org-template").delete("team-template")
-	got := Resolve(f, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	got := Resolve(f, ScopeRef{Kind: "team", ID: "t1"}, ScopeRef{Kind: "organization", ID: "o1"})
 	if got.Source != BuiltinSource || got.TemplateID != "" || got.Strategy() != "traffic-split" {
 		t.Fatalf("悬空绑定没有回到模型默认: %+v", got)
 	}
@@ -137,7 +137,7 @@ func TestTypedExecutionDefaultsAndBoundaries(t *testing.T) {
 // TestResolveWithoutLookupUsesModelDefault 验证身份库不可用时仍可使用模型管理默认分配。
 // nil lookup 不应导致请求失败；测试无外部状态。
 func TestResolveWithoutLookupUsesModelDefault(t *testing.T) {
-	got := Resolve(nil, ScopeRef{"team", "t1"})
+	got := Resolve(nil, ScopeRef{Kind: "team", ID: "t1"})
 	if got.Source != BuiltinSource || got.Strategy() != "traffic-split" {
 		t.Fatalf("无 lookup 时解析错误: %+v", got)
 	}

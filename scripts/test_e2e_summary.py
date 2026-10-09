@@ -35,7 +35,7 @@ class ReportTests(unittest.TestCase):
                     "=== RUN   TestBusiness\n--- PASS: TestBusiness (1.00s)\n"
                     "    --- PASS: TestBusiness/child (0.50s)\n"
                     "    --- SKIP: TestOptional/media (0.00s)\n"
-                    "ok github.com/sunqirui1987/xhub/internal/regression 1.00s\n")
+                    "ok github.com/sunqirui1987/xhub/cmd/regression 1.00s\n")
                 if backend_failure:
                     with (out / "backend.log").open("a") as log:
                         log.write("=== RUN   TestLive\n    live_test.go:40: upstream DNS timeout\n--- FAIL: TestLive (30.00s)\n")
@@ -128,9 +128,9 @@ class ReportTests(unittest.TestCase):
 
     def test_backend_setup_failure_preserves_missing_module_diagnostic(self):
         code, summary, html = self.report(backend_log=
-            "# github.com/sunqirui1987/xhub/internal/regression\n"
+            "# github.com/sunqirui1987/xhub/cmd/regression\n"
             "internal/gateway/guard/custom.go:9:2: no required module provides package go.starlark.net/starlark\n"
-            "FAIL github.com/sunqirui1987/xhub/internal/regression [setup failed]\nFAIL\n")
+            "FAIL github.com/sunqirui1987/xhub/cmd/regression [setup failed]\nFAIL\n")
         self.assertEqual(code, 1)
         self.assertEqual(summary["backend_pass"], 0)
         self.assertIn("no required module provides package", self.last_stdout)
@@ -144,7 +144,7 @@ class ReportTests(unittest.TestCase):
             "--- SKIP: TestOptional (0.00s)\n"
             "=== RUN   TestWeighted\n    weighted_test.go:20: unhealthy upstream attempt\n"
             "--- FAIL: TestWeighted (2.00s)\n"
-            "FAIL github.com/sunqirui1987/xhub/internal/regression 3.00s\n")
+            "FAIL github.com/sunqirui1987/xhub/cmd/regression 3.00s\n")
         self.assertEqual(code, 1)
         self.assertTrue(summary["backend_completed"])
         self.assertEqual(summary["incomplete_stages"], [])

@@ -29,6 +29,9 @@ func Module(h mountHost) httpx.Module {
 	traceModule("usage")
 	return httpx.Bind("usage", func(reg httpx.Registrar) {
 		reg.Handle("GET /global/spend/teams", func(w http.ResponseWriter, r *http.Request) { SpendTeams(h, w, r) })
+		reg.Handle("GET /guardrails/usage/overview", func(w http.ResponseWriter, r *http.Request) { GuardrailOverview(h, w, r) })
+		reg.Handle("GET /guardrails/usage/detail/{guardrail_id}", func(w http.ResponseWriter, r *http.Request) { GuardrailDetail(h, w, r) })
+		reg.Handle("GET /guardrails/usage/logs", func(w http.ResponseWriter, r *http.Request) { GuardrailLogs(h, w, r) })
 		reg.Handle("GET /spend/logs/v2", func(w http.ResponseWriter, r *http.Request) { LogsV2(h, w, r) })
 		// The console's Logs page reads this collection route, and only the
 		// per-request variant was registered. Its request fell through to the

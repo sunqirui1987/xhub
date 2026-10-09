@@ -9,7 +9,7 @@ import (
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/store"
-	"github.com/sunqirui1987/xhub/internal/testsupport"
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 type resourceHost struct {

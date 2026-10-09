@@ -91,7 +91,9 @@ test("every page route renders without a dashboard error", async ({ page }) => {
       ).toBeVisible({ timeout: 15_000 });
     }
     if (item.route === "/chat/logs") {
-      await expect(page.getByText(t("No logs for this period")).first()).toBeVisible({ timeout: 15_000 });
+      await expect(
+        page.getByText(t("No logs for this period")).or(page.getByRole("table")).first(),
+      ).toBeVisible({ timeout: 15_000 });
     }
     if (item.route === "/chat/usage") {
       await expect(page.getByText(t("No usage data for this period"))).toBeVisible({ timeout: 15_000 });

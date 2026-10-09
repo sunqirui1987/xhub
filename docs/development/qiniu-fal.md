@@ -98,7 +98,7 @@ Vidu Q2 的 output_range 和 MiniMax 的 free_quota 不能丢弃后声称完整�
 
 ~~~bash
 go test ./internal/provider/... ./internal/catalog ./internal/dataplane ./internal/gateway/usage -count=1
-XHUB_REGRESSION_STRICT=1 go test ./internal/regression -run 'Test(FalSettlement|SeedanceSettlement)' -count=1 -v
+XHUB_REGRESSION_STRICT=1 go test ./cmd/regression -run 'Test(FalSettlement|SeedanceSettlement)' -count=1 -v
 # 明确付费，每次运行会创建一个新视频；需要环境中的 QINIU_API_KEY
 XHUB_QINIU_FAL_LIVE=1 go test ./internal/dataplane -run '^TestQiniuFalLive$' -count=1 -v
 ~~~

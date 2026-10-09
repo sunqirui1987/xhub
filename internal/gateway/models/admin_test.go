@@ -3,8 +3,10 @@ package models
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
@@ -66,6 +68,29 @@ func TestFailedModelUpdateDoesNotMutateStoredEntry(t *testing.T) {
 	got := h.models[0]
 	if got.ModelName != "public-name" || got.LiteLLMParams["input_cost_per_token"] != 1.0 || got.ModelInfo["base_model"] != nil {
 		t.Fatalf("failed update mutated live entry: %#v", got)
+	}
+}
+
+// TestValidateDeploymentRejectsMissingUpstreamAndZeroBilling 验证模型上架前必须有真实上游绑定和至少一项正费率。
+// 前置条件使用本地假地址且不发网络请求；分别移除上游、设置全零手工费率并检查拒绝，测试无持久化数据需要清理。
+func TestValidateDeploymentRejectsMissingUpstreamAndZeroBilling(t *testing.T) {
+	baseParams := map[string]any{
+		"model": "upstream-name", "api_base": "http://127.0.0.1:1/v1", "api_key": "local-test",
+		"custom_llm_provider": "custom", "input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002,
+	}
+	info := map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}, "pricing_source": "manual"}
+	if err := validateNewDeploymentSurface(maps.Clone(baseParams), maps.Clone(info)); err != nil {
+		t.Fatalf("完整本地部署被拒绝: %v", err)
+	}
+	withoutUpstream := maps.Clone(baseParams)
+	delete(withoutUpstream, "api_base")
+	if err := validateNewDeploymentSurface(withoutUpstream, maps.Clone(info)); err == nil || !strings.Contains(err.Error(), "api_base") {
+		t.Fatalf("无上游部署未被拒绝: %v", err)
+	}
+	zeroBilling := maps.Clone(baseParams)
+	zeroBilling["input_cost_per_token"], zeroBilling["output_cost_per_token"] = 0, 0
+	if err := validateNewDeploymentSurface(zeroBilling, maps.Clone(info)); err == nil || !strings.Contains(err.Error(), "positive") {
+		t.Fatalf("全零计费部署未被拒绝: %v", err)
 	}
 }
 

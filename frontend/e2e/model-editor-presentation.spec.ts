@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t } from "./helpers";
 
 /** 前置真实浏览器、隔离 PostgreSQL 和本地 Responses 上游；验证路径模型的保留分隔符的默认公开名、
- * 中文校验、接口分行及窄屏无溢出、Bypass 勾选、保存刷新和跨协议数据面调用；finally 删除部署及凭据。 */
+ * 中文校验、接口默认折叠及反复展开、窄屏无溢出、Bypass 勾选后折叠保存、刷新和跨协议数据面调用；finally 删除部署及凭据。 */
 test("model editor presents endpoints clearly and saves a path model with a safe alias", async ({ page }) => {
   test.setTimeout(120_000);
   await loginAdmin(page);
@@ -29,6 +29,12 @@ test("model editor presents endpoints clearly and saves a path model with a safe
     await form.getByRole("combobox", { name: "上游接口协议", exact: true }).click();
     await page.getByRole("option", { name: "OpenAI · Responses", exact: true }).click();
     const published = form.getByRole("region", { name: "XHub 对外接口" });
+    const toggle = published.getByRole("button", { name: "XHub 对外接口", exact: true });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(published.getByRole("list")).toBeHidden();
+    await expect(form.getByText(/上游模型需填写 FAL 任务路径/)).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(published.getByRole("listitem")).toHaveCount(5);
     const gemini = published.getByRole("listitem", { name: "Gemini · Generate Content" });
     await expect(gemini.getByText("/v1beta/models/{model}:generateContent", { exact: true })).toBeVisible();
@@ -40,6 +46,12 @@ test("model editor presents endpoints clearly and saves a path model with a safe
     await page.screenshot({ path: path.resolve(__dirname, "../../.e2e/model-discovery-fix/editor-narrow.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1100 });
     await published.screenshot({ path: path.resolve(__dirname, "../../.e2e/model-discovery-fix/endpoints.png") });
+    await toggle.click();
+    await expect(published.getByRole("checkbox", { name: "Bypass · OpenAI Responses" })).toBeHidden();
+    await toggle.click();
+    await expect(published.getByRole("checkbox", { name: "Bypass · OpenAI Responses" })).toBeChecked();
+    await toggle.click();
+    await published.screenshot({ path: path.resolve(__dirname, "../../.e2e/model-discovery-fix/endpoints-collapsed.png") });
     await form.getByLabel("价格来源").selectOption("manual");
     await form.locator("#editor-input_cost_per_token").fill("1");
     await form.locator("#editor-output_cost_per_token").fill("2");
@@ -63,6 +75,8 @@ test("model editor presents endpoints clearly and saves a path model with a safe
     await page.getByRole("button", { name: "编辑模型", exact: true }).click();
     await expect(alias).toHaveValue(name);
     await expect(upstream).toHaveValue(upstreamModel);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
     await expect(published.getByRole("checkbox", { name: "Bypass · OpenAI Responses" })).toBeChecked();
     for (const target of [
       { path: "/v1/chat/completions", body: { model: name, messages: [{ role: "user", content: "hello" }] } },

@@ -1,7 +1,7 @@
 // Package catalog loads the built-in model price map and lists models by provider.
 //
 // The price map is generated from the configured price feed
-// (显式配置的价格源) by ./cmd/pricedata and
+// (显式配置的价格源) and
 // embedded as publicdata/pricedata.json. There is no LiteLLM price file and no
 // sample_spec row: every key in the map is a real model.
 package catalog

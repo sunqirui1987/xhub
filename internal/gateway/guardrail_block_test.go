@@ -16,7 +16,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/store"
-	"github.com/sunqirui1987/xhub/internal/testsupport"
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 // TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks is the data-plane

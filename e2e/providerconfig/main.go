@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sunqirui1987/xhub/internal/providerconfig"
+	"github.com/sunqirui1987/xhub/cmd/regression/providerconfig"
 )
 
 func main() {

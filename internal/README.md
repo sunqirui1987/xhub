@@ -4,7 +4,7 @@
 
 ## Responsibilities and behavior
 
-This tree implements identity, the management control plane, inference execution, routing, pricing, persistence, and regression tests. Command packages compose the services. Exported Go symbols are implementation seams inside the repository; HTTP contracts and configuration documents are the client boundary.
+This tree implements identity, the management control plane, inference execution, routing, pricing, and persistence. Command packages compose the services; [cmd/regression](../cmd/regression/readme.md) contains business regression tests and their shared fixtures. Exported Go symbols are implementation seams inside the repository; HTTP contracts and configuration documents are the client boundary.
 Inference resolves a session or virtual key, reloads ownership, checks action permissions, model access, budgets, and limits, selects one routing document, and executes an eligible deployment. Successful usage is priced with a recorded rate snapshot and historical ownership. Cache and affinity are committed only after success.
 iam owns identity and accounting; store owns framework configuration and deployments; live owns Redis hot state; cache owns process-local response bytes. Scope totals are different views of one charge. Never concatenate a second upstream response after stream output or acknowledge a queue item before durable commit.
 
@@ -27,11 +27,8 @@ iam owns identity and accounting; store owns framework configuration and deploym
 | [logx](logx/readme.md) | Runtime logging and secret redaction |
 | [plugin](plugin/readme.md) | Upstream extension registry |
 | [provider](provider/readme.md) | Provider capabilities and transports |
-| [providerconfig](providerconfig/readme.md) | Live provider test metadata and weight-cycle validation |
-| [regression](regression/readme.md) | Cross-module business regression |
 | [router](router/readme.md) | Deployment filtering, ordering, and weighted split |
 | [store](store/readme.md) | Framework configuration and deployment storage |
-| [testsupport](testsupport/readme.md) | Isolated database fixtures |
 
 ## Source responsibilities and entry points
 

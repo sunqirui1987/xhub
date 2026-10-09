@@ -328,7 +328,7 @@ var customProvider = map[string]any{
 // failed reload cannot wipe the prices in use.
 // 参数 raw（[]byte）：市场接口返回的原始正文。
 // 返回 PriceDocument（PriceDocument）：可直接嵌入或写入磁盘的价格目录；error（error）：解析失败或没有模型时不为 nil。
-// 调用：cmd/pricedata 生成内嵌文件；ReloadFromMarket 刷新运行中的价格表。
+// 调用：ReloadFromMarket 刷新运行中的价格表。
 // 测试：pricedata_test.go
 func BuildPriceDocument(raw []byte) (PriceDocument, error) {
 	var feed feedDocument

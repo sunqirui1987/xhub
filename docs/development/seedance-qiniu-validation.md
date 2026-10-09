@@ -25,7 +25,7 @@
 
 普通包检查：go test ./internal/provider/... ./internal/catalog ./internal/dataplane ./internal/gateway ./internal/gateway/usage -count=1
 
-数据库验收：XHUB_REGRESSION_STRICT=1 go test ./internal/regression -run '^TestSeedance' -count=1 -v
+数据库验收：XHUB_REGRESSION_STRICT=1 go test ./cmd/regression -run '^TestSeedance' -count=1 -v
 
 显式付费测试：XHUB_QINIU_SEEDANCE_LIVE=1 go test ./internal/dataplane -run '^TestQiniuSeedanceLive$' -count=1 -v，需要环境中的 QINIU_API_KEY。
 
