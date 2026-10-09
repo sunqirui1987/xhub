@@ -362,7 +362,7 @@ const PriceDataReload: React.FC<PriceDataReloadProps> = ({
                 {sourceInfo.source === "market" ? <Cloud className="size-4" /> : <Database className="size-4" />}
                 <span className="text-sm font-medium">{t("Pricing Data Source")}</span>
                 <Badge variant="secondary" className="ml-auto uppercase">
-                  {sourceInfo.source === "market" ? t("Modelink market") : t("Local")}
+                  {sourceInfo.source === "market" ? t("Configured price feed") : t("Local")}
                 </Badge>
               </div>
 

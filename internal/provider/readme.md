@@ -14,7 +14,6 @@ Configured api_base overrides supplier defaults. OfficialID strips one prefix wh
 | --- | --- |
 | [all](all/readme.md) | Built-in provider assembly |
 | [openai](openai/readme.md) | OpenAI provider placeholder |
-| [qiniu](qiniu/readme.md) | Qiniu official video-task transport |
 | [volcengine](volcengine/readme.md) | Volcengine Ark video-task transport |
 
 ## Source responsibilities and entry points
@@ -30,7 +29,6 @@ Exported types: `Model`, `ProviderField`, `Supplier`.
 
 ### seedance_billing.go
 
-`SeedanceBilling()` supplies request-context capture and successful-task usage extraction to the Qiniu and Volcengine transports. It retains whether the creation request included video, selects the measured output band from the final resolution, and forwards completion tokens and web-search counts. A failed or unfinished task yields no billable usage; missing context remains an unknown variant rather than a guessed no-video price.
 
 - [`func RegisterTransport(t Transport)`](registry.go) — RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
 - [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型，并为表单记录默认执行传输 ID。
@@ -50,11 +48,9 @@ Exported types: `Model`, `ProviderField`, `Supplier`.
 
 ### type.go
 
-Fal queues use Action.Model for fixed path models, Transport.AuthScheme for Key auth, and QueueURLs for local polling links. TaskBilling separates completion/usage extraction from HTTP forwarding. fal_billing.go retains creation bands and handles envelopes or bare results; incomplete price semantics remain explicitly unpriced. See [Qiniu Fal extension](../../docs/development/qiniu-fal.md).
 
 Exported types: `Action`, `Capability`, `Transport`, `Kind`, `Hit`.
 
-- [`func OfficialID(prefix, stored string) string`](type.go) — OfficialID 从存储的模型 id 上剥掉一层 "<前缀>/"。后面的斜杠保留， 所以 qiniu/bytedance/doubao-... 会变成 bytedance/doubao-...
 - [`func ReadTaskID(doc map[string]any, path string) string`](type.go) — ReadTaskID 从 JSON 对象里读一个点分字段，例如 "data.task_id"。
 - [`func Expand(pattern string, names map[string]string) string`](type.go) — Expand 把上游路径里的 {name} 占位符填上。
 

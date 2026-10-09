@@ -2,7 +2,6 @@
 
 ## 目标与验收标准
 
-默认 make e2e 使用真实控制台、真实网关、PostgreSQL、隔离 Redis，以及 config_provider.yaml 中的真实 Fenno 和 Qiniu。模拟供应商仅用于确定性错误注入。浏览器验证用户实际点击后的结果；后端回归验证预算、权限、计价、缓存、重试和协议语义。页面可打开、接口可响应、业务正确是三个不同的验收项，不能互相替代。
 
 测试流程先于用例实现确定：
 
@@ -28,7 +27,6 @@
 | 身份与作用域 | 组织、团队、项目、用户、成员和各层级登录 | 组织间隔离、成员范围、只读权限 | `visibility-chain.spec.ts`、`wizards.spec.ts`、`view-only.spec.ts` |
 | 调用与观测 | Playground、聊天、用量和日志 | 无数据、协议失败、预算与模型权限拒绝 | `keys-playground.spec.ts`、`coverage.spec.ts`、Go regression |
 | 路由与配置 | 模板保存、重新打开、回退配置 | 跨组织模板拒绝、继承、清空、零权重 | `writes.spec.ts`、Go regression |
-| 多供应商与同名部署 | Fenno/Qiniu 真实响应；两个同名部署编辑、保存和刷新 7:3；真实完整周期及五层计费 | 独立部署身份、零权重、重试、冷却隔离、并发、网络失败保留证据 | `live-vendors.spec.ts`、`weighted-routing.spec.ts`、Go weighted/multi_supplier |
 | 保留辅助页面 | 创建、更新、测试、删除、设置保存 | 已移除功能不再出现 | `column-writes.spec.ts`、`interactions.spec.ts` |
 | XGo 自定义护栏 | 真实编译 `for text <- texts`，试跑拦截与放行，保存、刷新、编辑脱敏并重新读取源码 | 编译失败可见、无成功结果、保存 400 且列表无记录；旧 Python/外部 HTTP 模板不出现 | `xgo-guardrails.spec.ts` |
 | 网关接线 | catalog 的所有登记路径 | 已移除接口、未知路径、协议错误 | `coverage.spec.ts`、`e2e/livesweep` |
@@ -44,13 +42,12 @@
 
 专项按以下顺序验证，浏览器失败后仍执行完整确定性后端回归：
 
-1. 创建明确为 `qiniu` 协议的独立凭据，获取完整目录，校验模型 ID 去重、Kling/Vidu 合并与超过 155 项的末尾选项可点击。
-2. 搜索并选择 Kling/Vidu，确认匹配 Fal 端点；空人工价格必须阻止提交，填写按秒价格后保存，校验请求中的 `endpoint_types` 与对应 `transport`；刷新、重新打开编辑器，校验上游型号、端点及价格回显。继续将已保存模型切换为另一原生型号，校验 PATCH 重新绑定对应传输，价格保留，刷新后再次确认型号、端点及价格。
+1. 选择不同供应商表单，验证专属字段、默认值、认证草稿清理及凭据创建、编辑和删除。
+2. 使用官方方舟凭据创建原生模型，验证保存、刷新、编辑、任务创建、查询和重复查询计费；本地上游核对认证和载荷。
 3. 对已有 Chat 部署注入端点目录延迟与网络失败，校验原声明未清空，修改名称并保存，刷新后主动选择“所有模型”标签再检查持久化结果。目录失败场景只注入目录读取，保存及回读仍使用真实网关。
-4. 从七牛切换为普通 OpenAI 凭据，校验旧型号及端点清空、目录不混入七牛注册模型、完整列表能键盘展开；未知型号保留输入并提示管理员显式声明端点。另以独立用例手动为未知型号声明 Chat 端点及人工价格，确认提示消失、实际提交声明、保存后列表可见，并在刷新重新编辑后保留型号、端点及价格。
-5. 点击 XGo 编辑器，以 JSON 输入执行真实编译器，校验放行、拦截、模板脱敏、保存与刷新回显；编译失败不能保存。非法 JSON、非字符串 texts 与旧 images 字段在客户端拒绝，加载请求示例后可恢复执行。
-6. 复验密钥生命周期、模型连接/编辑/删除、护栏、团队成员、回退设置及两个相同部署的 7:3 配置保存；实际分流、预算、权限、计费、缓存、重试与协议语义由完整后端回归验证。
-7. 写出 `.e2e/runs/<UTC时间>-models-<进程号>/summary.json`、`report.md`、`report.html`、实时日志、Playwright JSON/JUnit、失败截图及 trace；退出时删除临时 Redis 和浏览器私有 schema。跳过项单列，失败或结果缺失返回非零。
+4. 点击 XGo 编辑器，以 JSON 输入执行真实编译器，校验放行、拦截、模板脱敏、保存与刷新回显；编译失败不能保存。非法 JSON、非字符串 texts 与旧 images 字段在客户端拒绝，加载请求示例后可恢复执行。
+5. 复验密钥生命周期、模型连接/编辑/删除、护栏、团队成员、回退设置及两个相同部署的 7:3 配置保存；实际分流、预算、权限、计费、缓存、重试与协议语义由完整后端回归验证。
+6. 写出 `.e2e/runs/<UTC时间>-models-<进程号>/summary.json`、`report.md`、`report.html`、实时日志、Playwright JSON/JUnit、失败截图及 trace；退出时删除临时 Redis 和浏览器私有 schema。跳过项单列，失败或结果缺失返回非零。
 
 ```bash
 make e2e-model-endpoints
@@ -64,7 +61,6 @@ bash scripts/e2e.sh model-endpoints.spec.ts xgo-guardrails.spec.ts
 
 专项与完整供应商入口共享 acceptance.lock，避免并发覆盖产物；阶段的原始退出码写入报告。心跳结束时同时回收 sleep 子进程，避免命令完成后输出管道仍被持有。脚本契约测试覆盖成功退出 0、浏览器失败后继续后端、后端失败、缺失浏览器结果、Redis 启动失败以及锁占用拒绝。模拟阶段只验证脚本编排，产品业务仍由真实 Playwright 与后台 regression 验证。
 
-该专项证明模型配置契约与确定性业务行为，不证明供应商账号有真实 Kling/Vidu 权限，也不替代 Fenno/Qiniu 的真实健康权重周期及付费媒体任务验收。
 
 - 浏览器环境使用专属端口、独立构建目录和随机 schema，不终止开发服务。
 - 每个测试使用新的浏览器上下文；共享后端数据仅用于本次运行，各用例创建自己的业务资源。测试筛选运行也必须有效。
@@ -75,7 +71,6 @@ bash scripts/e2e.sh model-endpoints.spec.ts xgo-guardrails.spec.ts
 - 聊天模型选择限定在消息输入区域，避免账户菜单等其他 popover 的顺序变化影响点击。护栏成功用例使用“关键词 / 正则护栏”入口，创建后刷新，打开详情验证拦截，再编辑为脱敏并试跑核对替换结果。无效正则必须拒绝且不保存；已移除的供应商向导不能作为成功入口。列表参数每行一项，以数组提交；正则表达式内的逗号保持原样。
 - 护栏试跑按名称查找不存在的规则时必须返回 404；试跑未保存规则必须显式提交完整内联配置。回归验证内联规则实际命中、数据库不新增规则、后续推理仍可放行，不能以不存在规则返回 allow 证明试跑成功。
 - XGo 编辑器用例直接点击当前脚本的测试按钮，以真实编译器和执行器验证结果，并断言界面显示同一结果。保存后刷新重新打开，确认语言标记为 xgo、执行阶段为 pre_call、源码保持一致；编辑后的手机号脱敏必须实际返回替换文本。无效脚本的试跑失败与保存失败分别验证。
-- 后端 `TestXGoGuardrailEnforcesPersistedPolicy` 通过管理 API 创建并回读 XGo 脚本，验证默认关闭、按请求选择、真实请求上下文、命中不调用上游且不计费、不命中放行、更新后默认启用及上游收到脱敏正文、成功账单数量和删除恢复。此用例用本地供应商观察收到的正文，不产生额外真实供应商费用；Fenno/Qiniu 调用由独立真实供应商用例验收。
 - make e2e 默认调用配置的真实供应商并产生费用。make e2e-offline 仅运行模拟供应商。密钥只从环境读取；显式设置 E2E_CREDENTIAL_SOURCE=database 时读取指定的已有凭据。
 
 ## 扩展规则
@@ -101,13 +96,10 @@ E2E_CREDENTIAL_SOURCE=database make regression-live
 E2E_CREDENTIAL_SOURCE=database bash scripts/e2e-all.sh weighted-routing.spec.ts
 ```
 
-仓库根目录的 config_provider.yaml 使用标准 YAML，version 固定为 1。providers 的 id 是大写环境变量前缀；enabled 控制默认选择；credential_name 对应数据库保存的凭据名；key_env 指定密钥环境变量；base 为普通 URL；protocol 为 openai 或 anthropic；models 是非空模型列表。不要在 YAML 写密钥。默认配置 Fenno/gpt-5.6-sol 和 Qiniu/moonshotai/kimi-k2.5，模型权限和可用性由真实供应商决定。
 
-E2E_PROVIDER_CONFIG 可以指定其他 YAML 路径；E2E_LIVE_VENDORS=FENNO,QINIU 选择配置中的供应商。XHUB_REGRESSION_<ID>_BASE、_MODELS（逗号分隔）、_PROTOCOL 可以覆盖普通调用配置；权重场景的模型由每个 deployment.model 明确指定。地址必须写 https://api.fenno.ai/v1，不能复制 Markdown 链接语法。环境变量密钥优先于数据库。配置错误提前返回非零，且不打印密钥内容。
 
 ## 相同模型部署与分流验收
 
-weighted_scenarios 为数组；每项包含唯一 name、公开 model_name、requests 及至少两个 deployments。每个部署指定唯一 id、provider、model、非负整数 weight；总权重必须大于零。默认两个 Fenno 部署使用相同模型 gpt-5.6-sol、相同连接配置，但使用不同 deployment_id，权重分别为 7 和 3。也可将同一个公开模型映射到不同供应商的可用上游模型，再验证跨供应商分流。
 
 网关使用平滑加权轮询，健康候选固定且没有缓存或粘滞复用时，完整周期可精确验证比例。周期长度为 sum(weights)/gcd(weights)；请求数必须为完整周期整数倍，限制为 1..100。7:3 的最小完整周期为 10 次，因此断言恰好 7 和 3；少于 10 次不可能用整数调用精确实现这个比例。零权重、默认权重、配置更新、回退和冷却等边界由确定性后端用例检查。
 

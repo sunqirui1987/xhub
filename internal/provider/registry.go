@@ -18,7 +18,7 @@ var (
 // RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
 // 参数 t（Transport）：要登记的内置转发方式。
 // 返回：无。id 为空或没有动作时不登记——一个没有动作的转发方式无处可转。
-// 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
+// 调用：provider/volcengine/seedance.go
 // 测试：seedance_test.go
 func RegisterTransport(t Transport) {
 	t.ID = strings.TrimSpace(t.ID)
@@ -36,52 +36,51 @@ func RegisterTransport(t Transport) {
 
 // Model 是内置目录里显示在添加模型选择器上的一行。
 //
-// EndpointType 的历史字段名保留给目录接口使用，但实际语义是模型默认
-// 采用的 transport ID，不是公开的 endpoint_types 能力 ID。
+// TransportID 是目录推荐的执行配置；用户入口由部署独立声明。
 type Model struct {
-	ID           string
-	Provider     string
-	Official     string
-	Mode         string
-	EndpointType string
-	Source       string
-	Input        float64
-	Output       float64
-	Priced       bool
-	PriceModel   string
-	PriceSource  string
+	ID          string
+	Provider    string
+	Official    string
+	Mode        string
+	TransportID string
+	Source      string
+	Input       float64
+	Output      float64
+	Priced      bool
+	PriceModel  string
+	PriceSource string
 }
 
 // RegisterModel 登记一条可选模型，并记录它的默认执行传输。
 // 参数 m（Model）：正在累加或展示的模型。
 // 返回：无。id 为空时不登记。
-// 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
+// 调用：provider/volcengine/seedance.go
 // 测试：无直接单测
 func RegisterModel(m Model) {
 	m.ID = strings.TrimSpace(m.ID)
 	if m.ID == "" {
 		return
 	}
-	if m.EndpointType != "" {
+	if m.TransportID != "" {
 		mu.Lock()
-		modelEndpoints[m.ID] = m.EndpointType
+		modelEndpoints[m.ID] = m.TransportID
 		mu.Unlock()
 	}
 	mode := m.Mode
 	if mode == "" {
-		mode = m.EndpointType
+		mode = m.TransportID
 	}
 	catalog.Contribute(catalog.Row{
-		ID:           m.ID,
-		Provider:     m.Provider,
-		Mode:         mode,
-		EndpointType: m.EndpointType,
-		Source:       m.Source,
-		Input:        m.Input,
-		Output:       m.Output,
-		Priced:       m.Priced,
-		Official:     m.Official,
-		PriceModel:   m.PriceModel, PriceSource: m.PriceSource,
+		ID:          m.ID,
+		Provider:    m.Provider,
+		Mode:        mode,
+		TransportID: m.TransportID,
+		Source:      m.Source,
+		Input:       m.Input,
+		Output:      m.Output,
+		Priced:      m.Priced,
+		Official:    m.Official,
+		PriceModel:  m.PriceModel, PriceSource: m.PriceSource,
 	})
 }
 
@@ -99,15 +98,14 @@ type Supplier struct {
 	Name        string
 	Slug        string
 	Display     string
-	APIBase     string
 	Placeholder string
 	Fields      []ProviderField
 }
 
-// RegisterSupplier 记下默认 API 根；名字是新的时，连添加模型的凭据字段一起记下。
+// RegisterSupplier 登记展示名称和凭据字段；实际地址必须由连接显式配置。
 // 参数 s（Supplier）：要登记的供应商。
 // 返回：无。slug 为空时不登记。
-// 调用：provider/qiniu/seedance.go、provider/volcengine/seedance.go
+// 调用：provider/volcengine/seedance.go
 // 测试：无直接单测
 func RegisterSupplier(s Supplier) {
 	s.Slug = strings.TrimSpace(s.Slug)
@@ -123,31 +121,6 @@ func RegisterSupplier(s Supplier) {
 	catalog.ContributeProvider(catalog.ProviderRow{
 		Name: s.Name, Slug: s.Slug, Display: s.Display, Placeholder: s.Placeholder, Fields: fields,
 	})
-	if base := strings.TrimRight(strings.TrimSpace(s.APIBase), "/"); base != "" {
-		mu.Lock()
-		if bases == nil {
-			bases = map[string]string{}
-		}
-		bases[s.Slug] = base
-		mu.Unlock()
-	}
-}
-
-var bases = map[string]string{}
-
-// APIBase 返回部署上的根地址；部署没填时用供应商登记的默认根。
-// 参数 slug（string）：供应商 slug，例如 openai、volcengine、qiniu；configured（string）：部署上写的 api_base。
-// 返回 string（string）：要用的根地址。两处都没有时为空串。
-// 调用：dataplane/official.go
-// 测试：无直接单测
-func APIBase(slug, configured string) string {
-	configured = strings.TrimRight(strings.TrimSpace(configured), "/")
-	if configured != "" {
-		return configured
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	return bases[strings.TrimSpace(slug)]
 }
 
 // Transports 返回已登记的内置转发方式。
@@ -304,7 +277,7 @@ func normalizeCapabilities(list []string) []string {
 		if id == "" {
 			continue
 		}
-		if !isKnownCapability(id) || seen[id] {
+		if !KnownEndpoint(id) || seen[id] {
 			continue
 		}
 		seen[id] = true
@@ -332,9 +305,6 @@ func SelectedTransport(m config.ModelEntry) string {
 		if _, ok := transportByID(id); ok {
 			return id
 		}
-		if id == AdaptedTransportID {
-			return AdaptedTransportID
-		}
 	}
 	return ""
 }
@@ -351,45 +321,6 @@ func transportByID(id string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径：
-// 方舟内容生成的入口是 /api/v3/contents/generations/tasks，不是 /v1/videos，
-// 把它放进适配池会让 /v1/videos 选中它然后打错地址。
-// 参数 m（config.ModelEntry）：一条部署。
-// 返回 bool（bool）：走协议适配时为真。
-// 调用：AdaptedPool。
-// 测试：registry_test.go
-func IsAdapted(m config.ModelEntry) bool {
-	return SelectedTransport(m) == AdaptedTransportID && ValidateDeployment(m) == nil
-}
-
-// AdaptedPool 把适配路径的候选收敛到能应答这个 op 的部署。
-//
-// 两件事都做：丢掉不是协议适配的，丢掉能力不含这个 op 的。这是新行为，
-// 不是把现有比较换个写法——原来适配路径完全不过滤端点类型，一条标成
-// embedding 的部署现在仍能被 /v1/chat/completions 打到。
-//
-// 参数 models（[]config.ModelEntry）：router.Order 之后的候选；op（string）：数据面操作名。
-// 返回 []config.ModelEntry（[]config.ModelEntry）：留下来的部署，可能为空。
-// 调用：dataplane/serve.go
-// 测试：capability_test.go
-func AdaptedPool(models []config.ModelEntry, op string) []config.ModelEntry {
-	capability, known := CapabilityForOp(op)
-	// 空或未登记操作没有确定的能力边界，不能借用旧的默认对话路径。
-	if !known {
-		return []config.ModelEntry{}
-	}
-	out := make([]config.ModelEntry, 0, len(models))
-	for _, m := range models {
-		if !IsAdapted(m) {
-			continue
-		}
-		if IncludesCapability(m, capability) {
-			out = append(out, m)
-		}
-	}
-	return out
 }
 
 // IncludesCapability 报告这条部署是否应答这个能力。
@@ -412,7 +343,12 @@ func IncludesCapability(m config.ModelEntry, capability string) bool {
 // 调用：dataplane/official.go
 // 测试：registry_test.go
 func Includes(m config.ModelEntry, typeID string) bool {
-	return SelectedTransport(m) == typeID && ValidateDeployment(m) == nil
+	for _, t := range Transports() {
+		if t.ID == typeID {
+			return AllowsEndpoint(m, t.EndpointID) == nil
+		}
+	}
+	return false
 }
 
 // BoundTransports 把这条部署声明的转发方式解析成登记好的条目。

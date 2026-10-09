@@ -7,7 +7,8 @@ import (
 )
 
 // TestCredentialProviders 验证专属认证目录、默认地址和本地供应商合并。
-// 参数 t：测试上下文；返回无。前置为嵌入目录，断言关键字段、唯一标识；只读无需清理。
+// 参数 t：测试上下文；返回无。前置为嵌入目录，断言关键字段、唯一标识、Custom 可配置字段，
+// 并保证协议扩展不会变成固定 Qiniu/Fenno 凭据；临时本地供应商由 Cleanup 恢复。
 func TestCredentialProviders(t *testing.T) {
 	modelCostMu.Lock()
 	old := append([]ProviderRow(nil), extraProviders...)
@@ -35,6 +36,11 @@ func TestCredentialProviders(t *testing.T) {
 	if deepseek != 1 {
 		t.Fatalf("DeepSeek 重复：%d", deepseek)
 	}
+	for _, id := range []string{"Qiniu", "QINIU", "Fenno", "FENNO", "FennoAI", "FENNOAI"} {
+		if byID[id] != nil {
+			t.Fatalf("协议扩展不应贡献固定凭据供应商 %s", id)
+		}
+	}
 	for id, keys := range map[string][]string{"OpenAI": {"api_base", "api_key", "organization"}, "Deepseek": {"api_base", "api_key"}, "Azure": {"api_base", "api_version", "azure_ad_token", "tenant_id"}, "Vertex_AI": {"vertex_project", "vertex_location", "vertex_credentials"}, "Bedrock": {"aws_access_key_id", "aws_region_name", "aws_role_name"}, "Ollama": {"api_base"}} {
 		fields := map[string]map[string]any{}
 		for _, v := range byID[id]["credential_fields"].([]any) {
@@ -48,6 +54,15 @@ func TestCredentialProviders(t *testing.T) {
 		}
 		if id == "Deepseek" && fields["api_base"]["default_value"] != "https://api.deepseek.com" {
 			t.Fatal("DeepSeek 默认地址错误")
+		}
+	}
+	for _, id := range []string{"CUSTOM", "CUSTOM_OPENAI"} {
+		fields := map[string]bool{}
+		for _, value := range byID[id]["credential_fields"].([]any) {
+			fields[stringField(value.(map[string]any), "key")] = true
+		}
+		if !fields["api_base"] || !fields["api_key"] {
+			t.Fatalf("%s 必须允许用户填写地址和密钥：%v", id, fields)
 		}
 	}
 	if len(byID["CHATGPT"]["credential_fields"].([]any)) != 0 {

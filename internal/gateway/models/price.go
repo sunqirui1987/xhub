@@ -1,4 +1,4 @@
-// Package models manages the price catalog: the embedded Modelink baseline plus
+// Package models manages the price catalog: the embedded price baseline plus
 // the rows and suppliers an operator adds from the console. The stored overrides
 // are laid over the embedded file at startup, so editing a price never rewrites
 // the generated document.

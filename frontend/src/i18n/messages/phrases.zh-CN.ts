@@ -4595,8 +4595,6 @@ export const zhPhrases: Record<string, string> = {
   "Price unavailable": "价格未提供",
   Credential: "凭证",
   "Add this model": "添加此模型",
-  "Fetch fennoai models": "获取 fennoai 模型",
-  "Fetch qiniu models": "获取七牛模型",
   "Refresh tags": "刷新标签",
   "Refreshes after every request that reuses a pin. Empty tracks the backend default of {DEFAULT_SESSION_AFFINITY_TTL_SECONDS} seconds.":
     "Refreshes 之后每个请求该 reuses pin. 空 tracks backend 默认的 {DEFAULT_SESSION_AFFINITY_TTL_SECONDS}秒.",

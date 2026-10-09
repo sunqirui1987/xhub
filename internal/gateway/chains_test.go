@@ -230,7 +230,7 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 			t.Errorf("upstream authorization %q", r.Header.Get("Authorization"))
 		}
 		body, _ := io.ReadAll(r.Body)
-		if !bytes.Contains(body, []byte(`"model":"gpt-6-astra"`)) || !bytes.Contains(body, []byte(`"content":"ping"`)) {
+		if !bytes.Contains(body, []byte(`"model":"openai/gpt-6-astra"`)) || !bytes.Contains(body, []byte(`"content":"ping"`)) {
 			t.Errorf("upstream body %s", trim(body))
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -301,7 +301,7 @@ func ensurePlaygroundModel(t *testing.T, st *store.Store, upstreamURL string) {
 			"api_base":            upstreamURL + "/v1",
 			"api_key":             "sk-playground-fixture",
 		},
-		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true, "transport": "adapted", "endpoint_types": []string{"chat"}},
+		Info: map[string]any{"id": "model_gpt6_astra", "db_model": true, "transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	})
 	if err != nil {
 		t.Fatal(err)

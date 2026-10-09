@@ -9,7 +9,7 @@ regression:
 	./scripts/regression.sh -v
 
 # The same suite with the live vendor calls enabled. Spends real money and needs
-# XHUB_REGRESSION_FENNO_KEY and XHUB_REGRESSION_QINIU_KEY in the environment.
+# XHUB_REGRESSION_<ID>_KEY in the environment.
 regression-live:
 	python3 scripts/with-live-vendors.py bash scripts/regression.sh -v --live
 

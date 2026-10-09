@@ -17,6 +17,8 @@ func officialHost(up *httptest.Server, models ...config.ModelEntry) *logicHost {
 	return &logicHost{cfg: &config.Config{}, client: up.Client(), models: models, pins: map[string]string{}}
 }
 
+// TestOfficialTemplateWeightsAndCredentialPin 验证模板显式权重选中凭据并在任务查询时保持该凭据。
+// 参数 t：测试上下文；返回：无。前置本地上游与两条部署；断言创建和查询一致，服务关闭清理，无外部调用。
 func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
 	var seen []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,10 +26,12 @@ func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
 		io.WriteString(w, `{"id":"task-1"}`)
 	}))
 	defer up.Close()
-	a := deployment("video", "volcengine/model", "key-a", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "a", "weight": 0.0})
-	b := deployment("video", "volcengine/model", "key-b", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "b", "weight": 1.0})
+	a := deployment("video", "volcengine/model", "key-a", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "a", "weight": 0.0, "deployment_id": "a"})
+	b := deployment("video", "volcengine/model", "key-b", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "b", "weight": 1.0, "deployment_id": "b"})
 	h := officialHost(up, a, b)
-	h.settings = map[string]any{"routing_strategy": "weighted-split"}
+	h.settings = map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{
+		"weights": map[string]any{router.WeightID(a): 0.0, router.WeightID(b): 1.0},
+	}}
 	if rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", `{"model":"video"}`); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}

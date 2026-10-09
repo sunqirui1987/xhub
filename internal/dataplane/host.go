@@ -217,6 +217,10 @@ type Adapted interface {
 // 网关在 bypass.go 的 serveBypass 里，路径已经匹配到端点类型之后调用 ServeBypass。
 // 和 Adapted 同名的方法语义相同，这里再写一遍，读这个接口时不用跳回去。
 type Bypass interface {
+	// CommitRoute 记录成功原生响应的部署归属；参数为入口作用域计划、部署和响应 ID。
+	// 返回无；调用方为原生创建流程，不存储请求凭据。
+	CommitRoute(plan RoutePlan, deploymentID, responseID string)
+
 	// RouteSettingsFor 读取此次请求继承的模板。
 	// 参数 p：调用方。返回：路由配置。
 	// 调用：ServeBypass。测试：official_template_test.go。
@@ -371,6 +375,10 @@ type Host interface {
 // Caller 是密钥哈希或用户 id，避免不同租户共用一根钉。
 // Pinned 是上一次部署 id。非空时 Serve 把该部署放在候选第一位。Bypass 不使用 Pinned。
 type RoutePlan struct {
+	// Endpoint、Required、Err 隔离入口并阻止不存在的响应继续请求回退。
+	Endpoint  string
+	Required  bool
+	Err       error
 	Alias     string
 	SessionID string
 	Caller    string

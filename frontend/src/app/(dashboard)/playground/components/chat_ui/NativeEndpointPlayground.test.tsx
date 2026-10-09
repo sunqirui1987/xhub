@@ -6,7 +6,7 @@ import { act } from "@testing-library/react";
 
 vi.mock("@/components/networking", () => ({ getProxyBaseUrl: () => "http://localhost:4100" }));
 const endpoint: ModelEndpoint = {
-  endpoint_type: "bypass:fal-video",
+  endpoint_id: "bypass:fal-video",
   kind: "bypass",
   transport: "qiniu_fal_dreamina_20",
   protocol: "fal",

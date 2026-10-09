@@ -87,6 +87,11 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   guard.assertOk();
 });
 
+/**
+ * 用途：验证显式 OpenAI 协议模型可测试连接、改名、停启和删除。
+ * 前置条件：通过后台创建指向本地 fake upstream 的模型；验证结果：每次页面操作均落到真实后台。
+ * 清理方式：流程末尾删除模型，E2E 隔离数据库也会在进程退出时移除。
+ */
 test("model update, test connection, and delete", async ({ page }) => {
   test.setTimeout(120_000);
   const guard = watchGateway(page);
@@ -100,8 +105,8 @@ test("model update, test connection, and delete", async ({ page }) => {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-model-ops",
-      model_info: { transport: "adapted", endpoint_types: ["chat"] },
-      litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
+      model_info: { transport: "bypass_openai_chat", endpoint_types: ["chat"] },
+      litellm_params: { model: "openai/gpt-4o-mini", custom_llm_provider: "openai", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
@@ -117,7 +122,14 @@ test("model update, test connection, and delete", async ({ page }) => {
   await expect(page.getByRole("status").filter({ hasText: "连接正常，模型已响应。" })).toBeVisible();
   await page.getByRole("button", { name: "编辑模型", exact: true }).click();
   await page.getByLabel("对外模型名称 *").fill("e2e-model-renamed");
+  const updated = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname.startsWith("/model/") &&
+      new URL(response.url()).pathname.endsWith("/update"),
+  );
   await page.getByRole("button", { name: "保存修改", exact: true }).click();
+  expect((await updated).ok()).toBeTruthy();
   await expect(page.getByRole("heading", { name: "e2e-model-renamed", exact: true })).toBeVisible();
   await page.getByRole("switch", { name: "e2e-model-renamed 启用模型" }).click();
   await expect(page.getByRole("switch", { name: "e2e-model-renamed 启用模型" })).not.toBeChecked();
@@ -173,7 +185,7 @@ test("router fallback update lists the mapping", async ({ page }) => {
     headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
     data: {
       model_name: "e2e-fallback-model",
-      model_info: { transport: "adapted", endpoint_types: ["chat"] },
+      model_info: { transport: "bypass_openai_chat", endpoint_types: ["chat"] },
       litellm_params: { model: "openai/gpt-4o-mini", api_key: "sk-fake", api_base: UPSTREAM, input_cost_per_token: 0.00000015, output_cost_per_token: 0.0000006 },
     },
   });

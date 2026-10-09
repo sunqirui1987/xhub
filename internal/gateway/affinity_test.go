@@ -30,9 +30,11 @@ func TestSessionIDSticksToThePromptPrefix(t *testing.T) {
 	}
 }
 
+// TestContinuationPinsDoNotCrossCallerOrModel 验证响应归属按调用方、公开型号和入口隔离。
+// 参数 t：测试上下文；本地内存建立归属，跨范围续接必须拒绝，无外部数据需要清理。
 func TestContinuationPinsDoNotCrossCallerOrModel(t *testing.T) {
 	s := &Server{}
-	s.CommitRoute(dataplane.RoutePlan{Alias: "model-a", Caller: "user:alice"}, "supplier-a", "resp_shared")
+	s.CommitRoute(dataplane.RoutePlan{Alias: "model-a", Caller: "user:alice", Endpoint: "responses"}, "supplier-a", "resp_shared")
 	req := httptest.NewRequest("POST", "/v1/responses", nil)
 	body := map[string]any{"previous_response_id": "resp_shared"}
 	if got := s.PlanRoute(req, "model-a", body, &auth.Principal{UserID: "alice"}).Pinned; got != "supplier-a" {

@@ -176,15 +176,3 @@ func (e ModelEntry) ParamString(key, fallback string) string {
 	return s
 }
 
-// SplitProviderModel splits provider/model. With no slash the provider is empty and the model name is the whole string.
-// 参数 raw（string）：拆分供应商模型使用的原始内容。空串表示调用方没有提供这项。
-// 返回 provider（string）：供应商标识，例如 openai 或 volcengine；model（string）：发给上游或对外展示的模型名。
-// 调用：dataplane/serve.go
-// 测试：builtin_providers_test.go
-func SplitProviderModel(raw string) (provider, model string) {
-	raw = strings.TrimSpace(raw)
-	if i := strings.Index(raw, "/"); i > 0 {
-		return raw[:i], raw[i+1:]
-	}
-	return "openai", raw
-}

@@ -10,7 +10,7 @@ import (
 // inference gateway. Trial success alone cannot prove request enforcement.
 func TestXGoGuardrailEnforcesPersistedPolicy(t *testing.T) {
 	deployment := chatDeployment("regression-xgo")
-	deployment.ModelInfo = map[string]any{"endpoint_types": []string{"chat"}, "transport": "adapted"}
+	deployment.ModelInfo = map[string]any{"endpoint_types": []string{"chat"}, "transport": "bypass_openai_chat"}
 	h := newHarness(t, deployment)
 	admin := h.adminSession()
 	tn := h.provision(t, admin, "xgo")

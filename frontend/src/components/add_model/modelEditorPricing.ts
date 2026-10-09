@@ -162,10 +162,9 @@ export function editorDefaults(model?: EditorModel): Record<string, unknown> {
     supplier: params.litellm_credential_name ?? (model ? "__existing__" : ""),
     custom_llm_provider:
       params.custom_llm_provider ??
-      (String(params.model ?? "").includes("/") ? String(params.model).split("/")[0] : "openai"),
+      "",
     model: params.model ?? "",
     model_name: model?.model_name ?? "",
-    endpoint_type: Array.isArray(info.endpoint_types) ? (info.endpoint_types[0] ?? "") : "",
     transport: info.transport ?? "",
     endpoint_types: info.endpoint_types ?? [],
     disabled: info.disabled === true,
@@ -197,10 +196,9 @@ export function buildEditorModel(values: Record<string, unknown>, original?: Edi
   if (!name || !params.model || !params.custom_llm_provider || !values.supplier)
     throw new Error("请选择供应商，并填写上游模型和对外模型名称。");
   if (
-    !values.endpoint_type ||
     !values.transport ||
     !Array.isArray(values.endpoint_types) ||
-    !values.endpoint_types.includes(values.endpoint_type)
+    !values.endpoint_types.length
   )
     throw new Error("请选择端点类型。");
   if (values.supplier === "__existing__" && !original) throw new Error("请选择已配置的模型提供商。");

@@ -3,6 +3,7 @@ package router
 import (
 	"math"
 	"sync"
+	"time"
 
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
@@ -24,6 +25,8 @@ type SplitState struct {
 	// current is the running score per deployment id - the nginx smooth weighted
 	// round-robin accumulator.
 	current map[string]float64
+	scopes  map[string]*SplitState
+	touched time.Time
 }
 
 // NewSplitState returns an empty split state. One instance is shared by a
@@ -133,4 +136,41 @@ func (s *SplitState) Forget(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.current, id)
+}
+
+// Scoped 获取模板版本、模型与入口的独立状态；空 scope 使用调用方本地状态。
+// 参数 scope：摘要；返回子状态，不推进计数。调用：Pick，清理一小时未用状态并限制 4096 项。
+func (s *SplitState) Scoped(scope string) *SplitState {
+	if s == nil || scope == "" {
+		return s
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scopes == nil {
+		s.scopes = map[string]*SplitState{}
+	}
+	now := time.Now()
+	for key, child := range s.scopes {
+		if now.Sub(child.touched) > time.Hour {
+			delete(s.scopes, key)
+		}
+	}
+	if child := s.scopes[scope]; child != nil {
+		child.touched = now
+		return child
+	}
+	if len(s.scopes) >= 4096 {
+		oldest := ""
+		var when time.Time
+		for key, child := range s.scopes {
+			if oldest == "" || child.touched.Before(when) {
+				oldest, when = key, child.touched
+			}
+		}
+		delete(s.scopes, oldest)
+	}
+	child := NewSplitState()
+	child.touched = now
+	s.scopes[scope] = child
+	return child
 }

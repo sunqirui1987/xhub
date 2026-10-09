@@ -58,7 +58,7 @@ export function PriceModelDialog({
   const [provider, setProvider] = useState(editing?.provider ?? providers[0]?.slug ?? "");
   const [displayName, setDisplayName] = useState(editing?.displayName ?? "");
   const [mode, setMode] = useState(typeof draft.mode === "string" ? draft.mode : "");
-  const [endpointType, setEndpointType] = useState(typeof draft.endpoint_type === "string" ? draft.endpoint_type : "");
+  const [endpointType, setEndpointType] = useState(typeof draft.endpoint_id === "string" ? draft.endpoint_id : "");
   const [tokenRates, setTokenRates] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       EDITABLE_TOKEN_RATES.map(({ field }) => [field, rateToInputValue(catalogFieldValue(draft, field))]),
@@ -149,7 +149,7 @@ export function PriceModelDialog({
               <Input
                 id="price-model-endpoint"
                 value={endpointType}
-                placeholder="qiniu_contents_generation"
+                placeholder="ark_contents_generation"
                 onChange={(event) => setEndpointType(event.target.value)}
               />
               <p className="text-xs text-muted-foreground">{t("priceData.endpointTypeHint")}</p>

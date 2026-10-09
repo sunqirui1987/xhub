@@ -180,21 +180,6 @@ func proxyModelNames(list []config.ModelEntry) []string {
 	return out
 }
 
-// nonModelProvider identifies provider credentials that can appear in the deployment table but are not selectable models. Keep this name-based guard for older configurations that predate model_info.role
-// : provider.
-// 参数 name（string）：模型或部署的对外名。
-// 返回 bool（bool）：这个名字是供应商凭据而不是可选择的模型时返回真。
-// 调用：仅在 list.go 内使用
-// 测试：无直接单测
-func nonModelProvider(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "qiniu", "fennoai":
-		return true
-	default:
-		return false
-	}
-}
-
 // 判断这条配置是不是不能当模型调用的条目。
 // 参数 entry（config.ModelEntry）：一条模型部署，含对外名、供应商参数和价格覆盖。
 // 返回 bool（bool）：这条配置不是可调用模型时为真，例如空名或供应商壳。
@@ -202,7 +187,6 @@ func nonModelProvider(name string) bool {
 // 测试：list_test.go
 func nonModelEntry(entry config.ModelEntry) bool {
 	return strings.TrimSpace(entry.ModelName) == "" ||
-		nonModelProvider(entry.ModelName) ||
 		providerShell(entry.ModelInfo)
 }
 

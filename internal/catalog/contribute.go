@@ -10,17 +10,17 @@ import (
 // Row is one model a provider package adds to the price map the console already
 // serves. An ID that the embedded map already has is left unchanged.
 type Row struct {
-	ID           string
-	Provider     string
-	Mode         string
-	EndpointType string
-	Source       string
-	Input        float64
-	Output       float64
-	Priced       bool
-	Official     string
-	PriceModel   string
-	PriceSource  string
+	ID          string
+	Provider    string
+	Mode        string
+	TransportID string
+	Source      string
+	Input       float64
+	Output      float64
+	Priced      bool
+	Official    string
+	PriceModel  string
+	PriceSource string
 }
 
 // ProviderField is one credential input appended for a provider the embedded
@@ -111,15 +111,20 @@ func contributeLocked(row Row) {
 			entry["input_cost_per_token"] = row.Input
 			entry["output_cost_per_token"] = row.Output
 		}
-		if row.EndpointType != "" {
-			entry["endpoint_type"] = row.EndpointType
+		if row.TransportID != "" {
+			entry["transport_id"] = row.TransportID
 		}
-		// Bind a seller's model only to its explicitly verified price source.
+		// 显式声明来源的目录必须与绑定来源一致；没有携带来源元数据的本地快照仍可按
+		// 明确的 PriceModel 绑定。绑定规则适用于所有供应商，不读取供应商名称。
 		if row.PriceModel != "" && row.PriceSource != "" {
-			if price, ok := raw[row.PriceModel].(map[string]any); ok && price["source"] == row.PriceSource {
-				if rates, ok := rateTableOf(price); ok {
+			if price, ok := raw[row.PriceModel].(map[string]any); ok {
+				priceSource, _ := price["source"].(string)
+				if (strings.TrimSpace(priceSource) == "" || priceSource == row.PriceSource) && rowHasPrice(price) {
+					rates, _ := rateTableOf(price)
 					entry["rates"] = rates
-					entry["source"] = row.PriceSource
+					if priceSource != "" {
+						entry["source"] = priceSource
+					}
 					entry["price_model"] = row.PriceModel
 				}
 			}

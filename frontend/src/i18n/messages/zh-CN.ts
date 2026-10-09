@@ -189,7 +189,7 @@ export const zhCN = {
   },
   priceData: {
     eyebrow: "模型与价格",
-    description: "内置价格目录来自 Modelink，可按需手动补充或修正。这里改的价格立即生效，并且优先于内置目录。",
+    description: "内置目录提供参考价格，可按需手动补充或修正。这里改的价格立即生效，并且优先于内置目录。",
     generatedAt: "内置目录生成时间：{value0}",
     models: "模型",
     providers: "供应商",

@@ -56,6 +56,8 @@ for (const scenario of [
     await form.getByLabel("对外模型名称 *").fill(name);
     await form.getByRole("combobox", { name: t("Endpoint type"), exact: true }).click();
     await page.getByRole("option", { name: t("Chat"), exact: true }).click();
+  await form.getByRole("combobox", { name: "上游接口协议", exact: true }).click();
+  await page.getByRole("option", { name: "Chat Completions", exact: true }).click();
     await form.getByLabel("价格来源").selectOption("manual");
     await form.locator("#editor-input_cost_per_token").fill("0.15");
     await form.locator("#editor-output_cost_per_token").fill("0.60");

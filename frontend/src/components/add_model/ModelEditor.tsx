@@ -62,9 +62,7 @@ export default function ModelEditor({
         ? {
             supplier: initialSupplier.credential_name,
             custom_llm_provider:
-              (initialSupplier.credential_info?.builtin === "qiniu"
-                ? "qiniu"
-                : initialSupplier.credential_info?.custom_llm_provider) ??
+              initialSupplier.credential_info?.custom_llm_provider ??
               initialSupplier.credential_values?.custom_llm_provider,
           }
         : {}),
@@ -80,7 +78,6 @@ export default function ModelEditor({
   const rows = catalogRows(catalog?.models);
   const row = rows[String(values.pricing_model ?? "")];
   const provider = String(values.custom_llm_provider ?? "");
-  const builtin = supplier?.credential_info?.builtin || (values.supplier === "qiniu" ? "qiniu" : undefined);
   const discovery = useQuery({
     queryKey: ["providerModelList", values.supplier],
     enabled: !!accessToken && !!supplier,
@@ -88,7 +85,7 @@ export default function ModelEditor({
       const body = await apiClient.post<{ models?: ListedModel[]; error?: string }>("/model/builtin/models", {
         accessToken: accessToken!,
         signal,
-        body: { provider: builtin || provider, credential_name: supplier!.credential_name },
+        body: { provider: provider, credential_name: supplier!.credential_name },
       });
       if (body.error) throw new Error(body.error);
       return body.models ?? [];
@@ -125,7 +122,6 @@ export default function ModelEditor({
         "custom_llm_provider",
         "model",
         "model_name",
-        "endpoint_type",
         "transport",
         "endpoint_types",
       ])
@@ -136,14 +132,13 @@ export default function ModelEditor({
     set("supplier", name);
     set(
       "custom_llm_provider",
-      (next?.credential_info?.builtin === "qiniu" || name === "qiniu" ? "qiniu" : next?.credential_info?.custom_llm_provider) ??
+      next?.credential_info?.custom_llm_provider ??
         next?.credential_values?.custom_llm_provider ??
         "",
     );
     set("model", "");
     set("catalog_model", "");
-    set("endpoint_type", "");
-    set("transport", "adapted");
+    set("transport", "");
     set("endpoint_types", []);
     if (values.model_name === String(values.model).replace(provider + "/", "")) set("model_name", "");
   };
@@ -216,7 +211,7 @@ export default function ModelEditor({
     <FormProvider {...form}>
       {importing && accessToken && supplier && (
         <ProviderModelDialog
-          provider={String(builtin || provider)}
+          provider={String(provider)}
           initialCredentialName={supplier.credential_name}
           credentials={suppliers}
           accessToken={accessToken}
@@ -331,7 +326,7 @@ export default function ModelEditor({
                 {textField("model_name", "对外模型名称 *", "客户端请求使用的模型名称")}
                 <EndpointTypeField
                   key={String(values.supplier)}
-                  selectedProvider={String(builtin || values.custom_llm_provider || "")}
+                  selectedProvider={String(values.custom_llm_provider || "")}
                   modelCostMap={rows}
                 />
                 <div className="flex items-center justify-between gap-4 rounded-lg border p-4">

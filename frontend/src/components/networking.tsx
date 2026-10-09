@@ -564,7 +564,7 @@ export const getModelCostMapReloadStatus = async (accessToken: string) => {
     throw error;
   }
 };
-// The price catalog: the embedded Modelink baseline plus whatever an operator
+// The price catalog: the embedded price baseline plus whatever an operator
 // adds or edits. Unlike the public cost map this needs a management token,
 // because the response also says which rows are hand-entered overrides.
 export const getPriceCatalog = async (accessToken: string) => {

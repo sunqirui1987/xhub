@@ -47,6 +47,8 @@ type EndpointDescriptor struct {
 	Protocol   string `json:"protocol"`
 	Family     string `json:"family"`
 	Capability string `json:"capability,omitempty"`
+	// Paths 保存用户入口路径；对话绑定读取目录，与上游执行配置独立。
+	Paths []string `json:"paths,omitempty"`
 }
 
 // AuthConfig 定义供应商鉴权；先清除客户端凭据，再写入部署凭据。
@@ -58,15 +60,15 @@ type AuthConfig struct {
 
 // Transport 定义原生协议如何在供应商上执行，与公开端点类型分开登记。
 // SupplierPrefixes 按供应商追加协议路径；ResponseUsage 只提取响应事实，不计算金额。
-// EndpointType 关联公开协议；Protocol 决定事实提取；Family 用于展示；ModelGroup 区分队列。
+// EndpointID 关联公开协议；Protocol 决定事实提取；Family 用于展示；ModelGroup 区分队列。
 // Auth、Headers 定义鉴权和协议默认头；ID 是部署引用的稳定执行标识。
-// APIBase 是无部署或供应商默认地址时的根地址；ModelField 指定可替换的顶层模型字段。
+// 地址和凭据只来自连接配置；ModelField 指定可替换的顶层模型字段。
 // TaskID 指定响应中的任务编号；StripPrefix 只移除模型的一层供应商前缀。
 // QueueURLs 要求轮询 URL 改写为网关入口；Billing 定义成功结果的异步用量提取。
 // Actions 是方法和路径白名单，禁止任意地址代理；创建与查询必须固定到同一传输。
 type Transport struct {
 	SupplierPrefixes map[string]string                                   `json:"supplier_prefixes,omitempty"`
-	EndpointType     string                                              `json:"endpoint_type"`
+	EndpointID       string                                              `json:"endpoint_id"`
 	Protocol         string                                              `json:"protocol"`
 	Family           string                                              `json:"family"`
 	ModelGroup       string                                              `json:"model_group,omitempty"`
@@ -79,7 +81,6 @@ type Transport struct {
 	Kind Kind `json:"kind"`
 	// Providers 限制这个转发方式对哪些供应商显示。空表示任何供应商都能选。
 	Providers   []string     `json:"providers,omitempty"`
-	APIBase     string       `json:"api_base,omitempty"`
 	ModelField  string       `json:"model_field,omitempty"`
 	TaskID      string       `json:"task_id,omitempty"`
 	StripPrefix string       `json:"strip_prefix,omitempty"`
@@ -128,7 +129,7 @@ type Hit struct {
 }
 
 // OfficialID 从存储的模型 id 上剥掉一层 "<前缀>/"。后面的斜杠保留，
-// 所以 qiniu/bytedance/doubao-... 会变成 bytedance/doubao-...
+// 所以 supplier/org/model 会变成 bytedance/doubao-...
 // 参数 prefix（string）：要剥掉的前缀。空串表示不处理；stored（string）：存储的模型 id。
 // 返回 string（string）：去掉一层前缀后的模型 id。
 // 调用：dataplane/official.go

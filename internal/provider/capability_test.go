@@ -3,7 +3,6 @@ package provider_test
 import (
 	"testing"
 
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/provider"
 )
 
@@ -62,7 +61,7 @@ func TestEveryDeclaredPathBelongsToItsOwnCapability(t *testing.T) {
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
 func TestChatCoversThreeSpellings(t *testing.T) {
-	for _, op := range []string{"chat", "messages", "responses", "gemini"} {
+	for _, op := range []string{"chat", "messages", "responses"} {
 		got, ok := provider.CapabilityForOp(op)
 		if !ok || got != "chat" {
 			t.Fatalf("op %s maps to %q (known=%v), want chat", op, got, ok)
@@ -109,112 +108,4 @@ func TestImageCoversGenerationAndEdit(t *testing.T) {
 			t.Fatalf("op %s maps to %q, want image", op, got)
 		}
 	}
-}
-
-// TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp 是这次新增过滤行为的主测。
-//
-// 过滤是新行为：原来适配路径完全按模型名选部署，不过滤端点类型。所以这些断言
-// 在改动前全都会失败，它们钉的是新约定。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp(t *testing.T) {
-	chat := capabilityEntry("chat-model", map[string]any{"endpoint_types": []any{"chat"}})
-	embed := capabilityEntry("embed-model", map[string]any{"endpoint_types": []any{"embedding"}})
-	// 明确只声明向量能力。
-	legacyEmbed := capabilityEntry("second-embed", map[string]any{"endpoint_types": []any{"embedding"}})
-	// 两种能力都答。
-	both := capabilityEntry("both-model", map[string]any{"endpoint_types": []any{"chat", "embedding"}})
-	// 内置 Bypass：不能进适配池。
-	bypass := capabilityEntry("qiniu/bytedance/doubao-seedance-2-0-260128", map[string]any{"transport": "qiniu_contents_generation"})
-
-	candidates := []config.ModelEntry{chat, embed, legacyEmbed, both, bypass}
-
-	t.Run("chat keeps chat deployments and drops embedding", func(t *testing.T) {
-		got := poolNames(provider.AdaptedPool(candidates, "chat"))
-		if !sameSet(got, []string{"chat-model", "both-model"}) {
-			t.Fatalf("chat pool %v", got)
-		}
-	})
-
-	t.Run("embedding keeps embedding deployments and drops chat", func(t *testing.T) {
-		got := poolNames(provider.AdaptedPool(candidates, "embeddings"))
-		if !sameSet(got, []string{"embed-model", "second-embed", "both-model"}) {
-			t.Fatalf("embedding pool %v", got)
-		}
-	})
-
-	t.Run("messages is chat", func(t *testing.T) {
-		got := poolNames(provider.AdaptedPool(candidates, "messages"))
-		if !sameSet(got, []string{"chat-model", "both-model"}) {
-			t.Fatalf("messages pool %v", got)
-		}
-	})
-
-	t.Run("a bypass deployment never enters the adapted pool", func(t *testing.T) {
-		for _, op := range []string{"chat", "videos", "images"} {
-			for _, m := range provider.AdaptedPool(candidates, op) {
-				if m.ModelName == "qiniu/bytedance/doubao-seedance-2-0-260128" {
-					t.Fatalf("a bypass deployment entered the adapted pool for op %s", op)
-				}
-			}
-		}
-	})
-
-	t.Run("an unknown op cannot select an adapted deployment", func(t *testing.T) {
-		// 新系统没有未声明入口的兼容语义；未知或空操作名必须得到空池，
-		// 让上层返回明确错误，而不是把请求交给任意适配部署。
-		got := poolNames(provider.AdaptedPool(candidates, "something-new"))
-		if len(got) != 0 {
-			t.Fatalf("unknown op pool %v", got)
-		}
-		if got := provider.AdaptedPool(candidates, ""); len(got) != 0 {
-			t.Fatalf("empty op pool %v", got)
-		}
-	})
-}
-
-// capabilityEntry 造一条只用于能力判定的部署。
-// 参数 name（string）：对外模型名；info（map[string]any）：model_info 的内容。
-// 返回 config.ModelEntry（config.ModelEntry）：可放进候选池的部署。
-func capabilityEntry(name string, info map[string]any) config.ModelEntry {
-	if info == nil {
-		info = map[string]any{}
-	}
-	if _, ok := info["transport"]; !ok {
-		info["transport"] = "adapted"
-	}
-	return config.ModelEntry{ModelName: name, ModelInfo: info}
-}
-
-// poolNames 把过滤后的池收成模型名列表，顺序保持。
-// 参数 pool（[]config.ModelEntry）：过滤后的候选。
-// 返回 []string（[]string）：模型名。
-func poolNames(pool []config.ModelEntry) []string {
-	out := make([]string, 0, len(pool))
-	for _, m := range pool {
-		out = append(out, m.ModelName)
-	}
-	return out
-}
-
-// sameSet 比较两个字符串集合，忽略顺序。
-// 参数 got/want（[]string）：实际与期望。
-// 返回 bool（bool）：集合相同时为真。
-func sameSet(got, want []string) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	seen := map[string]int{}
-	for _, s := range got {
-		seen[s]++
-	}
-	for _, s := range want {
-		seen[s]--
-	}
-	for _, n := range seen {
-		if n != 0 {
-			return false
-		}
-	}
-	return true
 }

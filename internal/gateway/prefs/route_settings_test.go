@@ -352,7 +352,7 @@ func TestWeightOverridesReadsTheDocument(t *testing.T) {
 	}
 }
 
-func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
+func TestForEndpointReplacesOnlyRoutingPolicy(t *testing.T) {
 	rootArgs := map[string]any{"weights": map[string]any{"deployment:root": 99.0}}
 	chatArgs := map[string]any{"weights": map[string]any{"deployment:chat-a": 3.0, "deployment:chat-b": 7.0}}
 	original := map[string]any{
@@ -368,7 +368,7 @@ func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
 	}
 	base := RouteSettings{Settings: original, TemplateID: "template", TemplateName: "team policy", Source: "team"}
 
-	chat := base.ForModel("chat")
+	chat := base.ForEndpoint("chat", "chat")
 	if chat.Err != nil || chat.Strategy() != "weighted-split" || chat.WeightOverrides()["deployment:chat-b"] != 7 {
 		t.Fatalf("chat policy = strategy %q weights %#v err %v", chat.Strategy(), chat.WeightOverrides(), chat.Err)
 	}
@@ -379,20 +379,20 @@ func TestForModelReplacesOnlyRoutingPolicy(t *testing.T) {
 		t.Fatalf("model policy lost template provenance: %#v", chat)
 	}
 
-	embedding := base.ForModel("embedding")
+	embedding := base.ForEndpoint("embedding", "embedding")
 	if embedding.Strategy() != "least-busy" || embedding.WeightOverrides() != nil {
 		t.Fatalf("an override without args inherited root weights: strategy=%q weights=%#v", embedding.Strategy(), embedding.WeightOverrides())
 	}
-	other := base.ForModel("other")
+	other := base.ForEndpoint("other", "chat")
 	if other.Strategy() != "simple-shuffle" || other.WeightOverrides()["deployment:root"] != 99 {
 		t.Fatalf("unlisted model did not use root policy: strategy=%q weights=%#v", other.Strategy(), other.WeightOverrides())
 	}
 
 	if base.Strategy() != "simple-shuffle" || base.WeightOverrides()["deployment:root"] != 99 {
-		t.Fatalf("ForModel mutated its receiver: strategy=%q weights=%#v", base.Strategy(), base.WeightOverrides())
+		t.Fatalf("ForEndpoint mutated its receiver: strategy=%q weights=%#v", base.Strategy(), base.WeightOverrides())
 	}
 	if original["routing_strategy"] != "simple-shuffle" {
-		t.Fatalf("ForModel mutated the source document: %#v", original)
+		t.Fatalf("ForEndpoint mutated the source document: %#v", original)
 	}
 }
 

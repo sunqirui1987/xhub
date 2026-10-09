@@ -40,6 +40,8 @@ test.describe("write wizards create then list", () => {
     await add.getByLabel("对外模型名称 *").fill("e2e-added-model");
     await add.getByRole("combobox", { name: t("Endpoint type"), exact: true }).click();
     await page.getByRole("option", { name: t("Chat"), exact: true }).click();
+    await add.getByRole("combobox", { name: "上游接口协议", exact: true }).click();
+    await page.getByRole("option", { name: "Chat Completions", exact: true }).click();
     await add.getByLabel("价格来源").selectOption("manual");
     await add.locator("#editor-input_cost_per_token").fill("0.15");
     await add.locator("#editor-output_cost_per_token").fill("0.60");
@@ -47,7 +49,12 @@ test.describe("write wizards create then list", () => {
       (res) => res.url().includes("/model/new") && res.request().method() === "POST",
     );
     await add.getByRole("button", { name: "添加模型", exact: true }).click();
-    expect((await submitted).ok()).toBeTruthy();
+    const created = await submitted;
+    expect(created.ok(), await created.text()).toBeTruthy();
+    expect(created.request().postDataJSON().model_info).toMatchObject({
+      transport: "bypass_openai_chat",
+      endpoint_types: ["chat"],
+    });
     await page.getByRole("tab", { name: t("pages.models.all") }).click();
     await expect(page.getByText("e2e-added-model").first()).toBeVisible({ timeout: 15_000 });
   });

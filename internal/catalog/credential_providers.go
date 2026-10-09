@@ -9,6 +9,7 @@ import (
 // 参数：无；返回：按显示名排序的独立字段目录，不修改价格目录或共享切片。
 // 调用：PublicBody；相同 provider 标识优先使用专属认证定义，未知本地提供商保留原字段。
 // 目录描述配置方式，不承诺执行适配器或外部账户可用；无字段类型需要独立授权流程。
+// 测试：credential_providers_test.go、regression/provider_forms_test.go。
 func CredentialProviders() []map[string]any {
 	var rows []map[string]any
 	if json.Unmarshal(providerFieldsJSON, &rows) != nil {

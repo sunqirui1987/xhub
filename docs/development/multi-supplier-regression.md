@@ -81,7 +81,6 @@ Redis 花费队列是进程外共享状态，而各 harness 的 PostgreSQL schem
 
 ## 与真实供应商用例的边界
 
-`internal/regression/weighted_live_test.go` 的 `TestLiveConfiguredWeightedRouting` 读取 `scripts/with-live-vendors.py` 写入的 `E2E_PROVIDER_METADATA`。当前仓库配置是 FENNO 的两个 `gpt-5.6-sol` 部署，以及 QINIU 的 `moonshotai/kimi-k2.5`；它能证明同一真实连接下两个部署的完整权重周期，但不能证明两个不同真实供应商都支持 `gpt-5.6-sol`。文档和报告不得把这项能力补写出来。
 
 真实用例逐次保存 call ID、deployment、provider、token 和费用，并汇总部署次数与费用。账务证据必须把响应费用头、持久化价格日志（数量、费率与快照）和 user/key/project/team/organization 五层累计连起来。外部供应商不能稳定制造 400、429、500、冷却或精确并发交错，因此这些保证由本地确定性用例承担。
 

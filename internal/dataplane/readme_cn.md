@@ -59,7 +59,6 @@ stream.go 与 usage.go 处理 SSE usage，log.go 保留成功与失败事件。l
 
 ## 验证与维护入口
 
-可选的 [qiniu_live_test.go](qiniu_live_test.go) 会调用真实七牛 Seedance 任务，核验创建、轮询和按实测用量计费；仅在配置对应旁路模型、地址及端点时执行。
 
 | 测试文件 | 场景入口 |
 | --- | --- |

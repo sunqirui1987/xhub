@@ -20,6 +20,7 @@ import {
   type TemplateFormState,
 } from "./templateForm";
 import WeightedSplitFields from "./WeightedSplitFields";
+import RoutePreview from "./RoutePreview";
 
 const NumberField: React.FC<{
   label: string;
@@ -58,10 +59,13 @@ const TemplateEditor: React.FC<{
   form: TemplateFormState;
   deployments: SplitDeployment[];
   accessToken: string | null;
+  templateId?: string;
+  organizationId?: string;
+  teamId?: string;
   onName: (name: string) => void;
   onChange: (form: TemplateFormState) => void;
   onJsonValid: (valid: boolean) => void;
-}> = ({ name, nameLocked = false, form, deployments, accessToken, onName, onChange, onJsonValid }) => {
+}> = ({ name, nameLocked = false, form, deployments, accessToken, templateId, organizationId, teamId, onName, onChange, onJsonValid }) => {
   const [jsonOverride, setJsonOverride] = useState<string | null>(null);
   const [jsonError, setJsonError] = useState("");
   const [catalog, setCatalog] = useState<string[]>([]);
@@ -287,6 +291,7 @@ const TemplateEditor: React.FC<{
           </div>
         </TabsContent>
       </Tabs>
+      <RoutePreview accessToken={accessToken} models={modelNames} body={written.ok && !jsonError ? written.body : null} templateId={templateId} organizationId={organizationId} teamId={teamId} />
       {!written.ok && !jsonError && (
         <p role="alert" className="text-xs text-destructive">
           {t("pages.routeTemplates.invalidField", { field: written.field })}

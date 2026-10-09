@@ -1,6 +1,5 @@
 # 模型、端点与供应商扩展
 
-[开发指南](README.md) · [七牛 Fal 扩展](qiniu-fal.md) · [计价](pricing.md)
 
 模型名称、公开协议、上游传输、供应商凭据和价格来源是五项独立契约。客户端先选已授权的模型，再从该模型的真实端点绑定中选择调用方式。价格目录负责价格，不能因为某个模型有价格就推断它支持对话或某种视频接口。
 
@@ -22,21 +21,21 @@
 
 `/public/endpoints` 提供注册目录，用于配置模型。`/model/available` 返回当前身份可用模型的 `endpoints`，用于对话和对比。公开目录不是某个模型的实际能力清单。
 
-添加模型时先选供应商和上游模型，再选择端点协议。已登记的固定 Fal 模型只能选择匹配自身创建路径的传输，Kling 不能绑定 Vidu 的查询队列。未登记的通用模型需要管理员明确声明能力，系统不能凭名称或价格保证其上游支持；固定 Fal 路径则必须先在后台登记。
+添加模型时先选供应商和上游模型，再选择端点协议。已登记的方舟模型使用官方任务传输。未登记的通用模型需要管理员明确声明能力，系统不能凭名称或价格保证其上游支持。
 
-上游模型联想列表不截断数量：输入为空时显示完整发现结果，可滚动选择，也可输入 `kling`、`vidu` 等关键词过滤。七牛的 OpenAI `/models` 目录未必返回 Fal 队列模型，因此 `/model/builtin/models` 会合并供应商目录与网关已登记的七牛原生模型，并按模型 ID 去重。供应商通过凭据的 `builtin: qiniu`、`custom_llm_provider: qiniu` 或内置凭据名 `qiniu` 识别；普通 OpenAI 供应商不会混入七牛模型。登记表示网关支持该调用契约，账号权限和实际可用性仍需供应商确认。
 
 编辑已保存模型时，端点目录加载期间和加载失败后保留现有端点与传输声明；加载失败会显示错误提示。目录返回后才校验声明是否匹配当前模型。未知模型没有已保存声明时需要手动选择实际支持的端点；价格目录不补猜协议。
 
 ### 供应商模型目录路径
 
-目录发现遵循保存的供应商凭据。Fenno、七牛默认连接先读取各自官方 `/v1/models`；自定义地址先在 API 根地址后追加 `/models`，已含 `/v1` 或完整 `/models` 时避免重复追加。仅当首选目录返回 404，才在同一供应商、相同路径前缀下增减一层 `/v1` 后重试一次，例如 `/relay/models` 与 `/relay/v1/models`。无需让用户为每次获取目录回答是否添加 v1。
+OpenAI 兼容连接仅使用已保存凭据的地址与密钥读取目录。当 /models 返回 404 时尝试 /v1/models，已含 /v1 的根地址反向尝试去除该段。不根据供应商名称、域名或请求中的临时地址切换协议。
+
 
 401、403、429、5xx、网络错误及无效目录响应直接保留错误；成功空列表不触发回退。两次请求共用 20 秒上限，遵循管理请求取消且不跟随重定向。两个候选都不存在时，错误列出尝试过的路径和 404 状态，仍可手动输入模型 ID。回退仅用于读取目录，不修改凭据 API 根地址、推理路径或密钥，也不跨供应商寻找目录；非 OpenAI 兼容凭据继续显示协议不支持。
 
 ### 模型选择与编辑回归
 
-先验证空输入显示完整列表、搜索与末尾型号选择，再验证供应商模型发现合并及隔离，最后通过浏览器选择 Kling/Vidu、保存、刷新、重新编辑，并检查提交的 `endpoint_types` 与 `transport`。编辑时切换 Kling/Vidu，验证传输重新绑定及按秒价格保留。已有 Chat 部署分别注入端点目录延迟与失败，验证原声明不被清空、保存后返回列表、刷新再次编辑仍保留。未知型号另行手动声明 Chat 及人工价格，确认真实保存后重新读取型号、端点和价格。
+先验证空输入显示完整列表、搜索与末尾型号选择，再验证供应商模型发现及隔离。通过浏览器保存、刷新、重新编辑官方方舟模型，并检查提交的端点与传输。已有 Chat 部署分别注入端点目录延迟与失败，验证原声明不被清空。未知型号另行手动声明端点及人工价格，确认保存后重新读取型号、端点和价格。
 
 ```bash
 # 模型与端点专项 + 完整确定性后端回归 + JSON/Markdown/HTML 报告。
@@ -46,7 +45,6 @@ make e2e-model-endpoints
 bash scripts/e2e.sh model-discovery.spec.ts model-endpoints.spec.ts wizards.spec.ts writes.spec.ts weighted-routing.spec.ts xgo-guardrails.spec.ts
 
 # 网关管理 API 回归，不触发视频生成或真实供应商计费。
-bash scripts/regression.sh -v 'Test(ModelDiscoveryPathFallback|QiniuDiscoveryIncludesRegisteredFalModels)$'
 
 # 完整真实供应商入口，使用 config_provider.yaml 及数据库中已保存的凭据。
 E2E_CREDENTIAL_SOURCE=database make e2e
@@ -66,18 +64,15 @@ E2E_CREDENTIAL_SOURCE=database make e2e
 | `bypass:anthropic-messages` | `POST /bypass/anthropic/v1/messages` |
 | `bypass:openai-images` | `POST /bypass/openai/v1/images/generations` |
 | `bypass:openai-image-edit` | `POST /bypass/openai/v1/images/edits` |
-| `bypass:fal-video` | 已登记的 `POST /queue/<具体模型路径>` 及其公共查询队列 |
 | `bypass:ark-video` | 已登记的 Ark 内容生成任务路径 |
 
-供应商根地址与协议前缀分别处理。七牛支持 `https://api.qnaigc.com` 与 `https://api.modelink.ai`，凭据使用 `/v1` 根地址时也会正确插入原生 OpenAI/Anthropic 接口的 `/bypass/<协议>` 前缀；Fal 使用自己的队列路径及 `Authorization: Key`。模型重写只移除所选供应商的一层前缀，七牛请求中的 `openai/`、`anthropic/` 命名空间必须保留。
 
 透传保留原生 JSON 的未知字段和数字表示，以及 multipart 的文件内容和边界。转发层替换路由模型并重新注入供应商鉴权，清除客户端凭据及逐跳头。禁止跟随重定向；上游返回的任务查询 URL 改写为网关路径，任务结果固定到创建身份、传输和部署。透传不等于允许客户端指定任意上游 URL。
 
 SSE 按原字节转发并观察完整事件。Responses 必须看到 `response.completed`，Messages 必须看到 `message_stop`；EOF、`[DONE]` 或另一协议的终态不能证明原生调用成功。图片部分事件不增加完成图片数。多张流式图片可能具有不同规格，当前单规格账单无法表达时保留用量并标记待核价。
 
-## 扩展 Kling、Vidu、Seedance
+## 扩展官方模型与协议
 
-同协议新增型号时登记具体模型创建路径、共享查询队列、模型与传输映射、准确的供应商价格 ID 和用量规则。只有新队列或新的协议行为才需要新增执行传输；前端不新增按模型名称判断的分支。七牛目前的 Fal 型号及查询队列见[七牛 Fal 扩展](qiniu-fal.md)。
 
 新增供应商时登记独立连接信息和鉴权，价格也绑定该供应商的目录条目。新增协议时补端点描述、传输白名单及用量提取器；新的原生非文本协议可以先使用参数编辑器。注册路径仅表示网关能够识别和转发，不等同于所有型号都经过付费实测。
 

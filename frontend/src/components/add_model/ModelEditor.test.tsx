@@ -62,7 +62,7 @@ const catalog = {
       display_name: "Claude Sonnet",
       litellm_provider: "anthropic",
       upstream_model: "claude-sonnet",
-      endpoint_type: "chat",
+      endpoint_id: "chat",
       rates: mixedRates,
     },
     {
@@ -71,7 +71,7 @@ const catalog = {
       litellm_provider: "openai",
       supplier_name: "relay-a",
       upstream_model: "private-a",
-      endpoint_type: "chat",
+      endpoint_id: "chat",
       input_cost_per_token: 0.000001,
     },
     {
@@ -211,7 +211,7 @@ describe("ModelEditor", () => {
     const model: EditorModel = {
       model_name: "existing-name",
       litellm_params: { model: "custom-upstream", custom_llm_provider: "openai", litellm_credential_name: "relay-a" },
-      model_info: { endpoint_types: ["chat"], transport: "adapted", pricing_source: "catalog", base_model: "anthropic/claude-sonnet" },
+      model_info: { endpoint_types: ["chat"], transport: "bypass_openai_chat", pricing_source: "catalog", base_model: "anthropic/claude-sonnet" },
     };
     renderEditor({ model });
     expect(screen.getByRole("combobox", { name: "上游模型 *" })).toHaveValue("custom-upstream");
@@ -229,7 +229,7 @@ describe("ModelEditor", () => {
         db_model: true,
         disabled: true,
         endpoint_types: ["chat"],
-        transport: "adapted",
+        transport: "bypass_openai_chat",
         pricing_source: "catalog",
         base_model: "anthropic/claude-sonnet",
       },

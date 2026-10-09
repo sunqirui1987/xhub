@@ -48,7 +48,9 @@ export type SplitDeployment = {
   model_name: string;
   api_base: string;
   model: string;
-  weight?: string;
+  endpoint_types?: string[];
+  transport?: string;
+  unavailable_reason?: string;
   provider?: string;
   supplier?: string;
 };
@@ -56,6 +58,7 @@ export type SplitDeployment = {
 /** Exact public-name overrides within the selected scope template. */
 export type ModelRoutingRule = {
   model_name: string;
+  endpoint_id?: string;
   routing_strategy: string;
   routing_strategy_args?: Record<string, unknown>;
   [key: string]: unknown;
@@ -348,7 +351,6 @@ export const deploymentsFromInfo = (rows: unknown[]): SplitDeployment[] => {
     const model = typeof params.model === "string" && params.model.trim() !== "" ? params.model.trim() : modelName;
     if (!model || model.startsWith("auto_router/")) continue;
     const apiBase = typeof params.api_base === "string" ? params.api_base.trim() : "";
-    const weight = numberText(params.weight);
     const info = isRecord(row.model_info) ? row.model_info : {};
     const deploymentId = [params.deployment_id, info.id].find(
       (value) => typeof value === "string" && value.trim(),
@@ -361,7 +363,9 @@ export const deploymentsFromInfo = (rows: unknown[]): SplitDeployment[] => {
       model_name: modelName || model,
       api_base: apiBase,
       model,
-      ...(weight ? { weight } : {}),
+      endpoint_types: Array.isArray(info.endpoint_types) ? info.endpoint_types.filter((id): id is string => typeof id === "string") : [],
+      transport: typeof info.transport === "string" ? info.transport : "",
+      unavailable_reason: typeof info.unavailable_reason === "string" ? info.unavailable_reason : undefined,
       ...(typeof params.custom_llm_provider === "string" ? { provider: params.custom_llm_provider } : {}),
       ...(typeof params.litellm_credential_name === "string" ? { supplier: params.litellm_credential_name } : {}),
     });
@@ -504,8 +508,9 @@ export const bodyFromForm = (form: TemplateFormState): BodyResult => {
     const seen = new Set<string>();
     for (const rule of form.model_routing) {
       const name = rule.model_name.trim();
-      if (!name || seen.has(name) || !rule.routing_strategy.trim()) return { ok: false, field: "model_routing" };
-      seen.add(name);
+      const key = JSON.stringify([name, rule.endpoint_id ?? ""]);
+      if (!name || seen.has(key) || (rule.endpoint_id !== undefined && (typeof rule.endpoint_id !== "string" || !rule.endpoint_id.trim())) || !rule.routing_strategy.trim()) return { ok: false, field: "model_routing" };
+      seen.add(key);
       const argsForm = formFromBody({ routing_strategy_args: rule.routing_strategy_args });
       const checked = bodyFromForm(argsForm);
       if (!checked.ok) return { ok: false, field: "model_routing" };

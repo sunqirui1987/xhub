@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -73,32 +72,11 @@ func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error
 				logx.Error("credential invalid name=%s reason=missing credential_values", name)
 				return dep, errCredentialInvalid
 			}
-			fillBuiltinKey(name, values)
 		}
 	}
 	out := dep
 	out.LiteLLMParams = llm.Hydrate(dep.LiteLLMParams, values)
 	return out, nil
-}
-
-// fillBuiltinKey uses the provider environment variable when the stored key is blank. A first install with no key writes an empty credential and then never reads the environment again. The call still picks up QINIU_API_KEY or FENNOAI_API_KEY.
-// 参数 name（string）：填充内置密钥要查找或展示的名称。空串表示还没有命名；values（map[string]any）：填充内置密钥读到的 JSON 对象。缺键表示没有该字段。
-// 返回：无。库存密钥为空时，已用供应商环境变量填上。已经有密钥时不改。
-// 调用：仅在 limits.go 内使用
-// 测试：无直接单测
-func fillBuiltinKey(name string, values map[string]any) {
-	if text, _ := values["api_key"].(string); strings.TrimSpace(text) != "" {
-		return
-	}
-	for _, spec := range modelaccess.Builtins() {
-		if spec.ID != name {
-			continue
-		}
-		if key := strings.TrimSpace(os.Getenv(spec.KeyEnv)); key != "" {
-			values["api_key"] = key
-		}
-		return
-	}
 }
 
 // enforceIdentityLimits checks the model allow-list, budget, and rate. On rejection it has already written the response and returns false. The budget is checked from the narrowest scope outwards, so the

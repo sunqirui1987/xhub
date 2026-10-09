@@ -7,6 +7,8 @@ import (
 	_ "github.com/sunqirui1987/xhub/internal/provider/qiniu"
 )
 
+// TestQiniuSeedanceKeepsTheBytedancePrefix 验证协议能力仍在，但只能由手工 Custom 凭据选择。
+// 参数 t：测试上下文。返回：无；只检查本地注册表，不创建凭据或访问外部供应商。
 func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
 	typ := provider.Transport{}
 	for _, item := range provider.Transports() {
@@ -14,10 +16,10 @@ func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
 			typ = item
 		}
 	}
-	if typ.ID == "" || typ.StripPrefix != "qiniu" || typ.APIBase != "https://api.qnaigc.com" {
+	if typ.ID == "" || typ.StripPrefix != "qiniu" {
 		t.Fatalf("type %+v", typ)
 	}
-	if len(typ.Providers) != 1 || typ.Providers[0] != "qiniu" {
+	if len(typ.Providers) != 2 || typ.Providers[0] != "custom" || typ.Providers[1] != "custom_openai" {
 		t.Fatalf("providers %v", typ.Providers)
 	}
 	create, ok := provider.Match("POST", "/v3/contents/generations/tasks", nil)

@@ -19,6 +19,7 @@ type ForwardResponse struct {
 	Body       []byte
 	Streamed   bool
 	Usage      map[string]any
+	ResponseID string // 成功原生流的存储响应归属，非流由正文读取。
 }
 
 // forwardOfficial 向登记的供应商地址发送一次原生请求并观察响应事实。
@@ -116,6 +117,7 @@ func forwardOfficial(h Bypass, r *http.Request, method, address, key string, bod
 		if streamState.Failed || !streamState.Completed {
 			return result, fmt.Errorf("native stream ended without successful completion")
 		}
+		result.ResponseID = streamState.ResponseID
 		if result.Usage == nil {
 			result.Usage = map[string]any{"pricing_blocked": "upstream_usage_missing"}
 		}
@@ -146,7 +148,8 @@ func sseLines(data []byte, atEOF bool) (int, []byte, error) {
 
 // bypassHeader 判断请求头是否可透传，移除客户端凭据和逐跳传输字段。
 // 参数 k：头名称；headers：http.Header，用于检查 Connection 声明的逐跳字段。
-// 返回 bool：可转发时为 true。调用：forwardOfficial。测试：TestNativeBypassJSONAndUsage。
+// 返回 bool：可转发时为 true。
+// 调用：forwardOfficial。测试：TestNativeBypassJSONAndUsage。
 func bypassHeader(k string, headers http.Header) bool {
 	switch strings.ToLower(k) {
 	case "authorization", "host", "content-length", "cookie", "set-cookie", "x-api-key", "api-key", "x-litellm-api-key", "connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade":

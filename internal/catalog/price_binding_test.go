@@ -27,7 +27,7 @@ func TestExplicitSellerPriceBindingSurvivesRefreshAndRejectsOtherSource(t *testi
 	for _, tc := range []struct {
 		source string
 		priced bool
-	}{{source, true}, {"https://other.example/prices", false}} {
+	}{{source, true}, {"", true}, {"https://other.example/prices", false}} {
 		RemoveModel(qualified)
 		setPrice(0.002, tc.source)
 		modelCostMu.Lock()

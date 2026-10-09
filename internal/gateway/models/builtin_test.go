@@ -7,32 +7,12 @@ import (
 	"github.com/sunqirui1987/xhub/internal/config"
 )
 
-func TestAddedModelMatchesHandAdded(t *testing.T) {
-	entry := addedModel("fennoai", "gpt-5.6-terra")
-	if entry.ModelName != "gpt-5.6-terra" || entry.LiteLLMParams["model"] != "gpt-5.6-terra" {
-		t.Fatalf("name %#v", entry)
-	}
-	if entry.LiteLLMParams["litellm_credential_name"] != "fennoai" || entry.LiteLLMParams["custom_llm_provider"] != "openai" {
-		t.Fatalf("params %#v", entry.LiteLLMParams)
-	}
-	if _, ok := entry.LiteLLMParams["api_base"]; ok {
-		t.Fatal("api_base belongs on the credential")
-	}
-	if _, ok := entry.ModelInfo["mode"]; ok || entry.ModelInfo["role"] != nil || entry.ModelInfo["builtin"] != nil {
-		t.Fatalf("info %#v", entry.ModelInfo)
-	}
-	id, _ := entry.ModelInfo["id"].(string)
-	if len(id) < len("model_") || id[:len("model_")] != "model_" {
-		t.Fatal(id)
-	}
-}
-
 func TestPlaygroundGroupSkipsProviderShellsAndUsesChat(t *testing.T) {
 	list := []config.ModelEntry{
 		{ModelName: "fennoai", ModelInfo: map[string]any{"role": "provider", "builtin": "fennoai", "wire_api": "responses", "endpoint_types": []string{"chat"}}},
 		{ModelName: "qiniu", ModelInfo: map[string]any{"role": "provider", "builtin": "qiniu", "wire_api": "responses"}},
-		{ModelName: "gpt-5.6-terra", LiteLLMParams: map[string]any{"custom_llm_provider": "openai", "litellm_credential_name": "fennoai"}, ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}}},
-		{ModelName: "gpt-5.6-luna", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"id": "model_5e85e4e8398a", "transport": "adapted", "endpoint_types": []string{"chat"}}},
+		{ModelName: "gpt-5.6-terra", LiteLLMParams: map[string]any{"custom_llm_provider": "openai", "litellm_credential_name": "fennoai"}, ModelInfo: map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}}},
+		{ModelName: "gpt-5.6-luna", LiteLLMParams: map[string]any{"custom_llm_provider": "openai"}, ModelInfo: map[string]any{"id": "model_5e85e4e8398a", "transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}}},
 	}
 	got := playgroundGroups(list)
 	if len(got) != 2 {
@@ -75,17 +55,6 @@ func TestParseModelIDs(t *testing.T) {
 	}
 	if ParseModelIDs([]byte(`{"data":[]}`)) != nil {
 		t.Fatal("empty list should stay empty")
-	}
-}
-
-func TestBuiltinsEnabled(t *testing.T) {
-	t.Setenv("XHUB_BUILTIN_PROVIDERS", "")
-	if !BuiltinsEnabled() {
-		t.Fatal("unset switch should install builtins")
-	}
-	t.Setenv("XHUB_BUILTIN_PROVIDERS", "off")
-	if BuiltinsEnabled() {
-		t.Fatal("off should disable builtins")
 	}
 }
 
@@ -134,18 +103,10 @@ func TestFillFromCostMapUsesPriceData(t *testing.T) {
 }
 
 func TestModelsURL(t *testing.T) {
-	if ModelsURL(BuiltinFenno, "https://api.fenno.ai") != "https://api.fenno.ai/v1/models" {
-		t.Fatal(ModelsURL(BuiltinFenno, "https://api.fenno.ai"))
+	if ModelsURL("ignored", "https://api.fenno.ai") != "https://api.fenno.ai/models" {
+		t.Fatal(ModelsURL("ignored", "https://api.fenno.ai"))
 	}
-	if ModelsURL(BuiltinQiniu, "https://api.qnaigc.com/v1/") != "https://api.qnaigc.com/v1/models" {
-		t.Fatal(ModelsURL(BuiltinQiniu, "https://api.qnaigc.com/v1/"))
-	}
-}
-
-func TestSlashedModelIDStaysTheModelName(t *testing.T) {
-	const id = "deepseek/deepseek-v3.2-exp"
-	entry := addedModel("qiniu", id)
-	if entry.ModelName != id || entry.LiteLLMParams["model"] != id {
-		t.Fatalf("%#v", entry)
+	if ModelsURL("ignored", "https://api.qnaigc.com/v1/") != "https://api.qnaigc.com/v1/models" {
+		t.Fatal(ModelsURL("ignored", "https://api.qnaigc.com/v1/"))
 	}
 }

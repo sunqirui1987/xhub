@@ -38,7 +38,7 @@ func deployment(public, upstream string, extra map[string]any) config.ModelEntry
 	return config.ModelEntry{
 		ModelName:     public,
 		LiteLLMParams: params,
-		ModelInfo:     map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+		ModelInfo:     map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	}
 }
 

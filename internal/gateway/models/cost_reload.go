@@ -4,7 +4,9 @@ package models
 import (
 	"context"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
@@ -79,6 +81,11 @@ func ScheduleCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 	hours, err := strconv.Atoi(r.URL.Query().Get("hours"))
 	if err != nil || hours < 1 || hours > 168 {
 		httpx.WriteError(w, 400, "invalid_request", "hours must be a whole number between 1 and 168")
+		return
+	}
+	// 缺少显式源时不保存定时计划，避免周期性访问未知供应商。
+	if strings.TrimSpace(os.Getenv("XHUB_PRICE_FEED_URL")) == "" {
+		httpx.WriteError(w, 400, "invalid_request", "XHUB_PRICE_FEED_URL must be configured before scheduling")
 		return
 	}
 	plan := loadCostReload(s)

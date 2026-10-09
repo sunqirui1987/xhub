@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { apiClient } from "../networking";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -62,17 +63,21 @@ const ModelRoutingFields: React.FC<{
   defaultStrategy: string;
   onChange: (rules: ModelRoutingRule[]) => void;
 }> = ({ rules, deployments, defaultStrategy, onChange }) => {
+  const [endpoint, setEndpoint] = useState("");
+  const [entries, setEntries] = useState<{id:string;label:string}[]>([]);
+  // 入口来自后端公共目录；模板不接受任意 URL 作为匹配条件。
+  useEffect(() => { let canceled = false; apiClient.get<{endpoint_types?:{id:string;label:string}[]}>("/public/endpoints").then(body => { if (!canceled) setEntries(body?.endpoint_types ?? []); }).catch(() => {}); return () => { canceled = true }; }, []);
   const [selectedModel, setSelectedModel] = useState("");
   const publicModels = useMemo(
     () => [...new Set(deployments.map((row) => row.model_name).filter(Boolean))],
     [deployments],
   );
-  const availableModels = publicModels.filter((name) => !rules.some((rule) => rule.model_name === name));
+  const availableModels = publicModels.filter((name) => !rules.some((rule) => rule.model_name === name && (rule.endpoint_id ?? "") === endpoint));
   const selectedAvailable = availableModels.includes(selectedModel);
 
   const addRule = () => {
     if (!selectedAvailable) return;
-    onChange([...rules, { model_name: selectedModel, routing_strategy: defaultStrategy }]);
+    onChange([...rules, { model_name: selectedModel, ...(endpoint ? {endpoint_id:endpoint} : {}), routing_strategy: rules.find(rule => rule.model_name === selectedModel && !rule.endpoint_id)?.routing_strategy ?? defaultStrategy }]);
     setSelectedModel("");
   };
   const patch = (index: number, next: ModelRoutingRule) =>
@@ -144,6 +149,10 @@ const ModelRoutingFields: React.FC<{
             ))}
           </SelectContent>
         </Select>
+        <Select value={endpoint || "model-default"} onValueChange={value => setEndpoint(value === "model-default" ? "" : value ?? "")}>
+          <SelectTrigger aria-label="用户入口覆盖"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="model-default">模型默认（继承模板）</SelectItem>{entries.map(entry => <SelectItem key={entry.id} value={entry.id}>{entry.label}</SelectItem>)}</SelectContent>
+        </Select>
         <Button type="button" onClick={addRule} disabled={!selectedAvailable}>
           <Plus className="size-4" />
           {t("pages.routeTemplates.modelRouting.add")}
@@ -161,7 +170,7 @@ const ModelRoutingFields: React.FC<{
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.modelRouting.exactName")}</p>
-                <p className="truncate font-mono text-sm font-medium">{rule.model_name}</p>
+                <p className="truncate font-mono text-sm font-medium">{rule.model_name}</p><p className="text-xs text-muted-foreground">{rule.endpoint_id ? entries.find(entry => entry.id === rule.endpoint_id)?.label ?? rule.endpoint_id : "模型默认"} · 删除覆盖后恢复继承</p>
               </div>
               <label className="min-w-56 space-y-1">
                 <span className="text-xs text-muted-foreground">
@@ -196,7 +205,7 @@ const ModelRoutingFields: React.FC<{
             {rule.routing_strategy === "weighted-split" && (
               <WeightedSplitFields
                 saved={weightsFromRule(rule)}
-                deployments={deployments.filter((row) => row.model_name === rule.model_name)}
+                deployments={deployments.filter((row) => row.model_name === rule.model_name && (!rule.endpoint_id || row.endpoint_types?.includes(rule.endpoint_id)))}
                 modelName={rule.model_name}
                 onChange={(weights) => changeWeights(index, weights)}
               />

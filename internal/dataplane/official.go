@@ -5,7 +5,7 @@
 // Create replaces the model field, forwards the rest, and pins the task id
 // to that deployment for seven days. A later get or list must resolve to a
 // deployment that selected the same endpoint type, so a Volcengine task id
-// is not fetched from Qiniu. Usage on a follow-up response is billed once.
+// is not fetched through a different protocol. Usage on a follow-up response is billed once.
 
 package dataplane
 
@@ -77,7 +77,7 @@ func ServeBypass(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.
 // 参数 principal（*auth.Principal）：已通过鉴权的调用方。body（map[string]any）：解析后的 JSON。raw（[]byte）：原始正文。
 // 参数 callID（string）：用量行 id。start（time.Time）：请求开始时间。
 // 返回：无。
-// 调用：ServeBypass 在动作名是 create 时。测试：逻辑测试里的火山、七牛和 Suno 创建。
+// 调用：ServeBypass 在动作名是 create 时。测试：逻辑测试中的方舟创建、重试及任务归属。
 func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.Hit, principal *auth.Principal, body map[string]any, raw []byte, callID string, start time.Time) {
 	requestBody, _ := parseBypassBody(raw, r.Header.Get("Content-Type"))
 	field := hit.Transport.ModelField
@@ -115,7 +115,7 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	settings = settings.ForModel(alias)
+	settings = settings.ForEndpoint(alias, hit.Transport.EndpointID)
 	if settings.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
 		return
@@ -129,7 +129,22 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		list = router.ApplyWeights(list, settings.WeightOverrides())
 	}
 	list, _ = dropDisabled(list)
-	pool := router.Order(list, alias, settings.Strategy(), h.RouteState())
+	plan := h.PlanRoute(r, alias, body, principal)
+	if plan.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 409, "invalid_request", plan.Err.Error())
+		return
+	}
+	state := h.RouteState()
+	state.SplitScope = settings.CursorScope(alias, originalEndpoint(hit))
+	pool := router.Schedule(list, alias, settings.Strategy(), state, plan.Pinned)
+	if plan.Required {
+		if state.Cooldown[plan.Pinned] || len(pool) == 0 || router.CooldownID(pool[0]) != plan.Pinned {
+			httpx.WriteTypedError(w, r.URL.Path, 409, "unavailable", "response deployment unavailable")
+			return
+		}
+		// 已存响应只属于原部署，重试不能换到其他供应商。
+		pool = pool[:1]
+	}
 	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
 		return
@@ -146,7 +161,10 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		if err != nil {
 			continue
 		}
-		candidateHit := originalHit
+		candidateHit, err := provider.ResolveHit(originalHit, candidate)
+		if err != nil {
+			continue
+		}
 		hit = candidateHit
 		base, key := bypassAuth(candidateHit, candidate)
 		if base == "" || key == "" {
@@ -231,7 +249,13 @@ forwarded:
 		h.PinOfficial(scope, selectedID)
 	}
 	respBody = rewriteQueueURLs(hit, doc, respBody)
-	plan := h.PlanRoute(r, alias, body, principal)
+	if status >= 200 && status < 300 {
+		responseID, _ := doc["id"].(string)
+		if response.Streamed {
+			responseID = response.ResponseID
+		}
+		h.CommitRoute(plan, selectedID, responseID)
+	}
 	h.RememberExchange(callID, r, raw, respBody)
 	h.AnnotateCall(callID, dataplaneNote(hit, dep, plan.SessionID, time.Since(start)))
 	var usage map[string]any
@@ -291,7 +315,7 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	settings = settings.ForModel(dep.ModelName)
+	settings = settings.ForEndpoint(dep.ModelName, originalEndpoint(hit))
 	if settings.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
 		return
@@ -299,6 +323,11 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	dep, err := h.AttachCredential(dep)
 	if err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 401, "upstream_auth", "This model has no upstream API key configured.")
+		return
+	}
+	hit, err = provider.ResolveHit(hit, dep)
+	if err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 409, "unavailable", err.Error())
 		return
 	}
 	base, key := bypassAuth(hit, dep)
@@ -370,10 +399,10 @@ func dataplaneNote(hit provider.Hit, dep config.ModelEntry, sessionID string, el
 	}
 }
 
-// sameEndpoint 确认钉住的部署和当前路径属于同一类端点。火山任务不能走到七牛路径。
+// sameEndpoint 确认钉住的部署和当前路径属于同一类端点。防止跨协议查询任务。
 // 参数 dep：钉上找回的部署。hit：当前路径匹配到的类型。
 // 返回：true 才继续用这行部署转发。
-// 调用：serveBypassFollow。测试：逻辑测试用 cgt- 打七牛路径得到 404。
+// 调用：serveBypassFollow。测试：native_bypass_test.go 的任务隔离与重复查询。
 func sameEndpoint(dep config.ModelEntry, hit provider.Hit) bool {
 	return provider.Includes(dep, hit.Transport.ID)
 }
@@ -428,12 +457,6 @@ func oneUpstream(h Bypass, hit provider.Hit) (config.ModelEntry, []string, bool)
 // 测试：无直接单测
 func bypassAuth(hit provider.Hit, dep config.ModelEntry) (string, string) {
 	base := trimBase(dep.ParamString("api_base", ""))
-	if base == "" {
-		base = provider.APIBase(dep.ParamString("custom_llm_provider", ""), "")
-	}
-	if base == "" {
-		base = trimBase(hit.Transport.APIBase)
-	}
 	return base, dep.ParamString("api_key", "")
 }
 
@@ -556,3 +579,7 @@ func rewriteQueueURLs(hit provider.Hit, doc map[string]any, raw []byte) []byte {
 	}
 	return out
 }
+
+// originalEndpoint 返回原生协议入口 ID；参数为匹配结果，返回稳定目录标识。
+// 调用：模板解析与计数器隔离，不依据供应商识别入口。
+func originalEndpoint(hit provider.Hit) string { return hit.Transport.EndpointID }

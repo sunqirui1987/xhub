@@ -4,8 +4,8 @@
 
 ## Responsibilities and behavior
 
-seedance.go registers qiniu_contents_generation with api.qnaigc.com as the default base. It supports POST /v3/contents/generations/tasks and GET the task path with /{id}, without a list action.
-The model field is model and task ID field is id; the qiniu prefix is removed upstream. Four Seedance entries cover standard, Fast, Mini (260615), and 2.5 (260628), with explicit rates from the Qiniu Modelink market source. Deployments can override base and credentials.
+seedance.go registers the qiniu_contents_generation protocol with api.qnaigc.com as its protocol default. It supports POST /v3/contents/generations/tasks and GET the task path with /{id}, without a list action. XHub does not register a fixed Qiniu credential provider. Administrators select Custom or Custom OpenAI, enter their own base and key, and explicitly select this transport on the model.
+The model field is model and task ID field is id; the qiniu prefix is removed upstream. Four Seedance entries cover standard, Fast, Mini (260615), and 2.5 (260628), with explicit rates from the Qiniu Modelink market source. Credential names, model names, and hostnames do not infer the transport.
 Dataplane owns sending, tenant task affinity, polling, and terminal settlement. Registration tests validate descriptions; real task tests require explicit bypass configuration and consume provider quota. Creation success alone does not prove completion or billing accuracy.
 
 ## Source responsibilities and entry points

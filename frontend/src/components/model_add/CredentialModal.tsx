@@ -39,7 +39,8 @@ export default function CredentialModal({ open, onCancel, onSubmit, mode, existi
   const selection = useWatch({ control: form.control, name: "custom_llm_provider" });
   const selected = providers?.find(p => p.provider === selection)
     ?? providers?.find(p => p.litellm_provider === selection || p.provider_display_name === selection);
-  const options = useMemo(() => (providers ?? []).map(p => ({
+  // ChatGPT 订阅账户需要独立授权流程，当前弹窗无法完成连接，因此不放入可创建供应商目录。
+  const options = useMemo(() => (providers ?? []).filter(p => p.provider !== "CHATGPT" && p.litellm_provider !== "chatgpt").map(p => ({
     label: p.provider_display_name, value: p.provider, sublabel: p.litellm_provider,
     icon: <Logo provider={p.litellm_provider} label={p.provider_display_name} className="size-5" />,
   })), [providers]);

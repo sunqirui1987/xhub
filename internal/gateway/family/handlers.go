@@ -137,6 +137,11 @@ func modelFromPath(path string) string {
 // 返回 string（string）：路径对应的数据面操作名，例如 chat 或 embedding。认不出时为空串，不能当成 chat。
 // 调用：仅在 handlers.go 内使用
 // 测试：无直接单测
+// InferenceOp 提供网关和协议处理器共用的公开入口分类。
+// 参数 path：用户请求路径；返回操作名，未知路径为空，不推断上游协议。
+// 调用：网关会话隔离；测试：handlers_test.go 的路径分类用例。无副作用。
+func InferenceOp(path string) string { return inferenceOp(path) }
+
 func inferenceOp(path string) string {
 	p := strings.ToLower(path)
 	switch {

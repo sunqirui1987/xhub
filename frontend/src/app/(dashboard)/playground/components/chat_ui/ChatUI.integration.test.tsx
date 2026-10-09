@@ -58,7 +58,7 @@ async function selectComboboxOption(placeholder: string, optionLabel: string) {
 
 /** endpoint 构造公开契约测试夹具；只登记指定路径，不用模型分类推断能力。 */
 const endpoint = (path: string, kind: "adapted" | "bypass" = "adapted", protocol = "adapted") => ({
-  endpoint_type: protocol, transport: kind, kind, protocol, family: "text", method: "POST", path,
+  endpoint_id: protocol, transport: kind, kind, protocol, family: "text", method: "POST", path,
 });
 
 describe("ChatUI", () => {

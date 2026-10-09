@@ -33,8 +33,6 @@ Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 O
 
 ### bypass.go
 
-- [`func IsQiniuBypass(apiBase string) bool`](bypass.go) — IsQiniuBypass reports an api_base that already points at the Qiniu OpenAI bypass root.
-- [`func PrepareQiniuBypass(op, apiBase string, body map[string]any) string`](bypass.go) — PrepareQiniuBypass sends chat and responses calls to the bypass Responses API. A chat body has messages. The bypass endpoint reads input, so messages are copied there and then removed. max_tokens is the chat name; the Responses API reads max_output_tokens. Other operations keep their own path. A base that is not the bypass root is unchanged.
 - [`func ResponsesToChat(raw []byte, model string) []byte`](bypass.go) — ResponsesToChat turns one Responses JSON object into a chat completion. A body that is already a chat completion, or that is not a response object, is returned unchanged.
 - [`func ResponsesSSEToChat(buf []byte, model string, flush bool) (emit, rest []byte)`](bypass.go) — ResponsesSSEToChat turns complete Responses SSE events into chat completion chunks. rest is the unfinished tail. flush parses that tail and ends the chat stream with [DONE].
 
@@ -89,7 +87,6 @@ Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 O
 
 | 测试文件 | 场景入口 |
 | --- | --- |
-| [bypass_test.go](bypass_test.go) | `TestPrepareQiniuBypassUsesResponsesInput`, `TestResponsesToChat`, `TestResponsesSSEToChat`, `TestResponsesSSEToChatAcceptsCRLFAndSplitFrames` |
 | [call_test.go](call_test.go) | `TestHydrateCredentialAPIKeyReplacesStaleDeploymentKey`, `TestHydrateKeepsDeploymentKeyWhenCredentialHasNone`, `TestDefaultAPIBase` |
 
 ```bash

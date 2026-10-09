@@ -851,7 +851,7 @@ func TestAnUnpricedGatewayNameDoesNotHideTheCatalogRow(t *testing.T) {
 	}
 	Contribute(Row{
 		ID: "qiniu/" + official, Provider: "qiniu", Official: official,
-		EndpointType: "qiniu_contents_generation", Mode: "qiniu_contents_generation",
+		TransportID: "qiniu_contents_generation", Mode: "qiniu_contents_generation",
 	})
 	got, ok := CostAt("qiniu/"+official, usage, at)
 	if !ok || got.Total != before.Total {

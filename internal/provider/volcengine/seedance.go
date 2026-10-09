@@ -15,15 +15,13 @@ func init() {
 	logx.Debug("provider volcengine loading its registered transport and models")
 	provider.RegisterSupplier(provider.Supplier{
 		Name: "VolcEngine", Slug: "volcengine", Display: "VolcEngine",
-		APIBase: "https://ark.cn-beijing.volces.com",
 	})
 	provider.RegisterTransport(provider.Transport{
-		EndpointType: "bypass:ark-video", Protocol: "ark", Family: "video", ModelGroup: "Seedance",
+		EndpointID: "bypass:ark-video", Protocol: "ark", Family: "video", ModelGroup: "Seedance",
 		Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Bearer"},
 		ID:   "ark_contents_generation", Kind: provider.KindBypass,
 		Label:     "Bypass - 方舟内容生成 /api/v3/contents/generations/tasks",
-		Providers: []string{"volcengine"}, APIBase: "https://ark.cn-beijing.volces.com",
-		ModelField: "model", TaskID: "id", StripPrefix: "volcengine",
+		Providers: []string{"volcengine"}, ModelField: "model", TaskID: "id", StripPrefix: "volcengine",
 		Billing: provider.SeedanceBilling(),
 		Actions: []provider.Action{
 			{Name: "create", Method: "POST", PublicPath: "/api/v3/contents/generations/tasks", UpstreamPath: "/api/v3/contents/generations/tasks"},
@@ -34,12 +32,12 @@ func init() {
 	// Configure actual Ark account prices on the deployment.
 	provider.RegisterModel(provider.Model{
 		ID: "volcengine/doubao-seedance-2-0-260128", Provider: "volcengine",
-		Official: "doubao-seedance-2-0-260128", EndpointType: "ark_contents_generation",
+		Official: "doubao-seedance-2-0-260128", TransportID: "ark_contents_generation",
 		Source: "https://www.volcengine.com/docs/82379/1544106",
 	})
 	provider.RegisterModel(provider.Model{
 		ID: "volcengine/doubao-seedance-2-0-fast-260128", Provider: "volcengine",
-		Official: "doubao-seedance-2-0-fast-260128", EndpointType: "ark_contents_generation",
+		Official: "doubao-seedance-2-0-fast-260128", TransportID: "ark_contents_generation",
 		Source: "https://www.volcengine.com/docs/82379/1520757",
 	})
 }

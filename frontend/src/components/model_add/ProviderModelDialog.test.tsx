@@ -63,7 +63,7 @@ describe("ProviderModelDialog catalog import", () => {
       litellm_provider: "openai",
       display_name: "gpt-priced",
       source: "provider-import",
-      endpoint_type: "chat",
+      endpoint_id: "chat",
       input_cost_per_token: 0.000002,
       output_cost_per_token: 0.000008,
     });

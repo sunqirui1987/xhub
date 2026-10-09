@@ -4,8 +4,6 @@
 
 ## Responsibilities and behavior
 
-all.go blank-imports openai, qiniu, and volcengine so required init registration runs from one startup import. This avoids entry points accidentally omitting built-in transports or models.
-The package exports no independent functions or HTTP routes. OpenAI is currently a placeholder without registration init; its adapted protocol lives in llm. Qiniu and Volcengine contribute task transports and model catalog entries.
 Add new provider packages here and confirm startup imports when extending built-ins. Tests live in provider registration and supplier packages. Import success does not verify real provider authentication or inference.
 
 ## Source responsibilities and entry points
@@ -20,7 +18,6 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Dependencies
 
-[internal/logx](../../logx/readme.md), [internal/provider/openai](../openai/readme.md), [internal/provider/qiniu](../qiniu/readme.md), [internal/provider/volcengine](../volcengine/readme.md).
 
 ## Verification and maintenance
 

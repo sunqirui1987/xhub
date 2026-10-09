@@ -1,6 +1,5 @@
 // stream.go copies an upstream SSE body to the client.
-// pipeStream forwards the bytes unchanged. pipeResponsesAsChat rewrites a
-// Responses stream into chat chunks when the public operation is chat.
+// pipeStream 保留原生事件；统一对话转换由 dialogue_stream.go 处理。
 // The first byte sets TTFT. At most 2 MiB is kept for the usage log.
 
 package dataplane
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
@@ -24,7 +22,7 @@ const captureLimit = 2 << 20
 // 而偏低的原因在日志里看不出来。
 // 参数 kept（int）：已经保留的字节数。
 // 返回：无。只写进程日志。
-// 调用：pipeStream、pipeResponsesAsChat 在拼接捕获正文时。
+// 调用：pipeStream 在拼接捕获正文时。
 // 测试：无直接单测
 func noteCaptureTruncated(kept int) {
 	if kept >= captureLimit {
@@ -58,71 +56,10 @@ func responseID(raw []byte) string {
 	return ""
 }
 
-// pipeResponsesAsChat 把七牛 Bypass 的 Responses 流转成 chat completion chunk。
-// 错误状态原样转发，调用方仍能看到供应商的报错。
-//
-// 参数 w：客户端响应。resp：上游响应，函数负责关闭 Body。
-// 参数 start：请求开始时间，用来算首字节。model：写进转换后 chunk 的模型名。
-// 返回 wrote：是否已经向 w 写过字节。usage：流里最后一次 usage。ttft：首字节耗时，没写过则为 0。
-// 返回 captured：最多 2 MiB，交给用量日志。
-// 调用：Serve 在操作是 chat 且上游协议是 responses 时。现有流式测试走 pipeStream，不走这条转换。
-func pipeResponsesAsChat(w http.ResponseWriter, resp *http.Response, start time.Time, model string) (bool, map[string]any, time.Duration, []byte, error) {
-	defer resp.Body.Close()
-	buf := make([]byte, 4096)
-	flusher, _ := w.(http.Flusher)
-	wrote := false
-	var ttft time.Duration
-	var pending []byte
-	var captured []byte
-	parser := streamUsageParser{}
-	write := func(chunk []byte) {
-		if len(chunk) == 0 {
-			return
-		}
-		if !wrote {
-			ttft = time.Since(start)
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.WriteHeader(resp.StatusCode)
-			wrote = true
-		}
-		_, _ = w.Write(chunk)
-		if flusher != nil {
-			flusher.Flush()
-		}
-		if len(captured) < 2<<20 {
-			take := len(chunk)
-			if len(captured)+take > 2<<20 {
-				take = (2 << 20) - len(captured)
-			}
-			captured = append(captured, chunk[:take]...)
-			noteCaptureTruncated(len(captured))
-		}
-	}
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			parser.write(buf[:n], false)
-			pending = append(pending, buf[:n]...)
-			emit, rest := llm.ResponsesSSEToChat(pending, model, false)
-			pending = rest
-			write(emit)
-		}
-		if err != nil {
-			emit, _ := llm.ResponsesSSEToChat(pending, model, true)
-			write(emit)
-			parser.write(nil, true)
-			if err == io.EOF {
-				err = nil
-			}
-			return wrote, parser.usage, ttft, captured, err
-		}
-	}
-}
-
 // pipeStream 把上游 SSE 原样抄给客户端，并尽量从流里抽出 usage。一个字节都没写时 wrote 为 false。
 // ttft 是 start 到首字节的时间。空正文时 ttft 保持 0。
 // 参数 w：客户端响应。resp：上游响应，函数负责关闭 Body。start：请求开始时间。
-// 返回 wrote、usage、ttft、captured：含义与 pipeResponsesAsChat 相同，但不改写 chunk。
+// 返回 wrote、usage、ttft、captured：表示是否输出、使用量、首字节耗时和捕获正文，不改写原生事件。
 // 调用：Serve 的普通流式路径。测试：failure_log_test.go TestServeLogsEmptyStreamAndUpstreamStatus、TestServeLogsCacheHitAndStreamMetrics。
 func pipeStream(w http.ResponseWriter, resp *http.Response, start time.Time) (bool, map[string]any, time.Duration, []byte, error) {
 	defer resp.Body.Close()
@@ -176,7 +113,7 @@ type streamUsageParser struct {
 // also consumes a final line without a newline, as permitted at EOF.
 // 参数 raw：本次读取的正文；final：正文是否已经结束。
 // 返回：无。解析出的用量合并进 p.usage，未完整的行保留在 p.pending。
-// 调用：pipeStream、pipeResponsesAsChat。测试：usage_stream_test.go。
+// 调用：pipeStream。测试：usage_stream_test.go。
 func (p *streamUsageParser) write(raw []byte, final bool) {
 	p.pending = append(p.pending, raw...)
 	for {
@@ -215,7 +152,7 @@ func (p *streamUsageParser) consumeLine(line []byte) {
 // streamUsage 在新到达的 SSE 字节里查找 usage，没有新用量时沿用上一次的结果。
 // 参数 raw：本次要扫描的字节。prev：上一次找到的 usage，可为 nil。
 // 返回：更新后的 usage。从未出现过时返回 prev，可能仍是 nil。
-// 调用：pipeStream、pipeResponsesAsChat。无单独测试。
+// 调用：pipeStream。无单独测试。
 func streamUsage(raw []byte, prev map[string]any) map[string]any {
 	p := streamUsageParser{usage: prev}
 	p.write(raw, true)

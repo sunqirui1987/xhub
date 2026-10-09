@@ -46,7 +46,7 @@ const requested = {
     litellm_credential_name: "supplier-a",
     input_cost_per_token: 0.000007,
   },
-  model_info: { id: "model-123", db_model: true, endpoint_types: ["chat"], transport: "adapted", pricing_source: "catalog", base_model: "catalog/gpt" },
+  model_info: { id: "model-123", db_model: true, endpoint_types: ["chat"], transport: "bypass_openai_chat", pricing_source: "catalog", base_model: "catalog/gpt" },
 };
 const other = { ...requested, model_name: "wrong-model", model_info: { ...requested.model_info, id: "other-id" } };
 const props = {
@@ -114,7 +114,7 @@ describe("ModelInfoView reconstructed behavior", () => {
       expect(testConnectionRequest).toHaveBeenCalledWith(
         "token",
         { model: "upstream-gpt", custom_llm_provider: "openai", litellm_credential_name: "supplier-a" },
-        { id: "model-123", endpoint_types: ["chat"], transport: "adapted" },
+        { id: "model-123", endpoint_types: ["chat"], transport: "bypass_openai_chat" },
         "chat",
       ),
     );

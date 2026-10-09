@@ -193,7 +193,7 @@ export const en = {
   priceData: {
     eyebrow: "MODELS AND PRICES",
     description:
-      "The built-in catalog comes from Modelink. Add or correct entries here as needed; what you save takes effect immediately and wins over the built-in catalog.",
+      "The bundled catalog provides reference prices. Add or correct entries here as needed; what you save takes effect immediately and wins over the built-in catalog.",
     generatedAt: "Built-in catalog generated {value0}",
     models: "Models",
     providers: "Providers",

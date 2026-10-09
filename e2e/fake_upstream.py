@@ -9,33 +9,31 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class Handler(BaseHTTPRequestHandler):
-    fal_tasks: dict[str, dict] = {}
+    ark_tasks: dict[str, dict] = {}
 
-    def _fal(self, req: dict | None = None) -> bool:
-        """处理本地 Dreamina Fal 创建及查询，供旧七牛凭据的浏览器回归调用。
+    def _ark(self, req: dict | None = None) -> bool:
+        """校验官方 Ark 本地任务请求；req 为正文或 None，返回路径是否匹配。
 
-        参数 req：POST JSON，GET 时为 None；返回：匹配 Fal 路径时为 True。
-        检查 Key 鉴权、固定路径及网关字段移除；保存任务到进程内，服务结束清理，无付费调用。
+        调用：浏览器 E2E；只接受 Bearer 和显式模型、非空 content；保存内存任务，进程结束清理。
         """
-        root = "/queue/byteplus/seedance-2.0"
-        if not self.path.startswith(root):
+        roots = ("/api/v3/contents/generations/tasks", "/v3/contents/generations/tasks")
+        root = next((candidate for candidate in roots if self.path.startswith(candidate)), None)
+        if root is None:
             return False
-        if self.headers.get("Authorization") != "Key sk-fake":
+        if self.headers.get("Authorization") != "Bearer sk-fake":
             self.send_error(401)
             return True
-        if req is not None and self.path == root + "/text-to-video":
-            if "model" in req or req.get("prompt") != "legacy-qiniu-e2e":
-                self.send_error(400, "invalid Fal request body")
+        if req is not None and self.path == root:
+            if not req.get("model") or not req.get("content"):
+                self.send_error(400, "invalid Ark request body")
                 return True
-            task = "fal-e2e-" + uuid.uuid4().hex
-            self.fal_tasks[task] = req
-            self._json({"request_id": task, "response_url": "https://unused.invalid/" + task,
-                        "status_url": "https://unused.invalid/" + task + "/status"})
+            task = "ark-e2e-" + uuid.uuid4().hex
+            self.ark_tasks[task] = req
+            self._json({"id": task})
             return True
-        task = self.path.removeprefix(root + "/requests/").removesuffix("/status")
-        if req is None and task in self.fal_tasks:
-            self._json({"status": "COMPLETED", "video": {"url": "https://example.invalid/fal-e2e.mp4"},
-                        "usage": {"completion_tokens": 100}, "resolution": "1080p"})
+        task = self.path.removeprefix(root + "/")
+        if req is None and task in self.ark_tasks:
+            self._json({"id": task, "status": "succeeded", "content": {"video_url": "https://example.invalid/ark-e2e.mp4"}, "usage": {"completion_tokens": 100}})
         else:
             self.send_error(404)
         return True
@@ -46,12 +44,11 @@ class Handler(BaseHTTPRequestHandler):
         参数：无，使用当前 HTTP 请求；返回：无，写入目录或 404 响应。
         调用：浏览器模型配置 E2E；不访问外部服务，服务器结束即清理。
         """
-        if self._fal():
+        if self._ark():
             return
         if self.path.rstrip("/") in ("/models", "/v1/models",
                                            "/discovery-v1/v1/models", "/discovery-root/models"):
-            # Deliberately exceed the old 80-option UI limit. Native Fal paths
-            # come from the gateway registry, just as with a real supplier.
+            # 完整返回155条上游模型，验证列表不会被截断或附加隐式专用模型。
             self._json({"data": [{"id": "gpt-4o-mini"}] + [{"id": f"e2e-model-{i}"} for i in range(154)]})
             return
         self.send_error(404)
@@ -60,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
         """读取当前 POST JSON 并返回对应本地推理结果，供浏览器 E2E 调用。
 
         参数：无；返回：无，写 HTTP 响应；非法 JSON 按空对象处理。
-        Fal 任务由 _fal 校验和保存，其余兼容接口保持原行为，进程结束清理数据。
+        Ark 任务由 _ark 校验和保存，其余兼容接口保持原行为，进程结束清理数据。
         """
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n)
@@ -68,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError:
             req = {}
-        if self._fal(req):
+        if self._ark(req):
             return
         model = req.get("model") or "gpt-4o-mini"
         path = self.path

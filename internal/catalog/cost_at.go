@@ -1002,7 +1002,7 @@ func rowHasPrice(row map[string]any) bool {
 // Three spellings are tried for a prefixed name, and the alias is looked up for
 // each: the name as written, the name without its provider prefix, and the alias
 // the feed declares for either. Looking up the alias of only the full name misses
-// the common case - a deployment is named after the vendor ("fenno/<model>")
+// the common case - a deployment is named after the vendor ("supplier/<model>")
 // while the catalog keys the row by the vendor's own model id, and the alias
 // table is keyed by that id. Without this a prefixed deployment bills from the
 // catalog only when the row happens to already carry the vendor's id verbatim.

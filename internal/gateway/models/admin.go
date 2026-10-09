@@ -35,6 +35,10 @@ func Public(m config.ModelEntry) map[string]any {
 	}
 	stripModelOwnership(info)
 	params := redactLiteLLMParams(m.LiteLLMParams)
+
+	if err := provider.ValidateDeployment(m); err != nil {
+		info["unavailable_reason"] = err.Error()
+	}
 	info["disabled"] = m.Disabled()
 	// A model from the config file has no db_model. The dashboard uses that to disable delete and save.
 	if _, ok := info["db_model"].(bool); !ok {
@@ -145,7 +149,15 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be updated. Edit the config file.")
 		return
 	}
+	if params, ok := body["litellm_params"].(map[string]any); ok {
+		if _, exists := params["weight"]; exists {
+			httpx.WriteError(w, 400, "invalid_request", "deployment weight is obsolete; configure weights in route templates")
+			return
+		}
+	}
 	m.LiteLLMParams = maps.Clone(m.LiteLLMParams)
+	// 更新历史记录时移除旧权重，避免普通编辑重新持久化无效策略。
+
 	m.ModelInfo = maps.Clone(m.ModelInfo)
 	if v := str(body["model_name"]); v != "" {
 		m.ModelName = v
@@ -363,14 +375,12 @@ func playgroundGroups(list []config.ModelEntry) []map[string]any {
 	}
 	data := make([]map[string]any, 0, len(order))
 	for _, name := range order {
-		mode := "chat"
+		mode := "other"
 		for _, m := range list {
 			if m.ModelName != name || providerShell(m.ModelInfo) || m.Disabled() {
 				continue
 			}
-			if transport := provider.SelectedTransport(m); transport != provider.AdaptedTransportID {
-				mode = transport
-			} else if caps := provider.SelectedCapabilities(m); len(caps) > 0 {
+			if caps := provider.SelectedCapabilities(m); len(caps) > 0 {
 				mode = caps[0]
 			}
 			break
@@ -420,7 +430,6 @@ func LoadStored(s Host) {
 	if s.RecordStore() == nil {
 		return
 	}
-	dropProviderShells(s)
 	rows, err := s.RecordStore().ListProxyModels()
 	if err != nil {
 		return
@@ -451,7 +460,6 @@ func LoadStored(s Host) {
 			ModelName: row.ModelName, LiteLLMParams: row.Params, ModelInfo: row.Info,
 		})
 	}
-	SeedBuiltins(s)
 }
 
 // findByID 在当前模型表里按部署 id 查找。找不到时返回假。

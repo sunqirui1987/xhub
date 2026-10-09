@@ -10,8 +10,8 @@ vi.mock("@/components/llm_calls/fetch_models", () => ({
       model_group: "gpt-4",
       endpoints: [
         {
-          endpoint_type: "chat",
-          transport: "adapted",
+          endpoint_id: "chat",
+          transport: "bypass_openai_chat",
           kind: "adapted",
           protocol: "adapted",
           family: "chat",
@@ -24,8 +24,8 @@ vi.mock("@/components/llm_calls/fetch_models", () => ({
       model_group: "gpt-3.5-turbo",
       endpoints: [
         {
-          endpoint_type: "chat",
-          transport: "adapted",
+          endpoint_id: "chat",
+          transport: "bypass_openai_chat",
           kind: "adapted",
           protocol: "adapted",
           family: "chat",

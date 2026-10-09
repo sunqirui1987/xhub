@@ -1,6 +1,6 @@
 # 模型提供商完整重构设计
 
-状态：设计提案，尚未实现本文的新资源、OAuth 或 Fal AI 官方适配器。已有 `/models` 与 `/v1/models` 的 404 自动回退独立生效于当前模型发现代码。
+状态：剩余架构设计提案；动态供应商表单已实现，见 [认证表单](provider-credential-forms.md)。下述旧问题描述保留为设计背景。尚未实现本文的新资源、OAuth 或 Fal AI 官方适配器。已有 `/models` 与 `/v1/models` 的 404 自动回退独立生效于当前模型发现代码。
 
 ## 目标与完整范围
 
@@ -25,14 +25,12 @@
 3. `internal/catalog/feed.go` 按模型发行方和价格资料生成提供商字段，默认每家都是 API Base + API Key。发行方、价格来源与实际连接方混在一起。
 4. `internal/gateway/models/builtin.go` 泛用发现只接受 OpenAI 兼容凭证；不能用这条路径推断其他协议的目录。
 5. `internal/llm/credential.go` 与 `gateway/limits.go` 运行时按名称补字段，部分部署非空连接字段优先于凭证；修改连接后可能继续使用部署中的旧地址。
-6. `internal/provider/all` 登记 OpenAI、七牛和火山引擎的执行传输。七牛已有 Fal 视频代理传输，不代表 Fal AI 官方直连或 ChatGPT OAuth 已实现。
 
 ## 资源与职责
 
 | 资源 | 职责 | 示例 |
 | --- | --- | --- |
 | ProviderDefinition | 后端登记的提供商类型：认证字段、默认地址、发现策略、执行适配器、端点能力、文档与支持状态 | `openai`、`openai_compatible`、`fal_ai`、`chatgpt` |
-| ProviderConnection | 用户保存的连接实例：稳定 ID、可编辑名称、类型引用、非秘密配置、认证引用、启用状态与配置版本 | “OpenAI 生产账户”“七牛测试”“公司中转” |
 | ProviderAuth | 某一连接的密钥或 OAuth 令牌；仅服务端读取，支持替换、撤销与刷新 | API Key、access/refresh token、account_id |
 | ModelDeployment | 上游模型 ID、连接 ID、已验证端点/传输、对外别名和价格关联 | 公司中转 → `gpt-4o-mini` → 对外 `chat-default` |
 | ModelPrice | 计价来源、费率、单位和版本 | 目录价或手动声明价 |
@@ -65,12 +63,10 @@ ProviderDefinition ──定义──> ProviderConnection ──引用──> Pr
 | --- | --- | --- | --- |
 | OpenAI 官方 | Bearer API Key；`https://api.openai.com/v1` | 官方目录适配器 | OpenAI 已登记端点 |
 | OpenAI 兼容/中转 | Bearer API Key；用户地址，认证要求由类型定义 | 自动、无 v1、含 v1、自定义相对路径 | 只开放 XHub 能执行的兼容端点 |
-| 七牛 | 七牛账户认证与现有默认地址 | 七牛目录 + 已登记模型元数据 | OpenAI 兼容以及已登记的七牛原生传输 |
 | Fal AI 官方 | `Authorization: Key ...`；`https://fal.run` | 适配器内置支持模型 + 手动 ID；没有已验证目录 API 时不探测 `/models` | 按具体模型的图片协议转换；队列/视频需另外登记 |
 | ChatGPT 订阅 | OAuth 设备码；`https://chatgpt.com/backend-api/codex` | 适配器支持列表；账户可用性另行验证 | 原生 Responses；受支持模型可声明 Chat 桥接 |
 | Anthropic、Gemini、Azure、Bedrock 等 | 各自字段、版本、区域、角色或工作负载认证 | 各自适配器策略 | 逐项登记与验证，不能继承 OpenAI 目录策略 |
 
-Fal AI 官方与七牛 Fal 代理必须是不同连接类型，认证、地址、目录、定价来源和执行传输分别归属。ChatGPT 订阅与 OpenAI API 账户同样分开。上述 Fal AI 官方与 ChatGPT 在 XHub 中是待实现类型，必须先通过相应执行验收再启用。
 
 ## 模型发现与 v1 规则
 
@@ -126,7 +122,6 @@ LiteLLM 的本地 `auth.json` 模式可供开发参考，XHub 的多个连接和
 
 1. 盘点数据库 `credentials`、YAML 命名凭据、内置种子和部署中的 `litellm_credential_name`；生成不含秘密的迁移诊断。
 2. 每条历史凭据生成稳定连接 ID，保存名称别名映射，认证转入秘密记录；显示名变化不改变引用。迁移幂等，不合并同名但不同来源的账户。
-3. 依据实际字段和注册适配器映射类型：七牛/Fenno 保留明确来源，普通 openai 自定义域名映射兼容类型；原生协议没有执行适配器时标记待处理，不能冒充 openai。
 4. 计算每条部署当前的有效配置。历史部署覆盖了凭据地址/区域/协议的，按有效配置建立独立连接并重新引用；保持原先调用行为，不能简单删除覆盖项。内联认证也按这一方式迁移。
 5. 在事务里写连接、认证及部署引用。存在歧义、无效类型或无法解析的环境变量时报告具体资源并阻止这些资源的启用，不猜测秘密或地址。
 6. 旧 `/credentials` 等受支持接口由兼容转换器读写新服务；旧名称映射保留。新建和修改部署只写连接 ID，读取旧部署时明确标记来源。配置导出增加新资源，并提供需要时的 LiteLLM 兼容导出。
@@ -137,7 +132,6 @@ LiteLLM 的本地 `auth.json` 模式可供开发参考，XHub 的多个连接和
 - 后台：扩展 `internal/provider` 的定义登记；新增连接领域服务与存储边界、管理模块和认证模块；调整 `gateway/models`、`gateway/limits.go`、`llm` 和数据面解析。不要把当前用于测试 YAML 的 `internal/providerconfig` 当作产品连接持久化服务。
 - 前端：以 ProviderConnection 页面/表单/表格替代 `model_add/CredentialModal`、`CredentialsPanel`、`CredentialsTable` 和列定义；统一类型、请求、查询缓存、中英文文案；调整 ModelEditor、复用连接和导入流程。
 - 目录与文档：`internal/catalog/feed.go` 保留价格/发行方资料，退出认证字段职责；同步 OpenAPI 生成、接口参考、配置导入导出和用户指南。
-- 适配器：Fal AI 官方增加独立图片转换和响应映射；ChatGPT 增加连接级设备流、刷新与 Responses/SSE，逐模型声明 Chat 桥接。既有七牛 Fal 保持自己的协议与计价链。
 
 可分批实施和验证，但只有前端、后台、迁移、运行时与分层测试全部完成，且所有已展示的“可用”类型都具备执行证据，才算完成完整重构。阶段性改名不得宣称完成。
 
@@ -148,7 +142,6 @@ LiteLLM 的本地 `auth.json` 模式可供开发参考，XHub 的多个连接和
 | 层级 | 核心用例 |
 | --- | --- |
 | 单元 | 定义 Schema、不同认证字段、切换清空、秘密保留/替换、四种目录模式、前缀与边界、错误脱敏、缓存隔离、Fal 参数/响应映射、ChatGPT 字段过滤/SSE、OAuth 状态/刷新竞态、迁移映射与冲突 |
-| 后台 regression | 真实路由 + PostgreSQL：CRUD 契约/权限/持久化错误，引用删除 409，停用，认证轮换生效，目录四模式与404/401/429/5xx，OAuth 拒绝/过期/取消/刷新，Fal 官方与七牛隔离，历史有效配置迁移、事务回滚与重启持久化 |
 | E2E | 浏览器创建兼容连接 → 目录发现 → 添加部署 → 数据面调用 → 修改连接/轮换认证 → 再调用 → 清理；目录失败手动保存；只读权限；名称编辑引用不变；有引用删除阻止；Fal 选择图片端点并获得转换结果；ChatGPT 授权状态与 Responses/Chat 流结果；历史数据迁移后编辑及调用 |
 
 OAuth 认证服务器、Fal 图片服务和各模型协议用本地 HTTP 服务确定性覆盖，不要求用户的外部凭据。离线结果不能证明真实账户权限、订阅额度、所有模型可用性或第三方服务稳定性；上线支持矩阵必须另外记录每个适配器的真实服务验证范围。

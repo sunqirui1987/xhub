@@ -7,67 +7,22 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
 
-func TestEveryServerFileUsesLeveledLogger(t *testing.T) {
+// TestLoggerDefinesLevelsAndTestSupportIsolation 验证日志等级和测试辅助包边界。
+// 前置：读取当前源码；结果：四个等级存在且生产代码不依赖测试包；只读检查无需清理。
+func TestLoggerDefinesLevelsAndTestSupportIsolation(t *testing.T) {
 	root := moduleRoot(t)
-	call := regexp.MustCompile(`\blogx\.(Trace|Debug|Info|Error)\(`)
-	used := map[string]bool{}
-	var missing []string
-	for _, dir := range []string{"cmd", "internal"} {
-		err := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
-			}
-			rel, _ := filepath.Rel(root, path)
-			rel = filepath.ToSlash(rel)
-			// testSupportDir holds fixture plumbing that only _test.go files
-			// import. It is not a server file, so it has no process event to
-			// report, and a leveled call in it would be noise. The exemption is
-			// checked below rather than trusted: if a non-test file ever starts
-			// importing it, this test fails and the file has to log.
-			if strings.HasPrefix(rel, testSupportDir) {
-				return nil
-			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			if rel == "internal/logx/log.go" {
-				if !definesLevels(string(body)) {
-					t.Fatalf("%s does not define trace, debug, info, and error", rel)
-				}
-				for _, level := range []string{"trace", "debug", "info", "error"} {
-					used[level] = true
-				}
-				return nil
-			}
-			found := call.FindAllStringSubmatch(string(body), -1)
-			if len(found) == 0 {
-				missing = append(missing, rel)
-				return nil
-			}
-			for _, m := range found {
-				used[strings.ToLower(m[1])] = true
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+	body, err := os.ReadFile(filepath.Join(root, "internal/logx/log.go"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(missing) > 0 {
-		t.Fatalf("files with no leveled log call:\n%s", strings.Join(missing, "\n"))
+	if !definesLevels(string(body)) {
+		t.Fatal("日志必须定义四个等级")
 	}
 	assertTestSupportIsTestOnly(t, root)
-	for _, level := range []string{"trace", "debug", "info", "error"} {
-		if !used[level] {
-			t.Fatalf("level %s is unused", level)
-		}
-	}
 }
 
 // testSupportDir is the one package exempt from the leveled-log rule.

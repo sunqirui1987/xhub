@@ -146,7 +146,7 @@ func New(cfg *config.Config, st *store.Store, db *iam.DB) *Server {
 	}
 	prefs.ApplyTyped(s, prefs.MergedRouter(s))
 	models.LoadStored(s)
-	// Hand-entered price rows and suppliers are laid over the embedded Modelink
+	// Hand-entered price rows and suppliers are laid over the embedded price
 	// catalog before any request is served.
 	models.LoadPriceOverrides(s)
 	// An armed reload plan keeps the market prices current without a restart.

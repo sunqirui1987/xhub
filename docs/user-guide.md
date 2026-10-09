@@ -30,7 +30,6 @@ Platform administration and inference access are separate. A platform administra
 
 Several deployments can share a public model name. This gives routing a choice of upstreams without changing the application's model name.
 
-A new instance may contain built-in FennoAI and Qiniu credential entries. Supply valid credentials and configure deployments before calling models. Validate the exact operation and parameters your application needs; a registered endpoint alone does not establish support for every upstream feature. A missing price does not mean a model is free.
 
 ## 3. Assign the right administrators
 
@@ -155,3 +154,5 @@ For supported provider content-generation tasks, query with the same virtual key
 Use the [installation guide](getting-started.md) for external URLs, environment secrets, and Docker configuration. Back up PostgreSQL and deployment configuration before upgrades; validate a restore in a separate database. The current identity schema has no automatic migration from the earlier schema.
 
 For a code change or reproducible defect, include the affected operation, public model name, call ID, expected result, and relevant redacted logs. Developers can start with the [code and AI programming guide](development/README.md).
+
+Administrators explicitly create providers by selecting a type and entering its authentication fields. Price refresh requires XHUB_PRICE_FEED_URL; without it, the current bundled prices and manual overrides remain in use.

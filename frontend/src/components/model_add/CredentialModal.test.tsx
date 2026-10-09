@@ -87,11 +87,14 @@ describe("CredentialModal", () => {
     expect(screen.getByLabelText("Provider name")).toBeDisabled();
     expect(screen.getByRole("combobox",{name:"Provider type"})).toBeDisabled();
   });
-  /** 验证无普通字段供应商禁止保存且说明独立配置；无外部账户，自动清理。 */
-  it("explains providers with a separate authorization flow", async () => {
-    renderModal(); await choose("ChatGPT");
-    expect(screen.getByRole("alert")).toHaveTextContent("separate authorization");
-    expect(screen.getByRole("button",{name:"Add model provider"})).toBeDisabled();
+  /** 验证无法在弹窗完成授权的 ChatGPT 订阅账户不进入可创建目录；无外部账户，自动清理。 */
+  it("omits ChatGPT Subscription from the provider picker", async () => {
+    renderModal();
+    const user = userEvent.setup();
+    const input = await screen.findByRole("combobox", {name: "Provider type"});
+    await waitFor(() => expect(input).toBeEnabled());
+    await user.type(input, "ChatGPT");
+    expect(screen.queryByRole("option", {name: /ChatGPT/})).not.toBeInTheDocument();
   });
   for (const kind of ["false", "throw"] as const) {
     /** 验证两种保存失败均保留完整草稿并允许重试；失败回调无写入，自动卸载清理。 */

@@ -9,8 +9,8 @@ import (
 // SeedanceBilling 按供应商报告的视频 token 结算，需要成功结果与创建时保存的参考视频事实。
 // 参数：无。
 // 返回 *TaskBilling：创建请求上下文与轮询结果计费提取器。
-// 调用：qiniu 和 volcengine 的 Seedance transport 注册。
-// 测试：qiniu/seedance_test.go、volcengine/seedance_test.go。
+// 调用：volcengine 的 Seedance transport 注册。
+// 测试：volcengine/seedance_test.go。
 func SeedanceBilling() *TaskBilling {
 	logx.Trace("provider Seedance task billing configured")
 	return &TaskBilling{Context: seedanceContext, Usage: seedanceUsage}
@@ -20,7 +20,7 @@ func SeedanceBilling() *TaskBilling {
 // 参数 body（map[string]any）：提交给供应商的任务请求。
 // 返回 TaskContext：后续轮询结算所需的原始请求事实。
 // 调用：SeedanceBilling 返回的 Context 回调。
-// 测试：qiniu/seedance_test.go、volcengine/seedance_test.go。
+// 测试：volcengine/seedance_test.go。
 func seedanceContext(body map[string]any) TaskContext {
 	model, _ := body["model"].(string)
 	resolution, _ := body["resolution"].(string)
@@ -42,7 +42,7 @@ func seedanceContext(body map[string]any) TaskContext {
 // 参数 doc（map[string]any）：供应商轮询响应；c（TaskContext）：创建任务时保存的请求事实。
 // 返回 map[string]any：可计价的完成 token、搜索次数及变体；失败或缺少用量时为空。
 // 调用：SeedanceBilling 返回的 Usage 回调。
-// 测试：qiniu/seedance_test.go、volcengine/seedance_test.go。
+// 测试：volcengine/seedance_test.go。
 func seedanceUsage(doc map[string]any, c TaskContext) map[string]any {
 	if doc["status"] != "succeeded" || doc["error"] != nil {
 		return nil

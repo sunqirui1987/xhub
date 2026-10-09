@@ -12,9 +12,9 @@ func deployment(alias, apiBase string, weight float64) config.ModelEntry {
 	return config.ModelEntry{
 		ModelName: alias,
 		LiteLLMParams: map[string]any{
-			"model":    alias,
-			"api_base": apiBase,
-			"weight":   weight,
+			"model":                 alias,
+			"api_base":              apiBase,
+			"route_template_weight": weight,
 		},
 	}
 }
@@ -196,14 +196,14 @@ func TestApplyWeightsUsesTheDocumentWithoutTouchingThePool(t *testing.T) {
 	if counts["https://a.example.com"] != 3 || counts["https://b.example.com"] != 7 {
 		t.Fatalf("document shares split %v, want 3 and 7", counts)
 	}
-	if pool[0].LiteLLMParams["weight"] != 1.0 || pool[1].LiteLLMParams["weight"] != 9.0 {
+	if pool[0].LiteLLMParams["route_template_weight"] != 1.0 || pool[1].LiteLLMParams["route_template_weight"] != 9.0 {
 		t.Fatalf("the original pool was rewritten: %#v", pool)
 	}
 	if !IsSplitStrategy("weighted-split") || IsSplitStrategy("simple-shuffle") {
 		t.Fatalf("split detection drifted")
 	}
-	if same := ApplyWeights(pool, nil); len(same) != len(pool) || &same[0] != &pool[0] {
-		t.Fatalf("an empty override should be the same slice")
+	if same := ApplyWeights(pool, nil); len(same) != len(pool) || same[0].LiteLLMParams["route_template_weight"] != 1.0 || same[1].LiteLLMParams["route_template_weight"] != 1.0 {
+		t.Fatalf("an empty template must reset every share to one")
 	}
 }
 

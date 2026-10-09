@@ -39,7 +39,7 @@ func addPricedModel(t *testing.T, h *harness, admin, public string, rates []any,
 			"custom_llm_provider": "openai",
 			"rates":               rates,
 		},
-		"model_info": map[string]any{"transport": "adapted", "endpoint_types": []string{mode}},
+		"model_info": map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{mode}},
 	})
 }
 
@@ -297,7 +297,7 @@ func TestAnUnpricedCallIsNotRecordedAsFree(t *testing.T) {
 	bare := config.ModelEntry{
 		ModelName:     "regression-unpriced",
 		LiteLLMParams: map[string]any{"model": "openai/regression-unpriced", "api_key": "sk-fake-upstream"},
-		ModelInfo:     map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+		ModelInfo:     map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	}
 	h := newHarness(t, bare)
 	admin := h.adminSession()

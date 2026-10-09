@@ -197,6 +197,7 @@ func ingressModule(s *Server) httpx.Module {
 // 测试：无直接单测
 func accessModule(s *Server) httpx.Module {
 	return httpx.Bind("access", func(reg httpx.Registrar) {
+		reg.Handle("POST /route_template/preview", s.routePreview)
 		reg.Handle("POST /flushall", s.flushCache)
 		reg.Handle("GET /cache/settings", s.cacheSettings)
 		reg.Handle("POST /cache/settings", s.cacheSettings)

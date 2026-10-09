@@ -123,9 +123,9 @@ func newSupplierFixture(t *testing.T, sharedBase bool, scenarios ...providerconf
 			if d.Provider == "SUPPLIER_B" {
 				multiplier = 2
 			}
-			f.entries = append(f.entries, deployment(s.ModelName, "openai/"+d.Model, map[string]any{
+			f.entries = append(f.entries, deployment(s.ModelName, d.Model, map[string]any{
 				"deployment_id": d.ID, "api_base": bases[d.Provider], "litellm_credential_name": p.CredentialName,
-				"weight": d.Weight, "input_cost_per_token": testInputRate * multiplier, "output_cost_per_token": testOutputRate * multiplier,
+				"input_cost_per_token": testInputRate * multiplier, "output_cost_per_token": testOutputRate * multiplier,
 			}))
 		}
 	}
@@ -263,7 +263,12 @@ func TestMultiSupplierConfiguredWeights(t *testing.T) {
 				f := newSupplierFixture(t, shared, scenario)
 				admin := f.h.adminSession()
 				c := f.h.openScope(t, admin, "suppliers")
-				f.h.ok(http.MethodPost, "/config/update", admin, map[string]any{"router_settings": map[string]any{"routing_strategy": "weighted-split", "allowed_fails": 0}})
+				weights := []any{}
+				for _, dep := range scenario.Deployments {
+					weights = append(weights, map[string]any{"deployment_id": dep.ID, "weight": dep.Weight})
+				}
+				id := routeTemplate(t, f.h, admin, "configured-weights", map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{"weights": weights}, "allowed_fails": 0})
+				bindTemplate(t, f.h, admin, "team", c.teamID, id)
 				want := expectedWeightedCounts(scenario)
 				f.runCounts(t, admin, c, scenario.ModelName, scenario.Name, scenario.Requests, want)
 				if len(f.h.successRows(t, admin, scenario.ModelName)) != scenario.Requests {
@@ -283,7 +288,7 @@ func TestMultiSupplierTemplateWeights(t *testing.T) {
 			}
 			f := newSupplierFixture(t, true, s)
 			if form == "default-one" {
-				delete(f.entries[1].LiteLLMParams, "weight")
+				// 未列出的部署统一使用模板默认权重 1。
 			}
 			admin := f.h.adminSession()
 			c := f.h.openScope(t, admin, "template-suppliers")
@@ -296,7 +301,7 @@ func TestMultiSupplierTemplateWeights(t *testing.T) {
 			if form == "partial" || form == "default-one" {
 				weights = []any{map[string]any{"deployment_id": "sol-a", "weight": 1}}
 				requests = 8
-				want = map[string]int{"sol-a": 2, "sol-b": 6}
+				want = map[string]int{"sol-a": 4, "sol-b": 4}
 				if form == "default-one" {
 					want = map[string]int{"sol-a": 4, "sol-b": 4}
 				}
@@ -304,8 +309,8 @@ func TestMultiSupplierTemplateWeights(t *testing.T) {
 			id := routeTemplate(t, f.h, admin, form, map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{"weights": weights}, "allowed_fails": 0})
 			bindTemplate(t, f.h, admin, "team", c.teamID, id)
 			f.runCounts(t, admin, c, s.ModelName, form, requests, want)
-			if numberOrZero(f.entries[0].LiteLLMParams["weight"]) != 7 {
-				t.Fatal("template mutated configured deployment weight")
+			if _, exists := f.entries[0].LiteLLMParams["weight"]; exists {
+				t.Fatal("部署不能保存路由权重")
 			}
 		})
 	}
@@ -548,14 +553,14 @@ func TestMultiSupplierDatabaseDuplicateDeployments(t *testing.T) {
 	const public = "database-gpt-5.6-sol"
 	connection := f.entries[0]
 	for i, id := range []string{"db-sol-a", "db-sol-b"} {
-		weight, multiplier := 7, 1.0
+		multiplier := 1.0
 		if i == 1 {
-			weight, multiplier = 3, 2
+			multiplier = 2
 		}
 		f.h.addDBModel(t, admin, public, s.ModelName, id, map[string]any{
 			"api_base":                connection.ParamString("api_base", ""),
 			"litellm_credential_name": connection.ParamString("litellm_credential_name", ""),
-			"weight":                  weight, "input_cost_per_token": testInputRate * multiplier, "output_cost_per_token": testOutputRate * multiplier,
+			"input_cost_per_token":    testInputRate * multiplier, "output_cost_per_token": testOutputRate * multiplier,
 		})
 	}
 	f.entries = nil
@@ -570,7 +575,8 @@ func TestMultiSupplierDatabaseDuplicateDeployments(t *testing.T) {
 	if len(f.entries) != 2 || router.CooldownID(f.entries[0]) == router.CooldownID(f.entries[1]) {
 		t.Fatal("database duplicate rows collapsed into one runtime deployment")
 	}
-	f.h.ok(http.MethodPost, "/config/update", admin, map[string]any{"router_settings": map[string]any{"routing_strategy": "weighted-split", "allowed_fails": 0}})
+	id := routeTemplate(t, f.h, admin, "database-weights", map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{"weights": []any{map[string]any{"deployment_id": "db-sol-a", "weight": 7}, map[string]any{"deployment_id": "db-sol-b", "weight": 3}}}, "allowed_fails": 0})
+	bindTemplate(t, f.h, admin, "team", c.teamID, id)
 	before := f.h.moneyOf(t, c)
 	counts := map[string]int{}
 	total := 0.0

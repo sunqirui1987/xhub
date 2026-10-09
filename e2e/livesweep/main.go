@@ -104,6 +104,11 @@ func main() {
 			lines = append(lines, fmt.Sprintf("route unsupported %s %s %d", method, rt.Path, code))
 			continue
 		}
+		// 价格刷新没有配置外部源时应明确失败；这是可观测的业务边界，不是路由错位。
+		if expectedOperationalFailure(method, path, code, resp) {
+			record()
+			continue
+		}
 		if code == 0 || code == 404 || code >= 500 {
 			bad = append(bad, fmt.Sprintf("%s %s -> %d %s", method, path, code, truncate(resp, 180)))
 			record()
@@ -167,6 +172,14 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("checked=%d misaligned=0 unique_http_routes=%d\n", checked, doc.Baseline.Unique)
+}
+
+// expectedOperationalFailure 识别目录 sweep 中依赖显式外部配置的合法失败。
+// 参数为请求方法、路径、状态码与响应；返回是否符合精确业务契约。调用：main 路由逐项检查。
+// 仅允许未配置价格源这一种 502，其他服务端错误仍计为路由错位。
+func expectedOperationalFailure(method, path string, code int, body string) bool {
+	return method == http.MethodPost && path == "/reload/model_cost_map" && code == http.StatusBadGateway &&
+		strings.Contains(body, "price feed URL must be explicitly configured")
 }
 
 func mint(client *http.Client, base, master string) (string, string) {

@@ -42,7 +42,7 @@ func liveModelDeployment(vendor liveVendor, model string) config.ModelEntry {
 			"custom_llm_provider": vendor.Protocol,
 			"timeout":             90,
 		},
-		ModelInfo: map[string]any{"endpoint_types": []string{"chat"}, "transport": "adapted"},
+		ModelInfo: map[string]any{"endpoint_types": []string{"chat"}, "transport": "bypass_openai_chat"},
 	}
 }
 

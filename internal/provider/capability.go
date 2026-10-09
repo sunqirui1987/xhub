@@ -21,8 +21,8 @@ var capabilities = []Capability{
 		// messages、responses 和 chat 是三种公开协议入口，但都由对话适配器
 		// 承担，因此属于同一个“对话能力”。gemini 是内部路由识别出的
 		// generateContent 入口，不作为配置页面上的独立选项，也没有展示路径。
-		Ops:   []string{"chat", "messages", "responses", "gemini"},
-		Paths: []string{"/v1/chat/completions", "/v1/messages", "/v1/responses"},
+		Ops:   []string{"chat", "messages", "responses"},
+		Paths: []string{"/v1/chat/completions"},
 	},
 	{
 		// 单独一条，不并进 chat：正文是 prompt，上游是 /completions，
@@ -108,10 +108,6 @@ func CapabilityForOp(op string) (string, bool) {
 	}
 	return "", false
 }
-
-// AdaptedTransportID 是协议适配那一档的 id。它不进登记表：行为由
-// (op, 供应商) 决定，没有可登记的数据。
-const AdaptedTransportID = "adapted"
 
 // isKnownCapability 判断这个 id 是不是一条登记过的能力。
 // 参数 id（string）：要判断的 id。

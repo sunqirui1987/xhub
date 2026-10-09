@@ -85,18 +85,18 @@ func TestTemplateWeightsRequireStableIdentity(t *testing.T) {
 		"deployment:supplier-a": 3,
 		"deployment:supplier-b": 7,
 	})
-	if paramFloat(weighted[0], "weight", 0) != 3 || paramFloat(weighted[1], "weight", 0) != 7 {
+	if paramFloat(weighted[0], "route_template_weight", 0) != 3 || paramFloat(weighted[1], "route_template_weight", 0) != 7 {
 		t.Fatalf("stable identities did not isolate weights: %#v", weighted)
 	}
 	physical := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{"same|shared-name": 5})
-	if paramFloat(physical[0], "weight", 0) != 1 || paramFloat(physical[1], "weight", 0) != 1 {
+	if paramFloat(physical[0], "route_template_weight", 0) != 1 || paramFloat(physical[1], "route_template_weight", 0) != 1 {
 		t.Fatalf("physical identity unexpectedly applied: %#v", physical)
 	}
 	preferred := ApplyWeights([]config.ModelEntry{a, b}, map[string]float64{
 		"same|shared-name":      5,
 		"deployment:supplier-a": 3,
 	})
-	if paramFloat(preferred[0], "weight", 0) != 3 || paramFloat(preferred[1], "weight", 0) != 1 {
+	if paramFloat(preferred[0], "route_template_weight", 0) != 3 || paramFloat(preferred[1], "route_template_weight", 0) != 1 {
 		t.Fatalf("physical identity unexpectedly overrode a row: %#v", preferred)
 	}
 }
@@ -114,7 +114,7 @@ func TestTemplateWeightIdentityPrefersDeploymentOverSharedPricing(t *testing.T) 
 		"deployment:supplier-a": 3,
 		"deployment:supplier-b": 7,
 	})
-	if paramFloat(weighted[0], "weight", 0) != 3 || paramFloat(weighted[1], "weight", 0) != 7 {
+	if paramFloat(weighted[0], "route_template_weight", 0) != 3 || paramFloat(weighted[1], "route_template_weight", 0) != 7 {
 		t.Fatalf("shared pricing identity overrode deployment identities: %#v", weighted)
 	}
 }

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { GATEWAY, MASTER, loginAdmin, stableGoto, t, watchGateway } from "./helpers";
+import { GATEWAY, loginAdmin, sessionBearer, stableGoto, t, watchGateway } from "./helpers";
 
 /** 用途：打开护栏管理标签；参数：page 页面、name 标签名称；返回：标签内容完成切换。 */
 async function openTab(page: Page, name: string) {
@@ -37,7 +37,7 @@ async function assertMode(page: Page, dialog: Locator) {
 /** 用途：调用真实网关聊天数据面；参数：page 登录页面、body 请求正文；返回：响应和 JSON。 */
 async function chat(page: Page, body: Record<string, unknown>) {
   const response = await page.request.post(GATEWAY + "/v1/chat/completions", {
-    headers: { Authorization: "Bearer " + MASTER, "Content-Type": "application/json" },
+    headers: { Authorization: "Bearer " + await sessionBearer(page), "Content-Type": "application/json" },
     data: body,
   });
   return { response, json: await response.json() };
@@ -46,14 +46,14 @@ async function chat(page: Page, body: Record<string, unknown>) {
 /** 用途：清理本测试产生的规则；参数：page 页面、names 精确名称列表；返回：清理完成。 */
 async function cleanup(page: Page, names: string[]) {
   const response = await page.request.get(GATEWAY + "/guardrails/list", {
-    headers: { Authorization: "Bearer " + MASTER },
+    headers: { Authorization: "Bearer " + await sessionBearer(page) },
   });
   if (!response.ok()) return;
   const body = await response.json();
   for (const row of Array.isArray(body.guardrails) ? body.guardrails : []) {
     if (names.includes(row.guardrail_name) && row.guardrail_id) {
       await page.request.delete(GATEWAY + "/guardrails/" + encodeURIComponent(row.guardrail_id), {
-        headers: { Authorization: "Bearer " + MASTER },
+        headers: { Authorization: "Bearer " + await sessionBearer(page) },
       });
     }
   }
@@ -79,8 +79,8 @@ test.describe("新护栏逻辑完整 E2E", () => {
     await expect(page.getByRole("button", { name: /关键词 \/ 正则护栏/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /XGo 自定义护栏/ })).toBeVisible();
     await expect(page.getByText("外部服务目录", { exact: true })).toBeVisible();
-    await page.getByLabel("搜索护栏服务", { exact: true }).fill("CrowdStrike");
-    await expect(page.getByRole("button", { name: /CrowdStrike/ })).toContainText("尚未移植");
+    await page.getByLabel("搜索护栏服务", { exact: true }).fill("Aporia");
+    await expect(page.getByRole("button", { name: /Aporia/ })).toContainText("尚未移植");
     await page.getByRole("tab", { name: t("pages.guardrails.submitted"), exact: true }).click();
     await expect(page.getByText("Cannot read properties of undefined", { exact: false })).toHaveCount(0);
     guard.assertOk();
@@ -131,6 +131,7 @@ test.describe("新护栏逻辑完整 E2E", () => {
     await openTab(page, t("pages.guardrails.title"));
     await page.getByLabel("搜索护栏", { exact: true }).fill("e2e-guardrails-local");
     await page.getByRole("row").filter({ hasText: "e2e-guardrails-local" }).getByRole("button").nth(1).click();
+    await page.getByRole("menuitem", { name: t("common.delete"), exact: true }).click();
     await page
       .getByRole("dialog")
       .getByRole("button", { name: t("common.delete"), exact: true })
@@ -153,7 +154,7 @@ test.describe("新护栏逻辑完整 E2E", () => {
     await dialog.getByLabel("护栏名称", { exact: true }).fill("e2e-guardrails-default");
     await dialog.getByLabel("正则表达式（每行一个，可选）", { exact: true }).fill("");
     await dialog.getByLabel("关键词（每行一个）", { exact: true }).fill("e2e-default-block");
-    await dialog.getByRole("switch", { name: "默认启用（所有请求）", exact: true }).click();
+    await dialog.getByRole("switch", { name: /默认启用（客户端不能关闭）/ }).click();
     const created = page.waitForResponse(
       (r) => new URL(r.url()).pathname === "/guardrails" && r.request().method() === "POST",
     );
@@ -177,7 +178,7 @@ test.describe("新护栏逻辑完整 E2E", () => {
     await page.getByRole("menuitem", { name: "XGo 自定义脚本护栏", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "创建 XGo 护栏", exact: true })).toBeVisible();
-    for (const primitive of ["Return Values", "HTTP Requests", "Regex Functions", "JSON Functions", "LLM Chat"])
+    for (const primitive of ["返回值", "HTTP 请求", "正则函数", "JSON 函数", "大模型调用"])
       await expect(dialog).toContainText(primitive);
     await assertMode(page, dialog);
     await dialog.getByLabel("护栏名称", { exact: true }).fill("e2e-guardrails-xgo");
@@ -192,7 +193,9 @@ test.describe("新护栏逻辑完整 E2E", () => {
       "}",
     ].join("\n");
     await dialog.getByLabel("XGo 代码", { exact: true }).fill(xgo);
-    await dialog.getByLabel("测试文本", { exact: true }).fill("xgo-block");
+    await dialog
+      .getByLabel("测试输入（JSON）", { exact: true })
+      .fill(JSON.stringify({ texts: ["xgo-block"], model: "gpt-4o-mini", metadata: {} }, null, 2));
     const trial = page.waitForResponse((r) => new URL(r.url()).pathname === "/guardrails/test_custom_code");
     await dialog.getByRole("button", { name: "测试当前代码", exact: true }).click();
     expect((await (await trial).json()).result.action).toBe("block");

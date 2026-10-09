@@ -29,8 +29,8 @@ function priceSummary(model: EditorModel, rows: Record<string, CatalogRow>) {
 }
 
 function callType(info: Record<string, unknown>): string {
-  if (typeof info.transport === "string" && info.transport !== "adapted") return info.transport;
-  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "chat") : "chat";
+  if (typeof info.transport === "string") return info.transport;
+  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "") : "";
 }
 
 export default function AllModelsPanel() {

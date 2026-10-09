@@ -9,6 +9,7 @@ import (
 // 参数 protocol：注册表中的协议标识；返回函数的 doc 是上游响应，request 是原始请求字段。
 // 返回：可供目录计价的用量；缺少事实时带 pricing_blocked，明确失败时返回 nil。
 // 调用：原生传输注册、NativeStreamUsage。价格由 catalog 和部署规则决定。
+// 测试：native_usage_test.go。
 func NativeUsage(protocol string) func(map[string]any, map[string]any) map[string]any {
 	return func(doc, request map[string]any) map[string]any {
 		if doc["error"] != nil {
@@ -61,6 +62,7 @@ func NativeUsage(protocol string) func(map[string]any, map[string]any) map[strin
 // 参数 protocol：原生协议；raw：包含空行分隔符的事件；request：请求中的图片规格等事实。
 // 返回：本批事件报告的用量；无事实的中间事件返回 nil，终态缺失事实保留计价阻断原因。
 // 调用：dataplane.forwardOfficial。图片的跨事件累加由转发器完成。
+// 测试：native_usage_test.go。
 func NativeStreamUsage(protocol string, raw []byte, request map[string]any) map[string]any {
 	out := map[string]any{}
 	source := strings.ReplaceAll(string(raw), "\r\n", "\n")
@@ -110,14 +112,16 @@ func NativeStreamUsage(protocol string, raw []byte, request map[string]any) map[
 // NativeStreamState 保存一次原生流的完成、失败及图片完成事件数。
 // 流正常 EOF 不代表业务成功；结算必须观察到协议规定的完成事件且没有失败事件。
 type NativeStreamState struct {
-	Completed bool
-	Failed    bool
-	Images    int
+	Completed  bool
+	Failed     bool
+	Images     int
+	ResponseID string // 仅成功 Responses 终态报告的存储响应 ID.
 }
 
 // Observe 消费一个完整 SSE 事件，更新状态但不修改事件内容。
 // 参数 protocol：协议标识；raw：原始事件。返回：无，结果写入接收者。
 // 调用：dataplane.forwardOfficial。错误状态只累积，不会被后续完成事件覆盖。
+// 测试：native_usage_test.go。
 func (s *NativeStreamState) Observe(protocol string, raw []byte) {
 	var data []string
 	var event string
@@ -138,9 +142,16 @@ func (s *NativeStreamState) Observe(protocol string, raw []byte) {
 		s.Failed = true
 	}
 	switch protocol {
+	case "openai-chat":
+		if strings.TrimSpace(strings.Join(data, "\n")) == "[DONE]" {
+			s.Completed = true
+		}
 	case "openai-responses":
 		if event == "response.completed" {
 			s.Completed = true
+			if response, ok := doc["response"].(map[string]any); ok {
+				s.ResponseID, _ = response["id"].(string)
+			}
 		}
 	case "anthropic-messages":
 		if event == "message_stop" {

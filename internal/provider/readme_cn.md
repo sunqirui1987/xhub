@@ -14,7 +14,6 @@ SelectedCapabilities 只读取 endpoint_types；缺失或空列表表示没有�
 | --- | --- |
 | [all](all/readme_cn.md) | 内置供应商装配 |
 | [openai](openai/readme_cn.md) | OpenAI 供应商占位边界 |
-| [qiniu](qiniu/readme_cn.md) | 七牛官方视频任务传输 |
 | [volcengine](volcengine/readme_cn.md) | 火山方舟官方视频任务传输 |
 
 ## 源码职责与入口
@@ -30,7 +29,6 @@ SelectedCapabilities 只读取 endpoint_types；缺失或空列表表示没有�
 
 ### seedance_billing.go
 
-`SeedanceBilling()` 为七牛与火山方舟的 Seedance 任务传输提供创建请求事实和成功任务用量提取。创建时记录是否含参考视频；查询成功后以最终分辨率选择输出费率变体，只传递实际完成 token 和网页搜索次数。失败或未完成任务不产生可计费用量；缺失创建上下文时保留未知变体，不猜成无参考视频价格。
 
 - [`func RegisterTransport(t Transport)`](registry.go) — RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
 - [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型，并为表单记录默认执行传输 ID。
@@ -50,11 +48,9 @@ SelectedCapabilities 只读取 endpoint_types；缺失或空列表表示没有�
 
 ### type.go
 
-Fal 队列使用 Action.Model 表示路径固定模型，Transport.AuthScheme 指定 Key 鉴权，QueueURLs 指示转发层改写查询链接。TaskBilling 将成功判断和用量提取独立于 HTTP 转发；fal_billing.go 记录创建档位并处理状态包裹/裸结果，缺少完整定价语义时保留待核价原因。新增模型无需向转发层添加供应商分支，详见 [七牛 Fal 扩展](../../docs/development/qiniu-fal.md)。
 
 公开类型：`Action`, `Capability`, `Transport`, `Kind`, `Hit`.
 
-- [`func OfficialID(prefix, stored string) string`](type.go) — OfficialID 从存储的模型 id 上剥掉一层 "<前缀>/"。后面的斜杠保留， 所以 qiniu/bytedance/doubao-... 会变成 bytedance/doubao-...
 - [`func ReadTaskID(doc map[string]any, path string) string`](type.go) — ReadTaskID 从 JSON 对象里读一个点分字段，例如 "data.task_id"。
 - [`func Expand(pattern string, names map[string]string) string`](type.go) — Expand 把上游路径里的 {name} 占位符填上。
 

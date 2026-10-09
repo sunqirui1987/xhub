@@ -13,7 +13,7 @@ type falEndpoint struct {
 	billing          provider.FalModel
 }
 
-// registerFal 注册一个七牛 Fal 模型组和它的创建、状态、结果操作。
+// registerFal 注册一个可由 Custom 凭据显式选择的七牛 Fal 模型组及其创建、状态、结果操作。
 // 参数 id：传输 ID；label：展示名；queue：查询路径所属模型组；endpoints：允许的具体模型路径。
 // 返回：无。模型目录与传输注册表同时更新，URL 模型 ID 与定价 ID 分别保存。
 // 调用：本包 init。测试：fal_test.go、billing_test.go。
@@ -27,15 +27,15 @@ func registerFal(id, label, queue string, endpoints []falEndpoint) {
 		specs[e.path] = e.billing
 		actions = append(actions, provider.Action{Name: "create", Method: "POST", PublicPath: "/queue/" + e.path, UpstreamPath: "/queue/" + e.path, Model: e.path})
 		provider.RegisterModel(provider.Model{
-			ID: "qiniu/" + e.path, Provider: "qiniu", Official: e.path, Mode: "video", EndpointType: id,
+			ID: "qiniu/" + e.path, Provider: "qiniu", Official: e.path, Mode: "video", TransportID: id,
 			Source:     "https://docs.modelink.ai/api/video-fal-" + e.doc,
 			PriceModel: e.price, PriceSource: "https://api.modelink.ai/v1/market/models",
 		})
 	}
 	provider.RegisterTransport(provider.Transport{
-		EndpointType: "bypass:fal-video", Protocol: "fal", Family: "video", ModelGroup: label,
-		ID: id, Label: "Bypass - 七牛 Fal " + label, Kind: provider.KindBypass, Providers: []string{"qiniu"},
-		APIBase: "https://api.qnaigc.com", StripPrefix: "qiniu", Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Key"}, TaskID: "request_id", QueueURLs: true,
+		EndpointID: "bypass:fal-video", Protocol: "fal", Family: "video", ModelGroup: label,
+		ID: id, Label: "Bypass - 七牛 Fal " + label, Kind: provider.KindBypass, Providers: []string{"custom", "custom_openai"},
+		StripPrefix: "qiniu", Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Key"}, TaskID: "request_id", QueueURLs: true,
 		Billing: provider.FalBilling(specs), Actions: actions,
 	})
 }

@@ -1,7 +1,7 @@
 // Package catalog loads the built-in model price map and lists models by provider.
 //
-// The price map is generated from the Modelink market feed
-// (https://api.modelink.ai/v1/market/models) by ./cmd/pricedata and
+// The price map is generated from the configured price feed
+// (显式配置的价格源) by ./cmd/pricedata and
 // embedded as publicdata/pricedata.json. There is no LiteLLM price file and no
 // sample_spec row: every key in the map is a real model.
 package catalog
@@ -111,7 +111,7 @@ var knownLLMProviders = map[string]struct{}{
 	"xiaomi_mimo": {}, "tensormesh": {}, "libertai": {}, "pinstripes": {}, "cognition": {},
 	"scx-ai": {}, "darkbloom": {}, "meta": {}, "litellm_agent": {}, "cursor": {},
 	"bedrock_mantle": {}, "gdc": {},
-	// Suppliers the embedded Modelink catalog names.
+	// Suppliers the embedded price catalog names.
 	"kling": {}, "vidu": {}, "byteplus": {}, "meituan": {}, "stepfun": {}, "arcee_ai": {},
 }
 

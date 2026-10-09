@@ -375,6 +375,7 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
                 form={draft.form}
                 deployments={deployments}
                 accessToken={accessToken}
+                templateId={draft.id || undefined}
                 onName={(name) => setDraft({ ...draft, name })}
                 onChange={(form) => setDraft({ ...draft, form })}
                 onJsonValid={setJsonValid}

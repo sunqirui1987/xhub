@@ -20,7 +20,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/cache"
@@ -59,7 +58,7 @@ func dropDisabled(pool []config.ModelEntry) ([]config.ModelEntry, int) {
 // Serve runs one inference. It picks deployments with the routing strategy, encodes the upstream request, and tries the next deployment after a failure.
 // Serve 跑一次适配推理。预算或护栏拒绝时响应已经写好，函数直接返回。
 // 扩展按注册顺序在缓存和上游之前运行。重试次数小于 1 时按 1 次。没有 api_base
-// 时用供应商默认地址。没有密钥或地址的部署跳过。
+// 时拒绝调用。没有密钥或地址的部署跳过。
 //
 // 参数 h：Adapted，不含官方任务钉。w：调用方响应。r：入站请求，正文只读一次。
 // 参数 op：目录操作名，例如 chat、embedding。
@@ -100,7 +99,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		logx.Debug("process path=%s step=limits refused model=%s", r.URL.Path, alias)
 		return
 	}
-	if op == "chat" || op == "responses" || op == "" {
+	if op == "chat" || op == "responses" || op == "messages" || op == "" {
 		if blocked, msg := h.GuardrailBlocks(callID, body); blocked {
 			logx.Error("process path=%s step=guardrail blocked model=%s", r.URL.Path, alias)
 			// The refusal is still a request. Record it so the logs drawer can
@@ -143,7 +142,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	routeCfg = routeCfg.ForModel(alias)
+	routeCfg = routeCfg.ForEndpoint(alias, provider.EndpointForOp(op))
 	if routeCfg.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", routeCfg.Err.Error())
 		return
@@ -153,6 +152,18 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		tenant = "user:" + p.UserID
 	}
 	plan := h.PlanRoute(r, alias, body, p)
+	if plan.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", plan.Err.Error())
+		return
+	}
+	var dialogue llm.Dialogue
+	if callerProtocol(op) != "" {
+		dialogue, err = llm.ParseDialogue(callerProtocol(op), dialogueRequestBody(body))
+		if err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 400, "unsupported_capability", err.Error())
+			return
+		}
+	}
 	cacheScope, err := json.Marshal(map[string]any{
 		"models": cfg.ModelList, "router": routeCfg.Settings,
 		"session": plan.SessionID, "query": r.URL.RawQuery,
@@ -182,21 +193,28 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
 		return
 	}
-	// Shares in the resolved document override the weight stored on a deployment,
-	// and only for a weighted split. simple-shuffle still reads the deployment's
-	// own weight and picks the heaviest one; applying the document here would
-	// change that.
+	// 权重仅取自解析后的模板，旧部署权重不会参与任何策略。
 	models := cfg.ModelList
 	if router.IsSplitStrategy(routeCfg.Strategy()) {
 		models = router.ApplyWeights(models, routeCfg.WeightOverrides())
 	}
 	models, disabled := dropDisabled(models)
-	// 能力门。适配路径原来完全不过滤端点类型，一条标成 embedding 的部署
-	// 仍能被 /v1/chat/completions 打到。Bypass 部署在这里被丢掉：它们的入口是
-	// 供应商自己的路径，由 gateway 的 serveBypass 先一步接走，落到这里只会打错地址。
-	models = provider.AdaptedPool(models, op)
-	pool := router.Order(models, alias, routeCfg.Strategy(), h.RouteState())
-	pool = preferDeployment(pool, plan.Pinned)
+	// 实际请求与预览使用同一兼容性判断，策略只处理已经兼容的候选。
+	if callerProtocol(op) != "" {
+		models, _ = provider.Candidates(models, provider.EndpointForOp(op), &dialogue)
+	} else {
+		models, _ = provider.Candidates(models, provider.EndpointForOp(op), nil)
+	}
+	state := h.RouteState()
+	state.SplitScope = routeCfg.CursorScope(alias, provider.EndpointForOp(op))
+	pool := router.Schedule(models, alias, routeCfg.Strategy(), state, plan.Pinned)
+	if plan.Required && (state.Cooldown[plan.Pinned] || len(pool) == 0 || router.CooldownID(pool[0]) != plan.Pinned) {
+		httpx.WriteTypedError(w, r.URL.Path, 409, "continuation_unavailable", "original deployment is unavailable")
+		return
+	}
+	if plan.Required {
+		pool = pool[:1]
+	}
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
 		if disabled > 0 {
@@ -222,7 +240,6 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	// tracked separately from lastProvider, which is set before the provider is
 	// checked and therefore cannot tell the two failures apart: an operator who
 	// misspelled a provider name used to be told their API key was missing.
-	unimplementedProvider := false
 
 	for _, rawDep := range pool {
 		if triedHTTP {
@@ -246,51 +263,34 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			continue
 		}
 		upstreamModel := dep.ParamString("model", alias)
-		provider, realModel := config.SplitProviderModel(upstreamModel)
-		if custom := dep.ParamString("custom_llm_provider", ""); custom != "" {
-			provider = custom
-		}
-		provider = strings.ToLower(strings.TrimSpace(provider))
-		lastProvider = provider
-		if _, ok := llm.ProtocolGroup(provider); !ok || provider == "" {
-			unimplementedProvider = true
-			logx.Debug("process path=%s step=skip provider=%s model=%s reason=unimplemented", r.URL.Path, provider, realModel)
-			continue
-		}
-		apiBase := trimBase(dep.ParamString("api_base", ""))
-		usedDefaultBase := false
-		if apiBase == "" {
-			apiBase = llm.DefaultAPIBase(provider)
-			usedDefaultBase = apiBase != ""
-		}
-		if provider == "qiniu" {
-			if apiBase == "" {
-				apiBase = "https://api.qnaigc.com"
-			}
-			apiBase = trimBase(apiBase) + "/bypass/openai/v1"
-		}
-		apiKey := dep.ParamString("api_key", "")
-		if apiKey == "" || apiBase == "" {
-			missingCredential = true
-			logx.Debug("skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, provider, realModel)
-			continue
-		}
-		if usedDefaultBase {
-			logx.Debug("api_base empty path=%s provider=%s model=%s using default host", r.URL.Path, provider, realModel)
-		} else {
-			logx.Debug("upstream path=%s provider=%s model=%s base_host=%s", r.URL.Path, provider, realModel, baseHost(apiBase))
-		}
+		supplier := dep.ParamString("custom_llm_provider", "")
+		realModel := upstreamModel
+		lastProvider = supplier
+		var built llm.Upstream
+		var err error
+		apiBase := dep.ParamString("api_base", "")
 		did := router.CooldownID(rawDep)
-		upstreamOp := llm.PrepareQiniuBypass(op, apiBase, body)
-		built, err := llm.Build(r.Context(), llm.Request{
-			Op: upstreamOp, Provider: provider, APIBase: apiBase, APIKey: apiKey, Model: realModel, Body: body,
-			VertexProject:  dep.ParamString("vertex_project", ""),
-			VertexLocation: dep.ParamString("vertex_location", ""),
-		})
-		if err != nil {
-			lastErr = err
-			logx.Error("upstream encode path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
-			continue
+		if callerProtocol(op) != "" {
+			built, err = buildDialogue(dep, dialogue)
+			if errors.Is(err, errDialogueCredentials) {
+				missingCredential = true
+				logx.Debug("skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, supplier, realModel)
+				continue
+			}
+			if err != nil {
+				lastErr = err
+				continue
+			}
+		} else {
+			built, err = buildRegisteredOperation(dep, body, op)
+			if errors.Is(err, errDialogueCredentials) {
+				missingCredential = true
+				continue
+			}
+			if err != nil {
+				lastErr = err
+				continue
+			}
 		}
 
 		for try := 0; try < attempts; try++ {
@@ -306,7 +306,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				}
 			}
 			triedHTTP = true
-			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, provider, realModel, baseHost(apiBase))
+			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, supplier, realModel, baseHost(apiBase))
 			h.IncBusy(did)
 			// The timeout belongs to this request's document, not to the process
 			// client. The shared client is copied so its Timeout of 0 lets the
@@ -318,7 +318,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				cancelAttempt()
 				h.DecBusy(did)
 				lastErr = err
-				logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, provider, realModel, safeErr(err))
+				logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, supplier, realModel, safeErr(err))
 				continue
 			}
 			for key, values := range built.Header {
@@ -326,13 +326,15 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			}
 			client := *h.HTTPClient()
 			client.Timeout = 0
+			// 明确地址不跟随重定向，防止凭据被转发到未配置的连接。
+			client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 			resp, err := client.Do(req)
 			if err != nil {
 				cancelAttempt()
 				h.DecBusy(did)
 				lastErr = err
 				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
-				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(err))
+				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(err))
 				continue
 			}
 			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
@@ -343,22 +345,21 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
 				lastStatus = resp.StatusCode
 				lastErr = errUpstreamStatus
-				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, provider, realModel, baseHost(apiBase), resp.StatusCode)
+				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, supplier, realModel, baseHost(apiBase), resp.StatusCode)
 				continue
 			}
 
 			h.NoteLatency(did, float64(time.Since(start).Milliseconds()))
 			h.SetChatHeaders(w, p, alias, apiBase)
-			// A chat client still expects chat chunks. The bypass body is Responses SSE, so translate only that public op.
-			asChat := upstreamOp == llm.OpResponses && (op == "" || op == llm.OpChat) && resp.StatusCode < 400
 			if stream {
 				var wrote bool
 				var usage map[string]any
 				var ttft time.Duration
 				var streamed []byte
 				var streamErr error
-				if asChat {
-					wrote, usage, ttft, streamed, streamErr = pipeResponsesAsChat(w, resp, start, alias)
+				if callerProtocol(op) != "" && resp.StatusCode < 400 {
+					execution, _ := provider.Execution(dep)
+					wrote, usage, ttft, streamed, streamErr = pipeDialogue(w, resp, start, alias, execution.Protocol, callerProtocol(op))
 				} else {
 					wrote, usage, ttft, streamed, streamErr = pipeStream(w, resp, start)
 				}
@@ -367,23 +368,27 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				if streamErr != nil {
 					lastErr = streamErr
 					h.NoteFailure(did, routeCfg)
-					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(streamErr))
+					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(streamErr))
 					if wrote {
 						h.RememberExchange(callID, r, raw, streamed)
-						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck, SessionID: plan.SessionID})
+						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck, SessionID: plan.SessionID})
 						h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusBadGateway, did)
 						return
 					}
 					continue
 				}
 				if wrote {
-					usage = completeUsage(usage, body, streamed)
+					if callerProtocol(op) != "" {
+						usage = llm.NormalizeDialogueUsage(usage)
+					} else {
+						usage = completeUsage(usage, body, streamed)
+					}
 					pt, ct := usageCounts(usage)
 					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
 					depID := did
 					h.RememberExchange(callID, r, raw, streamed)
 					h.AnnotateCall(callID, CallNote{
-						TTFTMs: ttftMillis(ttft), Provider: provider, CacheKey: ck,
+						TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck,
 						SessionID: plan.SessionID,
 					})
 					if resp.StatusCode < 400 {
@@ -393,7 +398,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 					return
 				}
 				lastErr = errEmptyUpstream
-				logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, provider, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
+				logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
 				continue
 			}
 			respBody, readErr := io.ReadAll(resp.Body)
@@ -405,23 +410,33 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				h.NoteFailure(did, routeCfg)
 				continue
 			}
-			if asChat {
-				respBody = llm.ResponsesToChat(respBody, alias)
+			if callerProtocol(op) != "" && resp.StatusCode < 400 {
+				execution, _ := provider.Execution(dep)
+				result, conversionErr := llm.ParseDialogueResult(execution.Protocol, respBody)
+				if conversionErr != nil {
+					lastErr = conversionErr
+					continue
+				}
+				respBody, conversionErr = llm.EncodeDialogueResult(result, callerProtocol(op), alias)
+				if conversionErr != nil {
+					lastErr = conversionErr
+					continue
+				}
 			}
 			elapsed := time.Since(start)
 			pt, ct := bodyUsage(respBody)
-			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, provider, realModel)
+			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, supplier, realModel)
 			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
 			depID := did
 			h.RememberExchange(callID, r, raw, respBody)
 			h.AnnotateCall(callID, CallNote{
-				TTFTMs: ttftMillis(elapsed), Provider: provider, CacheKey: ck,
+				TTFTMs: ttftMillis(elapsed), Provider: supplier, CacheKey: ck,
 				SessionID: plan.SessionID,
 			})
 			if resp.StatusCode < 400 {
 				h.CommitRoute(plan, depID, responseID(respBody))
 			}
-			h.WriteChatJSON(w, p, callID, alias, ck, op, provider, respBody, resp.StatusCode, start, depID)
+			h.WriteChatJSON(w, p, callID, alias, ck, op, "", respBody, resp.StatusCode, start, depID)
 			return
 		}
 	}
@@ -441,11 +456,6 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			logx.Error("dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusUnauthorized, "")
 			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "This model has no upstream API key configured.")
-		case unimplementedProvider:
-			logx.Error("dataplane path=%s status=400 code=provider_not_implemented provider=%s", r.URL.Path, lastProvider)
-			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
-			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented",
-				"This model's provider is not supported: "+lastProvider)
 		case lastErr != nil:
 			// The provider name is known but the request could not be encoded for
 			// it. Reporting this as a missing credential would be a lie, and the
@@ -454,17 +464,13 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 				r.URL.Path, lastProvider, safeErr(lastErr))
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			detail := safeErr(lastErr)
-			if errors.Is(lastErr, llm.ErrUnknownProvider()) {
-				// The sentinel's own text is just the code, which would read as
-				// "The request could not be encoded for base_llm: provider_not_implemented".
-				detail = "the gateway has no encoder for this provider"
-			}
-			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented",
+
+			httpx.WriteTypedError(w, r.URL.Path, 400, "execution_error",
 				"The request could not be encoded for "+lastProvider+": "+detail)
 		default:
 			logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
-			httpx.WriteTypedError(w, r.URL.Path, 400, "provider_not_implemented", "provider_not_implemented")
+			httpx.WriteTypedError(w, r.URL.Path, 400, "execution_error", "execution_error")
 		}
 		return
 	}

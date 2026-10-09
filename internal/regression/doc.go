@@ -6,7 +6,7 @@
 //
 // 这套测试按发布必须回答的问题排列，顺序和用户提的顺序一致：
 //
-//  1. 搭租户：加 fennoai 和 qiniu 供应商，再建组织、团队、项目、用户和密钥。
+//  1. 搭租户：加通用兼容与官方方舟供应商，再建组织、团队、项目、用户和密钥。
 //  2. 用各种端点类型调模型：chat、embedding，以及自定义的 Seedance Bypass。
 //  3. 核对返回值、用量日志、用量计数和缓存四者是不是一致。
 //  4. 核对额度用尽时，拒绝发生在真正用尽的那一层：个人、密钥、项目、团队、组织。
@@ -34,7 +34,7 @@
 //
 // 真实密钥只从环境变量读，绝不写进仓库：
 //
-//	XHUB_REGRESSION_FENNO_KEY, XHUB_REGRESSION_QINIU_KEY
+//	XHUB_REGRESSION_<ID>_KEY，另需同前缀的 BASE 和 MODELS
 package regression
 
 import (

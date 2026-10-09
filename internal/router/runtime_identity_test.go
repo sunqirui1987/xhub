@@ -13,7 +13,7 @@ func databaseDeployment(id string, weight float64) config.ModelEntry {
 			"api_base":                "https://same.example/v1",
 			"model":                   "upstream-model",
 			"litellm_credential_name": "shared-credential",
-			"weight":                  weight,
+			"route_template_weight":   weight,
 		},
 		ModelInfo: map[string]any{"id": id},
 	}

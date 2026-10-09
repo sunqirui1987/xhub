@@ -29,7 +29,6 @@ import (
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 	"github.com/sunqirui1987/xhub/internal/logx"
-	"github.com/sunqirui1987/xhub/internal/router"
 	"sync"
 )
 
@@ -867,7 +866,6 @@ func (s *Server) writeChatJSON(w http.ResponseWriter, p *auth.Principal, callID,
 		_, _ = w.Write(respBody)
 		return
 	}
-	respBody = router.DecodeResponse(op, provider, alias, respBody)
 	var parsed map[string]any
 	if json.Unmarshal(respBody, &parsed) == nil {
 		if op == "chat" || op == "" || op == "completions" || op == "embeddings" || op == "messages" || op == "responses" || op == "moderations" || op == "videos" {

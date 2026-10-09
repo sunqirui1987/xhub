@@ -89,9 +89,10 @@ Open http://localhost:3000/login and sign in with the credentials you set above.
 
 ## Connect a Provider and Make a Request
 
-A fresh installation has no configured models. It seeds two provider credential entries, FennoAI and Qiniu, unless `XHUB_BUILTIN_PROVIDERS=off`. These entries do not grant access or install models automatically.
 
-1. Open **Models + Endpoints** and configure a provider credential and upstream API base. Built-in catalog credentials can read `FENNOAI_API_KEY` and `QINIU_API_KEY` from the gateway environment.
+A new installation starts without configured providers or deployments.
+
+1. Open **Models + Endpoints**, choose a provider type, and enter its connection and authentication fields.
 2. Add a model deployment manually or from a provider catalog. Set its public model name, upstream model, and endpoint types.
 3. Create an organization and team, set the team model scope, and add members. Personal inference also requires team membership. Projects are optional.
 4. Issue a personal or service virtual key within that scope, then test in the **Playground** or call the gateway.
@@ -144,4 +145,5 @@ For browser tests, install Chromium once with `cd frontend && npx playwright ins
 
 The [user guide](user-guide.md) covers customer workflows; [development references](development/README.md) document current implementation. Package-level `readme.md` / `readme_cn.md` files explain modules in both languages. Temporary plans and execution records are not product promises.
 
-Budget reservations, a separate settlement ledger, and a general asynchronous media lifecycle are not implemented. Qiniu and Volcengine task forwarding is available within the limits in the [runtime reference](development/runtime.md).
+
+Administrators explicitly create providers by selecting a type and entering its authentication fields. Price refresh requires XHUB_PRICE_FEED_URL; without it, the current bundled prices and manual overrides remain in use.

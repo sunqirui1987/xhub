@@ -8,7 +8,7 @@ import (
 
 // Rate is one entry in a model's rate table.
 //
-// Four dimensions capture everything the Modelink market feed can express:
+// Four dimensions capture everything the configured price feed can express:
 //
 //   - Measure: how the quantity is counted — token, second, picture, query.
 //   - Side: which side of the call this price applies to — input, output,

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { GATEWAY, loginAdmin, sessionBearer, t, uiPath, watchGateway } from "./helpers";
 import { recordChain } from "./report";
 
-const vendors = process.env.E2E_LIVE === "1" ? (process.env.E2E_LIVE_VENDORS || "FENNO").split(",") : [];
+const vendors = process.env.E2E_LIVE === "1" ? (process.env.E2E_LIVE_VENDORS || "").split(",").filter(Boolean) : [];
 for (const vendor of vendors) {
   const models = (process.env[`XHUB_REGRESSION_${vendor}_MODELS`] || "").split(",").filter(Boolean);
   for (const model of models) {

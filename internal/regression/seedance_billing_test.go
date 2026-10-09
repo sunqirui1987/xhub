@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+// TestSeedanceSettlementUsesMeasuredBandAndDeduplicates 验证官方 Ark 任务只按成功实测用量结算一次。
+// 参数 t：测试上下文；返回：无。前置本地上游与真实数据库，核对状态边界和账单；schema 自动删除。
 func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 	var response atomic.Value
 	response.Store(map[string]any{"status": "running", "usage": map[string]any{"completion_tokens": 40594}})
@@ -20,17 +22,18 @@ func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 		writeJSON(w, response.Load())
 	}))
 	defer up.Close()
-	model := "qiniu/bytedance/doubao-seedance-2-0-mini-260615"
-	dep := seedanceDeployment(model, "qiniu_contents_generation")
+	model := "volcengine/doubao-seedance-2-0-fast-260128"
+	dep := seedanceDeployment(model, "ark_contents_generation")
 	dep.LiteLLMParams["api_base"] = up.URL
+	dep.LiteLLMParams["output_cost_per_token"] = 3.33333e-6
 	h := newHarness(t, dep)
 	admin := h.adminSession()
 	owner := h.openScope(t, admin, "seedance-billing")
 	before := h.moneyOf(t, owner)
-	h.ok(http.MethodPost, "/v3/contents/generations/tasks", owner.key, map[string]any{"model": model, "resolution": "480p", "content": []any{map[string]any{"type": "text", "text": "apple"}}})
+	h.ok(http.MethodPost, "/api/v3/contents/generations/tasks", owner.key, map[string]any{"model": model, "resolution": "480p", "content": []any{map[string]any{"type": "text", "text": "apple"}}})
 	for _, status := range []string{"queued", "creating_assets", "running", "failed", "expired", "unknown", ""} {
 		response.Store(map[string]any{"status": status, "usage": map[string]any{"completion_tokens": 40594}})
-		h.ok(http.MethodGet, "/v3/contents/generations/tasks/billing-task", owner.key, nil)
+		h.ok(http.MethodGet, "/api/v3/contents/generations/tasks/billing-task", owner.key, nil)
 		if !h.moneyOf(t, owner).same(before) {
 			t.Fatalf("charged status %q", status)
 		}
@@ -38,7 +41,7 @@ func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 	response.Store(map[string]any{"id": "billing-task", "status": "succeeded", "resolution": "480p", "usage": map[string]any{"completion_tokens": 40594, "total_tokens": 40594}})
 	const want = 40594 * 3.33333e-6
 	for i := 0; i < 3; i++ {
-		r := h.ok(http.MethodGet, "/v3/contents/generations/tasks/billing-task", owner.key, nil)
+		r := h.ok(http.MethodGet, "/api/v3/contents/generations/tasks/billing-task", owner.key, nil)
 		if !nearlyEqual(parseFloatOrZero(r.header("x-litellm-response-cost")), want) {
 			t.Fatal("wrong measured cost", r.describe())
 		}
@@ -64,7 +67,7 @@ func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 	}
 	bill := breakdownOf(t, h, admin, id)
 	raw, _ := json.Marshal(bill)
-	if !strings.Contains(string(raw), "woiv") || strings.Contains(string(raw), "\"fallback\":true") {
+	if strings.Contains(string(raw), "\"fallback\":true") {
 		t.Fatalf("wrong snapshot: %s", raw)
 	}
 }

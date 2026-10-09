@@ -22,6 +22,9 @@ var logTraceOnceValidate sync.Once
 // 测试：admin_test.go。
 func validateDeployment(s Host, name string, params, info map[string]any) error {
 	logTraceOnceValidate.Do(func() { logx.Trace("enter models.validateDeployment") })
+	if _, exists := params["weight"]; exists {
+		return fmt.Errorf("deployment weight is obsolete; configure weights in route templates")
+	}
 	if strings.TrimSpace(name) == "" || strings.TrimSpace(str(params["model"])) == "" {
 		return fmt.Errorf("model_name and litellm_params.model are required")
 	}
@@ -113,10 +116,11 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 // credentialProtocolMatches 校验部署协议与已存凭据的兼容性，供创建和更新模型调用。
 // 参数 name：凭据名称；record：已存凭据（允许缺字段）；current：部署声明的协议。
 // 返回 bool：兼容时为真；不修改凭据或部署，空协议沿用历史允许行为。
-// 七牛同时提供 OpenAI 兼容接口和原生接口；只有明确七牛身份的凭据可跨这两个声明使用，
-// 不能依据请求模型名或地址把任意 OpenAI 凭据升级为七牛。旧内置名称仅在缺少 builtin 时兜底。
+// 调用：validateCredential 在创建、更新模型时。
+// 协议必须匹配；凭据名和历史供应商提示不授予跨协议权限。
 // 测试：validate_credential_test.go、regression/model_credential_test.go。
 func credentialProtocolMatches(name string, record map[string]any, current string) bool {
+	_ = name // 名称仅用于调用方定位凭据，不能改变凭据的协议能力。
 	info, _ := record["credential_info"].(map[string]any)
 	values, _ := record["credential_values"].(map[string]any)
 	protocol := credentialText(info, "custom_llm_provider")
@@ -128,7 +132,18 @@ func credentialProtocolMatches(name string, record map[string]any, current strin
 	if protocol == "" || current == "" || protocol == current {
 		return true
 	}
-	builtin := credentialText(info, "builtin")
-	qiniu := builtin == BuiltinQiniu || (builtin == "" && name == BuiltinQiniu)
-	return qiniu && (protocol == "openai" || protocol == "qiniu") && (current == "openai" || current == "qiniu")
+	return openAICompatibleProtocol(protocol) && openAICompatibleProtocol(current)
+}
+
+// openAICompatibleProtocol 判断协议标识是否使用 OpenAI 兼容线协议。
+// 参数 protocol：凭据或部署保存的协议标识；返回 bool：openai 与 custom_openai 返回真，其余协议返回假。
+// 调用：模型目录发现和部署凭据校验；不读取供应商名称、builtin 元数据、地址或模型前缀。
+// 测试：validate_credential_test.go、regression/model_discovery_test.go。
+func openAICompatibleProtocol(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "openai", "custom_openai":
+		return true
+	default:
+		return false
+	}
 }

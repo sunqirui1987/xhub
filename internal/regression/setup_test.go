@@ -25,13 +25,13 @@ func chatDeployment(name string) config.ModelEntry {
 	return config.ModelEntry{
 		ModelName: name,
 		LiteLLMParams: map[string]any{
-			"model":                 "openai/" + name,
+			"model":                 name,
 			"api_key":               "sk-fake",
 			"custom_llm_provider":   "openai",
 			"input_cost_per_token":  testInputRate,
 			"output_cost_per_token": testOutputRate,
 		},
-		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+		ModelInfo: map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	}
 }
 
@@ -63,52 +63,31 @@ func expectedCost() float64 {
 	return charge.Total
 }
 
-// TestProviderSetupAddsFennoaiAndQiniu 证明两个内置供应商能配起来、它们的模型目录
-// 读得到、并且从目录里加进来的模型真的能调。
-//
-// 它是后面每一个用例的前提，所以断言的是整条链而不只是状态码：凭据存下了、
-// 用这个凭据目录读得到、它加进来的模型真的完成了一次补全。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestProviderSetupAddsFennoaiAndQiniu(t *testing.T) {
+// TestStartupDoesNotInstallRelayCapabilities 验证旧环境开关不再安装固定供应商凭据。
+// 参数 t：测试上下文；返回：无。前置隔离 PostgreSQL，验证凭据为空、无上游请求、旧入口契约；协议传输由独立目录测试覆盖，harness 清理 schema。
+func TestStartupDoesNotInstallRelayCapabilities(t *testing.T) {
+	t.Setenv("XHUB_BUILTIN_PROVIDERS", "1")
+	t.Setenv("FENNOAI_API_KEY", "ignored-key")
+	t.Setenv("QINIU_API_KEY", "ignored-key")
 	h := newHarness(t)
 	admin := h.adminSession()
-
-	// 目录读得到：假供应商会对 /v1/models 回一个补全形状的正文，所以这一条
-	// 走通了读取链路，又不用连真实供应商。
-	t.Run("catalog is readable with the operator's key", func(t *testing.T) {
-		for _, provider := range []string{"fennoai", "qiniu"} {
-			r := h.do(http.MethodPost, "/model/builtin/models", admin, map[string]any{"provider": provider})
-			if r.status != http.StatusOK {
-				t.Fatalf("%s catalog -> %s", provider, r.describe())
-			}
-			if got := stringField(r.json(), "provider"); got != provider {
-				t.Fatalf("%s catalog answered provider=%q", provider, got)
-			}
+	rows := rowsOf(h.ok(http.MethodGet, "/credentials", admin, nil), "credentials")
+	if len(rows) != 0 {
+		t.Fatalf("启动自动生成了供应商凭据: %v", rows)
+	}
+	if len(h.upstreamCalls()) != 0 {
+		t.Fatal("启动不应发现供应商模型")
+	}
+	for _, provider := range []string{"fennoai", "qiniu", "unknown"} {
+		r := h.do(http.MethodPost, "/model/builtin/models", admin, map[string]any{"provider": provider})
+		if r.status != http.StatusBadRequest {
+			t.Fatalf("未保存凭据仍可发现模型: %s", r.describe())
 		}
-	})
-
-	// 旧入口已经退役；目录导入后统一走 /price/model 和 /model/new。
-	t.Run("the old builtin add endpoint is gone", func(t *testing.T) {
-		r := h.do(http.MethodPost, "/model/builtin/add", admin, map[string]any{
-			"provider":  "fennoai",
-			"model_ids": []string{"regression-fenno-model"},
-		})
-		if r.status != http.StatusGone {
-			t.Fatalf("retired add endpoint -> %s", r.describe())
-		}
-		message := errorMessage(r)
-		if !strings.Contains(message, "/price/model") || !strings.Contains(message, "/model/new") {
-			t.Fatalf("retirement does not direct the caller to the unified flow: %q", message)
-		}
-	})
-
-	// 不认识的供应商要拒绝，否则"供应商"这个字段就没有约束力。
-	t.Run("an unknown provider is refused", func(t *testing.T) {
-		if r := h.do(http.MethodPost, "/model/builtin/models", admin, map[string]any{"provider": "not-a-provider"}); r.status != http.StatusBadRequest {
-			t.Fatalf("unknown provider -> %s", r.describe())
-		}
-	})
+	}
+	r := h.do(http.MethodPost, "/model/builtin/add", admin, map[string]any{"provider": "qiniu", "model_ids": []string{"removed-model"}})
+	if r.status != http.StatusGone || !strings.Contains(errorMessage(r), "/model/new") {
+		t.Fatalf("旧添加入口未退役: %s", r.describe())
+	}
 }
 
 // TestScopedKeyCallsInference 证明给租户发出来的那把密钥真的能调推理。

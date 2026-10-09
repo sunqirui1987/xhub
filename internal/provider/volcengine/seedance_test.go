@@ -16,9 +16,6 @@ func TestSeedanceModelsAndPaths(t *testing.T) {
 	if len(typ.Providers) != 1 || typ.Providers[0] != "volcengine" {
 		t.Fatalf("providers %v", typ.Providers)
 	}
-	if typ.APIBase != "https://ark.cn-beijing.volces.com" {
-		t.Fatalf("base %s", typ.APIBase)
-	}
 	names := map[string]string{}
 	for _, action := range typ.Actions {
 		names[action.Name] = action.Method + " " + action.PublicPath

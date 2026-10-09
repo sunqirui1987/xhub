@@ -18,9 +18,15 @@ credential_info.provider_id 保存表单唯一标识，custom_llm_provider 保�
 
 - 前端：在 frontend 运行 npx vitest run --project component src/components/model_add/CredentialModal.test.tsx src/components/model_add/CredentialsPanel.test.tsx src/components/add_model/provider_specific_fields.test.tsx。
 - 目录：go test ./internal/catalog -count=1 -json。
-- 后台：bash scripts/regression.sh -v 'TestProviderFormsContract|TestLegacyQiniuCredentialSupportsNativeModel'。
 - 浏览器：bash scripts/e2e.sh provider-forms.spec.ts model-credential-protocol.spec.ts model-discovery.spec.ts。
 
-浏览器用真实网关、PostgreSQL 与本地上游验证切换、DeepSeek 默认值保存和编辑、兼容端点身份恢复、创建模型、连接测试、真实数据面响应，以及删除模型和凭据。原有七牛原生模型与目录回退流程共同回归。测试使用隔离 schema；模型和凭据显式删除，失败时 schema 统一清理。
 
 报告保存到 .e2e/provider-forms/（单元 JSON、目录 JSON、后台日志、浏览器日志与截图）。浏览器机器报告为 .e2e/current/results.json、.e2e/current/junit.xml，HTML 为 frontend/playwright-report/index.html。
+
+## 供应商能力清理
+
+正式供应商目录仅来自 LiteLLM 字段快照与注册的官方适配器。已删除中转专用适配器、启动种子凭据、环境变量密钥回退、地址推断和目录型号注入。用户保存的普通 OpenAI 兼容连接继续按显式地址与协议使用，名称或旧 builtin 元数据不再升级协议。
+
+官方 Ark 使用 volcengine、ark_contents_generation 及 /api/v3/contents/generations/tasks。移除的传输无法创建新部署；不会删除用户已有凭据或模型。
+
+嵌入价格保留现有通用模型费率，不代表已重新审核为厂商官方价格。删除中转别名与元数据；实际账号价格可人工覆盖。刷新只读取显式 XHUB_PRICE_FEED_URL，缺失时返回错误，定时计划拒绝启用。

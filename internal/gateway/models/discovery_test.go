@@ -18,8 +18,8 @@ func TestCatalogURLs(t *testing.T) {
 		provider, base string
 		want           []string
 	}{
-		{BuiltinFenno, "", []string{"https://api.fenno.ai/v1/models", "https://api.fenno.ai/models"}},
-		{BuiltinQiniu, "", []string{"https://api.qnaigc.com/v1/models", "https://api.qnaigc.com/models"}},
+		{"ignored", "https://provider.example", []string{"https://provider.example/models", "https://provider.example/v1/models"}},
+		{"qiniu", "https://configured.example/v1", []string{"https://configured.example/v1/models", "https://configured.example/models"}},
 		{"", " https://relay.example/ ", []string{"https://relay.example/models", "https://relay.example/v1/models"}},
 		{"", "https://relay.example/v1/", []string{"https://relay.example/v1/models", "https://relay.example/models"}},
 		{"", "https://relay.example/proxy/models/", []string{"https://relay.example/proxy/models", "https://relay.example/proxy/v1/models"}},

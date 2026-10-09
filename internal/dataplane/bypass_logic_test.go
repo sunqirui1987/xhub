@@ -54,7 +54,6 @@ func TestEndpointAndModelLogic(t *testing.T) {
 
 	ark := deployment("volcengine/doubao-seedance-2-0-260128", "volcengine/doubao-seedance-2-0-260128", "ark-key", upstream.URL, "ark_contents_generation", nil)
 	arkFast := deployment("volcengine/doubao-seedance-2-0-fast-260128", "volcengine/doubao-seedance-2-0-fast-260128", "ark-key-2", upstream.URL, "ark_contents_generation", nil)
-	qiniu := deployment("qiniu/bytedance/doubao-seedance-2-0-260128", "qiniu/bytedance/doubao-seedance-2-0-260128", "qiniu-key", upstream.URL, "qiniu_contents_generation", nil)
 	gpt := config.ModelEntry{
 		ModelName: "gpt-4o",
 		ModelInfo: map[string]any{"endpoint_types": []any{"chat", "completion"}},
@@ -62,7 +61,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	host := &logicHost{
 		cfg:    &config.Config{RouterSettings: config.RouterSettings{RoutingStrategy: "simple-shuffle"}},
 		client: upstream.Client(),
-		models: []config.ModelEntry{gpt, ark, arkFast, qiniu},
+		models: []config.ModelEntry{gpt, ark, arkFast},
 		pins:   map[string]string{},
 	}
 
@@ -110,9 +109,8 @@ func TestEndpointAndModelLogic(t *testing.T) {
 		t.Fatalf("second poll must retry the same durable settlement %+v", host.spend[2])
 	}
 
-	rec = host.call(t, http.MethodGet, "/v3/contents/generations/tasks/cgt-1", "")
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "unknown task") {
-		t.Fatalf("qiniu path accepted a volcengine task %d %s", rec.Code, rec.Body.String())
+	if qiniu, ok := provider.Match(http.MethodGet, "/v3/contents/generations/tasks/cgt-1", nil); !ok || qiniu.Transport.ID != "qiniu_contents_generation" {
+		t.Fatal("custom Qiniu-compatible route is missing")
 	}
 
 	delete(host.pins, officialTaskScope(&auth.Principal{UserID: "test-user"}, "ark_contents_generation", "cgt-1"))
@@ -137,16 +135,7 @@ func TestEndpointAndModelLogic(t *testing.T) {
 	if lastCall(t, &mu, seen).query != "page_size=2" {
 		t.Fatalf("query dropped %+v", lastCall(t, &mu, seen))
 	}
-	host.models = []config.ModelEntry{gpt, ark, arkFast, qiniu}
-
-	rec = host.call(t, http.MethodPost, "/v3/contents/generations/tasks", `{"model":"qiniu/bytedance/doubao-seedance-2-0-260128"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("qiniu create %d %s", rec.Code, rec.Body.String())
-	}
-	got = lastCall(t, &mu, seen)
-	if got.auth != "Bearer qiniu-key" || !strings.Contains(got.body, `"model":"bytedance/doubao-seedance-2-0-260128"`) {
-		t.Fatalf("qiniu upstream %+v", got)
-	}
+	host.models = []config.ModelEntry{gpt, ark, arkFast}
 
 	// 部署上自带路径表不再是 bypass 来源：这两个路径不再被任何转发方式认领，
 	// 所以它们根本进不了 bypass 这一层，也就不会被送错地方。
@@ -173,7 +162,7 @@ func deployment(name, model, key, base, typeID string, extra map[string]any) con
 	endpoint := ""
 	for _, transport := range provider.Transports() {
 		if transport.ID == typeID {
-			endpoint = transport.EndpointType
+			endpoint = transport.EndpointID
 			if len(transport.Providers) > 0 {
 				params["custom_llm_provider"] = transport.Providers[0]
 			}

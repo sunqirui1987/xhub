@@ -116,9 +116,9 @@ describe("priceCatalogRows", () => {
 
   it("keeps the raw row so the edit form can seed rates it does not show", () => {
     const rows = priceCatalogRows(
-      doc({ model: { mode: "chat", input_cost_per_token: 0.000002, endpoint_type: "ark_contents_generation" } }),
+      doc({ model: { mode: "chat", input_cost_per_token: 0.000002, endpoint_id: "ark_contents_generation" } }),
     );
-    expect(rows[0].raw.endpoint_type).toBe("ark_contents_generation");
+    expect(rows[0].raw.endpoint_id).toBe("ark_contents_generation");
   });
 });
 
@@ -186,7 +186,7 @@ describe("priceModelPayload", () => {
       litellm_provider: "acme",
       display_name: "Acme One",
       mode: "chat",
-      endpoint_type: "ark_contents_generation",
+      endpoint_id: "ark_contents_generation",
       input_cost_per_token: 0.000003,
       output_cost_per_token: 0.000015,
       output_cost_per_image: 0.04,
@@ -217,7 +217,7 @@ describe("priceModelPayload", () => {
     });
     expect(body).not.toHaveProperty("display_name");
     expect(body).not.toHaveProperty("mode");
-    expect(body).not.toHaveProperty("endpoint_type");
+    expect(body).not.toHaveProperty("endpoint_id");
   });
 
   it("sends only rates changed while editing, including an intentional clear", () => {

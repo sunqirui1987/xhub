@@ -34,26 +34,18 @@ func (h *modelTestHost) Resolve(*http.Request) (*auth.Principal, error) {
 }
 func (h *modelTestHost) AllowLLM(*auth.Principal) bool { return true }
 
-func TestAvailableCategoryIgnoresRetiredDeploymentMode(t *testing.T) {
-	row := map[string]any{"mode": "embedding"}
-	entry := config.ModelEntry{ModelInfo: map[string]any{"mode": "video"}}
-	if got := availableCategory(entry, nil); got != "other" {
-		t.Fatalf("retired mode selected category %q", got)
-	}
-	entry.ModelInfo["transport"] = "adapted"
-	entry.ModelInfo["endpoint_types"] = []string{"image"}
-	if got := availableCategory(entry, row); got != "image" {
-		t.Fatalf("capability lost to price category: %q", got)
-	}
-	entry.ModelInfo["endpoint_types"] = []string{"unregistered"}
-	if got := availableCategory(entry, row); got != "other" {
-		t.Fatalf("unknown capability fell back to catalog mode: %q", got)
-	}
-	entry.ModelInfo["transport"] = "qiniu_contents_generation"
-	entry.ModelInfo["endpoint_types"] = []string{"bypass:ark-video"}
-	entry.LiteLLMParams = map[string]any{"custom_llm_provider": "qiniu"}
-	if got := availableCategory(entry, row); got != "video" {
-		t.Fatalf("registered transport category: %q", got)
+// TestAvailableCategoryUsesExecution 验证部署分类来自显式协议和用户入口。
+// 前置：构造图片、对话、视频部署；结果：目录价格不改变能力分类；内存测试无需清理。
+func TestAvailableCategoryUsesExecution(t *testing.T) {
+	for _, tc := range []struct{ transport, endpoint, category string }{
+		{"bypass_openai_image_generation", "image", "image"},
+		{"bypass_openai_chat", "chat", "chat"},
+		{"ark_contents_generation", "bypass:ark-video", "video"},
+	} {
+		entry := config.ModelEntry{LiteLLMParams: map[string]any{"custom_llm_provider": "volcengine", "model": "doubao-seedance-2-0-260128"}, ModelInfo: map[string]any{"transport": tc.transport, "endpoint_types": []string{tc.endpoint}}}
+		if got := availableCategory(entry, nil); got != tc.category {
+			t.Fatalf("%s 分类=%s，预期=%s", tc.transport, got, tc.category)
+		}
 	}
 }
 

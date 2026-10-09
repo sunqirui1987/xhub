@@ -7,7 +7,7 @@ import (
 )
 
 // TestProviderFormsContract 验证真实公开目录和供应商凭据 CRUD 契约。
-// 参数 t：回归上下文；返回无。前置 PostgreSQL 和网关，断言专属字段、认证、错误、元数据持久化与脱敏。
+// 参数 t：回归上下文；返回无。前置 PostgreSQL 和网关，断言专属字段、Custom 入口、协议目录、认证、错误、元数据持久化与脱敏。
 // 凭据显式删除，harness 自动销毁隔离 schema，不调用外部付费供应商。
 func TestProviderFormsContract(t *testing.T) {
 	h := newHarness(t)
@@ -24,6 +24,32 @@ func TestProviderFormsContract(t *testing.T) {
 			t.Fatalf("重复标识 %s", id)
 		}
 		byID[id] = row
+	}
+	for _, id := range []string{"Qiniu", "QINIU", "Fenno", "FENNO", "FennoAI", "FENNOAI"} {
+		if byID[id] != nil {
+			t.Fatalf("公开凭据目录不应预置 %s", id)
+		}
+	}
+	for _, id := range []string{"CUSTOM", "CUSTOM_OPENAI"} {
+		fields := map[string]bool{}
+		for _, value := range byID[id]["credential_fields"].([]any) {
+			fields[stringField(value.(map[string]any), "key")] = true
+		}
+		if !fields["api_base"] || !fields["api_key"] {
+			t.Fatalf("%s 缺少自定义地址或密钥字段：%v", id, fields)
+		}
+	}
+	endpoints := h.ok(http.MethodGet, "/public/endpoints", "", nil).json()
+	transports := listField(endpoints, "transports")
+	foundTransport := map[string]bool{}
+	for _, transport := range transports {
+		id := stringField(transport, "id")
+		if id == "qiniu_contents_generation" || id == "qiniu_fal_kling" {
+			foundTransport[id] = true
+		}
+	}
+	if !foundTransport["qiniu_contents_generation"] || !foundTransport["qiniu_fal_kling"] {
+		t.Fatalf("Custom 可选的七牛传输不完整：%v", foundTransport)
 	}
 	for id, key := range map[string]string{"Deepseek": "api_base", "Azure": "azure_ad_token", "Vertex_AI": "vertex_credentials", "Bedrock": "aws_region_name"} {
 		found := false
@@ -78,5 +104,29 @@ func TestProviderFormsContract(t *testing.T) {
 		if row["credential_name"] == name {
 			t.Fatal("已删除凭据仍在列表")
 		}
+	}
+}
+
+// TestPriceReloadRequiresConfiguredSource 验证显式源缺失时管理接口错误和价格保留。
+// 参数 t：回归上下文；返回：无。前置隔离数据库，验证502、400与无计划副作用，harness 清理 schema。
+func TestPriceReloadRequiresConfiguredSource(t *testing.T) {
+	t.Setenv("XHUB_PRICE_FEED_URL", "")
+	h := newHarness(t)
+	admin := h.adminSession()
+	before := h.ok(http.MethodGet, "/price/catalog", admin, nil).json()
+	r := h.do(http.MethodPost, "/reload/model_cost_map", admin, nil)
+	if r.status != 502 {
+		t.Fatalf("无源刷新未失败: %s", r.describe())
+	}
+	r = h.do(http.MethodPost, "/schedule/model_cost_map_reload?hours=24", admin, nil)
+	if r.status != 400 {
+		t.Fatalf("无源仍能定时刷新: %s", r.describe())
+	}
+	after := h.ok(http.MethodGet, "/price/catalog", admin, nil).json()
+	if before["count"] != after["count"] || before["source"] != after["source"] {
+		t.Fatal("失败刷新改变价格")
+	}
+	if h.ok(http.MethodGet, "/schedule/model_cost_map_reload/status", admin, nil).json()["scheduled"] != false {
+		t.Fatal("失败创建污染定时计划")
 	}
 }

@@ -6,56 +6,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
-	providers "github.com/sunqirui1987/xhub/internal/provider"
 
-	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
 
-const (
-	BuiltinFenno = "fennoai"
-	BuiltinQiniu = "qiniu"
-)
-
-// Builtin is a provider credential installed with the gateway. Models added from it use the same row as a hand-added model.
-type Builtin struct {
-	ID     string
-	Base   string
-	KeyEnv string
-}
-
-// Builtins are the two providers a new install can add models from. Fenno calls https://api.fenno.ai. Qiniu calls the OpenAI bypass root. Catalogs stay on /v1/models.
-// 参数：无。
-// 返回 []Builtin（[]Builtin）：新安装可以添加模型的两个供应商。Fenno 走 https://api.fenno.ai，七牛走 OpenAI 兼容根。
-// 调用：gateway/limits.go
-// 测试：无直接单测
-func Builtins() []Builtin {
-	return []Builtin{
-		{ID: BuiltinFenno, Base: "https://api.fenno.ai", KeyEnv: "FENNOAI_API_KEY"},
-		{ID: BuiltinQiniu, Base: "https://api.qnaigc.com", KeyEnv: "QINIU_API_KEY"},
-	}
-}
-
-// BuiltinsEnabled reports whether first install should add fennoai and qiniu. XHUB_BUILTIN_PROVIDERS defaults to on. 0, false, off, no, or disabled turns it off.
-// 参数：无。
-// 返回 bool（bool）：首次安装应加入 fennoai 和 qiniu 时返回真。XHUB_BUILTIN_PROVIDERS 设为 0、false、off、no 或 disabled 时返回假。
-// 调用：仅在 builtin.go 内使用
-// 测试：builtin_test.go
-func BuiltinsEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("XHUB_BUILTIN_PROVIDERS"))) {
-	case "0", "false", "off", "no", "disable", "disabled":
-		return false
-	default:
-		return true
-	}
-}
+// catalogConnection 描述已保存凭据的目录连接，不包含隐式供应商或环境密钥。
+type catalogConnection struct{ ID, Base string }
 
 // CatalogModel is one card in the provider catalog. Prices are copied from the payload and stay nil when absent.
 type CatalogModel struct {
@@ -239,16 +199,10 @@ func asFloat(value any) *float64 {
 }
 
 // ModelsURL 生成供应商首选模型目录地址，保留自定义地址的路径前缀和查询参数。
-// 参数 provider：内置供应商标识，非空内置标识使用官方目录；base：保存的 API 根地址。
+// 参数 provider：兼容旧调用方的提示，不参与地址选择；base：保存的 API 根地址。
 // 返回：目录 URL；已以 /models 结尾的地址保持原路径，非法地址留给 fetchCatalog 报错。
 // 调用：ListBuiltin；测试：builtin_test.go、discovery_test.go。
 func ModelsURL(provider, base string) string {
-	if provider == BuiltinFenno {
-		return "https://api.fenno.ai/v1/models"
-	}
-	if provider == BuiltinQiniu {
-		return "https://api.qnaigc.com/v1/models"
-	}
 	u, err := url.Parse(strings.TrimSpace(base))
 	if err != nil {
 		return strings.TrimSpace(base)
@@ -277,45 +231,6 @@ func SetBuiltinClient(c *http.Client) {
 	builtinClient = c
 }
 
-// SeedBuiltins removes leftover provider rows and creates the two credentials when they are missing. It does not insert models. A model added later is the same row a person would save by hand.
-// 参数 s（Host）：写入初始Builtins使用的数据面宿主。
-// 返回：无。误存成模型的供应商行已删掉，缺失的 Fenno 和七牛凭据已补上。不插入模型。
-// 调用：gateway/models/admin.go
-// 测试：无直接单测
-func SeedBuiltins(s Host) {
-	if s == nil || s.RecordStore() == nil || !BuiltinsEnabled() {
-		return
-	}
-	dropProviderShells(s)
-	for _, spec := range Builtins() {
-		seedCredential(s, spec, strings.TrimSpace(os.Getenv(spec.KeyEnv)))
-	}
-}
-
-// dropProviderShells deletes fennoai and qiniu rows that were stored as models. They are credentials. Leaving them in the model table makes the playground list the provider name.
-// 参数 s（Host）：丢掉供应商Shells使用的数据面宿主。
-// 返回：无。存成模型的 fennoai 和 qiniu 行已删除。它们应是凭据，留在模型表里会被当成可调用模型。
-// 调用：gateway/models/admin.go
-// 测试：无直接单测
-func dropProviderShells(s Host) {
-	rows, err := s.RecordStore().ListProxyModels()
-	if err != nil {
-		logx.Error("builtin providers list: %v", err)
-		return
-	}
-	for _, row := range rows {
-		if str(row.Info["role"]) != "provider" {
-			continue
-		}
-		if _, ok := builtinByID(str(row.Info["builtin"])); !ok {
-			continue
-		}
-		if err := s.RecordStore().DeleteProxyModel(row.ID); err != nil {
-			logx.Error("builtin provider %s: %v", row.ID, err)
-		}
-	}
-}
-
 // RefreshBuiltin reloads the catalog. It does not add or delete models.
 // 参数 s（Host）：Refresh内置使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
@@ -334,14 +249,9 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	already := savedNames(source.rows, source.spec.ID)
 	var available []CatalogModel
 	var fetchErr string
-	urlProvider := ""
-	if source.specialized {
-		urlProvider = source.spec.ID
-	}
-	items, err := fetchCatalog(r.Context(), ModelsURL(urlProvider, source.spec.Base), source.key)
+	items, err := fetchCatalog(r.Context(), ModelsURL("", source.spec.Base), source.key)
 	if err != nil {
 		fetchErr = err.Error()
 	} else {
@@ -350,18 +260,11 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	if available == nil {
 		available = []CatalogModel{}
 	}
-	available = appendRegisteredModels(available, source.registryProvider)
 	models := []map[string]any{}
 	modelIDs := []string{}
 	for _, item := range available {
 		modelIDs = append(modelIDs, item.ID)
-		if source.specialized {
-			fillFromCostMap(&item)
-			item.Added = already[item.ID]
-			models = append(models, catalogJSON(item))
-		} else {
-			models = append(models, map[string]any{"id": item.ID})
-		}
+		models = append(models, map[string]any{"id": item.ID})
 	}
 	out := map[string]any{
 		"provider":        source.spec.ID,
@@ -390,70 +293,14 @@ func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteError(w, http.StatusGone, "gone", "catalog deployment import moved to /price/model followed by /model/new")
 }
 
-// addedModel 判断这个目录模型是否已经在当前部署表里。
-// 参数 provider（string）：供应商标识，例如 openai。name（string）：目录里的模型 id，按表单填写的方式保存。
-// 返回：一条可写入模型表的部署。
-// 调用：内置供应商往目录里加模型之前。
-// 测试：无直接单测
-func addedModel(provider, name string) config.ModelEntry {
-	return config.ModelEntry{
-		ModelName: name,
-		LiteLLMParams: map[string]any{
-			"model":                   name,
-			"custom_llm_provider":     builtinSupplier(provider),
-			"litellm_credential_name": provider,
-		},
-		ModelInfo: map[string]any{
-			"id":             "model_" + httpx.CallID()[:12],
-			"transport":      "adapted",
-			"endpoint_types": []string{"chat"},
-			"db_model":       true,
-			"created_at":     time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-}
-
 type catalogSource struct {
-	spec             Builtin
-	rows             []store.ProxyModel
-	key              string
-	credentialName   string
-	specialized      bool
-	registryProvider string
+	spec           catalogConnection
+	rows           []store.ProxyModel
+	key            string
+	credentialName string
 }
 
-// appendRegisteredModels adds only the selected supplier’s registered native
-// model paths. An OpenAI discovery catalog need not list Fal queue models.
-// This advertises supported gateway contracts, not upstream account entitlement.
-func appendRegisteredModels(items []CatalogModel, supplier string) []CatalogModel {
-	if supplier == "" {
-		return items
-	}
-	seen := map[string]bool{}
-	for _, item := range items {
-		seen[item.ID] = true
-	}
-	var registered []string
-	for id := range providers.ModelEndpoints() {
-		if strings.HasPrefix(id, supplier+"/") {
-			registered = append(registered, id)
-		}
-	}
-	sort.Strings(registered)
-	for _, id := range registered {
-		upstream := strings.TrimPrefix(id, supplier+"/")
-		if seen[upstream] || seen[id] {
-			continue
-		}
-		seen[upstream] = true
-		items = append(items, CatalogModel{ID: upstream, Category: "video"})
-	}
-	return items
-}
-
-// openCatalog resolves either a specialized builtin catalog or a generic saved
-// OpenAI-compatible credential. Generic discovery always takes its base URL and
-// secret from the saved credential, never from request fields.
+// openCatalog 读取用户已保存的 OpenAI 兼容凭据；请求不能覆盖连接地址和密钥。
 // 参数 s（Host）：目录发现使用的数据面宿主；w（http.ResponseWriter）：错误响应写入这里；r（*http.Request）：包含 provider 或 credential_name 的管理请求。
 // 返回 catalogSource（catalogSource）：已解析的目录连接和现有部署；bool（bool）：请求有效且可以发起目录请求时为真。
 // 调用：ListBuiltin。
@@ -468,12 +315,7 @@ func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource,
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return catalogSource{}, false
 	}
-	provider := strings.TrimSpace(str(body["provider"]))
 	name := strings.TrimSpace(str(body["credential_name"]))
-	if spec, found := builtinByID(provider); found && name == "" {
-		key := providerKey(s, spec, str(body["api_key"]))
-		return catalogSource{spec: spec, rows: rows, key: key, credentialName: name, specialized: true, registryProvider: spec.ID}, true
-	}
 	if name == "" {
 		httpx.WriteError(w, 400, "invalid_request", "credential_name is required for generic model discovery")
 		return catalogSource{}, false
@@ -484,13 +326,6 @@ func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource,
 	}
 	info, _ := record["credential_info"].(map[string]any)
 	values, _ := record["credential_values"].(map[string]any)
-	registryProvider := credentialText(info, "builtin")
-	if registryProvider == "" && name == BuiltinQiniu {
-		registryProvider = BuiltinQiniu
-	}
-	if registryProvider == "" && (credentialText(info, "custom_llm_provider") == "qiniu" || credentialText(values, "custom_llm_provider") == "qiniu") {
-		registryProvider = "qiniu"
-	}
 	base := credentialText(values, "api_base")
 	if base == "" {
 		base = credentialText(info, "api_base")
@@ -498,23 +333,12 @@ func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource,
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
-	// Default builtin connections have their own discovery endpoint. A custom
-	// saved address must still be used directly instead of that default.
-	if builtin, found := builtinByID(str(info["builtin"])); found && strings.TrimRight(base, "/") == builtin.Base {
-		return catalogSource{
-			spec: builtin, rows: rows, key: credentialSecret(record, "api_key"), credentialName: name, specialized: true, registryProvider: registryProvider,
-		}, true
-	}
-	// Saved credentials always determine the discovery URL, even when the
-	// request includes a builtin provider hint or the credential has that name.
-	spec := Builtin{ID: name, Base: base}
-	return catalogSource{
-		spec: spec, rows: rows, key: credentialSecret(record, "api_key"), credentialName: name, registryProvider: registryProvider,
-	}, true
+	// 目录地址和密钥只来自用户已保存的凭据，忽略请求中的供应商提示、URL 和密钥。
+	return catalogSource{spec: catalogConnection{ID: name, Base: base}, rows: rows,
+		key: credentialSecret(record, "api_key"), credentialName: name}, true
 }
 
-// openAICompatibleCredential reads one saved credential and verifies that its
-// declared wire protocol can use an OpenAI /models endpoint.
+// openAICompatibleCredential 读取一个已保存凭据，并校验其声明的线协议能否访问 OpenAI /models 端点。
 // 参数 s（Host）：凭据存储宿主；w（http.ResponseWriter）：错误响应写入这里；name（string）：保存的凭据名称。
 // 返回 map[string]any（map[string]any）：未脱敏的服务端凭据；bool（bool）：凭据存在且协议兼容时为真。
 // 调用：openCatalog。
@@ -531,7 +355,7 @@ func openAICompatibleCredential(s Host, w http.ResponseWriter, name string) (map
 	if protocol == "" {
 		protocol = credentialText(values, "custom_llm_provider")
 	}
-	if protocol != "" && !strings.EqualFold(protocol, "openai") && !strings.EqualFold(protocol, "qiniu") {
+	if protocol != "" && !openAICompatibleProtocol(protocol) {
 		httpx.WriteError(w, 400, "invalid_request", "credential protocol is not compatible with OpenAI model discovery")
 		return nil, false
 	}
@@ -575,51 +399,6 @@ func readBody(r *http.Request) map[string]any {
 		body = map[string]any{}
 	}
 	return body
-}
-
-// providerKey is the key used only to read the catalog. The saved model does not copy it.
-// 参数 s（Host）：供应商密钥使用的数据面宿主；spec（Builtin）：供应商密钥使用的内置供应商；requestKey（string）：供应商密钥使用的请求密钥。空串表示调用方没有提供这项。
-// 返回 string（string）：只用来读目录的密钥。请求里的真实密钥优先，否则用已存凭据，再否则用供应商环境变量。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func providerKey(s Host, spec Builtin, requestKey string) string {
-	if key := realKey(requestKey); key != "" {
-		return key
-	}
-	if key := credentialAPIKey(s, spec.ID); key != "" {
-		return key
-	}
-	return realKey(os.Getenv(spec.KeyEnv))
-}
-
-// 判断这是不是可以保存的真实密钥。掩码占位符返回空串。
-// 参数 raw（string）：真实密钥使用的原始内容。空串表示调用方没有提供这项。
-// 返回 string（string）：去掉空白后的真实密钥。空串或带掩码的占位符返回空串，表示不要覆盖原密钥。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func realKey(raw string) string {
-	key := strings.TrimSpace(raw)
-	if key == "" || strings.Contains(key, "****") {
-		return ""
-	}
-	return key
-}
-
-// 按凭据 id 读取保存的 api_key。
-// 参数 s（Host）：凭据APIKey使用的数据面宿主；id（string）：密钥 id。空串表示没有指定密钥。
-// 返回 string（string）：凭据表里的 api_key。库不可用或没有这条凭据时为空串。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func credentialAPIKey(s Host, id string) string {
-	if s.RecordStore() == nil {
-		return ""
-	}
-	rec, err := s.RecordStore().GetKV("credentials", id)
-	if err != nil {
-		return ""
-	}
-	values, _ := rec["credential_values"].(map[string]any)
-	return strings.TrimSpace(str(values["api_key"]))
 }
 
 // fillFromCostMap copies input/output prices from the price-data map when the catalog payload omitted them. The stored rates are per token; the card shows the same per-million-token dollars as Price Data Management.
@@ -702,20 +481,6 @@ type errString string
 // 测试：无直接单测
 func (e errString) Error() string { return string(e) }
 
-// 按 id 查找内置供应商。找不到时布尔值为假。
-// 参数 id（string）：内置按标识使用的主键。空串表示调用方没有指定记录。
-// 返回 Builtin（Builtin）：按 id 查找内置供应商。没有命中时为零值；bool（bool）：按 id 找到了内置供应商时返回真。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func builtinByID(id string) (Builtin, bool) {
-	for _, b := range Builtins() {
-		if b.ID == id {
-			return b, true
-		}
-	}
-	return Builtin{}, false
-}
-
 // savedNames reports catalog ids already stored for this credential, including older builtin rows.
 // 参数 rows（[]store.ProxyModel）：从用量或目录读出的ProxyModel；provider（string）：供应商标识，例如 openai 或 volcengine。
 // 返回 map[string]bool（map[string]bool）：saved名称。没有该键表示假，不要当成缺省 JSON。
@@ -737,40 +502,4 @@ func savedNames(rows []store.ProxyModel, provider string) map[string]bool {
 		}
 	}
 	return out
-}
-
-// 在凭据不存在时写入一条初始凭据。已经存在则不覆盖。
-// 参数 s（Host）：写入初始凭据使用的数据面宿主；spec（Builtin）：写入初始凭据使用的内置供应商；key（string）：上游或调用方的密钥。空串表示还不能转发或还没有密钥。
-// 返回：无。凭据不存在时写入了一条初始凭据。已经存在则不覆盖。
-// 调用：仅在 builtin.go 内使用
-// 测试：无直接单测
-func seedCredential(s Host, spec Builtin, key string) {
-	if _, err := s.RecordStore().GetKV("credentials", spec.ID); err == nil {
-		return
-	}
-	raw, err := json.Marshal(map[string]any{
-		"credential_name": spec.ID,
-		"credential_info": map[string]any{
-			"custom_llm_provider": builtinSupplier(spec.ID),
-			"builtin":             spec.ID,
-			"api_base":            spec.Base,
-		},
-		"credential_values": map[string]any{
-			"api_key":  key,
-			"api_base": spec.Base,
-		},
-	})
-	if err != nil {
-		return
-	}
-	if err := s.RecordStore().PutKV("credentials", spec.ID, string(raw)); err != nil {
-		logx.Error("builtin credential %s: %v", spec.ID, err)
-	}
-}
-
-func builtinSupplier(id string) string {
-	if id == BuiltinQiniu {
-		return "qiniu"
-	}
-	return "openai"
 }

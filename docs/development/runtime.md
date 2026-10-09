@@ -30,7 +30,6 @@ OpenAI 兼容、Azure、Anthropic、Gemini/Vertex 等使用各自请求形状与
 
 响应解码统一公共模型名，映射 Anthropic input/output/cache 字段、Gemini usageMetadata 和 Responses 嵌套终态 usage。字段缺失时可能估算，明确零不被覆盖。新增协议需验证认证、请求字段、错误、usage 单位、缓存关系及流终态。
 
-Qiniu Responses 的 SSE 转换器增量处理 LF/CRLF 帧和不完整网络块，转换文本、推理文本与终态 usage。未知事件、事件 ID、retry、工具调用及非文本增量没有完整保留。没有通用的流式适配状态机和统一 partial/unknown 计量契约。
 
 ## 官方媒体任务
 
@@ -38,7 +37,6 @@ Qiniu Responses 的 SSE 转换器增量处理 LF/CRLF 帧和不完整网络块�
 
 | 供应商 | 创建 | 查询 | 列表 |
 | --- | --- | --- | --- |
-| Qiniu | `POST /v3/contents/generations/tasks` | `GET /v3/contents/generations/tasks/{id}` | 未登记 |
 | Volcengine | `POST /api/v3/contents/generations/tasks` | `GET /api/v3/contents/generations/tasks/{id}` | `GET /api/v3/contents/generations/tasks` |
 
 部署使用登记的 transport；自定义路径文档不参与匹配。成功创建把任务钉到含凭据身份的部署，以调用方、transport 和 task ID 隔离，保留七天。查询使用相同调用范围。Redis 故障时的本地兜底重启丢失。

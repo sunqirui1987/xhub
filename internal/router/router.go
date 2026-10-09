@@ -47,6 +47,8 @@ type State struct {
 	// router's only mutable state: every other strategy is a pure function of the
 	// pool, while an even split has to remember how far it got last time.
 	Splits *SplitState
+	// SplitScope 按模板版本、公开模型和入口隔离轮询。
+	SplitScope string
 }
 
 // instant returns the time this routing decision is being made for.
@@ -264,34 +266,19 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		}
 		return &pool[best]
 	case "tag":
-		best := 0
-		bestW := -1.0
 		for i, e := range pool {
-			if e.ParamString("tag", "") == "" && i > 0 {
-				continue
-			}
-			w := paramFloat(e, "weight", 1)
-			if w > bestW {
-				bestW = w
-				best = i
+			if e.ParamString("tag", "") != "" {
+				return &pool[i]
 			}
 		}
-		return &pool[best]
+		return &pool[0]
 	case "split":
 		return pickSplit(pool, st)
 	default:
-		// simple_shuffle and the other weight strategies pick the highest weight. Callers rely on this stable result.
-		best := 0
-		bestW := -1.0
-		for i, e := range pool {
-			w := paramFloat(e, "weight", 1)
-			if w > bestW {
-				bestW = w
-				best = i
-			}
-		}
-		return &pool[best]
+		// 非加权策略不读取历史部署权重，同优先级采用稳定声明顺序。
+		return &pool[0]
 	}
+
 }
 
 // pickSplit chooses the first deployment by configured traffic share.
@@ -322,7 +309,7 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 	available := make([]bool, len(pool))
 	for i, e := range pool {
 		ids[i] = CooldownID(e)
-		weights[i] = paramFloat(e, "weight", 1)
+		weights[i] = paramFloat(e, "route_template_weight", 1)
 		available[i] = !st.Cooldown[ids[i]] && weights[i] > 0 && !math.IsNaN(weights[i]) && !math.IsInf(weights[i], 0)
 	}
 	// st.Splits is nil when the gateway never installed one. Falling back to the
@@ -344,7 +331,7 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 		}
 		return &pool[best]
 	}
-	picked := st.Splits.PickWeighted(ids, weights, available)
+	picked := st.Splits.Scoped(st.SplitScope).PickWeighted(ids, weights, available)
 	if picked < 0 {
 		return nil
 	}
@@ -359,7 +346,7 @@ func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
 func splitCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
 	out := make([]config.ModelEntry, 0, len(pool))
 	for _, e := range pool {
-		w := paramFloat(e, "weight", 1)
+		w := paramFloat(e, "route_template_weight", 1)
 		if w > 0 && !math.IsNaN(w) && !math.IsInf(w, 0) && !st.Cooldown[CooldownID(e)] {
 			out = append(out, e)
 		}
@@ -590,35 +577,22 @@ func IsSplitStrategy(strategy string) bool {
 	}
 }
 
-// ApplyWeights copies list and sets weight on the deployments named in overrides.
-//
-// Keys are deployment:<id> or pricing:<id>. A deployment that is not in the map keeps the weight
-// already on it, which defaults to 1 inside the split. An empty map returns the
-// same slice, so a document without shares does not allocate or change the pool.
-//
-// The copy matters: ModelList is the process config, and writing weight onto it
-// would leak one request's template into the next request.
-// 参数 list（[]config.ModelEntry）：候选部署；overrides（map[string]float64）：部署 id 到份额，空表示不改。
-// 返回 []config.ModelEntry（[]config.ModelEntry）：带上份额之后的部署。没有覆盖时就是原来的切片。
-// 调用：dataplane/serve.go。
-// 测试：split_test.go
+// ApplyWeights 从模板构造私有部署副本；未配置使用 1，明确 0 排除部署。
+// 参数 list：候选；overrides：稳定部署 ID 到权重。返回副本，不读取旧 weight，不修改配置。
+// 调用：统一、原生与预览；测试：unified_policy_test.go。
 func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry {
-	if len(overrides) == 0 {
-		return list
-	}
 	out := make([]config.ModelEntry, len(list))
 	for i, entry := range list {
-		id := WeightID(entry)
-		weight, ok := overrides[id]
-		if id == "" || !ok {
-			out[i] = entry
-			continue
+		weight := 1.0
+		if v, ok := overrides[WeightID(entry)]; ok {
+			weight = v
 		}
 		params := make(map[string]any, len(entry.LiteLLMParams)+1)
 		for key, value := range entry.LiteLLMParams {
 			params[key] = value
 		}
-		params["weight"] = weight
+
+		params["route_template_weight"] = weight
 		entry.LiteLLMParams = params
 		out[i] = entry
 	}
@@ -646,24 +620,6 @@ func paramFloat(e config.ModelEntry, key string, fallback float64) float64 {
 	default:
 		return fallback
 	}
-}
-
-// AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
-// 调用：仅在 router.go 内使用
-// 测试：无直接单测
-// 参数 provider（string）：供应商标识，例如 openai 或 volcengine；apiBase（string）：上游根地址，末尾斜杠会被去掉再拼路径；realModel（string）：发给上游或对外展示的模型名。
-// 返回：聊天补全的上游 URL，等价于 AdapterURLOp("chat", ...)。
-func AdapterURL(provider, apiBase, realModel string) string {
-	return AdapterURLOp("chat", provider, apiBase, realModel)
-}
-
-// AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
-// 调用：仅在 router.go 内使用
-// 测试：无直接单测
-// 参数 op（string）：操作名，例如 chat；provider（string）：供应商标识，例如 openai 或 volcengine；apiBase（string）：上游根地址，末尾斜杠会被去掉再拼路径；realModel（string）：发给上游或对外展示的模型名。
-// 返回：该操作和供应商的完整上游 URL，规则在 llm.Endpoint。
-func AdapterURLOp(op, provider, apiBase, realModel string) string {
-	return llm.Endpoint(op, provider, apiBase, realModel)
 }
 
 // ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses. An unknown name returns an error and is not treated as simple-shuffle.

@@ -3,8 +3,8 @@ import type { ModelGroup, ModelEndpoint } from "@/components/llm_calls/fetch_mod
 import { determineEndpointType, filterModelsForEndpoint, isModelCompatibleWithEndpoint } from "./EndpointUtils";
 import { EndpointType } from "@/components/chat_ui/mode_endpoint_mapping";
 const chat: ModelEndpoint = {
-  endpoint_type: "chat",
-  transport: "adapted",
+  endpoint_id: "chat",
+  transport: "bypass_openai_chat",
   kind: "adapted",
   protocol: "adapted",
   family: "chat",

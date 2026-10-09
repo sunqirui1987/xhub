@@ -4701,8 +4701,6 @@ export const enPhrases: Record<string, string> = {
   "Price unavailable": "Price unavailable",
   Credential: "Credential",
   "Add this model": "Add this model",
-  "Fetch fennoai models": "Fetch fennoai models",
-  "Fetch qiniu models": "Fetch qiniu models",
   "Refresh tags": "Refresh tags",
   "Refreshes after every request that reuses a pin. Empty tracks the backend default of {DEFAULT_SESSION_AFFINITY_TTL_SECONDS} seconds.":
     "Refreshes after every request that reuses a pin. Empty tracks the backend default of {DEFAULT_SESSION_AFFINITY_TTL_SECONDS} seconds.",

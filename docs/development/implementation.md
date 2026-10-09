@@ -313,13 +313,11 @@ prompt logging 决定正文、头和响应是否存储，敏感字段写入时�
 
 ## 18 官方视频任务、创建与轮询
 
-Qiniu 注册 /v3/contents/generations/tasks 的 create/get，没有 list；Ark 上游 /api/v3/contents/generations/tasks 支持 create/list/get。模型前缀与字段映射由 transport 描述，实际发送由数据面。
 创建接收任务 ID 并按调用方/transport/部署建立任务钉；查询不能把另一调用方同名任务发送给供应商。创建遇可重试状态与未知传输结果区别处理，后者不得盲目再创建。
 每次 poll 独立 callID；成功终态且正 usage 用稳定 settlement identity 计费一次。等待、失败、零用量不推断生成费。第一次持久化失败后后续终态查询可重新结算；没有完整价格或未等终态时不能称真实费用已验收。
 
 ### 实现位置
 
-- [provider/qiniu](../../internal/provider/qiniu/readme_cn.md)
 - [provider/volcengine](../../internal/provider/volcengine/readme_cn.md)
 - [dataplane](../../internal/dataplane/readme_cn.md)
 - [gateway](../../internal/gateway/readme_cn.md)

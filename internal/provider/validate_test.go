@@ -15,12 +15,9 @@ func TestExplicitEndpointContract(t *testing.T) {
 		valid                            bool
 	}{
 		{"", "chat", "openai", "gpt", false},
-		{"adapted", "", "openai", "gpt", false},
-		{"adapted", "chat", "openai", "gpt", true},
-		{"adapted", "bypass:fal-video", "qiniu", "x", false},
 		{"qiniu_fal_kling", "video", "qiniu", "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", false},
-		{"qiniu_fal_kling", "bypass:fal-video", "qiniu", "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", true},
-		{"qiniu_fal_kling", "bypass:fal-video", "openai", "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", false},
+		{"qiniu_fal_kling", "bypass:fal-video", "custom", "qiniu/fal-ai/kling-video/v2.5-turbo/pro/text-to-video", true},
+		{"qiniu_fal_kling", "bypass:fal-video", "openai", "qiniu/fal-ai/kling-video/v2.5-turbo/pro/text-to-video", false},
 		{"qiniu_fal_kling", "bypass:fal-video", "qiniu", "fal-ai/vidu/q1/text-to-video", false},
 		{"bypass_openai_responses", "bypass:openai-responses", "qiniu", "gpt", true},
 	} {

@@ -602,7 +602,7 @@ func (h *harness) usageOverride(model string, usage map[string]any) {
 func addFlatPricedModel(t *testing.T, h *harness, admin, public string, params map[string]any, mode string) {
 	t.Helper()
 	litellm := map[string]any{
-		"model":               "openai/" + public,
+		"model":               public,
 		"api_key":             "sk-fake-upstream",
 		"api_base":            h.credentialAPIBase(),
 		"custom_llm_provider": "openai",
@@ -613,7 +613,7 @@ func addFlatPricedModel(t *testing.T, h *harness, admin, public string, params m
 	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": litellm,
-		"model_info":     map[string]any{"transport": "adapted", "endpoint_types": []string{mode}},
+		"model_info":     map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{mode}},
 	})
 }
 
@@ -640,7 +640,7 @@ func (h *harness) patchRates(t *testing.T, admin, public string, rates []any, ex
 	h.ok(http.MethodPost, "/model/update", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": params,
-		"model_info":     map[string]any{"id": id, "transport": "adapted", "endpoint_types": []string{"chat"}},
+		"model_info":     map[string]any{"id": id, "transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	})
 }
 

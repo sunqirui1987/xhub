@@ -14,11 +14,11 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// MarketURL is the Modelink market feed the price catalog is generated from.
-// Both the build-time generator and the runtime reload read this one URL.
-const MarketURL = "https://api.modelink.ai/v1/market/models"
+// MarketURL 保留旧生成器常量契约；默认无远程价格源，调用方必须显式提供地址。
+// 生成器和运行时均只读取调用方显式指定的源。
+const MarketURL = ""
 
-// feedDocument is the Modelink market response.
+// feedDocument is the configured price feed response.
 type feedDocument struct {
 	Status bool        `json:"status"`
 	Data   []feedModel `json:"data"`
@@ -351,7 +351,7 @@ func BuildPriceDocument(raw []byte) (PriceDocument, error) {
 
 	return PriceDocument{
 		Version:     1,
-		Source:      MarketURL,
+		Source:      "configured_feed",
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Providers:   providers,
 		Models:      models,
@@ -425,7 +425,7 @@ func convertFeedModel(model feedModel) map[string]any {
 
 	row := map[string]any{
 		"mode":              modeOf(model.Architecture),
-		"source":            MarketURL,
+		"source":            "configured_feed",
 		"display_name":      firstNonEmpty(model.Name, model.ID),
 		"max_input_tokens":  positiveOrNil(model.ModelConstraints.ContextLength),
 		"max_output_tokens": positiveOrNil(firstPositive(model.ModelConstraints.MaxCompletionTokens, model.ModelConstraints.MaxTokens)),
@@ -781,13 +781,13 @@ func putTrue(row map[string]any, key string, on bool) {
 
 // FetchMarket reads the market feed. It is the runtime counterpart of the
 // build-time generator, and both go through BuildPriceDocument.
-// 参数 ctx（context.Context）：请求的取消和超时；url（string）：要读的地址。空串用 MarketURL。
+// 参数 ctx（context.Context）：请求的取消和超时；url（string）：要读的地址。空串返回配置错误。
 // 返回 PriceDocument（PriceDocument）：转换好的价格目录；error（error）：网络或解析失败时不为 nil。
 // 调用：ReloadFromMarket。
-// 测试：pricedata_test.go 用本地服务覆盖。
+// 测试：feed_source_test.go、gateway/models/schedule_test.go 用本地服务覆盖。
 func FetchMarket(ctx context.Context, url string) (PriceDocument, error) {
 	if strings.TrimSpace(url) == "" {
-		url = MarketURL
+		return PriceDocument{}, fmt.Errorf("price feed URL must be explicitly configured")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -808,15 +808,20 @@ func FetchMarket(ctx context.Context, url string) (PriceDocument, error) {
 	if err != nil {
 		return PriceDocument{}, err
 	}
-	return BuildPriceDocument(raw)
+	doc, err := BuildPriceDocument(raw)
+	if err != nil {
+		return PriceDocument{}, err
+	}
+	doc.Source = url
+	return doc, nil
 }
 
 // ReloadFromMarket fetches the market feed and swaps it in as the live price
 // catalog. A failed fetch leaves the prices in use untouched and reports why.
-// 参数 ctx（context.Context）：请求的取消和超时；url（string）：要读的地址。空串用 MarketURL。
+// 参数 ctx（context.Context）：请求的取消和超时；url（string）：要读的地址。空串返回配置错误。
 // 返回 int（int）：换上的模型条数；error（error）：抓取、解析或应用失败时不为 nil。
 // 调用：gateway/models.ReloadCostMap。
-// 测试：pricedata_test.go 用本地服务覆盖。
+// 测试：feed_source_test.go、gateway/models/schedule_test.go 用本地服务覆盖。
 func ReloadFromMarket(ctx context.Context, url string) (int, error) {
 	doc, err := FetchMarket(ctx, url)
 	if err != nil {

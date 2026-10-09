@@ -126,5 +126,5 @@ func bypassEndpointOf(id string) string {
 	if v := strings.TrimSpace(os.Getenv(liveVendorEnvPrefix + id + "_BYPASS_ENDPOINT")); v != "" {
 		return v
 	}
-	return "qiniu_contents_generation"
+	return "ark_contents_generation"
 }

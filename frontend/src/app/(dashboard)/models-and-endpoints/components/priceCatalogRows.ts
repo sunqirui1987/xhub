@@ -273,7 +273,7 @@ export function priceModelPayload(input: {
   };
   if (input.displayName?.trim()) body.display_name = input.displayName.trim();
   if (input.mode?.trim()) body.mode = input.mode.trim();
-  if (input.endpointType?.trim()) body.endpoint_type = input.endpointType.trim();
+  if (input.endpointType?.trim()) body.endpoint_id = input.endpointType.trim();
   for (const [field, raw] of Object.entries(input.tokenRates)) {
     if (
       input.original &&

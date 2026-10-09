@@ -1,7 +1,10 @@
 package prefs
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"math"
 	"strings"
 	"sync"
@@ -33,6 +36,8 @@ type RouteSettings struct {
 	// "platform". The console shows it, because a scope that selected nothing and
 	// a scope whose parent selected something look identical without it.
 	Source string
+	// RuleSource 说明命中的策略层级，不包含凭据。
+	RuleSource string
 }
 
 // ScopeRef names one level of the inheritance chain.
@@ -198,37 +203,61 @@ func (r RouteSettings) Strategy() string {
 // 返回 RouteSettings：应用精确模型规则后的设置或原设置。
 // 调用：数据面选路前读取设置。
 // 测试：route_settings_test.go
-func (r RouteSettings) ForModel(modelName string) RouteSettings {
+
+// ForEndpoint 解析模型与入口策略，优先入口覆盖、模型默认、模板默认。
+// 参数 modelName、endpointID：公开模型及目录 ID；返回设置或 Err，不修改源文档。
+// 调用：统一、原生和预览；重试、超时和冷却保持模板公共设置。
+func (r RouteSettings) ForEndpoint(modelName, endpointID string) RouteSettings {
+	r.RuleSource = "template-default"
 	if r.Err != nil {
 		return r
 	}
-	rules, present, err := modelRoutingRules(r.Settings)
+	rules, _, err := modelRoutingRules(r.Settings)
 	if err != nil {
 		r.Err = err
 		return r
 	}
-	if !present {
-		return r
-	}
+	var selected map[string]any
 	for _, rule := range rules {
 		name, _ := rule["model_name"].(string)
+		endpoint, _ := rule["endpoint_id"].(string)
 		if strings.TrimSpace(name) != modelName {
 			continue
 		}
-		settings := make(map[string]any, len(r.Settings))
-		for key, value := range r.Settings {
-			settings[key] = value
+		if strings.TrimSpace(endpoint) == "" && selected == nil {
+			selected = rule
 		}
-		settings["routing_strategy"] = strings.TrimSpace(rule["routing_strategy"].(string))
-		if args, ok := rule["routing_strategy_args"].(map[string]any); ok {
-			settings["routing_strategy_args"] = args
-		} else {
-			settings["routing_strategy_args"] = map[string]any{}
+		if endpointID != "" && strings.TrimSpace(endpoint) == endpointID {
+			selected = rule
+			break
 		}
-		r.Settings = settings
+	}
+	if selected == nil {
 		return r
 	}
+	settings := make(map[string]any, len(r.Settings))
+	for key, value := range r.Settings {
+		settings[key] = value
+	}
+	settings["routing_strategy"] = strings.TrimSpace(selected["routing_strategy"].(string))
+	args, _ := selected["routing_strategy_args"].(map[string]any)
+	if args == nil {
+		args = map[string]any{}
+	}
+	settings["routing_strategy_args"] = args
+	r.Settings = settings
+	r.RuleSource = "model-default"
+	if endpoint, _ := selected["endpoint_id"].(string); strings.TrimSpace(endpoint) != "" {
+		r.RuleSource = "model-endpoint"
+	}
 	return r
+}
+
+// CursorScope 按模板内容版本、公开模型和用户入口隔离轮询状态。
+// 参数为调用上下文；返回摘要，不读凭据、不推进计数。调用：共用调度。
+func (r RouteSettings) CursorScope(modelName, endpointID string) string {
+	raw, _ := json.Marshal([]any{r.TemplateID, r.Settings, modelName, endpointID})
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
 // ValidateModelRoutingDocument validates the optional exact-name model routing
@@ -271,10 +300,20 @@ func modelRoutingRules(settings map[string]any) ([]map[string]any, bool, error) 
 		if !ok || name == "" {
 			return nil, true, fmt.Errorf("model_routing[%d].model_name is required", i)
 		}
-		if seen[name] {
-			return nil, true, fmt.Errorf("model_routing has duplicate model_name %q", name)
+		endpoint := ""
+		if value, exists := rule["endpoint_id"]; exists {
+			var valid bool
+			endpoint, valid = value.(string)
+			endpoint = strings.TrimSpace(endpoint)
+			if !valid || !provider.KnownEndpoint(endpoint) {
+				return nil, true, fmt.Errorf("model_routing[%d].endpoint_id is not registered", i)
+			}
 		}
-		seen[name] = true
+		key := name + "\x00" + endpoint
+		if seen[key] {
+			return nil, true, fmt.Errorf("model_routing has duplicate model and endpoint %q", key)
+		}
+		seen[key] = true
 		strategy, ok := rule["routing_strategy"].(string)
 		strategy = strings.TrimSpace(strategy)
 		if !ok || strategy == "" {
@@ -355,7 +394,7 @@ func (r RouteSettings) CooldownSeconds() float64 {
 //	{"weights": {"deployment:model_123": 70}}
 //
 // Rows require deployment_id or pricing_id. A missing or empty list means
-// "use each deployment's own weight". Zero disables a deployment. Negative or non-finite
+// "use weight 1 for every deployment". Zero disables a deployment. Negative or non-finite
 // weights are ignored.
 // 参数：无。
 // 返回 map[string]float64（map[string]float64）：部署 id 到份额。文档没写份额时为 nil。

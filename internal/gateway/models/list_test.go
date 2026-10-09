@@ -17,14 +17,14 @@ func TestProxyModelNamesSkipsProviderShells(t *testing.T) {
 	}
 }
 
-func TestProxyModelNamesSkipsLegacyProviderNamesWithoutRole(t *testing.T) {
+func TestProxyModelNamesDoesNotInferRolesFromNames(t *testing.T) {
 	names := proxyModelNames([]config.ModelEntry{
 		{ModelName: "qiniu"},
 		{ModelName: "fennoai"},
 		{ModelName: "GPT-5.5"},
 	})
-	if len(names) != 1 || names[0] != "GPT-5.5" {
-		t.Fatalf("legacy provider names leaked into the model list: %v", names)
+	if len(names) != 3 {
+		t.Fatalf("model names incorrectly inferred provider roles: %v", names)
 	}
 }
 

@@ -92,9 +92,6 @@ func availableCategory(entry config.ModelEntry, row map[string]any) string {
 	if provider.ValidateDeployment(entry) != nil {
 		return "other"
 	}
-	if provider.SelectedTransport(entry) == provider.AdaptedTransportID {
-		return provider.SelectedCapabilities(entry)[0]
-	}
 	for _, t := range provider.BoundTransports(entry) {
 		return t.Family
 	}

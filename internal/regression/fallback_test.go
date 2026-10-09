@@ -23,7 +23,7 @@ func fallbackSimulated(t *testing.T) {
 	if r := h.setRouter(admin, map[string]any{"allowed_fails": 0}); r.status >= 300 {
 		t.Fatalf("disable cooldown for deterministic failover: %s", r.text())
 	}
-	h.addDBModel(t, admin, public, "fail-a", "dep-fail-a", map[string]any{"weight": 10})
+	h.addDBModel(t, admin, public, "fail-a", "dep-fail-a", nil)
 	h.addDBModel(t, admin, public, "fail-b", "dep-fail-b", nil)
 
 	h.scriptStatus("fail-a", http.StatusInternalServerError)
@@ -130,8 +130,8 @@ func cooldownSimulated(t *testing.T) {
 	}
 	const public = "regression-cooldown"
 	h := newHarness(t,
-		deployment(public, "openai/cool-a", map[string]any{"weight": 10}),
-		deployment(public, "openai/cool-b", map[string]any{"weight": 1}),
+		deployment(public, "cool-a", nil),
+		deployment(public, "cool-b", nil),
 	)
 	admin := h.adminSession()
 	c := h.openScope(t, admin, "cooldown")
@@ -152,7 +152,7 @@ func cooldownSimulated(t *testing.T) {
 func (h *harness) addDBModel(t *testing.T, admin, public, upstream, id string, extra map[string]any) {
 	t.Helper()
 	params := map[string]any{
-		"model":                 "openai/" + upstream,
+		"model":                 upstream,
 		"api_key":               "sk-fake-upstream",
 		"api_base":              h.prices.URL + "/v1",
 		"custom_llm_provider":   "openai",
@@ -165,6 +165,6 @@ func (h *harness) addDBModel(t *testing.T, admin, public, upstream, id string, e
 	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
 		"model_name":     public,
 		"litellm_params": params,
-		"model_info":     map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}, "id": id},
+		"model_info":     map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}, "id": id},
 	})
 }

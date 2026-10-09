@@ -5,6 +5,8 @@ package models
 
 import (
 	"context"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
@@ -26,14 +28,14 @@ func StartScheduledReload(s Host) {
 	go scheduledReloadLoop(s)
 }
 
-// reloadNow fetches the market feed and swaps it in. Both the manual reload and
-// the scheduled one go through here, so they cannot drift apart.
+// reloadNow 从运维显式配置的 XHUB_PRICE_FEED_URL 读取价格。
+// 不设置任何内置远程地址；缺失或失败时返回错误并保留当前价格。
 // 参数 ctx（context.Context）：取消和超时。
 // 返回 int（int）：换上的模型条数；error（error）：抓取或应用失败时不为 nil，此时价格表不动。
 // 调用：ReloadCostMap、scheduledReloadLoop。
-// 测试：无直接单测
+// 测试：schedule_test.go 的缺失源、失败源与目录保留断言。
 func reloadNow(ctx context.Context) (int, error) {
-	return catalog.ReloadFromMarket(ctx, catalog.MarketURL)
+	return catalog.ReloadFromMarket(ctx, strings.TrimSpace(os.Getenv("XHUB_PRICE_FEED_URL")))
 }
 
 // scheduledReloadLoop 每分钟重读一次重载计划。计划里的下次运行时间到了就拉市场目录并换上。按分钟轮询，取消或改间隔不用等整段间隔结束。

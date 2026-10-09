@@ -14,8 +14,8 @@ export function providerCatalogEntry(model: ListedModel, supplier: CredentialIte
   // This API's input/output_price fields are USD per million tokens. Do not
   // interpret prices from media categories as token prices.
   if (["llm", "chat", "completion", "vision", "embedding", "text"].includes(model.category ?? "")) {
-    if (model.category === "embedding") row.endpoint_type = "embedding";
-    else row.endpoint_type = "chat";
+    if (model.category === "embedding") row.endpoint_id = "embedding";
+    else row.endpoint_id = "chat";
     for (const side of ["input", "output"] as const) {
       const price = model[(side + "_price") as "input_price" | "output_price"];
       if (typeof price === "number" && Number.isFinite(price) && price >= 0)

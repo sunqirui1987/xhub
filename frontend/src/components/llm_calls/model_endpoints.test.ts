@@ -16,7 +16,7 @@ const binding = (path: string, protocol = "openai-responses"): ModelEndpoint => 
   method: "POST",
   kind: "bypass",
   transport: "test",
-  endpoint_type: "test",
+  endpoint_id: "test",
   family: "chat",
 });
 afterEach(() => vi.unstubAllGlobals());

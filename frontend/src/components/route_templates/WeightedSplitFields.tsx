@@ -26,7 +26,6 @@ const metadata = (row: SplitDeployment) =>
   [row.supplier, row.provider].filter((value, index, all) => value && all.indexOf(value) === index).join(" · ");
 const sourceKey = (explicit: boolean, deployment: SplitDeployment) => {
   if (explicit) return "pages.routeTemplates.weights.sourceOverride";
-  if (deployment.weight != null) return "pages.routeTemplates.weights.sourceDeployment";
   return "pages.routeTemplates.weights.sourceDefault";
 };
 
@@ -140,7 +139,7 @@ const WeightedSplitFields: React.FC<{
           return {
             deployment,
             ...(savedIndex >= 0 ? { savedIndex } : {}),
-            effectiveWeight: savedIndex >= 0 ? saved[savedIndex].weight : (deployment.weight ?? "1"),
+            effectiveWeight: savedIndex >= 0 ? saved[savedIndex].weight : "1",
           };
         });
         const missing = saved

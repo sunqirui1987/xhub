@@ -7,7 +7,7 @@ import { modelAvailableCall, userAvailableModelsCall } from "@/components/networ
  * 不携带上游地址或凭据；客户端只能调用当前模型明确声明的绑定。
  */
 export interface ModelEndpoint {
-  endpoint_type: string;
+  endpoint_id: string;
   transport: string;
   kind: "adapted" | "bypass";
   protocol: string;

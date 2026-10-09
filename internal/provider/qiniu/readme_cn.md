@@ -4,8 +4,8 @@
 
 ## 职责与实现契约
 
-seedance.go 登记 qiniu_contents_generation，默认供应商地址 api.qnaigc.com。官方创建路径为 POST /v3/contents/generations/tasks，查询为 GET 同路径/{id}；没有 list 动作。
-请求模型字段为 model，任务 ID 字段为 id，上游模型名去掉 qiniu 前缀。内置标准版、Fast、Mini（260615）和 2.5（260628）四条模型；价格显式绑定七牛 Modelink 市场目录，避免借用其他供应商的同名模型价。部署可以覆盖默认地址和命名凭据。
+seedance.go 登记 qiniu_contents_generation 协议，默认协议地址为 api.qnaigc.com。官方创建路径为 POST /v3/contents/generations/tasks，查询为 GET 同路径/{id}；没有 list 动作。XHub 不登记固定七牛凭据供应商；管理员必须选择 Custom 或 Custom OpenAI，填写地址和密钥，并在模型上显式选择该传输。
+请求模型字段为 model，任务 ID 字段为 id，上游模型名去掉 qiniu 前缀。目录包含标准版、Fast、Mini（260615）和 2.5（260628）四条模型；价格显式绑定七牛 Modelink 市场目录，避免借用其他供应商的同名模型价。凭据名、模型名和 hostname 都不会触发协议推断。
 实际发送、任务钉、权限、轮询与终态结算由 dataplane 管理。登记测试只证明路径和字段描述；真实任务测试使用 XHUB_QINIU_SEEDANCE_LIVE=1 和环境中的 QINIU_API_KEY，会创建一个付费视频。不得把成功创建等价于终态完成或准确计费。
 
 ## 源码职责与入口

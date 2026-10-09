@@ -60,7 +60,6 @@ route_template_config_test 覆盖完整配置往返、平台播种一次、整�
 | [route_template_test.go](route_template_test.go) | `TestNoTemplateSelectedBehavesLikeThePlatformDefault`, `TestATeamsOwnTemplateBeatsItsOrganizations`, `TestASessionPicksUpItsTeamsTemplate`, `TestTheConsoleSaysWhichTemplateIsInEffect`, `TestDeletingATemplateInUseIsRefusedWithTheList`, `TestAKeyCreatedWithATemplateKeepsIt` |
 | [router_settings_test.go](router_settings_test.go) | `TestRouterSettingsChain` |
 | [routing_test.go](routing_test.go) | `TestRoutingStrategyChain`, `TestLeastBusyChain`, `TestUnknownStrategyChain`, `TestExactNameBeatsWildcard`, `TestSessionPinOverridesStrategy` |
-| [setup_test.go](setup_test.go) | `TestProviderSetupAddsFennoaiAndQiniu`, `TestScopedKeyCallsInference`, `TestModelAllowListIsEnforced` |
 | [split_test.go](split_test.go) | `TestWeightedSplitSendsTrafficToBothDeployments`, `TestWeightedSplitDoesNotChangeSimpleShuffle`, `TestSplitStillBillsAndLogsEveryCall`, `TestSplitIsEvenWhenNoWeightsAreSet` |
 
 ```bash

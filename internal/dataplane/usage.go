@@ -255,6 +255,3 @@ func bodyUsage(raw []byte) (pt, ct int) {
 	usage := usageFromDocument(doc)
 	return usageCounts(usage)
 }
-
-// pipeResponsesAsChat copies a Qiniu bypass Responses stream as chat completion chunks.
-// An error status is forwarded unchanged so the client still sees the provider message.

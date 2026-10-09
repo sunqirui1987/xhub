@@ -91,8 +91,10 @@ export async function login(page: Page, username: string, password: string) {
   await clearConsoleSession(page);
   await gotoLogin(page);
   await page.getByPlaceholder(t("login.usernamePlaceholder")).fill(username);
-  await page.getByPlaceholder(t("login.passwordPlaceholder")).fill(password);
-  await page.getByRole("button", { name: t("login.submit"), exact: true }).click();
+  const passwordInput = page.getByPlaceholder(t("login.passwordPlaceholder"));
+  await passwordInput.fill(password);
+  // 从密码框提交原生登录表单，避免长时间全量运行时按钮动画或重渲染打断指针点击。
+  await passwordInput.press("Enter");
 }
 
 export async function loginAdmin(page: Page) {

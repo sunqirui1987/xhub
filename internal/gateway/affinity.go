@@ -10,12 +10,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/dataplane"
+	"github.com/sunqirui1987/xhub/internal/gateway/family"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/provider"
 )
@@ -28,17 +30,27 @@ const affinityTTL = time.Hour
 // 调用：dataplane/host.go、dataplane/official.go、dataplane/serve.go
 // 测试：bypass_logic_test.go、failure_log_test.go、log_completeness_test.go
 func (s *Server) PlanRoute(r *http.Request, alias string, body map[string]any, p *auth.Principal) dataplane.RoutePlan {
-	plan := dataplane.RoutePlan{Alias: alias, Caller: callerScope(p)}
+	endpoint := ""
+	if r != nil && r.URL != nil {
+		endpoint = provider.EndpointForOp(family.InferenceOp(r.URL.Path))
+		if hit, ok := provider.Match(r.Method, r.URL.Path, nil); ok {
+			endpoint = hit.Transport.EndpointID
+		}
+	}
+	plan := dataplane.RoutePlan{Alias: alias, Caller: callerScope(p), Endpoint: endpoint}
 	if body != nil {
 		if prev := strings.TrimSpace(asString(body["previous_response_id"])); prev != "" {
-			if id := s.affinityGet(responsePinKey(alias, plan.Caller, prev)); id != "" {
+			if id := s.affinityGet(responsePinKey(alias, plan.Caller, prev, plan.Endpoint)); id != "" {
 				plan.Pinned = id
+			} else {
+				plan.Err = fmt.Errorf("response ownership is unknown; submit full history")
 			}
+			plan.Required = true
 		}
 	}
 	plan.SessionID = sessionID(r, body)
 	if plan.Pinned == "" && plan.SessionID != "" && plan.Caller != "" {
-		plan.Pinned = s.affinityGet(sessionPinKey(alias, plan.Caller, plan.SessionID))
+		plan.Pinned = s.affinityGet(sessionPinKey(alias, plan.Caller, plan.SessionID, plan.Endpoint))
 	}
 	return plan
 }
@@ -53,10 +65,10 @@ func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID 
 		return
 	}
 	if plan.SessionID != "" && plan.Caller != "" {
-		s.affinitySet(sessionPinKey(plan.Alias, plan.Caller, plan.SessionID), deploymentID)
+		s.affinitySet(sessionPinKey(plan.Alias, plan.Caller, plan.SessionID, plan.Endpoint), deploymentID)
 	}
 	if responseID != "" && plan.Caller != "" {
-		s.affinitySet(responsePinKey(plan.Alias, plan.Caller, responseID), deploymentID)
+		s.affinitySet(responsePinKey(plan.Alias, plan.Caller, responseID, plan.Endpoint), deploymentID)
 	}
 }
 
@@ -64,10 +76,10 @@ func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID 
 // 参数 alias、caller、responseID：模型、调用方范围和响应 id。
 // 返回：不含原始调用方凭据的缓存键。
 // 调用：PlanRoute、CommitRoute。测试：affinity_test.go。
-func responsePinKey(alias, caller, responseID string) string {
-	raw, _ := json.Marshal([]string{alias, caller, responseID})
+func responsePinKey(alias, caller, responseID string, endpoint ...string) string {
+	raw, _ := json.Marshal(append([]string{alias, caller, responseID}, endpoint...))
 	sum := sha256.Sum256(raw)
-	return "deployment_affinity:v3:response:" + hex.EncodeToString(sum[:])
+	return "deployment_affinity:v4:response:" + hex.EncodeToString(sum[:])
 }
 
 // 用完整 SHA256 哈希隔离模型、调用方与会话，避免分隔符碰撞及原始标识泄露。
@@ -75,10 +87,10 @@ func responsePinKey(alias, caller, responseID string) string {
 // 返回 string（string）：会话粘滞的 Redis 键，含对外名、调用方哈希和会话 id。
 // 调用：仅在 affinity.go 内使用
 // 测试：affinity_test.go
-func sessionPinKey(alias, caller, sessionID string) string {
-	raw, _ := json.Marshal([]string{alias, caller, sessionID})
+func sessionPinKey(alias, caller, sessionID string, endpoint ...string) string {
+	raw, _ := json.Marshal(append([]string{alias, caller, sessionID}, endpoint...))
 	sum := sha256.Sum256(raw)
-	return "deployment_affinity:v2:session:" + hex.EncodeToString(sum[:])
+	return "deployment_affinity:v3:session:" + hex.EncodeToString(sum[:])
 }
 
 // 确定粘滞键里的调用方范围，优先密钥哈希，其次用户。

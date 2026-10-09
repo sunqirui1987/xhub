@@ -19,25 +19,41 @@ func ValidateDeployment(m config.ModelEntry) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("model_info.endpoint_types is required")
 	}
-	if id == AdaptedTransportID {
-		for _, endpoint := range ids {
-			if !isKnownCapability(endpoint) {
-				return fmt.Errorf("unsupported adapted endpoint type %s", endpoint)
-			}
+	seen := map[string]bool{}
+	for _, endpoint := range ids {
+		if seen[endpoint] {
+			return fmt.Errorf("duplicate endpoint type %s", endpoint)
 		}
-		return nil
+		seen[endpoint] = true
 	}
 	for _, t := range Transports() {
 		if t.ID != id {
 			continue
 		}
-		if len(ids) != 1 || ids[0] != t.EndpointType {
-			return fmt.Errorf("transport %s requires endpoint type %s", id, t.EndpointType)
+		for _, endpoint := range ids {
+			valid := false
+			for _, entry := range EndpointTypes() {
+				if entry.ID == endpoint && entry.Kind == KindBypass && entry.Protocol == t.Protocol && (DialogueProtocol(t.Protocol) || endpoint == t.EndpointID) {
+					valid = true
+				}
+			}
+			for _, entry := range EndpointTypes() {
+				if entry.ID == endpoint && entry.Kind == KindAdapted && entry.Protocol == t.Protocol {
+					valid = true
+				}
+			}
+			if DialogueProtocol(t.Protocol) {
+				valid = valid || slices.Contains([]string{"chat", "responses", "messages"}, endpoint)
+			}
+			if !valid {
+				return fmt.Errorf("transport %s is incompatible with endpoint type %s", id, endpoint)
+			}
 		}
 		slug := m.ParamString("custom_llm_provider", "")
 		if len(t.Providers) > 0 && !slices.Contains(t.Providers, slug) {
 			return fmt.Errorf("transport %s does not support provider %s", id, slug)
 		}
+		// 固定动作登记的是上游模型路径；部署可以保留目录使用的 qiniu/ 路由前缀。
 		model := OfficialID(t.StripPrefix, m.ParamString("model", ""))
 		fixed, found := false, false
 		for _, action := range t.Actions {

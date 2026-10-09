@@ -1,5 +1,5 @@
 // Command pricedata regenerates internal/catalog/publicdata/pricedata.json from
-// the Modelink market feed.
+// the configured price feed.
 //
 // Run it when the feed changes a price or adds a model, then rebuild the
 // gateway:

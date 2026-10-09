@@ -19,8 +19,8 @@ import PricingTable from "./add_model/PricingTable";
 import { effectivePricing, type EditorModel, type CatalogRow } from "./add_model/modelEditorPricing";
 
 function callType(info: Record<string, unknown>): string {
-  if (typeof info.transport === "string" && info.transport !== "adapted") return info.transport;
-  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "chat") : "chat";
+  if (typeof info.transport === "string") return info.transport;
+  return Array.isArray(info.endpoint_types) ? String(info.endpoint_types[0] ?? "") : "";
 }
 
 type Props = {
@@ -221,7 +221,7 @@ export default function ModelInfoView({
                   />
                 </div>
                 <Detail label="调用方式" value={callType(info)} />
-                <Detail label="传输方式" value={info.transport || "adapted"} />
+                <Detail label="传输方式" value={info.transport || "未配置上游执行配置"} />
                 <Detail label="配置来源" value={info.db_model ? "控制台" : "配置文件"} />
                 <Detail
                   label="创建时间"

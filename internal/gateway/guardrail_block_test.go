@@ -91,7 +91,7 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 		Cfg: &config.Config{
 			ModelList: []config.ModelEntry{{
 				ModelName: "gpt-4o-mini",
-				ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+				ModelInfo: map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 				LiteLLMParams: map[string]any{
 					"model":    "openai/gpt-4o-mini",
 					"api_key":  "sk-test",

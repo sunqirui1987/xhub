@@ -34,13 +34,10 @@ list.go/available.go 提供按身份可见的模型；admin.go 和 validate.go �
 
 公开类型：`Builtin`, `CatalogModel`.
 
-- [`func Builtins() []Builtin`](builtin.go) — Builtins are the two providers a new install can add models from. Fenno calls https://api.fenno.ai. Qiniu calls the OpenAI bypass root. Catalogs stay on /v1/models.
-- [`func BuiltinsEnabled() bool`](builtin.go) — BuiltinsEnabled reports whether first install should add fennoai and qiniu. XHUB_BUILTIN_PROVIDERS defaults to on. 0, false, off, no, or disabled turns it off.
 - [`func ParseModelIDs(body []byte) []string`](builtin.go) — ParseModelIDs reads an OpenAI models list. A body with no ids returns an empty slice.
 - [`func ParseCatalog(body []byte) []CatalogModel`](builtin.go) — ParseCatalog maps an OpenAI-style models document to catalog cards.
 - [`func ModelsURL(provider, base string) string`](builtin.go) — ModelsURL 拼出拉取上游模型目录的地址。供应商标识决定默认根路径。
 - [`func SetBuiltinClient(c *http.Client)`](builtin.go) — SetBuiltinClient replaces the client used to fetch builtin model lists.
-- [`func SeedBuiltins(s Host)`](builtin.go) — SeedBuiltins removes leftover provider rows and creates the two credentials when they are missing. It does not insert models. A model added later is the same row a person would save by hand.
 - [`func RefreshBuiltin(s Host, w http.ResponseWriter, r *http.Request)`](builtin.go) — RefreshBuiltin reloads the catalog. It does not add or delete models.
 - [`func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request)`](builtin.go) — ListBuiltin returns the specialized builtin catalog or model IDs discovered through a saved OpenAI-compatible credential. It does not write.
 - [`func AddBuiltinModels(s Host, w http.ResponseWriter, r *http.Request)`](builtin.go) — AddBuiltinModels is the retired catalog-to-deployment shortcut. Catalog rows now enter /price/model and deployments are created through /model/new, so a caller cannot bypass the unified pricing editor.

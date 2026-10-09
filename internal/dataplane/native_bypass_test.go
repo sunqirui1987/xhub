@@ -42,7 +42,7 @@ func TestNativeBypassJSONAndUsage(t *testing.T) {
 				}
 				var doc map[string]json.RawMessage
 				json.NewDecoder(r.Body).Decode(&doc)
-				if string(doc["model"]) != `"upstream"` || string(doc["opaque"]) != `9007199254740993` || !bytes.Contains(doc["custom"], []byte("keep")) {
+				if string(doc["model"]) != `"`+spec.protocol+`/upstream"` || string(doc["opaque"]) != `9007199254740993` || !bytes.Contains(doc["custom"], []byte("keep")) {
 					t.Error("native fields modified", doc)
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -120,7 +120,7 @@ func TestNativeImageEditMultipart(t *testing.T) {
 				fields[part.FormName()] = string(data)
 			}
 		}
-		if fields["model"] != "gpt-image" || fields["quality"] != "high" || fields["size"] != "1024x1024" {
+		if fields["model"] != "openai/gpt-image" || fields["quality"] != "high" || fields["size"] != "1024x1024" {
 			t.Error(fields)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -215,94 +215,14 @@ func TestNativeCreateServerErrorIsNotReplayed(t *testing.T) {
 	}
 }
 
-// TestQiniuNativeNamespace 验证七牛根地址扩展到原生协议路径，并保留 openai/ 模型命名空间。
-// 参数 t：测试上下文。返回：无。只调用本地假上游，不创建付费任务。
-func TestQiniuNativeNamespace(t *testing.T) {
-	for _, suffix := range []string{"", "/v1", "/v1/", "/bypass/openai/v1"} {
-		t.Run(suffix, func(t *testing.T) {
-			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/bypass/openai/v1/responses" {
-					t.Error(r.URL.Path)
-				}
-				var doc map[string]any
-				json.NewDecoder(r.Body).Decode(&doc)
-				if doc["model"] != "openai/gpt-test" {
-					t.Error(doc["model"])
-				}
-				io.WriteString(w, `{"status":"completed","usage":{"input_tokens":1,"output_tokens":1}}`)
-			}))
-			defer up.Close()
-			dep := deployment("public", "openai/gpt-test", "supplier-key", up.URL+suffix, "bypass_openai_responses", nil)
-			dep.LiteLLMParams["custom_llm_provider"] = "qiniu"
-			h := officialHost(up, dep)
-			req := httptest.NewRequest("POST", "/bypass/openai/v1/responses", strings.NewReader(`{"model":"public","input":"hello"}`))
-			hit, _ := provider.Match("POST", req.URL.Path, nil)
-			rec := httptest.NewRecorder()
-			ServeBypass(h, rec, req, hit)
-			if rec.Code != 200 {
-				t.Fatal(rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
-// TestModelinkNativeForward 验证按 OpenAI 配置的 Modelink 凭据实际转发到七牛原生路径。
-// 参数 t：Go 测试上下文。返回：无；检查目标地址、模型与响应，失败时报告回归。
-// 调用：go test；用本地假上游拦截请求，不访问供应商或产生费用。
-func TestModelinkNativeForward(t *testing.T) {
-	const response = `{"status":"completed","output":[{"content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":1,"output_tokens":1}}`
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/bypass/openai/v1/responses" {
-			t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["model"] != "glm-4.5" || body["input"] != "hello" {
-			t.Errorf("unexpected upstream body: %v, error: %v", body, err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, response)
-	}))
-	defer up.Close()
-	h := officialHost(up, deployment("public", "glm-4.5", "supplier-key", "https://api.modelink.ai/v1", "bypass_openai_responses", nil))
-	localTransport := up.Client().Transport
-	h.client = &http.Client{Transport: auditRoundTripper(func(r *http.Request) (*http.Response, error) {
-		if r.URL.String() != "https://api.modelink.ai/bypass/openai/v1/responses" {
-			t.Errorf("unexpected Modelink URL: %s", r.URL)
-		}
-		// 拦截最终供应商地址后只替换主机，保持路径和请求体交给本地上游验证。
-		r.URL.Scheme = "http"
-		r.URL.Host = strings.TrimPrefix(up.URL, "http://")
-		return localTransport.RoundTrip(r)
-	})}
-	rec := h.call(t, http.MethodPost, "/bypass/openai/v1/responses", `{"model":"public","input":"hello"}`)
-	if rec.Code != http.StatusOK || rec.Body.String() != response || len(h.spend) != 1 {
-		t.Fatalf("forwarded response: %d %s, spend count: %d", rec.Code, rec.Body.String(), len(h.spend))
-	}
-}
-
-// TestNativeSupplierURLs 验证兼容 OpenAI 的七牛 Qnaigc、Modelink 凭据仍使用七牛原生路径，其他供应商保留自己的路径。
+// TestNativeSupplierURLs 验证任何域名都只遵循配置地址与显式传输，模型前缀由所选传输处理。
 // 参数 t：测试上下文。返回：无；只组合本地声明，不访问供应商。
 func TestNativeSupplierURLs(t *testing.T) {
-	for _, spec := range []struct {
-		base, path, wantURL, model, wantModel string
-	}{
-		{"https://api.qnaigc.com/v1", "/bypass/openai/v1/responses", "https://api.qnaigc.com/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
-		{"https://api.qnaigc.com", "/bypass/openai/v1/responses", "https://api.qnaigc.com/bypass/openai/v1/responses", "glm-4.5", "glm-4.5"},
-		{"https://api.qnaigc.com/bypass/openai/v1", "/bypass/openai/v1/responses", "https://api.qnaigc.com/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
-		{"https://api.modelink.ai/v1", "/bypass/openai/v1/responses", "https://api.modelink.ai/bypass/openai/v1/responses", "glm-4.5", "glm-4.5"},
-		{"https://api.modelink.ai", "/bypass/openai/v1/responses", "https://api.modelink.ai/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
-		{"https://api.modelink.ai/v1/", "/bypass/openai/v1/responses", "https://api.modelink.ai/bypass/openai/v1/responses", "qiniu/openai/gpt-test", "openai/gpt-test"},
-		{"https://api.modelink.ai/bypass/openai/v1", "/bypass/openai/v1/responses", "https://api.modelink.ai/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
-		{"https://API.MODELINK.AI/v1", "/bypass/openai/v1/responses", "https://API.MODELINK.AI/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
-		{"https://api.modelink.ai/v1", "/bypass/anthropic/v1/messages", "https://api.modelink.ai/bypass/anthropic/v1/messages", "anthropic/claude-test", "anthropic/claude-test"},
-		{"https://api.modelink.ai/v1", "/bypass/openai/v1/images/generations", "https://api.modelink.ai/bypass/openai/v1/images/generations", "openai/gpt-image", "openai/gpt-image"},
-		{"https://api.modelink.ai/v1", "/bypass/openai/v1/images/edits", "https://api.modelink.ai/bypass/openai/v1/images/edits", "openai/gpt-image", "openai/gpt-image"},
-		{"https://api.qnaigc.com/v1", "/bypass/anthropic/v1/messages", "https://api.qnaigc.com/bypass/anthropic/v1/messages", "anthropic/claude-test", "anthropic/claude-test"},
-		{"https://api.qnaigc.com/v1", "/bypass/openai/v1/images/generations", "https://api.qnaigc.com/bypass/openai/v1/images/generations", "openai/gpt-image", "openai/gpt-image"},
-		{"https://api.openai.com/v1", "/bypass/openai/v1/responses", "https://api.openai.com/v1/responses", "openai/gpt-test", "gpt-test"},
-		{"https://relay.example/custom/v1", "/bypass/openai/v1/responses", "https://relay.example/custom/v1/responses", "openai/gpt-test", "gpt-test"},
-		{"https://api.qnaigc.com.example/v1", "/bypass/openai/v1/responses", "https://api.qnaigc.com.example/v1/responses", "openai/gpt-test", "gpt-test"},
-		{"https://api.modelink.ai.example/v1", "/bypass/openai/v1/responses", "https://api.modelink.ai.example/v1/responses", "openai/gpt-test", "gpt-test"},
+	for _, spec := range []struct{ base, path, wantURL, model, wantModel string }{
+		{"https://api.qnaigc.com/v1", "/bypass/openai/v1/responses", "https://api.qnaigc.com/v1/responses", "openai/gpt-test", "openai/gpt-test"},
+		{"https://api.modelink.ai/custom/v1", "/bypass/openai/v1/responses", "https://api.modelink.ai/custom/v1/responses", "openai/gpt-test", "openai/gpt-test"},
+		{"https://api.openai.com/v1", "/bypass/openai/v1/responses", "https://api.openai.com/v1/responses", "openai/gpt-test", "openai/gpt-test"},
+		{"https://configured.example/bypass/openai/v1", "/bypass/openai/v1/responses", "https://configured.example/bypass/openai/v1/responses", "openai/gpt-test", "openai/gpt-test"},
 	} {
 		t.Run(spec.wantURL, func(t *testing.T) {
 			hit, ok := provider.Match("POST", spec.path, nil)
@@ -317,6 +237,22 @@ func TestNativeSupplierURLs(t *testing.T) {
 				t.Errorf("model = %s, want %s", got, spec.wantModel)
 			}
 		})
+	}
+}
+
+// TestCustomQiniuTransportDoesNotDependOnHostname 验证 Custom 凭据显式选择七牛传输后可使用任意配置地址，
+// 并只按传输定义移除 qiniu 路由前缀；测试使用纯 URL 组合，不访问外部服务。
+func TestCustomQiniuTransportDoesNotDependOnHostname(t *testing.T) {
+	hit, ok := provider.Match("POST", "/v3/contents/generations/tasks", nil)
+	if !ok || hit.Transport.ID != "qiniu_contents_generation" {
+		t.Fatal("七牛兼容传输未登记")
+	}
+	dep := config.ModelEntry{LiteLLMParams: map[string]any{"custom_llm_provider": "custom"}}
+	if got := bypassDeploymentURL("https://configured.example", hit, dep); got != "https://configured.example/v3/contents/generations/tasks" {
+		t.Fatal(got)
+	}
+	if got := bypassUpstreamModel(hit.Transport, "qiniu/bytedance/doubao-seedance-2-0-260128", bypassSupplier("https://configured.example", dep)); got != "bytedance/doubao-seedance-2-0-260128" {
+		t.Fatal(got)
 	}
 }
 

@@ -11,16 +11,10 @@ import (
 // seedanceDeployment 是内置的 Seedance Bypass 类型。model_info.transport 选择传输方式；
 // 部署自己的名字就是供应商 id——Bypass 会就地把它上面属于网关的那层前缀去掉，
 // 而不是另读一个"上游模型名"字段。
-// 参数 name（string）：对外模型名，含 qiniu/ 前缀；transportID（string）：执行传输标识，据此显式声明 Ark 或 Fal 公开端点。
+// 参数 name（string）：对外模型名，含 volcengine/ 前缀；transportID（string）：执行传输标识，显式声明 Ark 公开端点。
 // 返回 config.ModelEntry（config.ModelEntry）：可装进模型表的部署。
 func seedanceDeployment(name, transportID string) config.ModelEntry {
-	endpointID, supplier := "bypass:ark-video", "qiniu"
-	if strings.HasPrefix(transportID, "qiniu_fal_") {
-		endpointID = "bypass:fal-video"
-	}
-	if strings.HasPrefix(transportID, "volcengine_") {
-		supplier = "volcengine"
-	}
+	endpointID, supplier := "bypass:ark-video", "volcengine"
 	return config.ModelEntry{
 		ModelName:     name,
 		LiteLLMParams: map[string]any{"api_key": "sk-fake-upstream", "model": name, "custom_llm_provider": supplier},
@@ -36,11 +30,11 @@ func embeddingDeployment(name string) config.ModelEntry {
 	return config.ModelEntry{
 		ModelName: name,
 		LiteLLMParams: map[string]any{
-			"model":               "openai/" + name,
+			"model":               name,
 			"api_key":             "sk-fake-upstream",
 			"custom_llm_provider": "openai",
 		},
-		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"embedding"}},
+		ModelInfo: map[string]any{"transport": "openai_embeddings", "endpoint_types": []string{"embedding"}},
 	}
 }
 
@@ -108,7 +102,7 @@ func TestEmbeddingEndpointUsesItsOwnPath(t *testing.T) {
 // 的路径创建一个 Seedance 任务，Bypass 把正文改写成供应商的内容生成形状，
 // 任务 id 回到调用方手里供它随后查询。
 //
-// 2.0 和 2.5 各跑一遍，因为它们的模型名不同而端点类型相同。
+// 2.0 和 2.0 fast 各跑一遍，因为它们的模型名不同而端点类型相同。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
 func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
@@ -117,8 +111,8 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 		endpointType string
 		modelID      string
 	}{
-		{"seedance 2.0", "qiniu_contents_generation", "qiniu/bytedance/doubao-seedance-2-0-260128"},
-		{"seedance 2.5", "qiniu_contents_generation", "qiniu/bytedance/doubao-seedance-2-5-260628"},
+		{"seedance 2.0", "ark_contents_generation", "volcengine/doubao-seedance-2-0-260128"},
+		{"seedance 2.0 fast", "ark_contents_generation", "volcengine/doubao-seedance-2-0-fast-260128"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			h := newHarness(t, seedanceDeployment(probe.modelID, probe.endpointType))
@@ -126,7 +120,7 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 			tn := h.provision(t, admin, "seedance")
 			h.resetUpstream()
 
-			created := h.ok(http.MethodPost, "/v3/contents/generations/tasks", tn.key, map[string]any{
+			created := h.ok(http.MethodPost, "/api/v3/contents/generations/tasks", tn.key, map[string]any{
 				"model":   probe.modelID,
 				"content": []any{map[string]any{"type": "text", "text": "a cat on a beach"}},
 			})
@@ -140,7 +134,7 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 				t.Fatalf("upstream saw %d calls, want 1", len(calls))
 			}
 			// Bypass 去掉的是网关自己那层前缀，供应商那层留着。
-			if got := stringField(calls[0].Body, "model"); got != "bytedance/doubao-seedance-2-0-260128" && got != "bytedance/doubao-seedance-2-5-260628" {
+			if got := stringField(calls[0].Body, "model"); got != "doubao-seedance-2-0-260128" && got != "doubao-seedance-2-0-fast-260128" {
 				t.Fatalf("upstream saw model=%q, want the vendor id with only the gateway prefix stripped", got)
 			}
 			if !containsPath(calls[0].Path, "contents/generations/tasks") {
@@ -148,7 +142,7 @@ func TestSeedanceBypassCreatesAndPollsATask(t *testing.T) {
 			}
 
 			// 查询走同一个端点类型，只是把任务 id 放进路径里。
-			polled := h.ok(http.MethodGet, "/v3/contents/generations/tasks/"+taskID, tn.key, nil)
+			polled := h.ok(http.MethodGet, "/api/v3/contents/generations/tasks/"+taskID, tn.key, nil)
 			if got := stringField(polled.json(), "id"); got != taskID {
 				t.Fatalf("poll returned id=%q, want %q: %s", got, taskID, polled.describe())
 			}

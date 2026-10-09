@@ -35,7 +35,7 @@ func splitDeployment(public, upstream string, weight float64) config.ModelEntry 
 			"input_cost_per_token":  testInputRate,
 			"output_cost_per_token": testOutputRate,
 		},
-		ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+		ModelInfo: map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 	}
 }
 
@@ -171,7 +171,7 @@ func TestSplitIsEvenWhenNoWeightsAreSet(t *testing.T) {
 				"input_cost_per_token":  testInputRate,
 				"output_cost_per_token": testOutputRate,
 			},
-			ModelInfo: map[string]any{"transport": "adapted", "endpoint_types": []string{"chat"}},
+			ModelInfo: map[string]any{"transport": "bypass_openai_chat", "endpoint_types": []string{"chat"}},
 		}
 	}
 	h := newHarness(t, bare("even-a"), bare("even-b"))

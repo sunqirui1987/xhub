@@ -41,4 +41,4 @@ npm run test:e2e
 
 ## 这个目录不做什么
 
-它不实现 `/v1/chat/completions`，不写 `usage_events`，也不匹配七牛或火山的内容生成路径。那些在网关进程里。
+它不实现 `/v1/chat/completions`，不写 `usage_events`，也不匹配火山引擎官方的内容生成路径。那些在网关进程里。

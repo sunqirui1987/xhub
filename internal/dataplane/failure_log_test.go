@@ -101,7 +101,10 @@ func chatConfig(entries ...config.ModelEntry) *config.Config {
 		if entries[i].ModelInfo == nil {
 			entries[i].ModelInfo = map[string]any{}
 		}
-		entries[i].ModelInfo["transport"] = "adapted"
+		entries[i].ModelInfo["transport"] = "bypass_openai_chat"
+		if entries[i].ParamString("custom_llm_provider", "") == "" {
+			entries[i].LiteLLMParams["custom_llm_provider"] = "custom-test"
+		}
 		entries[i].ModelInfo["endpoint_types"] = []string{"chat"}
 	}
 	return &config.Config{
@@ -147,45 +150,26 @@ func assertNoSecrets(t *testing.T, line string) {
 	}
 }
 
+// TestServeLogsBuildSkipAndTerminalAuth 验证任意供应商按显式协议调用且型号原样传递。
+// 参数 t：测试上下文；本地上游检查请求及日志，不依赖外网，服务和日志 writer 自动恢复。
 func TestServeLogsBuildSkipAndTerminalAuth(t *testing.T) {
 	buf := captureLog(t)
-	h := newLogHost(chatConfig(config.ModelEntry{
-		ModelName: "broken",
-		LiteLLMParams: map[string]any{
-			"model":    "base_llm/some-model",
-			"api_key":  "sk-local-master",
-			"api_base": "https://example.invalid/v1",
-		},
-	}), nil)
-	rec := httptest.NewRecorder()
-	Serve(h, rec, chatRequest(t, "broken", false), "chat")
-	// base_llm passes the provider check and then has no encoder, so this is a
-	// request the gateway cannot express -- not a missing credential. It used to
-	// answer 401 "no upstream API key configured" with the key set, which sent an
-	// operator looking for a credential that was never the problem.
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
-	}
-	line := buf.String()
-	t.Log(line)
-	for _, want := range []string{
-		"trace dataplane hop path=/v1/chat/completions",
-		"error upstream encode path=/v1/chat/completions provider=base_llm model=some-model err=provider_not_implemented",
-		"error dataplane path=/v1/chat/completions status=400 code=provider_not_implemented provider=base_llm",
-	} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("log missing %q\n%s", want, line)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var doc map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&doc)
+		if doc["model"] != "base_llm/some-model" {
+			t.Errorf("上游型号被改写: %v", doc)
 		}
+		io.WriteString(w, `{"id":"local","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer up.Close()
+	h := newLogHost(chatConfig(config.ModelEntry{ModelName: "custom", LiteLLMParams: map[string]any{"model": "base_llm/some-model", "api_key": "sk-local-master", "api_base": up.URL}}), up.Client())
+	rec := httptest.NewRecorder()
+	Serve(h, rec, chatRequest(t, "custom", false), "chat")
+	if rec.Code != 200 {
+		t.Fatalf("自定义供应商调用失败: %d %s", rec.Code, rec.Body.String())
 	}
-	// The body has to say what is wrong, not blame a credential that was set.
-	body := rec.Body.String()
-	if !strings.Contains(body, "encoded for base_llm") {
-		t.Fatalf("the refusal does not name the encoding problem: %s", body)
-	}
-	if strings.Contains(body, "API key") {
-		t.Fatalf("the refusal blames a credential that was configured: %s", body)
-	}
-	assertNoSecrets(t, line)
+	assertNoSecrets(t, buf.String())
 }
 
 func TestServeLogsMissingCredential(t *testing.T) {
@@ -209,8 +193,8 @@ func TestServeLogsMissingCredential(t *testing.T) {
 		"trace process path=/v1/chat/completions step=start op=chat",
 		"debug process path=/v1/chat/completions step=auth ok=true kind=session",
 		"debug process path=/v1/chat/completions step=route model=gpt-4o-mini deployments=1 stream=false",
-		"debug skip deployment path=/v1/chat/completions provider=openai model=gpt-4o-mini reason=missing api key or api base",
-		"error dataplane path=/v1/chat/completions status=401 code=authentication_error provider=openai",
+		"debug skip deployment path=/v1/chat/completions provider=custom-test model=openai/gpt-4o-mini reason=missing api key or api base",
+		"error dataplane path=/v1/chat/completions status=401 code=authentication_error provider=custom-test",
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("log missing %q\n%s", want, line)
@@ -219,28 +203,18 @@ func TestServeLogsMissingCredential(t *testing.T) {
 	assertNoSecrets(t, line)
 }
 
-func TestServeLogsUnimplementedProvider(t *testing.T) {
+// TestServeLogsUnregisteredTransport 验证未注册的显式 transport 在联网前被拒绝。
+// 参数 t：测试上下文；供应商名称只是用户数据，不参与能力判断；无外部调用，日志 writer 由 cleanup 恢复。
+func TestServeLogsUnregisteredTransport(t *testing.T) {
 	buf := captureLog(t)
-	h := newLogHost(chatConfig(config.ModelEntry{
-		ModelName: "ghost",
-		LiteLLMParams: map[string]any{
-			"model":               "openai/gpt-4o-mini",
-			"custom_llm_provider": "   ",
-			"api_key":             "sk-local-master",
-			"api_base":            "https://api.openai.com/v1",
-		},
-	}), nil)
+	cfg := chatConfig(config.ModelEntry{ModelName: "ghost", LiteLLMParams: map[string]any{"model": "openai/gpt", "api_key": "sk-local-master", "api_base": "https://example.invalid"}})
+	cfg.ModelList[0].ModelInfo["transport"] = "unregistered_transport"
 	rec := httptest.NewRecorder()
-	Serve(h, rec, chatRequest(t, "ghost", false), "chat")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	Serve(newLogHost(cfg, nil), rec, chatRequest(t, "ghost", false), "chat")
+	if rec.Code != 400 {
+		t.Fatalf("未注册 transport 未被拒绝: %d %s", rec.Code, rec.Body.String())
 	}
-	line := buf.String()
-	t.Log(line)
-	if !strings.Contains(line, "trace dataplane hop path=/v1/chat/completions") || !strings.Contains(line, "error dataplane path=/v1/chat/completions status=400 code=provider_not_implemented") {
-		t.Fatalf("log missing provider_not_implemented: %s", line)
-	}
-	assertNoSecrets(t, line)
+	assertNoSecrets(t, buf.String())
 }
 
 func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
@@ -273,9 +247,9 @@ func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
 		t.Log(line)
 		for _, want := range []string{
 			"trace dataplane hop path=/v1/chat/completions",
-			"error upstream stream path=/v1/chat/completions provider=openai model=gpt-4o-mini",
-			"err=empty upstream stream",
-			"error dataplane path=/v1/chat/completions status=502 code=upstream_error detail=empty upstream stream",
+			"error upstream stream path=/v1/chat/completions provider=custom-test model=openai/gpt-4o-mini",
+			"err=upstream stream ended without completion",
+			"error dataplane path=/v1/chat/completions status=502 code=upstream_error detail=upstream stream ended without completion",
 		} {
 			if !strings.Contains(line, want) {
 				t.Fatalf("log missing %q\n%s", want, line)
@@ -306,7 +280,7 @@ func TestServeLogsEmptyStreamAndUpstreamStatus(t *testing.T) {
 		t.Log(line)
 		for _, want := range []string{
 			"trace dataplane hop path=/v1/chat/completions",
-			"error upstream status path=/v1/chat/completions provider=openai model=gpt-4o-mini",
+			"error upstream status path=/v1/chat/completions provider=custom-test model=openai/gpt-4o-mini",
 			"status=500",
 			"error dataplane path=/v1/chat/completions status=502 code=upstream_error detail=upstream 500",
 		} {
@@ -363,7 +337,7 @@ func TestServeLogsCacheHitAndStreamMetrics(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "data: {\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":4,\"total_tokens\":9}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":4,\"total_tokens\":9}}\n\ndata: [DONE]\n\n")
 	}))
 	defer upstream.Close()
 	streamHost := newLogHost(chatConfig(config.ModelEntry{

@@ -50,7 +50,8 @@ flowchart LR
 
 目录导航补充：网关的 `family` 安装 API 家族处理器，`identity` 处理身份资源，`keys` 管理密钥，`models` 管理部署和价格，`prefs` 管理路由偏好和模板继承，`templateauth` 只负责模板选择授权，`usage` 提供用量和日志报表，`guard` 执行正文护栏。各处理器仍须遵守统一的服务端授权和查询范围。
 
-`config` 负责配置加载；`catalog/publicdata` 保存静态计价数据；`llm/estimate` 提供用量估算；`provider/all` 汇总供应商注册，`provider/openai`、`provider/qiniu` 和 `provider/volcengine` 保存供应商登记与实现；`regression` 提供跨模块回归检查；`testsupport` 提供测试数据库等辅助设施。
+
+供应商适配由 provider/all 汇总官方登记，provider/openai 与 provider/volcengine 提供原生端点；regression 验证跨模块调用，testsupport 提供隔离数据库。
 
 ## 数据边界
 

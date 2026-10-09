@@ -46,7 +46,7 @@ Adding AI to a team means managing more than API calls: multiple providers, shar
 | Chat guardrails | Block or redact configured words in supported chat text fields |
 | Playground | Test models available to your account before integrating them into applications |
 
-Provider adapters include OpenAI, Anthropic, and Gemini protocol families, alongside OpenAI-compatible endpoints. Qiniu and Volcengine also have provider-specific content-generation task forwarding. Supported operations depend on the configured provider and deployment.
+Provider adapters include OpenAI, Anthropic, and Gemini protocol families, alongside OpenAI-compatible endpoints. Volcengine also has official Ark content-generation task forwarding. Supported operations depend on the configured provider and deployment.
 
 ## How it works
 
