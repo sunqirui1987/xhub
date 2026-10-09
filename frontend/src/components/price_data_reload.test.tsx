@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setActiveLocale } from "@/i18n/runtime";
 import { toast } from "@/lib/toast";
 import {
   cancelModelCostMapReload,
@@ -46,16 +47,27 @@ const provenance = {
 
 describe("PriceDataReload", () => {
   beforeEach(() => {
+    setActiveLocale("en");
     vi.clearAllMocks();
     vi.mocked(getModelCostMapReloadStatus).mockResolvedValue(unscheduledStatus);
     vi.mocked(getModelCostMapSource).mockResolvedValue(marketSource as never);
+  });
+
+  /** 前置中文与市场来源；验证同步弹窗中文字段，测试后框架清理DOM及下个用例重置语言。 */
+  it("shows clear Chinese sync information", async () => {
+    setActiveLocale("zh-CN");
+    render(<PriceDataReload accessToken="sk-test" />);
+    expect(await screen.findByText("本地模型数：")).toBeInTheDocument();
+    expect(screen.getByText("Modelink 市场目录")).toBeInTheDocument();
+    expect(screen.getByText("目录更新时间：")).toBeInTheDocument();
+    expect(screen.getByText("尚未设置定期同步")).toBeInTheDocument();
   });
 
   it("shows the pricing source and current reload status", async () => {
     render(<PriceDataReload accessToken="sk-test" />);
 
     expect(await screen.findByText("Pricing Data Source")).toBeInTheDocument();
-    expect(screen.getByText("Modelink market")).toBeInTheDocument();
+    expect(screen.getByText("Configured price feed")).toBeInTheDocument();
     expect(screen.getByText("1,234")).toBeInTheDocument();
     expect(screen.getByText("No periodic reload scheduled")).toBeInTheDocument();
   });

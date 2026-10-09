@@ -13,7 +13,7 @@ type falEndpoint struct {
 	billing          provider.FalModel
 }
 
-// registerFal 注册一个可由 Custom 凭据显式选择的七牛 Fal 模型组及其创建、状态、结果操作。
+// registerFal 注册一个可由 Custom 或 OpenAI 兼容连接显式选择的七牛 Fal 模型组及创建、状态、结果操作。
 // 参数 id：传输 ID；label：展示名；queue：查询路径所属模型组；endpoints：允许的具体模型路径。
 // 返回：无。模型目录与传输注册表同时更新，URL 模型 ID 与定价 ID 分别保存。
 // 调用：本包 init。测试：fal_test.go、billing_test.go。
@@ -33,8 +33,10 @@ func registerFal(id, label, queue string, endpoints []falEndpoint) {
 		})
 	}
 	provider.RegisterTransport(provider.Transport{
-		EndpointID: "bypass:fal-video", Protocol: "fal", Family: "video", ModelGroup: label,
-		ID: id, Label: "Bypass - 七牛 Fal " + label, Kind: provider.KindBypass, Providers: []string{"custom", "custom_openai"},
+		CatalogID:  "qiniu",
+		EndpointID: "fal:queue", Protocol: "fal", Family: "video", ModelGroup: label,
+		// 连接类型只提供地址和密钥；Fal 的 Key 鉴权由执行器决定，OpenAI 兼容连接也可显式选择。
+		ID: id, Label: "Bypass - 七牛 Fal " + label, Kind: provider.KindBypass, Providers: []string{"custom", "custom_openai", "openai"},
 		StripPrefix: "qiniu", Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Key"}, TaskID: "request_id", QueueURLs: true,
 		Billing: provider.FalBilling(specs), Actions: actions,
 	})

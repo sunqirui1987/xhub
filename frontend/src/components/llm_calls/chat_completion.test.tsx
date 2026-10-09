@@ -1,3 +1,4 @@
+import { installLLMFetchFixture } from "../../../tests/llmFetchFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOpenAIChatCompletionRequest } from "./chat_completion";
 import type { TokenUsage } from "../chat_ui/ResponseMetrics";
@@ -6,25 +7,12 @@ vi.mock("@/components/networking", () => ({
   getProxyBaseUrl: vi.fn(() => "https://example.com"),
 }));
 
-// Mock the OpenAI client
+/** 协议响应夹具由 fetch 边界读取，保留业务回调断言。 */
 const mockCreate = vi.fn();
-const mockChatCompletions = {
-  create: mockCreate,
-};
-const mockChat = {
-  completions: mockChatCompletions,
-};
-const mockClient = {
-  chat: mockChat,
-};
 
-vi.mock("openai", () => ({
-  default: {
-    OpenAI: vi.fn(function () {
-      return mockClient;
-    }),
-  },
-}));
+/** 所有业务分组都使用隔离 fetch，结束恢复全局对象，禁止访问外网。 */
+beforeEach(() => installLLMFetchFixture(mockCreate));
+afterEach(() => vi.unstubAllGlobals());
 
 const nonStreamingResponse = (data: unknown, headers: Record<string, string> = {}) => ({
   withResponse: async () => ({ data, response: { headers: new Headers(headers) } }),
@@ -67,8 +55,10 @@ describe("chat_completion", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should make a basic chat completion request", async () => {
     await makeOpenAIChatCompletionRequest(mockChatHistory, mockUpdateUI, "gpt-4", "test-token");
 
@@ -88,6 +78,7 @@ describe("chat_completion", () => {
     expect(mockUpdateUI).toHaveBeenCalledWith(" there", "gpt-4");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should include temperature and max_tokens when provided", async () => {
     await makeOpenAIChatCompletionRequest(
       mockChatHistory,
@@ -124,6 +115,7 @@ describe("chat_completion", () => {
     });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should configure MCP tools per server with restrictions", async () => {
     const selectedMCPServers = ["server-1", "server-2"];
     const mcpServers = [
@@ -198,6 +190,7 @@ describe("chat_completion", () => {
     expect(secondTool.allowed_tools).toEqual(["toolC"]);
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should include mock_testing_fallbacks in request body when mockTestFallbacks is true", async () => {
     await makeOpenAIChatCompletionRequest(
       mockChatHistory,
@@ -231,6 +224,7 @@ describe("chat_completion", () => {
     expect(callArgs.mock_testing_fallbacks).toBe(true);
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should send a non-streaming request and render the whole message at once when streaming is disabled", async () => {
     mockCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -305,6 +299,7 @@ describe("chat_completion", () => {
     expect(onTotalLatency).toHaveBeenCalledWith(expect.any(Number));
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should surface reasoning content and MCP metadata from a non-streaming response", async () => {
     mockCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -372,6 +367,7 @@ describe("chat_completion", () => {
     );
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should not include mock_testing_fallbacks in request body when mockTestFallbacks is false or undefined", async () => {
     await makeOpenAIChatCompletionRequest(
       mockChatHistory,
@@ -436,20 +432,24 @@ describe("chat_completion prompt cache usage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces read and creation tokens from Anthropic-shape usage", async () => {
     await expect(
       captureUsage({ cache_read_input_tokens: 4695, cache_creation_input_tokens: 1234 }),
     ).resolves.toMatchObject({ cacheReadTokens: 4695, cacheCreationTokens: 1234 });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces read tokens from OpenAI-shape prompt_tokens_details", async () => {
     await expect(
       captureUsage({ prompt_tokens_details: { cached_tokens: 4695, cache_write_tokens: 0 } }),
     ).resolves.toMatchObject({ cacheReadTokens: 4695, promptTokens: 5000 });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cache fields entirely for a provider that reports none", async () => {
     const usageData = await captureUsage({});
 
@@ -458,6 +458,7 @@ describe("chat_completion prompt cache usage", () => {
     expect(usageData.promptTokens).toBe(5000);
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cache fields when the provider reports zeroes", async () => {
     const usageData = await captureUsage({
       cache_read_input_tokens: 0,
@@ -469,12 +470,14 @@ describe("chat_completion prompt cache usage", () => {
     expect(usageData).not.toHaveProperty("cacheCreationTokens");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cost when the provider reports a non-numeric value", async () => {
     const usageData = await captureUsage({ cost: "not-a-number" });
 
     expect(usageData).toEqual(expect.not.objectContaining({ cost: expect.anything() }));
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cost when the provider reports a blank value", async () => {
     const usageData = await captureUsage({ cost: "  " });
 
@@ -488,8 +491,10 @@ describe("chat_completion response cache", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("flags a non-streaming response-cache hit even though it replays provider prompt-cache usage", async () => {
     mockCreate.mockReturnValueOnce(
       nonStreamingResponse(
@@ -544,6 +549,7 @@ describe("chat_completion response cache", () => {
     );
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("does not flag a non-streaming response that missed the response cache", async () => {
     mockCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -588,6 +594,7 @@ describe("chat_completion response cache", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.not.objectContaining({ servedFromResponseCache: true }));
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("never flags a streaming response, even when the proxy reports a cache key", async () => {
     async function* mockStream() {
       yield {

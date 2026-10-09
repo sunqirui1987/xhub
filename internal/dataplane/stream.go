@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/logx"
@@ -32,28 +33,45 @@ func noteCaptureTruncated(kept int) {
 
 // responseID 从上游 JSON 或 SSE 里取出第一个响应 id，用来把后续对话钉回同一部署。
 // 参数 raw：上游响应或捕获的 SSE。
-// 返回：第一个非空 id。没有时返回空串，CommitRoute 就不写响应钉。
-// 调用：Serve 的流式和非流式成功路径。无单独测试。
+// 返回：第一个非空响应 id，忽略输出项 id。没有时返回空串，CommitRoute 不写响应钉。
+// 调用：Serve 的成功路径；测试覆盖 JSON、Responses/Chat/Messages SSE 和无效事件。
 func responseID(raw []byte) string {
-	var doc map[string]any
-	if json.Unmarshal(raw, &doc) == nil {
-		if id, ok := doc["id"].(string); ok {
-			return id
-		}
+	if id := responseDocumentID(raw); id != "" {
+		return id
 	}
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		line = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(line), []byte("data:")))
 		if len(line) == 0 || bytes.Equal(line, []byte("[DONE]")) {
 			continue
 		}
-		if json.Unmarshal(line, &doc) != nil {
-			continue
-		}
-		if id, ok := doc["id"].(string); ok && id != "" {
+		if id := responseDocumentID(line); id != "" {
 			return id
 		}
 	}
 	return ""
+}
+
+// responseDocumentID 读取一帧 JSON 中的响应标识。
+// 参数 raw 为 JSON 字节；返回响应 id 或空值。responseID 调用，无效 JSON 不保留上一帧字段。
+// Responses 事件只能取 response.id，Messages 开始事件取 message.id，防止误钉工具或输出项。
+func responseDocumentID(raw []byte) string {
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return ""
+	}
+	kind, _ := doc["type"].(string)
+	if strings.HasPrefix(kind, "response.") {
+		nested, _ := doc["response"].(map[string]any)
+		id, _ := nested["id"].(string)
+		return id
+	}
+	if kind == "message_start" {
+		nested, _ := doc["message"].(map[string]any)
+		id, _ := nested["id"].(string)
+		return id
+	}
+	id, _ := doc["id"].(string)
+	return id
 }
 
 // pipeStream 把上游 SSE 原样抄给客户端，并尽量从流里抽出 usage。一个字节都没写时 wrote 为 false。

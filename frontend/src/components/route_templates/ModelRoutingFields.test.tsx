@@ -1,160 +1,88 @@
 import React, { useState } from "react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { setActiveLocale } from "@/i18n";
-import { chooseSelectOption, fireEvent, renderWithProviders, screen } from "../../../tests/test-utils";
 import ModelRoutingFields from "./ModelRoutingFields";
 import type { ModelRoutingRule, SplitDeployment } from "./templateForm";
 
-setActiveLocale("en");
-
 const deployments: SplitDeployment[] = [
-  { deployment_id: "east", model_name: "chat", model: "openai/gpt-4o", api_base: "https://east", weight: "2" },
-  { deployment_id: "west", model_name: "chat", model: "openai/gpt-4o", api_base: "https://west" },
-  { deployment_id: "embed", model_name: "embed", model: "openai/embed", api_base: "https://embed" },
+  { deployment_id: "east", model_name: "shared", model: "vendor/a", api_base: "https://east" },
+  { deployment_id: "west", model_name: "shared", model: "vendor/b", api_base: "https://west" },
+  { deployment_id: "other", model_name: "other", model: "other", api_base: "https://other" },
 ];
-const Harness = ({
+
+/** 受控模板规则测试宿主；参数为初始规则和回调，组件卸载后清理内存状态。 */
+function Harness({
   initial = [],
-  onChange = () => {},
+  changed = () => {},
 }: {
   initial?: ModelRoutingRule[];
-  onChange?: (rules: ModelRoutingRule[]) => void;
-}) => {
+  changed?: (rules: ModelRoutingRule[]) => void;
+}) {
   const [rules, setRules] = useState(initial);
   return (
     <ModelRoutingFields
       rules={rules}
       deployments={deployments}
-      defaultStrategy="least-busy"
       onChange={(next) => {
         setRules(next);
-        onChange(next);
+        changed(next);
       }}
     />
   );
-};
+}
 
-describe("ModelRoutingFields", () => {
-  it("adds one exact public-model rule using the default strategy", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    renderWithProviders(<Harness onChange={onChange} />);
-    await chooseSelectOption(user, screen.getByRole("combobox", { name: "Public model for override" }), "chat");
-    await user.click(screen.getByRole("button", { name: "Add model rule" }));
-    expect(onChange).toHaveBeenLastCalledWith([{ model_name: "chat", routing_strategy: "least-busy" }]);
-    expect(screen.getByText("chat")).toBeInTheDocument();
+describe("模型规则表单", () => {
+  /** 验证按公开模型添加规则，并在添加后从候选列表移除以防重复。 */
+  it("只添加公开模型和路由策略", () => {
+    const changed = vi.fn();
+    render(<Harness changed={changed} />);
+    fireEvent.change(screen.getByLabelText("公开模型"), { target: { value: "shared" } });
+    fireEvent.click(screen.getByText("添加模型规则"));
+    expect(changed).toHaveBeenLastCalledWith([{ model: "shared", strategy: "simple-shuffle" }]);
+    expect(screen.queryByRole("option", { name: "shared" })).not.toBeInTheDocument();
   });
 
-  it("changes strategy while preserving custom rule fields and args", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const rule: ModelRoutingRule = {
-      model_name: "chat",
-      routing_strategy: "least-busy",
-      routing_strategy_args: { custom: 7 },
-      audit_tag: "keep",
-    };
-    renderWithProviders(<Harness initial={[rule]} onChange={onChange} />);
-    await chooseSelectOption(user, screen.getByRole("combobox", { name: "Strategy for chat" }), "Weighted Split");
-    expect(onChange).toHaveBeenLastCalledWith([{ ...rule, routing_strategy: "weighted-split" }]);
+  /** 验证策略可修改；省略模板权重时继承默认，切换非加权策略后清除权重。 */
+  it("修改策略并恢复非加权配置", () => {
+    const changed = vi.fn();
+    render(<Harness initial={[{ model: "shared", strategy: "traffic-split" }]} changed={changed} />);
+    expect(screen.getByText(/实时继承模型管理的默认权重/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("shared 路由逻辑"), { target: { value: "least-busy" } });
+    expect(changed).toHaveBeenLastCalledWith([{ model: "shared", strategy: "least-busy" }]);
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
   });
 
-  it("edits weighted args without injecting global reliability fields", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const rule: ModelRoutingRule = {
-      model_name: "chat",
-      routing_strategy: "weighted-split",
-      routing_strategy_args: { custom: "keep" },
-      audit_tag: "keep",
-    };
-    renderWithProviders(<Harness initial={[rule]} onChange={onChange} />);
-    await user.click(screen.getAllByRole("button", { name: "Set weight" })[0]);
-    const changed = onChange.mock.calls.at(-1)?.[0][0];
-    expect(changed.audit_tag).toBe("keep");
-    expect(changed.routing_strategy_args.custom).toBe("keep");
-    expect(changed.routing_strategy_args.weights).toEqual([
-      { deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: 2 },
-    ]);
-    expect(changed).not.toHaveProperty("num_retries");
-    expect(changed.routing_strategy_args).not.toHaveProperty("ttl");
+  /** 验证删除一条模板规则只恢复该模型默认分配，其他规则保留。 */
+  it("删除规则恢复该模型默认分配", () => {
+    const changed = vi.fn();
+    render(
+      <Harness
+        initial={[
+          { model: "shared", strategy: "least-busy" },
+          { model: "other", strategy: "random" },
+        ]}
+        changed={changed}
+      />,
+    );
+    fireEvent.click(within(screen.getByRole("region", { name: "模型规则 shared" })).getByText("删除规则"));
+    expect(changed).toHaveBeenLastCalledWith([{ model: "other", strategy: "random" }]);
   });
-
-  it("renders stable model-routing weights and keeps them when edited", () => {
-    const onChange = vi.fn();
-    const rule: ModelRoutingRule = {
-      model_name: "chat",
-      routing_strategy: "weighted-split",
-      routing_strategy_args: {
-        weights: [
-          { deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: 7 },
-          { deployment_id: "west", model_name: "chat", api_base: "https://west", model: "openai/gpt-4o", weight: 3 },
-        ],
-      },
-    };
-    renderWithProviders(<Harness initial={[rule]} onChange={onChange} />);
-    const inputs = screen.getAllByRole("spinbutton", { name: "chat openai/gpt-4o Weight" });
-    expect(inputs[0]).toHaveValue(7);
-    expect(inputs[1]).toHaveValue(3);
-    expect(screen.getByText("Approx. 70%")).toBeInTheDocument();
-    expect(screen.getByText("Approx. 30%")).toBeInTheDocument();
-
-    fireEvent.change(inputs[0], { target: { value: "8" } });
-    expect(onChange.mock.calls.at(-1)?.[0][0].routing_strategy_args.weights).toEqual([
-      { deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: 8 },
-      { deployment_id: "west", model_name: "chat", api_base: "https://west", model: "openai/gpt-4o", weight: 3 },
-    ]);
-  });
-
-  it("applies a stable-ID-only weight inside its exact model rule", () => {
-    const rule: ModelRoutingRule = {
-      model_name: "chat",
-      routing_strategy: "weighted-split",
-      routing_strategy_args: { weights: [{ deployment_id: "east", weight: 7 }] },
-    };
-    renderWithProviders(<Harness initial={[rule]} />);
-    expect(screen.getByRole("spinbutton", { name: "chat openai/gpt-4o Weight" })).toHaveValue(7);
-    expect(screen.queryByText("Not in current catalog")).not.toBeInTheDocument();
-  });
-
-  it("retains invalid raw weight drafts and custom args, then normalizes a corrected value", () => {
-    const onChange = vi.fn();
-    const rule: ModelRoutingRule = {
-      model_name: "chat",
-      routing_strategy: "weighted-split",
-      routing_strategy_args: {
-        custom: "keep",
-        weights: [{ deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: 2 }],
-      },
-    };
-    renderWithProviders(<Harness initial={[rule]} onChange={onChange} />);
-    const input = screen.getByRole("spinbutton", { name: "chat openai/gpt-4o Weight" });
-
-    fireEvent.change(input, { target: { value: "" } });
-    expect(onChange.mock.calls.at(-1)?.[0][0].routing_strategy_args).toEqual({
-      custom: "keep",
-      weights: [{ deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: "" }],
-    });
-
-    fireEvent.change(input, { target: { value: "-2" } });
-    expect(onChange.mock.calls.at(-1)?.[0][0].routing_strategy_args.weights[0].weight).toBe("-2");
-
-    fireEvent.change(input, { target: { value: "5" } });
-    expect(onChange.mock.calls.at(-1)?.[0][0].routing_strategy_args).toEqual({
-      custom: "keep",
-      weights: [{ deployment_id: "east", model_name: "chat", api_base: "https://east", model: "openai/gpt-4o", weight: 5 }],
-    });
-  });
-
-  it("removes only the requested rule", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const rules: ModelRoutingRule[] = [
-      { model_name: "chat", routing_strategy: "least-busy" },
-      { model_name: "embed", routing_strategy: "simple-shuffle" },
-    ];
-    renderWithProviders(<Harness initial={rules} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Remove rule for chat" }));
-    expect(onChange).toHaveBeenLastCalledWith([rules[1]]);
+  /** 验证自定义权重独立编辑、可读部署身份、空输入及恢复继承；内存宿主卸载清理。 */
+  it("自定义端点权重且可切回默认", () => {
+    const changed = vi.fn();
+    render(<Harness initial={[{ model: "shared", strategy: "traffic-split" }]} changed={changed} />);
+    fireEvent.change(screen.getByLabelText("shared 权重来源"), { target: { value: "custom" } });
+    expect(screen.getByText(/vendor\/a/)).toBeInTheDocument();
+    expect(screen.getByText(/vendor\/b/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("模板部署 other 权重")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("模板部署 east 权重"), { target: { value: "0" } });
+    expect(changed.mock.lastCall![0][0].allocations).toContainEqual({ deployment_id: "east", weight: 0 });
+    fireEvent.change(screen.getByLabelText("模板部署 west 权重"), { target: { value: "" } });
+    expect(
+      Number.isNaN(changed.mock.lastCall![0][0].allocations.find((a: any) => a.deployment_id === "west").weight),
+    ).toBe(true);
+    fireEvent.change(screen.getByLabelText("shared 权重来源"), { target: { value: "inherit" } });
+    expect(changed).toHaveBeenLastCalledWith([{ model: "shared", strategy: "traffic-split" }]);
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
   });
 });

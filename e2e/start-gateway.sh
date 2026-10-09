@@ -30,6 +30,6 @@ if [[ "${E2E_PREBUILT:-0}" != 1 ]]; then
 fi
 python3 "$ROOT/e2e/fake_upstream.py" --port "$UP_PORT" >"$DIR/up.log" 2>&1 &
 UP_PID=$!
-XHUB_PUBLIC_ORIGIN="http://127.0.0.1:$GW_PORT" "$DIR/xhub" -config "$DIR/c.yaml" -addr "127.0.0.1:$GW_PORT" >"$DIR/gw.log" 2>&1 &
+XHUB_PRICE_FEED_URL="http://127.0.0.1:$UP_PORT/v1/market/models" XHUB_PUBLIC_ORIGIN="http://127.0.0.1:$GW_PORT" "$DIR/xhub" -config "$DIR/c.yaml" -addr "127.0.0.1:$GW_PORT" >"$DIR/gw.log" 2>&1 &
 GW_PID=$!
 wait "$GW_PID"

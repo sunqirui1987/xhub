@@ -6,7 +6,7 @@ import "github.com/sunqirui1987/xhub/internal/config"
 // 参数为已兼容筛选的部署、公开型号、策略、隔离状态及粘性 ID；返回尝试列表。
 // 调用：统一与原生入口；有效粘性命中不推进分流计数，冷却或零份额部署不参与粘性。
 func Schedule(list []config.ModelEntry, alias, strategy string, st State, pinned string) []config.ModelEntry {
-	pool := All(list, alias)
+	pool := candidatesForState(list, alias, st)
 	pool = Available(pool, strategy, st)
 	if pinned != "" && !st.Cooldown[pinned] {
 		for i, e := range pool {

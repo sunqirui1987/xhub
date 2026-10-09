@@ -2056,6 +2056,7 @@ export const zhPhrases: Record<string, string> = {
   "End user (isolated per end user)": "End 用户 (isolated 每 end 用户)",
   "Endpoint Activity": "端点活动",
   "Endpoint Settings (Optional)": "端点设置 (可选)",
+  "客户调用接口": "客户调用接口",
   "Endpoint Type": "端点类型",
   "Endpoint Usage Trends": "端点使用趋势",
   "Endpoint deleted successfully.": "端点删除于成功.",
@@ -3526,7 +3527,9 @@ export const zhPhrases: Record<string, string> = {
   "Models field is disabled for this key type": "模型字段是已禁用用于此密钥类型",
   "Models from your model list that this group routes between.": "此组会在这些模型之间分流，模型来自你的模型列表。",
   "Models in": "删除后，路由组",
-  "Models loaded:": "模型 loaded:",
+  "Configured price feed": "Modelink 市场目录",
+  "Catalog generated:": "目录更新时间：",
+  "Models loaded:": "本地模型数：",
   "Models made public by the proxy admin will appear here.": "模型 made 公开由代理管理员将 appear 这里.",
   "Models not claimed by an explicit group fall through to the proxy's top-level routing strategy.":
     "没有被明确分组的模型会使用网关的顶层路由策略。",
@@ -3803,7 +3806,7 @@ export const zhPhrases: Record<string, string> = {
   "No pass-through endpoints configured": "否通过-透传 endpoints 已配置",
   "No patterns added.": "否模式已添加.",
   "No per-user fields configured for this server.": "否每-用户字段已配置用于此服务器.",
-  "No periodic reload scheduled": "否 periodic 重新加载 scheduled",
+  "No periodic reload scheduled": "尚未设置定期同步",
   "No permissions available": "否权限可用",
   "No policies configured": "否策略已配置",
   "No policies found": "未找到策略",
@@ -4664,7 +4667,7 @@ export const zhPhrases: Record<string, string> = {
   "Replaces a routed model that cannot take image input with the nearest higher tier that can, then the default model, instead of failing with a provider 400. Only models explicitly declared supports_vision false are replaced, and a kept session pin still wins unless you turn on the override below.":
     "将无法接受图像输入的路由模型替换为可以接受图像输入的最近的较高层，然后是默认模型，而不是因提供程序 400 而失败。只有明确声明supports_vision false 的模型才会被替换，并且保留的会话 pin 仍然会获胜，除非您打开下面的覆盖。",
   "Reported by the worker that answered this request. Other workers pick up a reload on their next poll, and the Last run time is the latest reload any worker recorded":
-    "由响应此请求的工作人员举报。其他工作人员在下一次轮询中进行重新加载，上次运行时间是任何工作人员记录的最新重新加载时间",
+    "同步状态由当前服务进程返回。其他进程将在下次轮询时同步；最后运行时间为各进程记录的最新同步时间。",
   "Repository name, e.g. BerriAI/litellm": "存储库名称，例如BerriAI/litellm",
   "Request & Response": "请求与响应",
   "Request Cost": "请求费用",
@@ -5315,7 +5318,7 @@ export const zhPhrases: Record<string, string> = {
   "Set at least one of max budget, soft budget or reset window": "设置于最少一个的最大预算, 软预算或重置窗口",
   "Set budget": "设定预算",
   "Set how often LiteLLM should fetch the latest pricing data from the remote source.":
-    "设置如何 often LiteLLM 应当 fetch 最新定价数据从远程来源.",
+    "设置 XHub 从价格来源同步最新数据的间隔。",
   "Set multiple independent budget windows (e.g., hourly $10 AND monthly $200). Each window tracks spend separately and resets on its own schedule.":
     "设置多个独立的预算窗口（例如每小时 10 美元并且每月 200 美元）。每个窗口单独统计支出，并按自己的计划重置。",
   "Set per-model TPM/RPM limits that apply across the whole team.": "设置每-模型 TPM/RPM 限制该应用跨 whole 团队.",
@@ -5819,9 +5822,9 @@ export const zhPhrases: Record<string, string> = {
   "This will activate the server. The submitting user will see it in their MCP Servers list once approved.":
     "此将 activate 服务器. submitting 用户将查看它中其 MCP 服务器列表一次 approved.",
   "This will automatically fetch the latest pricing data from the remote source every {hours} hours.":
-    "此将 automatically fetch 最新定价数据从远程来源每个 {hours}小时.",
+    "每 {hours} 小时从价格来源同步最新数据。",
   "This will immediately fetch the latest pricing information from the remote source. Continue?":
-    "此将 immediately fetch 最新定价信息从远程来源. 继续?",
+    "立即同步最新模型与价格，并保留本地上下架设置。是否继续？",
   "This will make it active and available for use.": "此将 make 它启用和可用用于使用.",
   "This will mark it as rejected and notify the team.": "此将 mark 它作为 rejected 和 notify 团队.",
   "This will only take a moment": "马上就好",

@@ -4,6 +4,7 @@ import {
   catalogFieldValue,
   catalogRows,
   editorDefaults,
+  suggestedModelName,
   type EditorModel,
 } from "./modelEditorPricing";
 
@@ -21,6 +22,27 @@ const baseValues = {
 };
 
 describe("modelEditorPricing", () => {
+  /** 前置普通、带协议前缀及路径模型 ID；验证只修改公开名称、空值及点路径边界；纯函数无需清理。 */
+  it("generates safe public names without changing upstream identifiers", () => {
+    expect(suggestedModelName("openai/group/model:latest", "openai")).toBe("group/model:latest");
+    expect(suggestedModelName("group/openai/model", "openai")).toBe("group/openai/model");
+    expect(suggestedModelName(" gpt-4o " )).toBe("gpt-4o");
+    expect(suggestedModelName("")).toBe("");
+    expect(suggestedModelName("..")).toBe("model");
+  });
+
+  /** 前置有效计价和对话声明；验证空段及点段给出中文提示、路径和冒号公开名保存原值、媒体路径名可保留；无持久数据。 */
+  it("validates dialogue aliases before submission and preserves native media names", () => {
+    for (const model_name of ["group//model", "group/../model", ".", "..", "/model", "model/"]) {
+      expect(() => buildEditorModel({...baseValues, model_name})).toThrow("对外模型名称的路径段不能留空");
+    }
+    const values = {...baseValues, model: "group/model:latest", model_name: "group/model:latest", input_cost_per_token: "1", output_cost_per_token: "2"};
+    for (const model_name of ["group/model:latest", "byteplus/seedance-2.0/text-to-video", "名称/版本：最新"]) {
+      expect(buildEditorModel({...values, model_name}).model_name).toBe(model_name);
+    }
+    expect(buildEditorModel(values).litellm_params.model).toBe("group/model:latest");
+    expect(buildEditorModel({...values, model_name: "group/image", endpoint_types: ["image_generation"], transport: "openai_image_generation"}).model_name).toBe("group/image");
+  });
   it("converts per-million prices, preserves zero, and leaves missing cache/peak prices null", () => {
     const result = buildEditorModel({
       ...baseValues,

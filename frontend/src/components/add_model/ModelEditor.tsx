@@ -24,6 +24,7 @@ import {
   type CatalogRow,
   catalogRows,
   pricingRates,
+  suggestedModelName,
 } from "./modelEditorPricing";
 import PricingTable from "./PricingTable";
 import RateEditor from "./RateEditor";
@@ -87,19 +88,19 @@ export default function ModelEditor({
         signal,
         body: { provider: provider, credential_name: supplier!.credential_name },
       });
-      if (body.error) throw new Error(body.error);
-      return body.models ?? [];
+      if (body.error && !body.models?.length) throw new Error(body.error);
+      return { models: body.models ?? [], warning: body.error };
     },
     retry: false,
     staleTime: 60_000,
   });
-  const modelOptions = (discovery.data ?? []).map((item) => ({ value: item.id, label: item.id }));
+  const modelOptions = (discovery.data?.models ?? []).map((item) => ({ value: item.id, label: item.id }));
   /** selectModel 更新上游模型并在公开名称仍为自动值时同步名称。
    * 参数 upstream：供应商模型 ID；返回：无。不会修改独立计价来源；端点字段自行校验新模型。 */
   const selectModel = (upstream: string) => {
     set("model", upstream);
-    if (!values.model_name || values.model_name === String(values.model).replace(provider + "/", ""))
-      set("model_name", upstream.replace(provider + "/", ""));
+    if (!values.model_name || values.model_name === suggestedModelName(String(values.model ?? ""), provider))
+      set("model_name", suggestedModelName(upstream, provider));
   };
   /** changePricingSource 切换价格来源，并在首次改为手动时复制目录的当前价格。
    * 参数 event：价格来源选择事件；返回：无。保留规格、时段等费率维度。 */
@@ -140,7 +141,7 @@ export default function ModelEditor({
     set("catalog_model", "");
     set("transport", "");
     set("endpoint_types", []);
-    if (values.model_name === String(values.model).replace(provider + "/", "")) set("model_name", "");
+    if (values.model_name === suggestedModelName(String(values.model ?? ""), provider)) set("model_name", "");
   };
 
   const categories = BILLING_CATEGORIES.filter((category) =>
@@ -287,9 +288,10 @@ export default function ModelEditor({
                     </div>
                     {discovery.data && (
                       <p className="text-xs text-muted-foreground">
-                        已获取 {discovery.data.length} 个模型（含供应商目录与已登记原生模型），可在下方搜索选择。原生模型的账号可用性以供应商为准。
+                        已获取 {discovery.data.models.length} 个模型（供应商 /models 的全部上架模型及已登记原生模型），可在下方搜索选择。实际可用性以供应商为准。
                       </p>
                     )}
+                    {discovery.data?.warning && <p role="alert" className="text-xs text-destructive">供应商模型列表获取失败：{discovery.data.warning}。当前仅显示已登记原生模型，可重试或直接输入模型 ID。</p>}
                     {discovery.error && (
                       <p role="alert" className="text-xs text-destructive">
                         获取模型列表失败：{discovery.error.message}。可重试或直接输入模型 ID。
@@ -324,9 +326,11 @@ export default function ModelEditor({
                   {catalogError && <p className="text-xs text-destructive">模型广场加载失败，仍可手动填写模型 ID。</p>}
                 </div>
                 {textField("model_name", "对外模型名称 *", "客户端请求使用的模型名称")}
+                <p className="text-xs leading-relaxed text-muted-foreground">客户端使用此名称调用模型，支持 /、: 和 ：，例如 byteplus/seedance-2.0/text-to-video。上游协议按上方的上游模型 ID 匹配。</p>
                 <EndpointTypeField
                   key={String(values.supplier)}
                   selectedProvider={String(values.custom_llm_provider || "")}
+                  catalogId={supplier ? supplier.credential_info?.catalog_id ?? "" : String(model?.model_info?.catalog_id ?? "")}
                   modelCostMap={rows}
                 />
                 <div className="flex items-center justify-between gap-4 rounded-lg border p-4">

@@ -17,6 +17,7 @@ func init() {
 		Name: "VolcEngine", Slug: "volcengine", Display: "VolcEngine",
 	})
 	provider.RegisterTransport(provider.Transport{
+		CatalogID:  "volcengine",
 		EndpointID: "bypass:ark-video", Protocol: "ark", Family: "video", ModelGroup: "Seedance",
 		Auth: provider.AuthConfig{Header: "Authorization", Prefix: "Bearer"},
 		ID:   "ark_contents_generation", Kind: provider.KindBypass,

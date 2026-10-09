@@ -82,63 +82,67 @@ func TestNativeBypassJSONAndUsage(t *testing.T) {
 // 参数 t：Go 测试上下文。返回：无；断言失败时报告协议或计费契约回归。
 // 调用：go test；使用本地注册表、价格目录或假上游，不创建真实付费任务。
 func TestNativeImageEditMultipart(t *testing.T) {
-	var raw bytes.Buffer
-	mw := multipart.NewWriter(&raw)
-	mw.SetBoundary("native-boundary")
-	mw.WriteField("model", "public")
-	mw.WriteField("quality", "high")
-	mw.WriteField("size", "1024x1024")
-	image := []byte{0, 255, 1, 2, 13, 10, 3}
-	part, _ := mw.CreateFormFile("image[]", "original.png")
-	part.Write(image)
-	mw.Close()
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/images/edits" || !strings.Contains(r.Header.Get("Content-Type"), "native-boundary") {
-			t.Error(r.URL, r.Header.Get("Content-Type"))
-		}
-		reader, err := r.MultipartReader()
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		fields := map[string]string{}
-		for {
-			part, err := reader.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			data, _ := io.ReadAll(part)
-			if part.FileName() != "" {
-				if part.FileName() != "original.png" || part.FormName() != "image[]" || !bytes.Equal(data, image) {
-					t.Error("file changed")
+	for _, mode := range []struct{ transport, path string }{{"openai_image_edit", "/v1/images/edits"}, {"bypass_openai_image_edit", "/bypass/openai/v1/images/edits"}} {
+		t.Run(mode.transport, func(t *testing.T) {
+			var raw bytes.Buffer
+			mw := multipart.NewWriter(&raw)
+			mw.SetBoundary("native-boundary")
+			mw.WriteField("model", "public")
+			mw.WriteField("quality", "high")
+			mw.WriteField("size", "1024x1024")
+			image := []byte{0, 255, 1, 2, 13, 10, 3}
+			part, _ := mw.CreateFormFile("image[]", "original.png")
+			part.Write(image)
+			mw.Close()
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/images/edits" || !strings.Contains(r.Header.Get("Content-Type"), "native-boundary") {
+					t.Error(r.URL, r.Header.Get("Content-Type"))
 				}
-			} else {
-				fields[part.FormName()] = string(data)
+				reader, err := r.MultipartReader()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				fields := map[string]string{}
+				for {
+					part, err := reader.NextPart()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					data, _ := io.ReadAll(part)
+					if part.FileName() != "" {
+						if part.FileName() != "original.png" || part.FormName() != "image[]" || !bytes.Equal(data, image) {
+							t.Error("file changed")
+						}
+					} else {
+						fields[part.FormName()] = string(data)
+					}
+				}
+				if fields["model"] != "openai/gpt-image" || fields["quality"] != "high" || fields["size"] != "1024x1024" {
+					t.Error(fields)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"data":[{"b64_json":"AAAA"}],"usage":{"input_tokens":2,"output_tokens":3}}`)
+			}))
+			defer up.Close()
+			h := officialHost(up, deployment("public", "openai/gpt-image", "supplier-key", up.URL, mode.transport, nil))
+			req := httptest.NewRequest("POST", mode.path, &raw)
+			req.Header.Set("Content-Type", mw.FormDataContentType())
+			hit, _ := provider.Match("POST", req.URL.Path, nil)
+			rec := httptest.NewRecorder()
+			ServeBypass(h, rec, req, hit)
+			if rec.Code != 200 || len(h.spend) != 1 {
+				t.Fatal(rec.Code, rec.Body.String())
 			}
-		}
-		if fields["model"] != "openai/gpt-image" || fields["quality"] != "high" || fields["size"] != "1024x1024" {
-			t.Error(fields)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"data":[{"b64_json":"AAAA"}],"usage":{"input_tokens":2,"output_tokens":3}}`)
-	}))
-	defer up.Close()
-	h := officialHost(up, deployment("public", "openai/gpt-image", "supplier-key", up.URL, "bypass_openai_image_edit", nil))
-	req := httptest.NewRequest("POST", "/bypass/openai/v1/images/edits", &raw)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	hit, _ := provider.Match("POST", req.URL.Path, nil)
-	rec := httptest.NewRecorder()
-	ServeBypass(h, rec, req, hit)
-	if rec.Code != 200 || len(h.spend) != 1 {
-		t.Fatal(rec.Code, rec.Body.String())
-	}
-	u := catalog.NormalizeUsage(h.spend[0].usage)
-	if u.Images != 1 || u.ImageVariant != "high_1024x1024" || u.OutputVariant != "" || u.CompletionTokens != 3 {
-		t.Fatal(u)
+			u := catalog.NormalizeUsage(h.spend[0].usage)
+			if u.Images != 1 || u.ImageVariant != "high_1024x1024" || u.OutputVariant != "" || u.CompletionTokens != 3 {
+				t.Fatal(u)
+			}
+		})
 	}
 }
 
@@ -208,7 +212,10 @@ func TestNativeCreateServerErrorIsNotReplayed(t *testing.T) {
 	}))
 	defer up.Close()
 	h := officialHost(up, deployment("public", "openai/gpt", "key", up.URL, "bypass_openai_responses", nil))
-	h.settings = map[string]any{"num_retries": 3}
+	h.settings = map[string]any{
+		"model_routes": []any{},
+		"retry_policy": map[string]any{"max_attempts": 3, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
+	}
 	rec := h.call(t, "POST", "/bypass/openai/v1/responses", `{"model":"public"}`)
 	if rec.Code != 503 || calls != 1 || h.spend[0].usage != nil {
 		t.Fatal(rec.Code, calls, h.spend)

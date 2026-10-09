@@ -1,4 +1,6 @@
 export const enPhrases: Record<string, string> = {
+  "Configured price feed": "Configured price feed",
+  "Catalog generated:": "Catalog generated:",
   "Edit model provider": "Edit model provider",
   "Add model provider": "Add model provider",
   "Choose a provider to configure its connection and authentication.": "Choose a provider to configure its connection and authentication.",
@@ -2100,6 +2102,7 @@ export const enPhrases: Record<string, string> = {
   "End user (isolated per end user)": "End user (isolated per end user)",
   "Endpoint Activity": "Endpoint Activity",
   "Endpoint Settings (Optional)": "Endpoint Settings (Optional)",
+  "客户调用接口": "Customer API",
   "Endpoint Type": "Endpoint Type",
   "Endpoint Usage Trends": "Endpoint Usage Trends",
   "Endpoint deleted successfully.": "Endpoint deleted successfully.",

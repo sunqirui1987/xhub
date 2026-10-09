@@ -225,6 +225,8 @@ export interface CredentialItem {
   credential_info: {
     /** 认证表单唯一标识；区分共用协议的 OpenAI 和兼容端点，旧数据允许缺省。 */
     provider_id?: string;
+    /** 编译时供应商实现目录 ID；不作为认证参数发送上游。 */
+    catalog_id?: string;
     custom_llm_provider?: string;
     description?: string;
     required?: boolean;

@@ -33,6 +33,7 @@ export default function CredentialModal({ open, onCancel, onSubmit, mode, existi
   const form = useForm<MountedFormValues>({ mode: "onChange", defaultValues: {
     ...existingCredential?.credential_values,
     credential_name: existingCredential?.credential_name ?? "",
+    catalog_id: existingCredential?.credential_info.catalog_id ?? "",
     custom_llm_provider: existingCredential?.credential_info.provider_id ?? existingCredential?.credential_info.custom_llm_provider ?? null,
   } });
   const registry = useMountRegistry();
@@ -64,7 +65,7 @@ export default function CredentialModal({ open, onCancel, onSubmit, mode, existi
       const values = projectMountedValues(registry, form.getValues);
       const filtered = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== "" && v != null));
       // 选择器使用唯一 provider 标识，持久化使用协议 slug；兼容端点与 OpenAI 共用协议。
-      const result = await onSubmit({ ...filtered, custom_llm_provider: selected.litellm_provider, provider_id: selected.provider });
+      const result = await onSubmit({ ...filtered, custom_llm_provider: selected.litellm_provider, provider_id: selected.provider, catalog_id: String(values.catalog_id ?? "").trim() });
       if (result === false) setSaveError(true);
     } catch {
       setSaveError(true);
@@ -86,7 +87,7 @@ export default function CredentialModal({ open, onCancel, onSubmit, mode, existi
               <fieldset disabled={saving} className="min-w-0">
                 <MountedFormField label={t("Provider type")} name="custom_llm_provider" required
                   rules={{ validate: { required: requiredRule("Required") } }} className="mb-5">
-                  {control => <SearchSelect inputId={control.id} placeholder={t("Select a provider")} options={options}
+                  {control => <SearchSelect countNoun="供应商" inputId={control.id} placeholder={t("Select a provider")} options={options}
                     disabled={isEdit || isLoading || !!error || saving} value={selected?.provider ?? (typeof selection === "string" ? selection : null)}
                     onValueChange={value => {
                       // reset({}) 避免 RHF 把编辑时的旧默认密钥、区域和地址重新带入。
@@ -105,6 +106,12 @@ export default function CredentialModal({ open, onCancel, onSubmit, mode, existi
                     onChange={control.onChange} onBlur={control.onBlur} placeholder={t("Enter a friendly name for these credentials")}
                     disabled={isEdit || saving} />}
                 </MountedFormField>
+                <MountedFormField label="供应商目录 ID" name="catalog_id" className="mb-5"
+                  rules={{ validate: value => !value || /^[a-z][a-z0-9_-]*$/.test(String(value)) || "目录 ID 只能包含小写字母、数字、下划线或连字符" }}>
+                  {control => <Input id={control.id} value={typeof control.value === "string" ? control.value : ""}
+                    onChange={control.onChange} onBlur={control.onBlur} placeholder="例如 qiniu、volcengine" />}
+                </MountedFormField>
+                <p className="mb-5 text-xs text-muted-foreground">供应商目录 ID 与连接名称独立，用于匹配已登记的专用型号。普通模型按连接类型默认选择协议，可在模型配置中切换；未登记的目录也可获取上游模型列表。</p>
                 {selected && <section className="mb-5 rounded-lg border bg-muted/20 p-4" aria-label={t("Connection and authentication")}>
                   <div className="mb-4 flex items-center gap-2">
                     <Logo provider={selected.litellm_provider} label={selected.provider_display_name} className="size-6" />

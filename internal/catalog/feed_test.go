@@ -316,3 +316,29 @@ func TestEmptyFeedIsRefused(t *testing.T) {
 		t.Fatal("unreadable json produced a catalog")
 	}
 }
+
+// TestMarketRawPriceRules 验证市场价格保留未知变体字段与缺失金额，不把缺价补成零。
+// 参数t为上下文；前置内存JSON，断言完整规则与错误输入，无网络或清理副作用。
+func TestMarketRawPriceRules(t *testing.T) {
+	raw := []byte("{\"status\":true,\"data\":[{\"id\":\"raw-price\",\"issuer\":{\"name\":\"OpenAI\"},\"pricing_rules_v2\":[{\"input_range\":[0,128000],\"condition\":\"premium\",\"details_v2\":{\"video\":{\"name\":\"视频\",\"unit_name\":\"second\",\"unit_size\":1,\"unit_price\":2,\"resolution\":\"1080p\"}}}]}]}")
+	doc, err := BuildPriceDocument(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := doc.Models["raw-price"]["pricing_rules_v2"].([]any)
+	rule := rules[0].(map[string]any)
+	unit := rule["details_v2"].(map[string]any)["video"].(map[string]any)
+	if rule["condition"] != "premium" || unit["resolution"] != "1080p" {
+		t.Fatalf("完整价格字段丢失: %#v", rule)
+	}
+	if _, exists := unit["unit_price_usd"]; exists {
+		t.Fatal("缺失美元金额被补零")
+	}
+	if _, err := BuildPriceDocument([]byte("{\"status\":false,\"data\":[]}")); err == nil {
+		t.Fatal("失败状态未被拒绝")
+	}
+	var model feedModel
+	if json.Unmarshal([]byte("invalid"), &model) == nil {
+		t.Fatal("非法模型未报错")
+	}
+}

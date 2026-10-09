@@ -1,8 +1,11 @@
-import openai from "openai";
+import { postLLMRequest } from "@/components/llm_calls/transport";
 import { getProxyBaseUrl } from "@/components/networking";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 
+/** 调用媒体数据面并回调结果；参数包含输入、模型、密钥、标签及取消信号。
+ * 返回完成 Promise，供 Playground 使用；HTTP/解析失败和取消向调用方传播。
+ * 上传保留原文件，语音对象 URL 由消费组件释放。 */
 export async function makeOpenAIImageGenerationRequest(
   prompt: string,
   updateUI: (imageUrl: string, model: string) => void,
@@ -18,21 +21,19 @@ export async function makeOpenAIImageGenerationRequest(
     console.log = function () {};
   }
   const proxyBaseUrl = customBaseUrl || getProxyBaseUrl();
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: tags && tags.length > 0 ? { "x-litellm-tags": tags.join(",") } : undefined,
-  });
 
   try {
-    const response = await client.images.generate(
+    const httpResponse = await postLLMRequest(
+      "images/generations",
+      { model: selectedModel, prompt },
       {
-        model: selectedModel,
-        prompt: prompt,
+        baseUrl: proxyBaseUrl,
+        accessToken,
+        tags,
+        signal,
       },
-      { signal },
     );
+    const response = await httpResponse.json();
 
     if (response.data && response.data[0]) {
       // Handle either URL or base64 data from response

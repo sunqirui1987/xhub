@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { FALLBACK_CATEGORY, type PriceCatalogRow } from "./priceCatalogRows";
 import { measureLabel, rateLabel, rateText, windowLabel } from "@/lib/rateDisplay";
 
+import { MarketPriceCatalog } from "./MarketPriceCatalog";
+
 type SortOrder = "name" | "input" | "output";
 type Modality = "text" | "image" | "audio" | "video";
 
@@ -336,17 +338,8 @@ function CatalogToolbar({
   );
 }
 
-export function PriceCatalog({
-  costMap,
-  rows: providedRows,
-  isLoading,
-  isError,
-  onRetry,
-  onAdd,
-  onEdit,
-  onDelete,
-  onReset,
-}: {
+export type PriceCatalogProps = {
+
   costMap?: Record<string, unknown> | null;
   rows?: PriceCatalogRow[];
   isLoading?: boolean;
@@ -356,7 +349,16 @@ export function PriceCatalog({
   onEdit?: (row: PriceCatalogRow) => void;
   onDelete?: (row: PriceCatalogRow) => void;
   onReset?: (row: PriceCatalogRow) => void;
-}) {
+  onDetail?: (row: PriceCatalogRow) => void;
+};
+
+/** 价格目录入口；参数为价格行及操作回调，返回对应目录布局；市场元数据存在时使用完整筛选，旧手工目录继续兼容原布局。 */
+export function PriceCatalog(props: PriceCatalogProps) {
+  return props.rows?.some(row => row.raw.market_catalog === true) ? <MarketPriceCatalog {...props} /> : <LegacyPriceCatalog {...props} />;
+}
+
+/** 旧手工目录布局；参数为价格行与操作回调，返回可编辑列表，保持无市场元数据目录的展示兼容性。 */
+function LegacyPriceCatalog({costMap, rows: providedRows, isLoading, isError, onRetry, onAdd, onEdit, onDelete, onReset}: PriceCatalogProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [provider, setProvider] = useState("all");

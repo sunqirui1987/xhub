@@ -24,9 +24,9 @@ import (
 
 const affinityTTL = time.Hour
 
-// PlanRoute resolves the session and any deployment already pinned to it. previous_response_id wins, then an explicit session, then a stable prompt prefix.
+// PlanRoute 解析会话与部署归属，并在统一 Responses 续接时恢复临时历史。
 // 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；alias（string）：对外模型名，用来选部署和记用量；body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
-// 返回 RoutePlan（dataplane.RoutePlan）：这次请求的会话和已经钉住的部署。previous_response_id 优先，其次显式会话，再其次提示前缀。没有钉时 Pinned 为空。
+// 返回 RoutePlan：响应 ID 优先确定部署；历史按调用方、型号、入口隔离，未知或过期时 Err 非空。
 // 调用：dataplane/host.go、dataplane/official.go、dataplane/serve.go
 // 测试：bypass_logic_test.go、failure_log_test.go、log_completeness_test.go
 func (s *Server) PlanRoute(r *http.Request, alias string, body map[string]any, p *auth.Principal) dataplane.RoutePlan {
@@ -42,6 +42,12 @@ func (s *Server) PlanRoute(r *http.Request, alias string, body map[string]any, p
 		if prev := strings.TrimSpace(asString(body["previous_response_id"])); prev != "" {
 			if id := s.affinityGet(responsePinKey(alias, plan.Caller, prev, plan.Endpoint)); id != "" {
 				plan.Pinned = id
+				if plan.Endpoint == "responses" {
+					raw := s.affinityGet(responseContextKey(alias, plan.Caller, prev, plan.Endpoint))
+					if json.Unmarshal([]byte(raw), &plan.History) != nil || len(plan.History) == 0 {
+						plan.Err = fmt.Errorf("response context is unavailable or expired; submit full history")
+					}
+				}
 			} else {
 				plan.Err = fmt.Errorf("response ownership is unknown; submit full history")
 			}
@@ -55,9 +61,9 @@ func (s *Server) PlanRoute(r *http.Request, alias string, body map[string]any, p
 	return plan
 }
 
-// CommitRoute remembers which deployment served this session and, when the response has an id, which deployment produced it.
+// CommitRoute 保存成功请求的会话、响应归属及统一 Responses 的临时历史。
 // 参数 plan（dataplane.RoutePlan）：提交路由使用的RoutePlan；deploymentID（string）：部署 id。空串表示当前没有钉住的部署；responseID（string）：提交路由使用的响应标识。空串表示调用方没有提供这项。
-// 返回：无。这次会话用过的部署已记下。响应带 id 时，产出它的部署也记下。部署 id 为空时不写。
+// 返回：无。History 随响应归属一小时过期，与原厂 store 无关；部署 id 为空时不写。
 // 调用：dataplane/host.go、dataplane/serve.go
 // 测试：bypass_logic_test.go、failure_log_test.go、log_completeness_test.go
 func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID string) {
@@ -68,8 +74,23 @@ func (s *Server) CommitRoute(plan dataplane.RoutePlan, deploymentID, responseID 
 		s.affinitySet(sessionPinKey(plan.Alias, plan.Caller, plan.SessionID, plan.Endpoint), deploymentID)
 	}
 	if responseID != "" && plan.Caller != "" {
+		// 先保存上下文再发布归属，避免完成事件后的下一轮读到只有归属的半成品。
+		if plan.Endpoint == "responses" && len(plan.History) > 0 {
+			raw, err := json.Marshal(plan.History)
+			if err != nil {
+				return
+			}
+			s.affinitySet(responseContextKey(plan.Alias, plan.Caller, responseID, plan.Endpoint), string(raw))
+		}
 		s.affinitySet(responsePinKey(plan.Alias, plan.Caller, responseID, plan.Endpoint), deploymentID)
 	}
+}
+
+// responseContextKey 为统一 Responses 的临时历史生成隔离键。
+// 参数为公开型号、调用方、响应 ID 和入口；返回无明文身份的缓存键。
+// PlanRoute/CommitRoute 使用，与归属相同一小时 TTL，过期后需要完整历史。
+func responseContextKey(alias, caller, responseID, endpoint string) string {
+	return strings.Replace(responsePinKey(alias, caller, responseID, endpoint), "deployment_affinity:v4:response:", "response_context:v1:", 1)
 }
 
 // responsePinKey isolates continuation IDs by caller and public model.

@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import React, { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import coy from "react-syntax-highlighter/dist/esm/styles/prism/coy";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import ReasoningContent from "@/components/chat_ui/ReasoningContent";

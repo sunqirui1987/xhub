@@ -34,6 +34,18 @@ describe("fetchAvailableModelsForTeam", () => {
 });
 
 describe("fetchAvailableModels", () => {
+  /** 前置网络返回有效绑定或校验错误；验证原样投影，不猜测旧分类，mock 随 beforeEach 清理。 */
+  it("preserves declared paths and explains invalid configurations", async () => {
+    const binding = { endpoint_id: "gemini", transport: "gemini_generate_content", kind: "bypass", protocol: "gemini", family: "chat", method: "POST", path: "/v1beta/models/valid:generateContent" };
+    availableMock.mockResolvedValue({ data: [
+      { id: "valid", endpoints: [binding] },
+      { id: "invalid", endpoints: [], unavailable_reason: "model_info.transport must select a registered transport" },
+    ] });
+    expect(await fetchAvailableModels("token")).toEqual([
+      { model_group: "invalid", endpoints: [], unavailable_reason: "model_info.transport must select a registered transport" },
+      { model_group: "valid", endpoints: [binding] },
+    ]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

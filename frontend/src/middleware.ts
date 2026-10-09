@@ -10,6 +10,7 @@ const APP_PAGES = new Set([
   "/api-keys",
   "/playground",
   "/models-and-endpoints",
+  "/model-providers",
   "/models-and-endpoints/catalog",
   "/models-and-endpoints/mine",
   "/mine-models",

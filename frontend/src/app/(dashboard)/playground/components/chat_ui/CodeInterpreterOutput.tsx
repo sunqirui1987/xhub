@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Code, Download, FileImage, FileText, Loader2 } from "lucide-react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import coy from "react-syntax-highlighter/dist/esm/styles/prism/coy";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import { getProxyBaseUrl, getGlobalLitellmHeaderName } from "@/components/networking";

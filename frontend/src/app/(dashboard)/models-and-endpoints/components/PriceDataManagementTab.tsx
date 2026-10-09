@@ -15,41 +15,68 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { usePriceCatalog, priceCatalogKeys } from "../../hooks/models/usePriceCatalog";
-import { deletePriceModel, deletePriceProvider, resetPriceModel, upsertPriceModel, upsertPriceProvider } from "@/components/networking";
-import { PriceCatalog } from "./PriceCatalog";
+import { apiClient, resetPriceModel, upsertPriceModel } from "@/components/networking";
+import Link from "next/link";
+import { MarketModelDetail, loadMarketAccess } from "./MarketModelDetail";
+import { modelDeployments } from "./modelAccess";
+import { marketSale } from "./marketCatalog";
+import { MarketPriceCatalog } from "./MarketPriceCatalog";
 import { PriceModelDialog } from "./PriceModelDialog";
-import { PriceProviderDialog } from "./PriceProviderDialog";
-import { PriceProviderPanel } from "./PriceProviderPanel";
-import { priceCatalogProviders, priceCatalogRows, type PriceCatalogRow, type PriceProviderRow } from "./priceCatalogRows";
+import { LocalModelList } from "./LocalModelList";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { priceCatalogProviders, priceCatalogRows, type PriceCatalogRow } from "./priceCatalogRows";
 
+/** 管理模型广场及本地快照；无参数，返回页面。刷新只同步目录并提示配置，保存操作需要管理会话。 */
 const PriceDataManagementTab = () => {
-  const { accessToken } = useAuthorized();
+  const { accessToken, userId, userRole } = useAuthorized();
   const { data, isPending, isError, refetch } = usePriceCatalog(accessToken);
   const queryClient = useQueryClient();
   const [managementOpen, setManagementOpen] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
-  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<PriceCatalogRow | null>(null);
-  const [editingProvider, setEditingProvider] = useState<PriceProviderRow | null>(null);
+  const [missingModels, setMissingModels] = useState<PriceCatalogRow[] | null>(null);
+  const [discoveryError, setDiscoveryError] = useState(false);
+  const [detail, setDetail] = useState<PriceCatalogRow | null>(null);
   const [saving, setSaving] = useState(false);
+
+  /** 刷新成功后检查在售公开价格模型是否已部署；参数无，返回异步结果。
+   * 供价格重载回调使用；只提示待添加模型，不自动创建部署，读取失败显示可重试错误。 */
+  async function discoverMissingModels() {
+    setManagementOpen(false);
+    setDiscoveryError(false);
+    try {
+      const refreshed = await refetch();
+      if (refreshed.isError || !refreshed.data) throw new Error("价格目录读取失败");
+      if (!accessToken) throw new Error("未登录");
+      const access = await loadMarketAccess(accessToken, userId ?? "", userRole);
+      setMissingModels(
+        priceCatalogRows(refreshed.data).filter(
+          (row) => marketSale(row) && !modelDeployments(row, access.deployments, true).length,
+        ),
+      );
+    } catch {
+      setDiscoveryError(true);
+      setMissingModels([]);
+    }
+  }
 
   const rows = useMemo(() => priceCatalogRows(data), [data]);
   const providers = useMemo(() => priceCatalogProviders(data), [data]);
 
-  // Every write changes which rows are overrides, so the whole catalog is
-  // refetched rather than patched locally.
+  /** 写入后刷新目录和计费缓存；参数为提示文案，返回异步结果；保存成功回调使用。 */
   async function afterWrite(message: string) {
     await queryClient.invalidateQueries({ queryKey: priceCatalogKeys.all });
     await queryClient.invalidateQueries({ queryKey: ["modelCostMap"] });
     toast.success(message);
   }
 
+  /** 保存价格编辑；参数为表单正文，返回异步结果；弹窗使用，失败保留表单。 */
   async function saveModel(body: Record<string, unknown>) {
     setSaving(true);
     try {
+      if (!accessToken) return;
       await upsertPriceModel(accessToken, body);
       setModelDialogOpen(false);
       setEditingModel(null);
@@ -61,35 +88,23 @@ const PriceDataManagementTab = () => {
     }
   }
 
-  async function removeModel(row: PriceCatalogRow) {
-    if (!window.confirm(t("priceData.confirmDeleteModel", { id: row.id }))) return;
-    await deletePriceModel(accessToken, row.id);
-    await afterWrite(t("priceData.modelDeleted"));
-  }
-
-  async function revertModel(row: PriceCatalogRow) {
-    await resetPriceModel(accessToken, row.id);
-    await afterWrite(t("priceData.modelReset"));
-  }
-
-  async function saveProvider(body: Record<string, unknown>) {
-    setSaving(true);
+  /** 保存本地上下架状态；参数为价格行及目标状态，返回异步结果。
+   * 管理列表与广场调用；保留完整价格和已有部署，失败显示错误，不执行删除。 */
+  async function setListing(row: PriceCatalogRow, delisted: boolean) {
+    if (!accessToken) return;
     try {
-      await upsertPriceProvider(accessToken, body);
-      setProviderDialogOpen(false);
-      setEditingProvider(null);
-      await afterWrite(t("priceData.providerSaved"));
-    } catch (error) {
-      console.error("Failed to save the provider:", error);
-    } finally {
-      setSaving(false);
+      await apiClient.post("/price/model/listing", { accessToken, body: { id: row.id, delisted } });
+      await afterWrite(delisted ? "模型已下架，本地记录已保留" : "模型已上架");
+    } catch {
+      toast.error("上下架保存失败，请重试");
     }
   }
 
-  async function removeProvider(provider: PriceProviderRow) {
-    if (!window.confirm(t("priceData.confirmDeleteProvider", { id: provider.name }))) return;
-    await deletePriceProvider(accessToken, provider.slug);
-    await afterWrite(t("priceData.providerDeleted"));
+  /** 恢复市场价格；参数为目录行，返回异步结果；保持独立的上下架状态。 */
+  async function revertModel(row: PriceCatalogRow) {
+    if (!accessToken) return;
+    await resetPriceModel(accessToken, row.id);
+    await afterWrite(t("priceData.modelReset"));
   }
 
   return (
@@ -103,7 +118,10 @@ const PriceDataManagementTab = () => {
             </p>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">{t("priceCatalog.title")}</h1>
             <p className="mt-4 text-sm leading-7 text-muted-foreground sm:text-base">
-              {t("priceData.description")}
+              在售公开模型的价格与能力来自 Modelink 市场目录。点击模型查看完整价格及内部接入文档。
+            </p>
+            <p className="mt-3 break-all text-xs text-muted-foreground">
+              价格来源：{data?.source || "https://api.modelink.ai/v1/market/models"}
             </p>
             {data?.generated_at && (
               <p className="mt-3 text-xs text-muted-foreground">
@@ -126,7 +144,7 @@ const PriceDataManagementTab = () => {
               <PriceDataReload
                 accessToken={accessToken}
                 onReloadSuccess={() => {
-                  void refetch();
+                  void discoverMissingModels();
                 }}
                 buttonText={t("Reload Price Data")}
                 size="middle"
@@ -137,14 +155,15 @@ const PriceDataManagementTab = () => {
           </Dialog>
         </header>
 
-        <Tabs defaultValue="models">
+        <Tabs defaultValue="market">
           <TabsList className="mb-6">
-            <TabsTrigger value="models">{t("priceData.models")}</TabsTrigger>
-            <TabsTrigger value="providers">{t("priceData.providers")}</TabsTrigger>
+            <TabsTrigger value="market">模型广场</TabsTrigger>
+            <TabsTrigger value="local">本地模型列表</TabsTrigger>
           </TabsList>
-          <TabsContent value="models">
-            <PriceCatalog
+          <TabsContent value="market">
+            <MarketPriceCatalog
               rows={rows}
+              onDetail={setDetail}
               isLoading={isPending}
               isError={isError}
               onRetry={() => {
@@ -159,31 +178,73 @@ const PriceDataManagementTab = () => {
                 setModelDialogOpen(true);
               }}
               onDelete={(row) => {
-                void removeModel(row);
+                void setListing(row, true);
               }}
               onReset={(row) => {
                 void revertModel(row);
               }}
             />
           </TabsContent>
-          <TabsContent value="providers">
-            <PriceProviderPanel
-              providers={providers}
-              onAdd={() => {
-                setEditingProvider(null);
-                setProviderDialogOpen(true);
-              }}
-              onEdit={(provider) => {
-                setEditingProvider(provider);
-                setProviderDialogOpen(true);
-              }}
-              onDelete={(provider) => {
-                void removeProvider(provider);
-              }}
+          <TabsContent value="local">
+            <LocalModelList
+              rows={rows}
+              onDetail={setDetail}
+              onListing={(row, delisted) => void setListing(row, delisted)}
             />
           </TabsContent>
         </Tabs>
 
+        <Dialog
+          open={missingModels !== null}
+          onOpenChange={(open) => {
+            if (!open) setMissingModels(null);
+          }}
+        >
+          <DialogContent className="max-h-[80dvh] overflow-y-auto sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>是否添加价格表中的模型？</DialogTitle>
+              <DialogDescription>选择模型后配置供应商和调用方式，确认保存后才会成为可调用模型。</DialogDescription>
+            </DialogHeader>
+            {discoveryError ? (
+              <p role="alert">
+                待添加模型读取失败。
+                <Button variant="outline" onClick={() => void discoverMissingModels()}>
+                  重试
+                </Button>
+              </p>
+            ) : (
+              <>
+                <p role="status">发现 {missingModels?.length ?? 0} 个尚未部署的在售公开模型。</p>
+                <ul className="max-h-96 space-y-2 overflow-y-auto">
+                  {missingModels?.map((row) => (
+                    <li key={row.id} className="flex items-center justify-between gap-3 rounded border p-3">
+                      <span className="min-w-0 text-sm">
+                        {row.displayName || row.id}
+                        <code className="block break-all text-xs text-muted-foreground">{row.id}</code>
+                      </span>
+                      <Link
+                        className="shrink-0 text-sm text-cyan-700 underline"
+                        href={"/models-and-endpoints?catalog=" + encodeURIComponent(row.id)}
+                      >
+                        添加此模型
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <Button variant="outline" onClick={() => setMissingModels(null)}>
+              暂不添加
+            </Button>
+          </DialogContent>
+        </Dialog>
+        <MarketModelDetail
+          row={detail}
+          accessToken={accessToken}
+          userId={userId}
+          userRole={userRole}
+          onClose={() => setDetail(null)}
+        />
         <PriceModelDialog
           key={editingModel?.id ?? "new-model"}
           open={modelDialogOpen}
@@ -195,19 +256,6 @@ const PriceDataManagementTab = () => {
           editing={editingModel}
           onSave={(body) => {
             void saveModel(body);
-          }}
-          isSaving={saving}
-        />
-        <PriceProviderDialog
-          key={editingProvider?.slug ?? "new-provider"}
-          open={providerDialogOpen}
-          onOpenChange={(open) => {
-            setProviderDialogOpen(open);
-            if (!open) setEditingProvider(null);
-          }}
-          editing={editingProvider}
-          onSave={(body) => {
-            void saveProvider(body);
           }}
           isSaving={saving}
         />

@@ -71,7 +71,8 @@ func ServeBypass(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.
 }
 
 // serveBypassCreate 处理创建。按模型字段找勾了该类型的部署，换成官方模型 id 和上游密钥。
-// 创建响应里的任务 id 钉住这条部署。这次不按 usage 扣费。
+// 创建响应里的任务 id 钉住这条部署；同步对话按实际 usage 计费，异步任务沿用查询结算。
+// 仅显式配置回退的同步对话可在失败后重放；继续请求、已输出流和异步创建保持原部署。
 //
 // 参数 h（Bypass）：官方转发需要的能力，不含聊天缓存和护栏；w（http.ResponseWriter）：创建结果或错误写在这里；r（*http.Request）：入站请求，用来读路径和头；hit（provider.Hit）：这次匹配到的端点类型和动作。
 // 参数 principal（*auth.Principal）：已通过鉴权的调用方。body（map[string]any）：解析后的 JSON。raw（[]byte）：原始正文。
@@ -86,6 +87,10 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	}
 	alias, _ := body[field].(string)
 	alias = strings.TrimSpace(alias)
+	if hit.Transport.Protocol == "gemini" || hit.Transport.Protocol == "vertex" {
+		// Gemini 原厂正文没有 model；公开路径是路由别名，部署模型决定上游路径。
+		alias = hit.Names["model"]
+	}
 	if alias == "" && hit.Action.Model != "" {
 		// A Fal body normally has no model. Resolve the registered path to its
 		// configured public alias, including names created by the model editor.
@@ -115,7 +120,8 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	settings = settings.ForEndpoint(alias, hit.Transport.EndpointID)
+	baseSettings := settings
+	settings = settings.ForModel(alias)
 	if settings.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
 		return
@@ -125,9 +131,6 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		return
 	}
 	list := eligible(h, hit)
-	if router.IsSplitStrategy(settings.Strategy()) {
-		list = router.ApplyWeights(list, settings.WeightOverrides())
-	}
 	list, _ = dropDisabled(list)
 	plan := h.PlanRoute(r, alias, body, principal)
 	if plan.Err != nil {
@@ -135,8 +138,8 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		return
 	}
 	state := h.RouteState()
-	state.SplitScope = settings.CursorScope(alias, originalEndpoint(hit))
-	pool := router.Schedule(list, alias, settings.Strategy(), state, plan.Pinned)
+	state.Allocations = settings.Policy.Shares()
+	pool := settings.Schedule(list, alias, state, plan.Pinned)
 	if plan.Required {
 		if state.Cooldown[plan.Pinned] || len(pool) == 0 || router.CooldownID(pool[0]) != plan.Pinned {
 			httpx.WriteTypedError(w, r.URL.Path, 409, "unavailable", "response deployment unavailable")
@@ -144,6 +147,18 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		}
 		// 已存响应只属于原部署，重试不能换到其他供应商。
 		pool = pool[:1]
+	}
+	disableFallbacks, _ := body["disable_fallbacks"].(bool)
+	// 原生异步任务的创建结果可能不明确，保持禁止重放；对话创建可以按模型回退。
+	background, _ := body["background"].(bool)
+	dialogueFallback := !background && (hit.Transport.Protocol == "openai-responses" || hit.Transport.Protocol == "openai-chat" || hit.Transport.Protocol == "anthropic-messages" || hit.Transport.Protocol == "gemini" || hit.Transport.Protocol == "vertex")
+	fallbacks := newFallbackQueue(baseSettings, alias, plan.Required || disableFallbacks || !dialogueFallback)
+	if len(pool) == 0 {
+		pool, settings = fallbacks.next("general", list, state)
+	}
+	if settings.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "fallback route unavailable")
+		return
 	}
 	if len(pool) == 0 {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
@@ -156,71 +171,103 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	var selectedID string
 	tried := false
 	originalHit := hit
-	for _, rawDep := range pool {
-		candidate, err := h.AttachCredential(rawDep)
-		if err != nil {
-			continue
-		}
-		candidateHit, err := provider.ResolveHit(originalHit, candidate)
-		if err != nil {
-			continue
-		}
-		hit = candidateHit
-		base, key := bypassAuth(candidateHit, candidate)
-		if base == "" || key == "" {
-			continue
-		}
-		upstreamModel := bypassUpstreamModel(candidateHit.Transport, candidate.ParamString("model", alias), bypassSupplier(base, candidate))
-		payload, err := requestBody.Payload(candidateHit.Transport.ModelField, upstreamModel, candidateHit.Action.Model != "")
-		if err != nil {
-			httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
-			return
-		}
-		url := withQuery(bypassDeploymentURL(base, candidateHit, candidate), r)
-		for attempt := 0; attempt < settings.Retries(); attempt++ {
-			if tried {
-				fresh, err := h.ResolveRequest(r)
-				if err != nil || fresh == nil {
-					httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
-					return
-				}
-				principal = fresh
-				if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) {
-					return
-				}
-			}
-			tried = true
-			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.TimeoutSeconds()*float64(time.Second)))
-			response, err = forwardOfficial(h, r.WithContext(ctx), candidateHit.Action.Method, url, key, payload, r.Header, candidateHit.Transport, w)
-			respBody, status = response.Body, response.StatusCode
-			cancel()
-			dep = candidate
-			selectedID = router.CooldownID(rawDep)
-			if err != nil {
-				if response.Streamed {
-					h.AnnotateCall(callID, dataplaneNote(hit, dep, "", time.Since(start)))
-					h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, 502, selectedID)
-					return
-				}
-				logx.Error("bypass forward path=%s err=%s", r.URL.Path, safeErr(err))
-				h.NoteFailure(router.CooldownID(rawDep), settings)
-				// 创建响应丢失时，上游可能已受理付费任务；结果不明确的创建请求不能重放。
-				httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
+	for len(pool) > 0 {
+		kind := "general"
+		for _, rawDep := range pool {
+			// 组内尝试仍保留成员身份，错误分类及后续回退使用最后尝试成员。
+			fallbacks.useDeployment(rawDep.ModelName)
+			// 回退目标可能是另一个组；组别名与真实成员都必须通过权限和预算检查。
+			if fallbacks.poolAlias != alias && fallbacks.poolAlias != rawDep.ModelName && !h.EnforceIdentityLimits(w, r.URL.Path, principal, fallbacks.poolAlias, EstimateTokens(body)) {
 				return
 			}
-			if status >= 500 || status == http.StatusTooManyRequests {
-				h.NoteFailure(router.CooldownID(rawDep), settings)
-				// 服务端可能在受理付费任务后才返回错误，不能因此创建第二个任务。
-				if status >= 500 {
-					goto forwarded
-				}
-				if r.Context().Err() != nil {
-					return
-				}
+			// 必须在确定成员身份后判断重放：组名没有模型级回退，成员可以配置回退链。
+			// 专用错误已进入链时仍继续剩余目标；异步任务和固定响应部署始终禁止重放。
+			replayDialogue := dialogueFallback && !fallbacks.disabled && (fallbacks.current != alias || hasFallbackTargets(baseSettings.ModelFallbacks[fallbacks.current]))
+			if rawDep.ModelName != alias && !h.EnforceIdentityLimits(w, r.URL.Path, principal, rawDep.ModelName, EstimateTokens(body)) {
+				return
+			}
+			candidate, err := h.AttachCredential(rawDep)
+			if err != nil {
+				continue
+			}
+			candidateHit, err := provider.ResolveHit(originalHit, candidate)
+			if err != nil {
 				continue
 			}
 			hit = candidateHit
-			goto forwarded
+			base, key := bypassAuth(candidateHit, candidate)
+			if base == "" || key == "" {
+				continue
+			}
+			upstreamModel := bypassUpstreamModel(candidateHit.Transport, candidate.ParamString("model", alias), bypassSupplier(base, candidate))
+			payload, err := requestBody.Payload(candidateHit.Transport.ModelField, upstreamModel, candidateHit.Action.Model != "" || candidateHit.Transport.Protocol == "gemini" || candidateHit.Transport.Protocol == "vertex")
+			if err != nil {
+				httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
+				return
+			}
+			url := withQuery(bypassDeploymentURL(base, candidateHit, candidate), r)
+			for attempt := 0; attempt < settings.Retries(); attempt++ {
+				if tried {
+					fresh, err := h.ResolveRequest(r)
+					if err != nil || fresh == nil || !fresh.CanInfer() {
+						httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
+						return
+					}
+					principal = fresh
+					if !h.EnforceIdentityLimits(w, r.URL.Path, principal, alias, EstimateTokens(body)) {
+						return
+					}
+					if rawDep.ModelName != alias && !h.EnforceIdentityLimits(w, r.URL.Path, principal, rawDep.ModelName, EstimateTokens(body)) {
+						return
+					}
+				}
+				tried = true
+				ctx, cancel := context.WithTimeout(r.Context(), time.Duration(settings.TimeoutSeconds()*float64(time.Second)))
+				response, err = forwardOfficial(h, r.WithContext(ctx), candidateHit.Action.Method, url, key, payload, r.Header, candidateHit.Transport, w)
+				respBody, status = response.Body, response.StatusCode
+				cancel()
+				dep = candidate
+				selectedID = router.CooldownID(rawDep)
+				if err != nil {
+					if response.Streamed {
+						h.AnnotateCall(callID, dataplaneNote(hit, dep, "", time.Since(start)))
+						h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, 502, selectedID)
+						return
+					}
+					logx.Error("bypass forward path=%s err=%s", r.URL.Path, safeErr(err))
+					h.NoteFailure(router.CooldownID(rawDep), settings)
+					if replayDialogue {
+						continue
+					}
+					// 创建响应丢失时，上游可能已受理付费任务；结果不明确的创建请求不能重放。
+					httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
+					return
+				}
+				if status >= 500 || status == http.StatusTooManyRequests {
+					h.NoteFailure(router.CooldownID(rawDep), settings)
+					// 服务端可能在受理付费任务后才返回错误，不能因此创建第二个任务。
+					if status >= 500 && !replayDialogue {
+						goto forwarded
+					}
+					if r.Context().Err() != nil {
+						return
+					}
+					continue
+				}
+				errorKind := fallbackKind(status, respBody)
+				if errorKind != "" && !fallbacks.disabled && len(baseSettings.ModelFallbacks[fallbacks.current].Targets(errorKind)) > 0 {
+					kind = errorKind
+					goto nextFallbackModel
+				}
+				hit = candidateHit
+				goto forwarded
+			}
+		}
+	nextFallbackModel:
+		pool, settings = fallbacks.next(kind, list, state)
+		if settings.Err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "fallback route unavailable")
+			return
 		}
 	}
 	if !tried {
@@ -228,6 +275,10 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		return
 	}
 forwarded:
+	if status == 0 {
+		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
+		return
+	}
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
 	depID := selectedID
@@ -315,7 +366,7 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	settings = settings.ForEndpoint(dep.ModelName, originalEndpoint(hit))
+	settings = settings.ForModel(dep.ModelName)
 	if settings.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
 		return
@@ -468,7 +519,15 @@ func withQuery(url string, r *http.Request) string {
 	if r.URL.RawQuery == "" {
 		return url
 	}
-	return url + "?" + r.URL.RawQuery
+	query := r.URL.Query()
+	// 网关凭据不得进入上游 query；供应商认证始终由注册的头注入。
+	query.Del("key")
+	query.Del("api_key")
+	query.Del("access_token")
+	if query.Encode() == "" {
+		return url
+	}
+	return url + "?" + query.Encode()
 }
 
 // officialTaskScope 隔离不同调用方和不同供应商端点的任务编号。

@@ -54,7 +54,7 @@ vi.mock("./CredentialModal", () => ({
             api_key: "sk-1****2345",
             api_base: "https://proxy.e2e.example.com/v1",
           }
-        : { credential_name: "new-cred", custom_llm_provider: "openai" };
+        : { credential_name: "new-cred", custom_llm_provider: "openai", catalog_id: "qiniu" };
     return (
       <button data-testid={`credential-modal-${mode}-submit`} onClick={() => onSubmit(values)}>
         submit {mode}
@@ -154,6 +154,7 @@ describe("CredentialsPanel", () => {
     expect(screen.getByTestId("credential-modal-add-submit")).toBeInTheDocument();
   });
 
+  /** 前置管理员、新目录连接和成功请求；验证目录仅存入连接元数据，关闭并刷新；mock 自动清理。 */
   it("closes the add modal and refetches after a successful add", async () => {
     const user = userEvent.setup();
     const refetch = vi.fn();
@@ -169,6 +170,9 @@ describe("CredentialsPanel", () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith("Credential added successfully");
     });
+    const payload = vi.mocked(credentialCreateCall).mock.calls[0][1];
+    expect(payload.credential_info).toMatchObject({catalog_id:"qiniu"});
+    expect(payload.credential_values).not.toHaveProperty("catalog_id");
     expect(refetch).toHaveBeenCalled();
     expect(screen.queryByTestId("credential-modal-add-submit")).not.toBeInTheDocument();
   });

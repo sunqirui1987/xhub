@@ -252,9 +252,8 @@ export function priceCatalogProviders(doc: PriceCatalogDocument | null | undefin
 }
 
 /**
- * Builds the request body for saving one model. Token rates are divided back to
- * per-token, and a blank field is sent as null so the backend clears that rate
- * instead of storing a zero.
+ * 构建价格模型保存正文；参数包含分类、Token/单位单价及可选原始行，返回后台补丁，供价格弹窗调用。
+ * Token 单价转换为每 Token；空单价用 null 清除，未修改单价省略。编辑时选择未设置清除原有分类；无副作用。
  */
 export function priceModelPayload(input: {
   id: string;
@@ -273,7 +272,11 @@ export function priceModelPayload(input: {
   };
   if (input.displayName?.trim()) body.display_name = input.displayName.trim();
   if (input.mode?.trim()) body.mode = input.mode.trim();
+  else if (input.original?.mode != null) body.mode = null;
   if (input.endpointType?.trim()) body.endpoint_id = input.endpointType.trim();
+  else if (input.original?.endpoint_id != null || input.original?.endpoint_type != null) body.endpoint_id = null;
+  // 写入标准字段时清除历史别名，避免“未设置”在重新打开表单时被旧 endpoint_type 恢复。
+  if (input.original?.endpoint_type != null) body.endpoint_type = null;
   for (const [field, raw] of Object.entries(input.tokenRates)) {
     if (
       input.original &&

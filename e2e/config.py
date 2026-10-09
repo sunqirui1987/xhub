@@ -9,6 +9,18 @@ models = [{"model_name": "gpt-4o-mini", "litellm_params": {
     "model": "openai/gpt-4o-mini", "api_key": "sk-fake",
     "api_base": "http://127.0.0.1:" + env["E2E_UP_PORT"]}, "model_info": {"transport": "bypass_openai_chat", "endpoint_types": ["chat", "responses"]}}]
 live = env.get("E2E_LIVE") == "1"
+# 续接用例使用专属本地模型，回复内容取决于真实上游收到的完整历史。
+if env.get("E2E_RESPONSES_CONTINUATION") == "1":
+    models.append({"model_name": "e2e-responses-history", "litellm_params": {
+        "model": "e2e-responses-history", "api_key": "sk-fake",
+        "input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002,
+        "api_base": "http://127.0.0.1:" + env["E2E_UP_PORT"]},
+        "model_info": {"transport": "bypass_openai_chat", "endpoint_types": ["chat", "responses"]}})
+# 隔离测试专用无效声明：验证旧配置不会推断聊天能力，浏览器必须解释不可调用原因。
+if env.get("E2E_ENDPOINT_UNBOUND") == "1":
+    models.append({"model_name": "e2e-unbound", "litellm_params": {
+        "model": "openai/old-model", "api_key": "sk-fake",
+        "api_base": "http://127.0.0.1:" + env["E2E_UP_PORT"]}, "model_info": {"mode": "chat"}})
 if live:
     for vendor in env["E2E_LIVE_VENDORS"].split(","):
         prefix = "XHUB_REGRESSION_" + vendor

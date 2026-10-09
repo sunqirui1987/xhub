@@ -39,7 +39,7 @@ func TestCatalogURLs(t *testing.T) {
 	}
 }
 
-// TestFetchCatalogFallback 验证正常、空目录及双向 404 回退；其他错误不得重复请求。
+// TestFetchCatalogFallback 验证正常、空目录、双向 404 及无效目录回退；鉴权、限流等错误不得重复请求。
 // 参数 t：测试上下文；返回：无。使用本地上游核对顺序、鉴权和脱敏错误，服务器自动关闭。
 func TestFetchCatalogFallback(t *testing.T) {
 	for _, tc := range []struct {
@@ -58,8 +58,8 @@ func TestFetchCatalogFallback(t *testing.T) {
 		{"rate limited", "", ``, 429, 200, []string{"/models"}, "429 Too Many Requests"},
 		{"server error", "", ``, 500, 200, []string{"/models"}, "500 Internal Server Error"},
 		{"fallback unauthorized", "", ``, 404, 401, []string{"/models", "/v1/models"}, "401 Unauthorized"},
-		{"HTML response", "", `<html>login</html>`, 200, 200, []string{"/models"}, "invalid model discovery response"},
-		{"error object", "", `{"error":"secret"}`, 200, 200, []string{"/models"}, "invalid model discovery response"},
+		{"HTML response", "", `<html>login</html>`, 200, 200, []string{"/models", "/v1/models"}, "invalid model discovery response"},
+		{"error object", "", `{"error":"secret"}`, 200, 200, []string{"/models", "/v1/models"}, "invalid model discovery response"},
 		{"empty data", "", `{"data":[]}`, 200, 200, []string{"/models"}, ""},
 		{"empty array", "", `[]`, 200, 200, []string{"/models"}, ""},
 		{"redirect", "", ``, 302, 200, []string{"/models"}, "302 Found"},
@@ -98,6 +98,63 @@ func TestFetchCatalogFallback(t *testing.T) {
 	}
 }
 
+// TestFetchCatalogInvalidResponseFallback 验证网站 HTML、错误 JSON 和畸形正文不会阻断同源目录发现。
+// 参数 t：测试上下文；返回：无。前置为本地上游，验证双向及自定义前缀回退、空目录和后续错误；
+// 响应正文与查询秘密不得泄露，服务器自动关闭，不写入持久数据。
+func TestFetchCatalogInvalidResponseFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, firstBody, secondBody, wantErr string
+		secondStatus                               int
+		wantCount                                  int
+	}{
+		{"website to v1", "", `<html>server-secret</html>`, `{"data":[{"id":"chat"}]}`, "", 200, 1},
+		{"website to root", "/v1", `<html>server-secret</html>`, `[{"id":"chat"}]`, "", 200, 1},
+		{"custom prefix", "/relay", `<html>server-secret</html>`, `{"data":[{"id":"chat"}]}`, "", 200, 1},
+		{"error JSON", "", `{"error":"server-secret"}`, `{"data":[{"id":"chat"}]}`, "", 200, 1},
+		{"malformed JSON", "", `{`, `{"data":[]}`, "", 200, 0},
+		{"empty body", "", ``, `[]`, "", 200, 0},
+		{"fallback missing", "", `<html>server-secret</html>`, ``, "/v1/models: 404 Not Found", 404, 0},
+		{"fallback invalid", "", `<html>server-secret</html>`, `{"error":"server-secret"}`, "/v1/models: invalid model discovery response", 200, 0},
+		{"fallback unauthorized", "", `<html>server-secret</html>`, ``, "401 Unauthorized", 401, 0},
+		{"fallback rate limited", "", `<html>server-secret</html>`, ``, "429 Too Many Requests", 429, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths []string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				if r.Header.Get("Authorization") != "Bearer server-secret" || r.Header.Get("x-api-key") != "server-secret" || r.URL.Query().Get("token") != "query-secret" {
+					t.Error("回退请求未保留已存供应商的鉴权和查询参数")
+				}
+				if len(paths) == 1 {
+					_, _ = io.WriteString(w, tc.firstBody)
+					return
+				}
+				w.WriteHeader(tc.secondStatus)
+				_, _ = io.WriteString(w, tc.secondBody)
+			}))
+			defer upstream.Close()
+			rawURL := ModelsURL("", upstream.URL+tc.base+"?token=query-secret")
+			items, err := fetchCatalog(context.Background(), rawURL, "server-secret")
+			wantURLs, _ := catalogURLs(rawURL)
+			if len(paths) != len(wantURLs) {
+				t.Fatalf("无效目录必须恰好尝试两个同源候选：%v", paths)
+			}
+			for i, candidate := range wantURLs {
+				if !strings.HasPrefix(candidate, upstream.URL+paths[i]+"?") {
+					t.Fatalf("无效目录回退顺序错误：%v", paths)
+				}
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || strings.Contains(err.Error(), "secret") {
+					t.Fatalf("无效目录回退失败契约或脱敏错误：%v", err)
+				}
+			} else if err != nil || len(items) != tc.wantCount || (tc.wantCount > 0 && items[0].ID != "chat") {
+				t.Fatalf("无效目录回退未返回有效模型列表：%v err=%v", items, err)
+			}
+		})
+	}
+}
+
 // TestFetchCatalogCanceled 验证已取消的管理请求不会继续发起供应商目录读取。
 // 参数 t：测试上下文；返回：无。使用本地服务，关闭服务清理，无持久数据。
 func TestFetchCatalogCanceled(t *testing.T) {
@@ -107,5 +164,19 @@ func TestFetchCatalogCanceled(t *testing.T) {
 	cancel()
 	if _, err := fetchCatalog(ctx, upstream.URL+"/models", ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("未保留取消错误：%v", err)
+	}
+}
+
+// TestMergeCatalogModels 验证上架列表完整、专用型号补充、去重、价格保留及空目录边界。
+// 参数 t 为测试上下文；返回无；仅内存，无外部依赖和清理。
+func TestMergeCatalogModels(t *testing.T) {
+	price := 1.25
+	items := []CatalogModel{{ID: "gpt-5.6-sol", InputPrice: &price}, {ID: "video"}, {ID: "gpt-5.6-sol"}, {ID: ""}}
+	got := mergeCatalogModels(items, map[string][]string{"video": {"fal"}, "ark": {"ark"}})
+	if len(got) != 3 || got[0].ID != "ark" || got[1].ID != "gpt-5.6-sol" || got[1].InputPrice != &price || got[2].ID != "video" {
+		t.Fatalf("完整目录合并错误: %+v", got)
+	}
+	if len(mergeCatalogModels(nil, nil)) != 0 || items[0].ID != "gpt-5.6-sol" {
+		t.Fatal("空目录或输入不变性错误")
 	}
 }

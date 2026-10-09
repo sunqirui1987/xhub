@@ -1,260 +1,107 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFormContext, useWatch } from "react-hook-form";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectLabel, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MountedFormField, type MountedFormValues } from "../common_components/MountedFormField";
 import { apiClient } from "../networking";
 import { provider_map } from "../provider_info_helpers";
-import { t } from "@/i18n";
+import { catalogTransports, defaultTransport, compatibleEndpoint, protocolLabel, upstreamProtocolGroup, publicEndpointGroup, defaultEndpoints, type EndpointDescriptor, type EndpointTransport } from "./endpointCatalog";
 
-/** EndpointDescriptor 描述公开协议，和供应商执行传输分开选择。 */
-interface EndpointDescriptor {
-  id: string;
-  label: string;
-  kind: "adapted" | "bypass";
-  protocol: string;
-  family: string;
-}
-/** EndpointTransport 描述可用供应商、固定模型路径及其任务队列；不包含凭据。 */
-interface EndpointTransport {
-  id: string;
-  label: string;
-  kind: string;
-  endpoint_id: string;
-  protocol?: string;
-  model_group?: string;
-  strip_prefix?: string;
-  providers?: string[];
-  actions?: { name: string; public_path: string; model?: string }[];
-}
-/** EndpointPayload 是 /public/endpoints 的只读声明目录；models 映射已登记模型的默认传输。 */
-interface EndpointPayload {
-  endpoint_types?: EndpointDescriptor[];
-  transports?: EndpointTransport[];
-  models?: Record<string, string>;
-}
+/** 公开目录仅声明已实现的上游操作和固定模型绑定，不用定价信息猜测能力。 */
+interface EndpointPayload { endpoint_types?: EndpointDescriptor[]; transports?: EndpointTransport[]; models?: Record<string, string>; catalogs?: Record<string, Record<string, string[]>> }
 
-/** EndpointTypeField 在选择上游模型后显示可配置的协议和执行传输。
- * 参数 selectedProvider：供应商标识。返回：端点与模型组表单字段。
- * 已登记模型受白名单约束；未知模型能力由管理员显式声明，不从价格目录推断。
- * endpoint_types 声明公开能力，transport 决定执行协议。调用：ModelEditor。
- */
-const EndpointTypeField: React.FC<{
-  selectedProvider: string | null;
-  modelCostMap?: Record<string, { endpoint_id?: string }> | null;
-}> = ({ selectedProvider }) => {
+/** 模型编辑先选择上游实际支持的调用方式，再展示由执行能力生成的固定 XHub 接口。
+ * 参数 selectedProvider 为连接协议，catalogId 为已保存供应商目录；返回上游选择与公开接口说明，供 ModelEditor 使用。
+ * 普通型号按连接默认选择协议；菜单保留连接支持的全部实现，专用型号不匹配时显示原因，目录失败保留草稿。 */
+const EndpointTypeField: React.FC<{ selectedProvider: string | null; catalogId?: string; modelCostMap?: Record<string, { endpoint_id?: string }> | null }> = ({ selectedProvider, catalogId = "" }) => {
   const { control, getValues, setValue } = useFormContext<MountedFormValues>();
   const lastModel = useRef<unknown>(undefined);
   const [payload, setPayload] = useState<EndpointPayload>({});
-  const [catalogState, setCatalogState] = useState<"loading" | "ready" | "failed">("loading");
-
-  const transportId = useWatch({ control, name: "transport" }) as string | undefined;
-  const enabledEntries = useWatch({ control, name: "endpoint_types" }) as string[] | undefined;
-  const selectedId = enabledEntries?.[0];
-  const modelValue = useWatch({ control, name: "model" });
+  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+  const transportId = useWatch({control, name:"transport"}) as string | undefined;
+  const entries = useWatch({control, name:"endpoint_types"}) as string[] | undefined;
+  const modelValue = useWatch({control, name:"model"});
+  const picked = Array.isArray(modelValue) ? modelValue[0] : modelValue;
   const slug = selectedProvider ? (provider_map[selectedProvider] ?? selectedProvider.toLowerCase()) : "";
-  // 组件卸载后忽略目录响应；请求失败保持不可选，禁止补猜端点。
   useEffect(() => {
     let canceled = false;
-    apiClient
-      .get<EndpointPayload>("/public/endpoints")
-      .then((body) => {
-        if (!canceled && body) {
-          setPayload(body);
-          setCatalogState("ready");
-        }
-      })
-      .catch(() => { if (!canceled) setCatalogState("failed"); });
-    return () => {
-      canceled = true;
-    };
+    apiClient.get<EndpointPayload>("/public/endpoints").then(body => {
+      if (!canceled && body) { setPayload(body); setState("ready"); }
+    }).catch(() => { if (!canceled) setState("failed"); });
+    return () => { canceled = true; };
   }, []);
-  const picked = Array.isArray(modelValue) ? modelValue[0] : modelValue;
-  // 固定模型路径必须逐项匹配，不能因为同属视频协议就提供其他模型组的传输。
-  const transports = useMemo(
-    () =>
-      (payload.transports ?? []).filter((item) => {
-        if (!["openai-chat", "openai-responses", "anthropic-messages"].includes(item.protocol ?? "") && item.providers?.length && (!slug || !item.providers.includes(slug))) return false;
-        const create = item.actions?.filter((action) => action.name === "create") ?? [];
-        if (!create.some((action) => action.model)) return true;
-        const prefix = item.strip_prefix ? item.strip_prefix + "/" : "";
-        let model = typeof picked === "string" ? picked : "";
-        if (prefix && model.startsWith(prefix)) model = model.slice(prefix.length);
-        return create.some((action) => action.model === model);
-      }),
-    [payload.transports, slug, picked],
-  );
-  const declared =
-    typeof picked === "string" ? payload.models?.[picked] || payload.models?.[slug + "/" + picked] : undefined;
-  const declaredTransport = transports.find((item) => item.id === declared);
-  const options = useMemo(
-    () =>
-      (payload.endpoint_types ?? []).filter((item) => {
-        if (!picked) return false;
-        if (declaredTransport && !["openai-chat", "openai-responses", "anthropic-messages"].includes(declaredTransport.protocol ?? "")) return item.id === declaredTransport.endpoint_id;
-        return item.kind === "adapted" || transports.some((transport) => transport.endpoint_id === item.id);
-      }),
-    [payload.endpoint_types, transports, picked, declaredTransport],
-  );
-  const selected = options.find((item) => item.id === selectedId);
-  const dialogue = selected?.family === "chat" && ["openai-chat", "openai-responses", "anthropic-messages"].includes(selected.protocol);
-  const bindings = transports.filter((item) => dialogue
-    ? ["openai-chat", "openai-responses", "anthropic-messages"].includes(item.protocol ?? "")
-    : item.endpoint_id === selectedId);
-  const binding = bindings.find((item) => item.id === transportId);
-  // 用户只需辨认上游接口格式；内部传输标识仍作为保存值，不暴露给选择流程。
-  const bindingLabels: Record<string, string> = {
-    "openai-chat": "Chat Completions",
-    "openai-responses": "Responses",
-    "anthropic-messages": "Messages",
-  };
-  /** bindingLabel 获取可访问的协议名称。
-   * 参数 item：目录传输；返回展示名称。调用：选择框；媒体传输保持模型组名称，无副作用。 */
-  const bindingLabel = (item: EndpointTransport) => dialogue
-    ? (bindingLabels[item.protocol ?? ""] ?? item.label)
-    : (item.model_group ?? item.label);
-  // 父表单订阅所有值；相同声明不得重复写入，否则会不断触发父组件渲染。
-  const syncValues = useCallback(
-    (id: string, transport: string, shouldDirty = true) => {
-      // 用户入口数组是唯一声明，切换执行配置保留仍兼容的入口。
-      const saved = getValues("endpoint_types");
-      const endpointTypes = id ? [...new Set([id, ...(Array.isArray(saved) ? saved as string[] : [])])] : [];
-      const current = getValues("endpoint_types");
-      const sameEndpoints =
-        Array.isArray(current) &&
-        current.length === endpointTypes.length &&
-        current.every((value, i) => value === endpointTypes[i]);
-      if (!sameEndpoints) setValue("endpoint_types", endpointTypes, { shouldDirty });
-      if (getValues("transport") !== transport) setValue("transport", transport, { shouldDirty });
-    },
-    [getValues, setValue],
-  );
-  /** writeValue 同步更新端点描述、公开能力和传输。
-   * 参数 id：协议 ID；preferredTransport：模型默认传输。返回：无；清空时移除旧能力。
-   */
-  const writeValue = useCallback(
-    (id: string, preferredTransport?: string) => {
-      const descriptor = options.find((item) => item.id === id);
-      const transport =
-        descriptor?.kind === "adapted"
-          ? (["chat", "responses", "messages"].includes(descriptor.id) ? (preferredTransport ?? "") : (preferredTransport ?? transports.find(item => item.protocol === descriptor.protocol)?.id ?? ""))
-          : (preferredTransport ?? transports.find((item) => item.endpoint_id === id)?.id ?? "");
-      syncValues(id, transport);
-    },
-    [options, transports, syncValues],
-  );
-  // 模型变化后重新验证端点与传输；无匹配项时清除三项声明，避免保留旧模型能力。
+  const transports = useMemo(() => catalogTransports(payload.transports ?? [], payload.catalogs ?? {}, catalogId,
+    typeof picked === "string" ? picked : "", slug), [payload.transports, payload.catalogs, catalogId, picked, slug]);
+  // 选择菜单展示连接可用的全部已实现协议；型号限制在选择后明确解释，并由保存接口再次校验。
+  const choices = useMemo(() => (payload.transports ?? []).filter(item => !item.providers?.length || item.providers.includes(slug)), [payload.transports, slug]);
+  const binding = choices.find(item => item.id === transportId);
+  const supported = !binding || transports.some(item => item.id === binding.id);
+  const bareModel = typeof picked === "string" && catalogId && picked.startsWith(catalogId + "/") ? picked.slice(catalogId.length + 1) : String(picked ?? "");
+  const declaredTransports = payload.catalogs?.[catalogId]?.[bareModel];
+  const unavailableReason = declaredTransports?.length
+      ? `当前连接类型 ${slug} 不支持该模型登记的上游协议，暂时无法保存。请检查供应商连接类型。`
+      : "目录未提供可用的上游接口协议，暂时无法保存该模型。请检查上游模型 ID 和供应商连接类型。";
+  const available = (payload.endpoint_types ?? []).filter(entry => compatibleEndpoint(entry, binding));
+  const standard = available.filter(entry => publicEndpointGroup(entry) !== "bypass");
+  const bypass = available.filter(entry => publicEndpointGroup(entry) === "bypass");
+  /** 写入上游执行及可用公开接口；参数为注册执行 ID，返回无。
+   * 只开放后端已实现的标准接口，Bypass 须显式勾选；空值清空旧声明，供选择和模型切换调用。 */
+  const selectTransport = useCallback((id: string, dirty = true) => {
+    const execution = choices.find(item => item.id === id);
+    const endpoints = defaultEndpoints(payload.endpoint_types ?? [], execution);
+    if (getValues("transport") !== id) setValue("transport", id, {shouldDirty:dirty});
+    if (JSON.stringify(getValues("endpoint_types")) !== JSON.stringify(endpoints)) setValue("endpoint_types", endpoints, {shouldDirty:dirty});
+  }, [getValues, setValue, choices, payload.endpoint_types]);
   useEffect(() => {
-    // 加载中无法判断已有声明是否无效，保留未知模型的显式声明，直到目录成功返回。
-    if (catalogState !== "ready") return;
-    if (!options.length) {
-      syncValues("", "", false);
-      return;
-    }
-    const current = (getValues("endpoint_types") as string[] | undefined)?.[0] ?? "";
-    const transport = getValues("transport") as string;
+    if (state !== "ready") return;
     const changed = lastModel.current !== undefined && lastModel.current !== picked;
     lastModel.current = picked;
-    const validEndpoint = options.some((item) => item.id === current);
-    const validTransport =
-      transports.some((item) => item.id === transport && (item.endpoint_id === current ||
-        (options.some(entry => entry.id === current && entry.family === "chat") &&
-          ["openai-chat", "openai-responses", "anthropic-messages"].includes(item.protocol ?? ""))));
-    if (!changed && validEndpoint && validTransport) return;
-    const id = declaredTransport?.endpoint_id ?? declared;
-    if (id && options.some((item) => item.id === id)) writeValue(id, declaredTransport?.id);
-    else if (changed || !current || !validEndpoint) writeValue("");
-    else if (!validTransport && transport) syncValues(current, "");
-    // 用户选择后以表单为准；供应商变化由 ModelEditor 清空，模型变化在此校验。
-  }, [
-    options,
-    catalogState,
-    transports,
-    picked,
-    declared,
-    declaredTransport,
-    getValues,
-    syncValues,
-    writeValue,
-    selectedId,
-    transportId,
-  ]);
-
-  return (
-    <>
-      <MountedFormField label={t("Endpoint type")} name="endpoint_types" className="mb-1">
-        {(control) => (
-          <Select
-            items={options.map((item) => ({ value: item.id, label: t(item.label) }))}
-            disabled={!picked || catalogState !== "ready"}
-            value={selectedId ?? ""}
-            onValueChange={(value) => writeValue(value ?? "")}
-          >
-            <SelectTrigger id={control.id} className="w-full" aria-label={t("Endpoint type")}>
-              <SelectValue placeholder={catalogState === "loading" ? "正在加载端点目录…" : "请选择端点类型"} />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {t(item.label)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </MountedFormField>
-      <p className="text-sm text-muted-foreground mb-5 mt-1">{t("Choose the API used to call this model.")}</p>
-      {catalogState === "failed" && <p role="alert" className="mb-5 text-sm text-destructive">端点目录加载失败，请重新打开编辑页面。已保存的端点声明已保留。</p>}
-      {catalogState === "ready" && picked && !selectedId && <p role="status" className="mb-5 text-sm text-muted-foreground">该模型尚未声明调用端点，请选择实际支持的协议后保存。</p>}
-      {(dialogue || (selected?.kind === "bypass" && bindings.length > 1)) && (
-        <MountedFormField label={dialogue ? "上游接口协议" : t("Model group")} name="transport" className="mb-5">
-          {(control) => (
-            <Select
-              items={bindings.map((item) => ({ value: item.id, label: bindingLabel(item) }))}
-              disabled={!picked || !bindings.length}
-              value={(control.value as string | undefined) ?? ""}
-              onValueChange={(value) => {
-                setValue("transport", value ?? "", { shouldDirty: true });
-                const next = bindings.find(item => item.id === value);
-                const entries = (getValues("endpoint_types") as string[] ?? []).filter(id => payload.endpoint_types?.some(entry => entry.id === id && ((entry.kind === "adapted" && entry.family === "chat") || (entry.kind === "bypass" && entry.protocol === next?.protocol))));
-                setValue("endpoint_types", entries, { shouldDirty: true });
-              }}
-            >
-              <SelectTrigger id={control.id} aria-label={dialogue ? "上游接口协议" : t("Model group")}>
-                <SelectValue placeholder="请选择上游实际支持的协议" />
-              </SelectTrigger>
-              <SelectContent>
-                {bindings.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {bindingLabel(item)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </MountedFormField>
-      )}
-      {dialogue && binding && <fieldset className="mb-5 space-y-2">
-        <legend className="text-sm font-medium">开放的用户入口</legend>
-        <p className="text-xs text-muted-foreground">统一入口支持协议转换及聊天护栏、完整响应缓存；Bypass 保留原生字段与事件，不执行聊天护栏或完整响应缓存。</p>
-        {(payload.endpoint_types ?? []).filter(entry => (entry.kind === "adapted" && ["chat", "responses", "messages"].includes(entry.id)) || (entry.kind === "bypass" && entry.protocol === binding.protocol)).map(entry => <label key={entry.id} className="flex items-center gap-2 text-sm">
-          <input type="checkbox" aria-label={t(entry.label)} checked={enabledEntries?.includes(entry.id) ?? false} onChange={event => {
-            const values = enabledEntries ?? [];
-            const next = event.target.checked ? [...values, entry.id] : values.filter(id => id !== entry.id);
-            // 至少保留一个用户入口，避免主入口清空后协议配置区消失。
-            if (!next.length) return;
-            setValue("endpoint_types", next, { shouldDirty: true });
-          }} />{t(entry.label)}
-        </label>)}
-      </fieldset>}
-      {dialogue && !binding && <p role="status" className="mb-5 text-sm text-muted-foreground">
-        {bindings.length ? "请选择上游实际支持的接口协议后保存。" : "目录未提供可用的上游接口协议，暂时无法保存该模型。"}
-      </p>}
-      {binding && (
-        <p className="mb-5 break-all font-mono text-xs text-muted-foreground">
-          {[...new Set(binding.actions?.map((action) => action.public_path) ?? [])].slice(0, 3).join(" · ")}
-        </p>
-      )}
-    </>
-  );
+    const current = getValues("transport") as string;
+    if (picked && !changed && choices.some(item => item.id === current)) return;
+    const bare = typeof picked === "string" && picked.startsWith(catalogId + "/") ? picked.slice(catalogId.length + 1) : picked;
+    const declared = catalogId ? payload.catalogs?.[catalogId]?.[String(bare)]?.[0]
+      : typeof picked === "string" ? payload.models?.[picked] ?? payload.models?.[slug + "/" + picked] : undefined;
+    selectTransport(picked ? defaultTransport(transports, slug, declared) : "", false);
+  }, [state, picked, slug, catalogId, transports, choices, payload.models, payload.catalogs, getValues, selectTransport]);
+  return <>
+    <MountedFormField label="上游接口协议" name="transport" className="mb-1">{field => <Select
+      items={choices.map(item => ({value:item.id,label:protocolLabel(item)}))}
+      value={transportId ?? ""} disabled={!picked || state !== "ready" || !choices.length}
+      onValueChange={value => selectTransport(value ?? "")}
+    >
+      <SelectTrigger id={field.id} aria-label="上游接口协议"><SelectValue placeholder={state === "loading" ? "正在加载端点目录…" : "请选择上游实际支持的调用方式"}/></SelectTrigger>
+      <SelectContent>{(["openai","vertex","claude","bypass"] as const).map(group => <SelectGroup key={group}>
+        <SelectLabel>{{openai:"OpenAI",vertex:"Vertex / Gemini",claude:"Claude / Anthropic",bypass:"Bypass 转发（含 Fal）"}[group]}</SelectLabel>
+        {choices.filter(item => upstreamProtocolGroup(item) === group).map(item => <SelectItem key={item.id} value={item.id}>{protocolLabel(item)}</SelectItem>)}
+      </SelectGroup>)}</SelectContent>
+    </Select>}</MountedFormField>
+    <p className="text-sm text-muted-foreground mb-5">默认按提供商选择常规协议，可切换为上游实际支持的 OpenAI、Vertex / Gemini 或 Anthropic 协议。FAL、Ark 和 Bypass 直通使用已实现的操作路径。</p>
+    {state === "failed" && <p role="alert">端点目录加载失败，请重新打开编辑页面。已保存的端点声明已保留。</p>}
+    {state === "ready" && picked && !binding && <p role="status" className="mb-5">{choices.length ? "请选择上游实际支持的调用协议。常规模型无需登记专用能力。" : unavailableReason}</p>}
+    {binding && !supported && <p role="alert" className="mb-5 text-destructive">所选 {protocolLabel(binding)} 尚未实现当前模型或目录的调用。请填写该协议支持的上游模型路径，或选择 OpenAI、Vertex / Gemini 等常规协议。保存时会校验此专用能力。</p>}
+    {state === "ready" && (catalogId === "qiniu" || binding?.protocol === "fal") && <p className="text-sm text-muted-foreground mb-5">FAL 使用具体任务模型路径，例如 bytedance/seedance-2.0/text-to-video 或 byteplus/seedance-2.0/text-to-video；bytedance/doubao-seedance-2-0-260128 对应 Ark Video。修改对外模型名称不会改变上游协议，请在上游模型中选择对应路径。</p>}
+    {binding && <section aria-label="XHub 对外接口" className="mb-5 min-w-0 space-y-4 rounded-lg border bg-muted/20 p-4">
+      <div className="space-y-1">
+        <p className="font-medium">XHub 对外接口</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{standard.length ? "标准接口已自动开放，可使用同一个对外模型名称调用。" : "此模型使用供应商专用协议，以下直通接口已按注册能力开放。"}</p>
+      </div>
+      <ul aria-label="已开放接口" className="space-y-3">
+        {standard.map(entry => <li key={entry.id} aria-label={entry.label} className="min-w-0 rounded-md border bg-background p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-sm font-medium">{entry.label}</span>
+            <span className="rounded bg-primary/10 px-2 py-0.5 text-xs text-primary">已开放</span>
+          </div>
+          <div className="mt-2 space-y-1.5">{entry.paths?.map(path => <code key={path} className="block break-all rounded bg-muted/60 px-2 py-1 font-mono text-xs leading-relaxed text-muted-foreground">{path}</code>)}</div>
+        </li>)}
+      </ul>
+      {bypass.length > 0 && <div className="space-y-2 border-t pt-3">
+        <p className="text-xs font-medium text-muted-foreground">可选直通接口</p>
+        {bypass.map(entry => <label key={entry.id} className="flex cursor-pointer items-start gap-3 rounded-md border bg-background p-3 text-sm"><input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" aria-label={entry.label} checked={entries?.includes(entry.id) ?? false} onChange={event => {
+          const next = event.target.checked ? [...new Set([...(entries ?? []), entry.id])] : (entries ?? []).filter(id => id !== entry.id);
+          // 仅有 Bypass 的供应商必须保留入口，否则部署不能调用。
+          if (next.length) setValue("endpoint_types", next, {shouldDirty:true});
+        }}/><span className="min-w-0 flex-1 space-y-1"><span className="block font-medium">{entry.label}</span>{entry.paths?.map(path => <code key={path} className="block break-all font-mono text-xs leading-relaxed text-muted-foreground">{path}</code>)}</span></label>)}
+      </div>}
+    </section>}
+  </>;
 };
 export default EndpointTypeField;

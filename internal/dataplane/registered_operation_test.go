@@ -39,7 +39,7 @@ func TestDialogueRequestBodyRemovesConsumedProxyFields(t *testing.T) {
 	}
 }
 
-// TestBuildRegisteredOperation 验证非对话执行只读取显式 transport，并用注册动作生成地址、鉴权和上游模型。
+// TestBuildRegisteredOperation 验证非对话执行只读取显式 transport，并用注册动作生成地址、鉴权和上游模型，剥离回退开关。
 // 前置条件是本地 OpenAI 图片传输已登记；测试不发网络请求，也不依赖外部凭据；结果只存在内存中，无需清理。
 func TestBuildRegisteredOperation(t *testing.T) {
 	dep := config.ModelEntry{
@@ -50,11 +50,11 @@ func TestBuildRegisteredOperation(t *testing.T) {
 			"custom_llm_provider": "qiniu",
 		},
 		ModelInfo: map[string]any{
-			"transport":      "bypass_openai_image_generation",
-			"endpoint_types": []any{"image"},
+			"transport":      "openai_image_generation",
+			"endpoint_types": []any{"image_generation"},
 		},
 	}
-	body := map[string]any{"model": "public-alias", "prompt": "cat", "api_base": "https://must-not-forward.example"}
+	body := map[string]any{"model": "public-alias", "prompt": "cat", "api_base": "https://must-not-forward.example", "disable_fallbacks": true}
 	upstream, err := buildRegisteredOperation(dep, body, "images")
 	if err != nil {
 		t.Fatal("显式图片传输构造失败:", err)
@@ -75,6 +75,9 @@ func TestBuildRegisteredOperation(t *testing.T) {
 	if _, exists := payload["api_base"]; exists {
 		t.Fatalf("代理字段进入上游正文: %#v", payload)
 	}
+	if _, exists := payload["disable_fallbacks"]; exists {
+		t.Fatalf("回退开关进入上游正文: %#v", payload)
+	}
 	if body["model"] != "public-alias" {
 		t.Fatalf("构造请求修改了调用方正文: %#v", body)
 	}
@@ -86,8 +89,8 @@ func TestBuildRegisteredOperationRequiresCredentials(t *testing.T) {
 	dep := config.ModelEntry{
 		LiteLLMParams: map[string]any{"model": "image-model"},
 		ModelInfo: map[string]any{
-			"transport":      "bypass_openai_image_generation",
-			"endpoint_types": []any{"image"},
+			"transport":      "openai_image_generation",
+			"endpoint_types": []any{"image_generation"},
 		},
 	}
 	_, err := buildRegisteredOperation(dep, map[string]any{"prompt": "cat"}, "images")

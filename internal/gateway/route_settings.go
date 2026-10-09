@@ -4,32 +4,28 @@ import (
 	"context"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
+	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/gateway/prefs"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/router"
 )
 
-// RouteSettingsFor resolves the router settings one request runs under.
-//
-// The narrow scope is already known: keyBudgetOK walked key, team and
-// organization for the budget chain and recorded both the first scope that names
-// a template and which scope that was. So this does not walk anything - it reads
-// the one template that walk already chose, or the platform document when none
-// was chosen.
-//
-// There is deliberately no process-wide cache. A cache would be fastest to build
-// around the template row, and it would also be the thing that hands a stale
-// template to the requests immediately after an operator edits one - the exact
-// moment they are looking at the console to check that the edit took. One
-// primary-key read per inference request is the cheaper mistake.
-//
+// RouteSettingsFor 读取预算链已经选定的客户模板，并合并公开模型的默认权重与回退配置。
+// 不缓存模板和模型策略，确保控制台保存后下一次请求立即使用最新配置；无模板时使用内置设置。
 // 参数 p（*auth.Principal）：已经解析的调用方，其 RouteTemplateID 由预算链填入。
-// 返回 prefs.RouteSettings（prefs.RouteSettings）：这次请求生效的设置和来源。
+// 返回 prefs.RouteSettings：本次生效的设置和来源；读取或解析失败通过 Err 返回，数据面应拒绝执行。
 // 调用：gateway 的请求路径。
 // 测试：route_settings_test.go
-func (s *Server) RouteSettingsFor(p *auth.Principal) prefs.RouteSettings {
-	platform := s.RouterDocument()
+func (s *Server) RouteSettingsFor(p *auth.Principal) (result prefs.RouteSettings) {
+	// 网关只负责身份模板读取与目录快照；所有策略合并在router中共用。
+	defer func() {
+		s.LockModels()
+		models := append([]config.ModelEntry(nil), (*s.ModelTable())...)
+		s.UnlockModels()
+		result = router.Compile(result, s.RecordStore(), models)
+	}()
 	if p == nil || s.IAM == nil || p.RouteTemplateID == "" {
-		return prefs.PlatformSettings(platform)
+		return prefs.BuiltinSettings()
 	}
 	row, err := s.IAM.GetRouteTemplate(context.Background(), p.RouteTemplateID)
 	if err != nil {
@@ -41,12 +37,12 @@ func (s *Server) RouteSettingsFor(p *auth.Principal) prefs.RouteSettings {
 		// that follow land on the platform default, which is the same state as a
 		// scope that selects nothing - the state the operator left behind when
 		// they deleted it.
-		logx.Error("route template is gone id=%s; falling back to the platform default", p.RouteTemplateID)
-		return prefs.PlatformSettings(platform)
+		logx.Error("route template is gone id=%s; falling back to model defaults", p.RouteTemplateID)
+		return prefs.BuiltinSettings()
 	}
 	source := p.RouteTemplateSource
 	if source == "" {
-		source = prefs.PlatformSource
+		source = prefs.BuiltinSource
 	}
 	return prefs.RouteSettings{
 		Settings:     row.Settings(),

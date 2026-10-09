@@ -1,9 +1,12 @@
-import openai from "openai";
+import { postLLMRequest } from "@/components/llm_calls/transport";
 import { getProxyBaseUrl } from "@/components/networking";
 import { toast } from "@/lib/toast";
 import type { OpenAIVoice } from "../components/chat_ui/chatConstants";
 import { t } from "@/i18n";
 
+/** 调用媒体数据面并回调结果；参数包含输入、模型、密钥、标签及取消信号。
+ * 返回完成 Promise，供 Playground 使用；HTTP/解析失败和取消向调用方传播。
+ * 上传保留原文件，语音对象 URL 由消费组件释放。 */
 export async function makeOpenAIAudioSpeechRequest(
   input: string,
   voice: OpenAIVoice,
@@ -22,23 +25,18 @@ export async function makeOpenAIAudioSpeechRequest(
     console.log = function () {};
   }
   const proxyBaseUrl = customBaseUrl || getProxyBaseUrl();
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: tags && tags.length > 0 ? { "x-litellm-tags": tags.join(",") } : undefined,
-  });
 
   try {
-    const response = await client.audio.speech.create(
+    const response = await postLLMRequest(
+      "audio/speech",
       {
         model: selectedModel,
-        input: input,
+        input,
         voice,
-        ...(responseFormat ? { response_format: responseFormat as any } : {}),
-        ...(speed ? { speed: speed } : {}),
+        ...(responseFormat ? { response_format: responseFormat } : {}),
+        ...(speed !== undefined ? { speed } : {}),
       },
-      { signal },
+      { baseUrl: proxyBaseUrl, accessToken, tags, signal },
     );
 
     // Convert the response to a blob and create an object URL

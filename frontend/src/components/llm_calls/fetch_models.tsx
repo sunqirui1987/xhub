@@ -21,6 +21,7 @@ export interface ModelEndpoint {
  * mode 只用于展示；endpoints 为空表示没有可调用绑定，禁止猜测为聊天模型。
  */
 export interface ModelGroup {
+  unavailable_reason?: string;
   endpoints?: ModelEndpoint[];
   model_group: string;
   mode?: string;
@@ -30,6 +31,7 @@ export interface ModelGroup {
 
 /** AvailableModel 是可用列表的网络字段投影；供应商壳不属于可调用部署。 */
 interface AvailableModel {
+  unavailable_reason?: string;
   endpoints?: ModelEndpoint[];
   model_group?: string | null;
   model_name?: string | null;
@@ -60,6 +62,7 @@ const toModelGroup = (item: AvailableModel): ModelGroup => {
   return {
     model_group: groupName,
     endpoints: item.endpoints ?? [],
+    ...(item.unavailable_reason && { unavailable_reason: item.unavailable_reason }),
     ...(item.mode && { mode: item.mode }),
     ...((item.supports_reasoning === true || item.capabilities?.includes("reasoning")) && { supports_reasoning: true }),
     ...(item.supported_reasoning_efforts !== undefined && {

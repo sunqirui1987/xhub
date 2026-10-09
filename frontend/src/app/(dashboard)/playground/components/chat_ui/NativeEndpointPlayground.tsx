@@ -7,10 +7,10 @@ import { ArrowUpRight, Loader2, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
- * NativeEndpointPlayground 提供所选图片/视频端点的原生参数编辑和任务操作。
+ * NativeEndpointPlayground 提供所选媒体或 Google 端点的原生参数编辑和任务操作。
  * 参数 endpoint/model/apiKey/base：模型绑定、对外别名、网关测试密钥和可选根地址。
  * 返回简洁请求/结果双栏界面，窄屏纵向排列；路径详情折叠，任务 ID 自动回填。
- * 提交仅注入 model；其余参数按原生协议发送，图片编辑支持 multipart。
+ * 媒体提交注入 model，Google 使用路径模型；其余参数按原生协议发送，图片编辑支持 multipart。
  * 切换模型中止旧请求，任务查询由用户点击执行，不自动重复提交。调用：ChatUI。
  */
 export default function NativeEndpointPlayground({
@@ -40,7 +40,9 @@ export default function NativeEndpointPlayground({
     setTaskId("");
     setFile(null);
     setInput(
-      endpoint.protocol === "openai-responses"
+      endpoint.protocol === "gemini" || endpoint.protocol === "vertex"
+        ? '{"contents":[{"role":"user","parts":[{"text":""}]}]}'
+        : endpoint.protocol === "openai-responses"
         ? '{\n  "input": "",\n  "stream": false\n}'
         : endpoint.protocol === "anthropic-messages"
           ? '{\n  "messages": [{"role": "user", "content": ""}],\n  "max_tokens": 1024\n}'
@@ -65,7 +67,8 @@ export default function NativeEndpointPlayground({
       if (method === "POST" && path === endpoint.path) {
         const doc = JSON.parse(input);
         if (!doc || Array.isArray(doc) || typeof doc !== "object") throw new Error("请求参数必须是 JSON 对象");
-        doc.model = model;
+        // 原生 Google 模型位于绑定路径，正文保持原厂格式。
+        if (endpoint.protocol !== "gemini" && endpoint.protocol !== "vertex") doc.model = model;
         if (endpoint.path.endsWith("/images/edits")) {
           if (!file) throw new Error("请选择需要编辑的图片");
           const form = new FormData();

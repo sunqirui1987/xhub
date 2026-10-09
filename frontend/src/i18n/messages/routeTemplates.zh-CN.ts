@@ -34,7 +34,7 @@ export const routeTemplatesZhCN = {
   loadBalancing: "负载均衡",
   fallbacksTab: "回退",
   strategy: "路由策略",
-  priorityStrategy: "部署权重优先",
+  priorityStrategy: "简单随机",
   strategyHint: "同一个公开名下有多条部署时，流量怎么分。",
   strategyDescriptions: {
     "simple-shuffle": "优先选择权重最大的部署。如需按比例分配流量，请选择「按份额分流」。",
@@ -98,7 +98,7 @@ export const routeTemplatesZhCN = {
     "高级字段的 JSON 对象。这里的键会并入当前模板顶层；已有专用表单的同名字段由表单值覆盖。完整字段、类型和示例见“配置说明”。",
   timeoutSummary: "{seconds} 秒",
   allowedFails: "允许失败次数",
-  allowedFailsHint: "一条部署失败这么多次之后进入冷静期。",
+  allowedFailsHint: "部署失败达到阈值后进入被动冷却；0 禁用冷却，状态依赖 Redis。",
   cooldown: "冷静期（秒）",
   cooldownHint: "进入冷静期后，多久之内不再选这条部署。0 表示一分钟。",
   retryAfter: "重试等待（秒）",

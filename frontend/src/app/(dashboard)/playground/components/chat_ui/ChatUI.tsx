@@ -1,4 +1,5 @@
 "use client";
+import { UnavailableEndpoint } from "@/components/llm_calls/UnavailableEndpoint";
 
 import {
   Bot,
@@ -18,8 +19,8 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import coy from "react-syntax-highlighter/dist/esm/styles/prism/coy";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import { v4 as uuidv4 } from "uuid";
@@ -53,7 +54,7 @@ import CodeInterpreterTool from "./CodeInterpreterTool";
 import { generateCodeSnippet } from "@/components/chat_ui/CodeSnippets";
 import EndpointSelector from "./EndpointSelector";
 import { isModelCompatibleWithEndpoint } from "./EndpointUtils";
-import { modelEndpoints, endpointUIType } from "@/components/llm_calls/model_endpoints";
+import { endpointLabel, modelEndpoints, endpointUIType } from "@/components/llm_calls/model_endpoints";
 import NativeEndpointPlayground from "./NativeEndpointPlayground";
 import { getProxyBaseUrl } from "@/components/networking";
 import { callTextEndpoint } from "@/components/llm_calls/model_endpoints";
@@ -1105,7 +1106,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
     endpointType === EndpointType.RESPONSES ||
     endpointType === EndpointType.ANTHROPIC_MESSAGES;
   const modelsForEndpoint = modelInfo;
-  const endpointOptions = supportedEndpoints.map((endpoint) => ({ value: endpoint.path, label: endpoint.path }));
+  const endpointOptions = supportedEndpoints.map((endpoint) => ({ value: endpoint.path, label: endpointLabel(endpoint) }));
   // 切换模型仅保留仍受支持的路径，不能因两个端点使用同一表单而混淆它们。
   useEffect(() => {
     const options = modelEndpoints(modelInfo.find((model) => model.model_group === selectedModel));
@@ -1123,6 +1124,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
   }
 
   const inputPlaceholder =
+    endpointType === null ? "请先选择模型和有效端点" :
     endpointType === EndpointType.CHAT ||
     endpointType === EndpointType.EMBEDDINGS ||
     endpointType === EndpointType.RESPONSES ||
@@ -1224,7 +1226,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
                 <div>
                   <label className="mb-2 flex items-center text-sm font-medium text-foreground">
-                    <Wrench className="mr-2 size-4" aria-hidden="true" /> {t("Endpoint Type")}
+                    <Wrench className="mr-2 size-4" aria-hidden="true" /> {t("客户调用接口")}
                   </label>
                   <EndpointSelector
                     options={endpointOptions}
@@ -1450,7 +1452,9 @@ const ChatUI: React.FC<ChatUIProps> = ({
           )}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
-            {selectedBinding && !endpointUIType(selectedBinding) ? (
+            {selectedModel && !selectedBinding ? (
+              <UnavailableEndpoint reason={selectedModelInfo?.unavailable_reason} />
+            ) : selectedBinding && !endpointUIType(selectedBinding) ? (
               <NativeEndpointPlayground
                 endpoint={selectedBinding}
                 model={selectedModel || ""}

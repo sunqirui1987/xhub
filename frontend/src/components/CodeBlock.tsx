@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CheckIcon, ClipboardIcon } from "lucide-react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import { t } from "@/i18n";

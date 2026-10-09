@@ -6,7 +6,7 @@ import { act } from "@testing-library/react";
 
 vi.mock("@/components/networking", () => ({ getProxyBaseUrl: () => "http://localhost:4100" }));
 const endpoint: ModelEndpoint = {
-  endpoint_id: "bypass:fal-video",
+  endpoint_id: "fal:queue",
   kind: "bypass",
   transport: "qiniu_fal_dreamina_20",
   protocol: "fal",
@@ -129,4 +129,18 @@ it("上游错误可见，切换模型重置任务和参数", async () => {
   view.rerender(<NativeEndpointPlayground endpoint={endpoint} model="next" apiKey="session" />);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByLabelText("任务 ID")).toHaveValue("");
+});
+
+/** 前置 Google 原生绑定与离线 fetch；验证 contents 默认值及提交无正文 model，恢复 fetch 无外部数据。 */
+it.each(["gemini", "vertex"])("%s 使用原厂正文与已绑定模型路径", async (protocol) => {
+ const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({candidates:[{content:{parts:[{text:"ok"}]}}]})));
+ vi.stubGlobal("fetch",fetchMock);
+ const path=(protocol==="gemini"?"/v1beta/models/":"/vertex/v1/models/")+"demo:generateContent";
+ render(<NativeEndpointPlayground endpoint={{...endpoint, endpoint_id:protocol, protocol, path, actions:[]}} model="demo" apiKey="session"/>);
+ expect(JSON.parse((screen.getByLabelText("原生请求参数") as HTMLTextAreaElement).value)).toHaveProperty("contents");
+ fireEvent.change(screen.getByLabelText("原生请求参数"),{target:{value:JSON.stringify({contents:[{parts:[{text:"hello"}]}],generationConfig:{temperature:0.2}})}});
+ fireEvent.click(screen.getByRole("button",{name:"提交请求"}));
+ expect(await screen.findByLabelText("原生响应")).toHaveTextContent("ok");
+ expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4100"+path);
+ expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({contents:[{parts:[{text:"hello"}]}],generationConfig:{temperature:0.2}});
 });

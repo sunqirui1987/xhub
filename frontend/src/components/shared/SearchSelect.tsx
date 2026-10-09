@@ -21,6 +21,8 @@ export interface SearchSelectOption {
 }
 
 interface SearchSelectProps {
+  /** 可选计数名称；供应商选择器显示真实总数和匹配数。 */
+  countNoun?: string;
   options: SearchSelectOption[];
   value?: string | null;
   onValueChange: (value: string | null) => void;
@@ -39,7 +41,9 @@ const matchesQuery = (option: SearchSelectOption, query: string): boolean => {
   return option.label.toLowerCase().includes(q) || (option.sublabel?.toLowerCase().includes(q) ?? false);
 };
 
+/** 通用可搜索选择器；参数为选项、选中值和回调，返回可访问组合框；可选计数随搜索更新，无持久化副作用。 */
 export function SearchSelect({
+  countNoun,
   options,
   value,
   onValueChange,
@@ -51,6 +55,7 @@ export function SearchSelect({
   allowClear = true,
   "aria-label": ariaLabel,
 }: SearchSelectProps) {
+  const [query, setQuery] = React.useState("");
   const selected =
     value == null || value === "" ? null : options.find((option) => option.value === value) ?? { label: value, value };
   const items =
@@ -58,6 +63,7 @@ export function SearchSelect({
 
   return (
     <Combobox
+      onInputValueChange={setQuery}
       items={items}
       value={selected}
       onValueChange={(item: SearchSelectOption | null) => onValueChange(item?.value ?? null)}
@@ -74,6 +80,7 @@ export function SearchSelect({
         className={`h-8 w-full text-sm ${className ?? ""}`}
       />
       <ComboboxContent side="bottom" collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}>
+        {countNoun && <p className="px-3 py-2 text-xs text-muted-foreground" role="status">共 {options.length} 个{countNoun}，当前匹配 {options.filter(option => matchesQuery(option, options.some(item => item.label === query) ? "" : query)).length} 个</p>}
         <ComboboxEmpty>{emptyText}</ComboboxEmpty>
         <ComboboxList>
           {(item: SearchSelectOption) => (

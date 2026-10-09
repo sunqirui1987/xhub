@@ -4,9 +4,7 @@ package models
 import (
 	"context"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
@@ -45,7 +43,7 @@ func ReloadCostMap(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
-	n, err := reloadNow(ctx)
+	n, err := refreshLocalCatalog(ctx, s)
 	if err != nil {
 		logx.Error("price catalog reload failed: %v", err)
 		httpx.WriteError(w, 502, "upstream_error", err.Error())
@@ -83,11 +81,6 @@ func ScheduleCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "hours must be a whole number between 1 and 168")
 		return
 	}
-	// 缺少显式源时不保存定时计划，避免周期性访问未知供应商。
-	if strings.TrimSpace(os.Getenv("XHUB_PRICE_FEED_URL")) == "" {
-		httpx.WriteError(w, 400, "invalid_request", "XHUB_PRICE_FEED_URL must be configured before scheduling")
-		return
-	}
 	plan := loadCostReload(s)
 	plan.Scheduled = true
 	plan.IntervalHours = &hours
@@ -97,6 +90,7 @@ func ScheduleCostMapReload(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
+	StartScheduledReload(s)
 	httpx.WriteJSON(w, 200, map[string]any{
 		"status":         "success",
 		"interval_hours": hours,

@@ -21,7 +21,7 @@ import CredentialModal from "./CredentialModal";
 import CredentialsTable from "./CredentialsTable";
 import { t } from "@/i18n";
 
-const restrictedFields = ["credential_name", "custom_llm_provider", "provider_id"];
+const restrictedFields = ["credential_name", "custom_llm_provider", "provider_id", "catalog_id"];
 
 /** 将表单 values 和已过滤的 credentialValues 组成持久化请求；返回凭据契约，新增与编辑共用，无副作用。 */
 const buildCredential = (values: Record<string, unknown>, credentialValues: Record<string, unknown>) => ({
@@ -29,6 +29,7 @@ const buildCredential = (values: Record<string, unknown>, credentialValues: Reco
   credential_values: credentialValues,
   credential_info: {
     custom_llm_provider: values.custom_llm_provider as string,
+    ...(typeof values.catalog_id === "string" ? { catalog_id: values.catalog_id.trim() } : {}),
     ...(typeof values.provider_id === "string" ? { provider_id: values.provider_id } : {}),
   },
 });

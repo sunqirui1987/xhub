@@ -1,4 +1,5 @@
 export const pageDescriptionsEn = {
+  "model-providers": "Manage supplier connections and credentials",
   "route-templates": "Route templates, including the platform default. Organizations, teams and keys each select one.",
   "api-keys": "Manage virtual keys for API access and authentication",
   "llm-playground": "Interactive playground for testing LLM requests",

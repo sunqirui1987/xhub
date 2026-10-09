@@ -38,11 +38,11 @@ func (h *modelTestHost) AllowLLM(*auth.Principal) bool { return true }
 // 前置：构造图片、对话、视频部署；结果：目录价格不改变能力分类；内存测试无需清理。
 func TestAvailableCategoryUsesExecution(t *testing.T) {
 	for _, tc := range []struct{ transport, endpoint, category string }{
-		{"bypass_openai_image_generation", "image", "image"},
+		{"openai_image_generation", "image_generation", "image"},
 		{"bypass_openai_chat", "chat", "chat"},
 		{"ark_contents_generation", "bypass:ark-video", "video"},
 	} {
-		entry := config.ModelEntry{LiteLLMParams: map[string]any{"custom_llm_provider": "volcengine", "model": "doubao-seedance-2-0-260128"}, ModelInfo: map[string]any{"transport": tc.transport, "endpoint_types": []string{tc.endpoint}}}
+		entry := config.ModelEntry{ModelName: "alias", LiteLLMParams: map[string]any{"custom_llm_provider": "volcengine", "model": "doubao-seedance-2-0-260128"}, ModelInfo: map[string]any{"transport": tc.transport, "endpoint_types": []string{tc.endpoint}}}
 		if got := availableCategory(entry, nil); got != tc.category {
 			t.Fatalf("%s 分类=%s，预期=%s", tc.transport, got, tc.category)
 		}

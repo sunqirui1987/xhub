@@ -27,6 +27,8 @@ type dialogueStream struct {
 	textBlock                       int
 	sequence                        int
 	toolIndices                     map[int]int
+	// beforeComplete 在 Responses 完成事件发送前保存续接状态，参数为已验证的最终回复。
+	beforeComplete func(llm.DialogueResult)
 }
 
 // streamMap 读取事件对象；参数为动态字段，返回对象或空值；流解析器调用。
@@ -75,6 +77,8 @@ func (s *dialogueStream) start() error {
 	}
 	s.started = true
 	switch s.protocol {
+	case "gemini", "vertex":
+		return nil
 	case "openai-chat":
 		return s.chat(map[string]any{"role": "assistant"}, nil)
 	case "openai-responses":
@@ -100,6 +104,8 @@ func (s *dialogueStream) textDelta(text string) error {
 	}
 	s.text += text
 	switch s.protocol {
+	case "gemini", "vertex":
+		return s.emit("", map[string]any{"candidates": []any{map[string]any{"index": 0, "content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": text}}}}}})
 	case "openai-chat":
 		return s.chat(map[string]any{"content": text}, nil)
 	case "openai-responses":
@@ -199,8 +205,8 @@ func (s *dialogueStream) observeUsage(u map[string]any) {
 	}
 }
 
-// finish 验证流工具参数并输出各协议终态；参数无，返回协议或写错误。
-// 调用：观察到上游完成事件之后；EOF 本身不代表完成，失败时不发送伪成功终态。
+// finish 校验完整工具调用并输出协议终态；无参数，返回写入或能力错误。
+// pipeDialogue 在上游完成后调用；Responses 发布终态前回调提交续接历史，失败流不进入此步骤。
 func (s *dialogueStream) finish() error {
 	if err := s.start(); err != nil {
 		return err
@@ -230,6 +236,18 @@ func (s *dialogueStream) finish() error {
 		r.Stop = "tool_calls"
 	}
 	switch s.protocol {
+	case "gemini", "vertex":
+		// 文本已按增量发送；终态仅发送完整函数参数与用量，避免文本重复。
+		r.Text = ""
+		raw, err := llm.EncodeDialogueResult(r, s.protocol, s.model)
+		if err != nil {
+			return err
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return err
+		}
+		return s.emit("", out)
 	case "openai-chat":
 		if err := s.chat(map[string]any{}, r.Stop); err != nil {
 			return err
@@ -283,6 +301,9 @@ func (s *dialogueStream) finish() error {
 		if r.Stop == "length" {
 			event = "response.incomplete"
 		}
+		if s.beforeComplete != nil {
+			s.beforeComplete(r)
+		}
 		return s.emit(event, map[string]any{"type": event, "response": response})
 	case "anthropic-messages":
 		for i := 0; i < s.nextBlock; i++ {
@@ -327,6 +348,50 @@ func (s *dialogueStream) consume(protocol string, data string) error {
 	s.observeUsage(streamMap(m["usage"]))
 	typ := streamString(m["type"])
 	switch protocol {
+	case "gemini", "vertex":
+		if m["candidates"] == nil {
+			// Google 可在单独末帧提供用量；不能把缺少候选的普通空帧视为完成。
+			if streamMap(m["usageMetadata"]) != nil {
+				m["candidates"] = []any{map[string]any{}}
+				raw, _ := json.Marshal(m)
+				result, err := llm.ParseDialogueResult(protocol, raw)
+				if err != nil {
+					return err
+				}
+				for k, v := range result.Usage {
+					if k != "pricing_blocked" {
+						s.usage[k] = v
+					}
+				}
+				return nil
+			}
+			return fmt.Errorf("Google stream candidate missing")
+		}
+		r, err := llm.ParseDialogueResult(protocol, []byte(data))
+		if err != nil {
+			return err
+		}
+		if r.ID != "" {
+			s.id = r.ID
+		}
+		for k, v := range r.Usage {
+			if k != "pricing_blocked" {
+				s.usage[k] = v
+			}
+		}
+		if err := s.textDelta(r.Text); err != nil {
+			return err
+		}
+		for _, c := range r.Calls {
+			if err := s.googleCall(c); err != nil {
+				return err
+			}
+		}
+		choices, _ := m["candidates"].([]any)
+		if len(choices) == 1 && streamString(streamMap(choices[0])["finishReason"]) != "" {
+			s.completed = true
+			s.stop = r.Stop
+		}
 	case "openai-chat":
 		choices, _ := m["choices"].([]any)
 		for _, v := range choices {
@@ -420,13 +485,31 @@ func (s *dialogueStream) consume(protocol string, data string) error {
 	return nil
 }
 
+// googleCall 收集 Google 完整函数调用；参数为解码调用，返回写入或冲突错误。
+// 流事件可能重复携带同一完整调用，相同 ID 和内容只发送一次；不同内容明确失败，不把完整参数当增量拼接。
+func (s *dialogueStream) googleCall(c llm.Turn) error {
+	for _, existing := range s.calls {
+		if existing.ID == c.ID {
+			if existing.Name == c.Name && existing.Arguments == c.Arguments {
+				return nil
+			}
+			return fmt.Errorf("conflicting Google function call ID")
+		}
+	}
+	return s.toolDelta(len(s.calls), c.ID, c.Name, c.Arguments)
+}
+
 // pipeDialogue 流式执行共享协议转换；参数为 HTTP 输出、上游响应、时间、公开模型和双方协议。
 // 返回已输出标记、用量、首字时间、日志字节和错误；调用：统一入口。输出后不允许跨部署重试。
-func pipeDialogue(w http.ResponseWriter, resp *http.Response, start time.Time, alias, upstream, caller string) (bool, map[string]any, time.Duration, []byte, error) {
+// beforeComplete 是可选成功回调，Responses 终态前调用；失败或未完成的流不调用。
+func pipeDialogue(w http.ResponseWriter, resp *http.Response, start time.Time, alias, upstream, caller string, beforeComplete ...func(llm.DialogueResult)) (bool, map[string]any, time.Duration, []byte, error) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	s := dialogueStream{writer: w, protocol: caller, model: alias, calls: map[int]*llm.Turn{}, blocks: map[int]int{}, usage: map[string]any{}, textBlock: -1, toolIndices: map[int]int{}}
+	if len(beforeComplete) > 0 {
+		s.beforeComplete = beforeComplete[0]
+	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4096), 8<<20)
 	var lines []string

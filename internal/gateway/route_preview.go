@@ -62,7 +62,7 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteTypedError(w, r.URL.Path, 403, "forbidden", "model is not allowed")
 		return
 	}
-	settings := prefs.PlatformSettings(s.RouterDocument())
+	settings := prefs.BuiltinSettings()
 	object := authz.Object{Type: authz.ObjectRouteTemplate, OrgID: input.OrgID, TeamID: input.TeamID}
 	if input.TemplateID != "" {
 		if s.IAM == nil {
@@ -121,14 +121,19 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 		if s.WriteAuthz(w, r, s.Authorize(r, p, authz.ActionRouteTemplateWrite, object)) {
 			return
 		}
-		if err := prefs.ValidateModelRoutingDocument(input.Body); err != nil {
+		if err := prefs.ValidateRouteTemplateDocument(input.Body); err != nil {
 			httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
 			return
 		}
 		settings.Settings = input.Body
 		settings.Source = "draft"
 	}
-	settings = settings.ForEndpoint(input.Model, input.Endpoint)
+	// 预览与数据面从同一编译器读取模型默认、模板组和回退。
+	s.LockModels()
+	directory := append([]config.ModelEntry(nil), (*s.ModelTable())...)
+	s.UnlockModels()
+	settings = router.Compile(settings, s.RecordStore(), directory)
+	settings = settings.ForModel(input.Model)
 	if settings.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", settings.Err.Error())
 		return
@@ -154,7 +159,7 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 	list := append([]config.ModelEntry(nil), s.Models()...)
 	s.UnlockModels()
 	// 保留暂停部署以解释原因；实际匹配函数会排除它们。
-	matched := router.All(list, input.Model)
+	matched := settings.Candidates(list, input.Model)
 	for _, dep := range list {
 		if dep.ModelName == input.Model && dep.Disabled() {
 			matched = append(matched, dep)
@@ -165,16 +170,14 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 	rows := make([]previewDeployment, 0, len(decisions))
 	total := 0.0
 	weighted := router.IsSplitStrategy(settings.Strategy())
-	if weighted {
-		compatible = router.ApplyWeights(compatible, settings.WeightOverrides())
-	}
+	state.Allocations = settings.Policy.Shares()
 	available := map[string]bool{}
 	for _, dep := range router.Available(compatible, settings.Strategy(), state) {
 		available[router.CooldownID(dep)] = true
 	}
 	for _, decision := range decisions {
 		dep := decision.Deployment
-		row := previewDeployment{DeploymentID: strings.TrimPrefix(router.WeightID(dep), "deployment:"), Connection: dep.ParamString("litellm_credential_name", ""), Supplier: dep.ParamString("custom_llm_provider", ""), Model: dep.ParamString("model", ""), Transport: provider.SelectedTransport(dep), Reason: decision.Reason}
+		row := previewDeployment{DeploymentID: router.DeploymentID(dep), Connection: dep.ParamString("litellm_credential_name", ""), Supplier: dep.ParamString("custom_llm_provider", ""), Model: dep.ParamString("model", ""), Transport: provider.SelectedTransport(dep), Reason: decision.Reason}
 		if execution, ok := provider.Execution(dep); ok {
 			row.Protocol = execution.Protocol
 		}
@@ -182,23 +185,32 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 			row.Reason = "deployment is cooling down"
 		}
 		if weighted {
-			weightedDep := router.ApplyWeights([]config.ModelEntry{dep}, settings.WeightOverrides())[0]
-			weight, _ := weightedDep.LiteLLMParams["route_template_weight"].(float64)
+			weight, exists := state.Allocations[router.DeploymentID(dep)]
+			if !exists {
+				weight = 1
+			}
 			row.Weight = &weight
 			if row.Reason == "" && weight <= 0 {
-				row.Reason = "template weight is zero"
+				row.Reason = "deployment has no allocated traffic"
 			}
 			if row.Reason == "" {
 				total += weight
 			}
 		}
+		if !weighted && row.Reason == "" {
+			total++
+		}
 		rows = append(rows, row)
 	}
-	if weighted {
+	if weighted || settings.Strategy() == "random" {
 		for i := range rows {
 			share := 0.0
 			if rows[i].Reason == "" && total > 0 {
-				share = *rows[i].Weight / total
+				if weighted {
+					share = *rows[i].Weight / total
+				} else {
+					share = 1 / total
+				}
 			}
 			rows[i].Share = &share
 		}

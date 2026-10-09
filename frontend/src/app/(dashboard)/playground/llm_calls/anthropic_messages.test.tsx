@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { installLLMFetchFixture } from "../../../../../tests/llmFetchFixture";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAnthropicMessagesRequest } from "./anthropic_messages";
 import type { TokenUsage } from "@/components/chat_ui/ResponseMetrics";
 
@@ -9,11 +10,13 @@ vi.mock("@/components/networking", () => ({
 const mockMessagesStream = vi.fn();
 const mockMessagesCreate = vi.fn();
 
-vi.mock("@anthropic-ai/sdk", () => ({
-  default: vi.fn(function () {
-    return { messages: { stream: mockMessagesStream, create: mockMessagesCreate } };
-  }),
-}));
+/** 按请求体选择流式/完整响应夹具；每例结束恢复 fetch，无外部数据。 */
+beforeEach(() =>
+  installLLMFetchFixture((body, options) =>
+    body.stream ? mockMessagesStream(body, options) : mockMessagesCreate(body, options),
+  ),
+);
+afterEach(() => vi.unstubAllGlobals());
 
 const NON_STREAMING_ARGS = [
   undefined, // traceId
@@ -59,12 +62,14 @@ describe("anthropic_messages prompt cache usage", () => {
     vi.clearAllMocks();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces read and creation tokens from Anthropic-shape usage", async () => {
     await expect(
       captureUsage({ cache_read_input_tokens: 4695, cache_creation_input_tokens: 1234 }),
     ).resolves.toMatchObject({ cacheReadTokens: 4695, cacheCreationTokens: 1234, promptTokens: 5000 });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cache fields entirely when Anthropic reports no prompt caching", async () => {
     const usageData = await captureUsage({});
 
@@ -79,6 +84,7 @@ describe("anthropic_messages non-streaming", () => {
     vi.clearAllMocks();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("sends stream:false through messages.create and renders the full reply at once", async () => {
     mockMessagesCreate.mockResolvedValue({
       content: [
@@ -113,6 +119,7 @@ describe("anthropic_messages non-streaming", () => {
     expect(onUsageData).toHaveBeenCalledWith(expectedUsage);
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("keeps streaming as the default when the flag is omitted", async () => {
     async function* emptyStream() {}
     mockMessagesStream.mockReturnValue(emptyStream());

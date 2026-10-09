@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// TestDialogueProtocolMatrix 验证三个入口到三种上游的文本、工具定义、调用和结果往返。
+// TestDialogueProtocolMatrix 验证五个入口到五种上游的文本、工具定义、调用和结果往返。
 // 前置：纯内存共享对话；结果：关联 ID、参数和完整模型标识保持；无外部数据需要清理。
 func TestDialogueProtocolMatrix(t *testing.T) {
-	protocols := []string{"openai-chat", "openai-responses", "anthropic-messages"}
-	original := Dialogue{Turns: []Turn{{Role: "system", Text: "规则"}, {Role: "user", Text: "天气"}, {Role: "assistant", Calls: []Turn{{ID: "call_1", Name: "weather", Arguments: "{\"city\":\"上海\"}"}}}, {Role: "tool", ID: "call_1", Text: "晴"}}, Tools: []map[string]any{{"name": "weather", "parameters": map[string]any{"type": "object"}}}, Options: map[string]any{"max_tokens": float64(20)}}
+	protocols := []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini", "vertex"}
+	original := Dialogue{Turns: []Turn{{Role: "system", Text: "规则"}, {Role: "user", Text: "天气"}, {Role: "assistant", Calls: []Turn{{ID: "call_1", Name: "weather", Arguments: "{\"city\":\"上海\"}"}}}, {Role: "tool", ID: "call_1", Text: "{\"result\":\"晴\"}"}}, Tools: []map[string]any{{"name": "weather", "parameters": map[string]any{"type": "object"}}}, Options: map[string]any{"max_tokens": float64(20)}}
 	for _, caller := range protocols {
 		t.Run(caller, func(t *testing.T) {
 			body, err := EncodeDialogue(original, caller, "public")
@@ -18,6 +18,7 @@ func TestDialogueProtocolMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			delete(body, "store")
+			body["model"] = "public"
 			raw, _ := json.Marshal(body)
 			_ = json.Unmarshal(raw, &body)
 			parsed, err := ParseDialogue(caller, body)
@@ -33,7 +34,7 @@ func TestDialogueProtocolMatrix(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if encoded["model"] != "namespace/vendor/model" {
+					if upstream != "gemini" && upstream != "vertex" && encoded["model"] != "namespace/vendor/model" {
 						t.Fatal("上游型号被修改")
 					}
 					delete(encoded, "store")
@@ -72,10 +73,10 @@ func TestDialogueRejectsUnsupported(t *testing.T) {
 	}
 }
 
-// TestDialogueResultMatrix 验证回复在三种协议间保持工具、结束原因与实测用量。
-// 前置：含工具回复及缓存 token；结果：九种组合等价，缺失用量禁止计价；无需外部清理。
+// TestDialogueResultMatrix 验证回复在五种协议间保持工具、结束原因与实测用量。
+// 前置：含工具回复及缓存 token；结果：二十五种组合等价，缺失用量禁止计价；无需外部清理。
 func TestDialogueResultMatrix(t *testing.T) {
-	protocols := []string{"openai-chat", "openai-responses", "anthropic-messages"}
+	protocols := []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini", "vertex"}
 	original := DialogueResult{ID: "r_1", Text: "正在查询", Stop: "tool_calls", Calls: []Turn{{ID: "call_1", Name: "weather", Arguments: "{}"}}, Usage: map[string]any{"prompt_tokens": float64(10), "completion_tokens": float64(3), "prompt_tokens_details": map[string]any{"cached_tokens": float64(2)}}}
 	for _, source := range protocols {
 		for _, target := range protocols {

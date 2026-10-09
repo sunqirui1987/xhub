@@ -19,7 +19,7 @@ func TestQiniuSeedanceKeepsTheBytedancePrefix(t *testing.T) {
 	if typ.ID == "" || typ.StripPrefix != "qiniu" {
 		t.Fatalf("type %+v", typ)
 	}
-	if len(typ.Providers) != 2 || typ.Providers[0] != "custom" || typ.Providers[1] != "custom_openai" {
+	if len(typ.Providers) != 3 || typ.Providers[0] != "custom" || typ.Providers[1] != "custom_openai" || typ.Providers[2] != "openai" {
 		t.Fatalf("providers %v", typ.Providers)
 	}
 	create, ok := provider.Match("POST", "/v3/contents/generations/tasks", nil)

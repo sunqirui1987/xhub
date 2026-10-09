@@ -34,8 +34,8 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Copy, Inbox, Search as SearchIcon, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { prism } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import prism from "react-syntax-highlighter/dist/esm/styles/prism/prism";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";

@@ -1,3 +1,4 @@
+import { installLLMFetchFixture } from "../../../tests/llmFetchFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOpenAIResponsesRequest } from "./responses_api";
 import { MessageType } from "../chat_ui/types";
@@ -7,20 +8,12 @@ vi.mock("@/components/networking", () => ({
   getProxyBaseUrl: vi.fn(() => "https://example.com"),
 }));
 
+/** 协议响应夹具由 fetch 边界读取，保留业务回调断言。 */
 const mockResponsesCreate = vi.fn();
-const mockClient = {
-  responses: {
-    create: mockResponsesCreate,
-  },
-};
 
-vi.mock("openai", () => ({
-  default: {
-    OpenAI: vi.fn(function () {
-      return mockClient;
-    }),
-  },
-}));
+/** 所有业务分组都使用隔离 fetch，结束恢复全局对象，禁止访问外网。 */
+beforeEach(() => installLLMFetchFixture(mockResponsesCreate));
+afterEach(() => vi.unstubAllGlobals());
 
 const nonStreamingResponse = (data: unknown, headers: Record<string, string> = {}) => ({
   withResponse: async () => ({ data, response: { headers: new Headers(headers) } }),
@@ -53,8 +46,10 @@ describe("responses_api", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should send a basic responses request", async () => {
     await makeOpenAIResponsesRequest(messages, mockUpdateTextUI, "gpt-4", "test-token");
 
@@ -76,6 +71,7 @@ describe("responses_api", () => {
     expect(mockUpdateTextUI).toHaveBeenCalledWith("assistant", "Hi", "gpt-4");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should send a non-streaming request and render the whole output at once when streaming is disabled", async () => {
     mockResponsesCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -135,6 +131,7 @@ describe("responses_api", () => {
     expect(onTimingData).not.toHaveBeenCalled();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should report total latency in both streaming and non-streaming modes", async () => {
     const onTotalLatency = vi.fn();
     const callWithStreaming = (streamingEnabled: boolean) =>
@@ -182,6 +179,7 @@ describe("responses_api", () => {
     expect(onTotalLatency).toHaveBeenLastCalledWith(expect.any(Number));
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should forward the cost the proxy reports on the streamed usage object", async () => {
     async function* streamWithCost() {
       yield { type: "response.output_text.delta", delta: "Hi" };
@@ -215,6 +213,7 @@ describe("responses_api", () => {
     );
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should omit cost when the proxy reports none", async () => {
     const onUsageData = vi.fn();
 
@@ -233,6 +232,7 @@ describe("responses_api", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.not.objectContaining({ cost: expect.anything() }), "");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should omit cost when the proxy reports a non-numeric cost", async () => {
     async function* streamWithNonNumericCost() {
       yield {
@@ -262,6 +262,7 @@ describe("responses_api", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.not.objectContaining({ cost: expect.anything() }), "");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should omit cost when the proxy reports a blank cost", async () => {
     async function* streamWithBlankCost() {
       yield {
@@ -291,6 +292,7 @@ describe("responses_api", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.not.objectContaining({ cost: expect.anything() }), "");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should replay MCP output items as events for a non-streaming response", async () => {
     mockResponsesCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -343,6 +345,7 @@ describe("responses_api", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.anything(), "search_docs");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should configure MCP tools per server with restrictions", async () => {
     const selectedMCPServers = ["server-1", "server-2"];
     const mcpServers = [
@@ -449,20 +452,24 @@ describe("responses_api prompt cache usage", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces read tokens from Responses-shape input_tokens_details", async () => {
     await expect(
       captureUsage({ input_tokens_details: { cached_tokens: 4695, cache_write_tokens: 0 } }),
     ).resolves.toMatchObject({ cacheReadTokens: 4695, promptTokens: 5000 });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces creation tokens from Responses-shape cache writes", async () => {
     await expect(
       captureUsage({ input_tokens_details: { cached_tokens: 0, cache_write_tokens: 4695 } }),
     ).resolves.toMatchObject({ cacheCreationTokens: 4695 });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("omits cache fields entirely for a provider that reports none", async () => {
     const usageData = await captureUsage({});
 
@@ -471,12 +478,14 @@ describe("responses_api prompt cache usage", () => {
     expect(usageData.promptTokens).toBe(5000);
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("surfaces reasoning tokens from Responses-shape output_tokens_details", async () => {
     await expect(captureUsage({ output_tokens_details: { reasoning_tokens: 42 } })).resolves.toMatchObject({
       reasoningTokens: 42,
     });
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("falls back to completion_tokens_details reasoning tokens when output_tokens_details is absent", async () => {
     await expect(captureUsage({ completion_tokens_details: { reasoning_tokens: 17 } })).resolves.toMatchObject({
       reasoningTokens: 17,
@@ -490,8 +499,10 @@ describe("responses_api response cache", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("flags a non-streaming response-cache hit even though it replays provider prompt-cache usage", async () => {
     mockResponsesCreate.mockReturnValueOnce(
       nonStreamingResponse(
@@ -544,6 +555,7 @@ describe("responses_api response cache", () => {
     );
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("does not flag a non-streaming response that missed the response cache", async () => {
     mockResponsesCreate.mockReturnValueOnce(
       nonStreamingResponse({
@@ -585,6 +597,7 @@ describe("responses_api response cache", () => {
     expect(onUsageData).toHaveBeenCalledWith(expect.not.objectContaining({ servedFromResponseCache: true }), "");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("never flags a streaming response, even when the proxy reports a cache key", async () => {
     async function* mockStream() {
       yield {

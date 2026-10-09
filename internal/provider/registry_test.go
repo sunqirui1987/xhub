@@ -18,7 +18,7 @@ func TestSelectedCapabilitiesUsesDeclaredIDs(t *testing.T) {
 		t.Fatalf("new spelling selected %v", got)
 	}
 
-	unknown := config.ModelEntry{ModelInfo: map[string]any{"endpoint_types": []any{"image_generation"}}}
+	unknown := config.ModelEntry{ModelInfo: map[string]any{"endpoint_types": []any{"image"}}}
 	if got := provider.SelectedCapabilities(unknown); len(got) != 0 {
 		t.Fatalf("unknown capability selected %v", got)
 	}

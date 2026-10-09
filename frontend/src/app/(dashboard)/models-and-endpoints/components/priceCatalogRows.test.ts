@@ -171,6 +171,7 @@ describe("priceModelPayload", () => {
     ]);
   });
 
+  /** 前置新建表单；验证分类 ID、Token 转换和单位单价提交正确；纯函数无需清理。 */
   it("divides token rates back to per-token and leaves unit rates alone", () => {
     const body = priceModelPayload({
       id: " acme-one ",
@@ -205,6 +206,7 @@ describe("priceModelPayload", () => {
     expect(body.output_cost_per_second).toBeNull();
   });
 
+  /** 前置新建表单空分类；验证可选字段省略；纯函数无需清理。 */
   it("omits a display name, mode and endpoint type that were left blank", () => {
     const body = priceModelPayload({
       id: "acme-one",
@@ -218,6 +220,21 @@ describe("priceModelPayload", () => {
     expect(body).not.toHaveProperty("display_name");
     expect(body).not.toHaveProperty("mode");
     expect(body).not.toHaveProperty("endpoint_id");
+  });
+
+  /** 前置已有分类与历史别名；验证选择未设置会清除所有旧字段，避免重开恢复；纯函数无需清理。 */
+  it("clears existing mode and endpoint selections including the legacy alias", () => {
+    expect(
+      priceModelPayload({
+        id: "legacy",
+        provider: "custom",
+        mode: "",
+        endpointType: "",
+        tokenRates: {},
+        unitRates: {},
+        original: { mode: "chat", endpoint_id: "chat", endpoint_type: "old" },
+      }),
+    ).toMatchObject({ mode: null, endpoint_id: null, endpoint_type: null });
   });
 
   it("sends only rates changed while editing, including an intentional clear", () => {

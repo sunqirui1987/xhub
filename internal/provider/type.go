@@ -41,6 +41,7 @@ type Capability struct {
 // EndpointDescriptor 定义公开端点类型；不包含供应商地址或密钥。
 // Family 用于界面分类，Protocol 标识载荷协议，Capability 关联适配层能力。
 type EndpointDescriptor struct {
+	Category   string `json:"category"` // openai、vertex、claude 或 bypass；分类不决定执行方式。
 	ID         string `json:"id"`
 	Label      string `json:"label"`
 	Kind       Kind   `json:"kind"`
@@ -67,6 +68,8 @@ type AuthConfig struct {
 // QueueURLs 要求轮询 URL 改写为网关入口；Billing 定义成功结果的异步用量提取。
 // Actions 是方法和路径白名单，禁止任意地址代理；创建与查询必须固定到同一传输。
 type Transport struct {
+	// CatalogID 绑定编译时供应商目录，与凭据名称及认证协议独立。
+	CatalogID        string                                              `json:"catalog_id,omitempty"`
 	SupplierPrefixes map[string]string                                   `json:"supplier_prefixes,omitempty"`
 	EndpointID       string                                              `json:"endpoint_id"`
 	Protocol         string                                              `json:"protocol"`

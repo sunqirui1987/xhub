@@ -10,7 +10,11 @@
 package gateway
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/dataplane"
 	"github.com/sunqirui1987/xhub/internal/httpx"
@@ -43,6 +47,21 @@ func (s *Server) serveBypass(w http.ResponseWriter, r *http.Request) bool {
 	hit, ok := provider.Match(r.Method, r.URL.Path, s.Models())
 	if !ok || hit.Transport.Kind != provider.KindBypass {
 		return false
+	}
+	// Google 公共对话进入统一转换器；countTokens 保留原厂计数操作。
+	if (hit.Transport.Protocol == "gemini" || hit.Transport.Protocol == "vertex") && !strings.HasPrefix(hit.Action.PublicPath, "/bypass/") && !strings.HasSuffix(hit.Action.PublicPath, ":countTokens") {
+		raw, err := io.ReadAll(io.LimitReader(r.Body, (64<<20)+1))
+		var body map[string]any
+		if err != nil || len(raw) > 64<<20 || json.Unmarshal(raw, &body) != nil || body == nil {
+			httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "invalid Google request body")
+			return true
+		}
+		body["model"] = hit.Names["model"]
+		body["stream"] = strings.HasSuffix(hit.Action.PublicPath, ":streamGenerateContent")
+		raw, _ = json.Marshal(body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		dataplane.Serve(s, w, r, hit.Transport.Protocol)
+		return true
 	}
 	// bypass 是真实上游调用，也会产生真实费用；记录命中的 transport 和动作，
 	// 便于把请求、任务结算和费用明细对应起来。适配路径由自己的循环记录。

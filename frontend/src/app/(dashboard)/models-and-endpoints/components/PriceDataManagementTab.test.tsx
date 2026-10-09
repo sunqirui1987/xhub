@@ -13,9 +13,13 @@ vi.mock("@/components/networking", () => ({
   resetPriceModel: vi.fn(),
   upsertPriceProvider: vi.fn(),
   deletePriceProvider: vi.fn(),
+  apiClient: { get: vi.fn(), post: vi.fn() },
+  getProxyBaseUrl: vi.fn(() => ""),
+  modelInfoCall: vi.fn(),
 }));
 
 describe("PriceDataManagementTab", () => {
+  /** 前置空目录，验证独立页面容器与管理入口可渲染；DOM自动清理。 */
   it("renders its content standalone, without a tab-panel ancestor", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(

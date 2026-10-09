@@ -11,16 +11,16 @@ import { getGeneralSettingsCall, updateConfigFieldSetting, deleteConfigFieldSett
 import { Trash2 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/table_cells";
 
-import RouterSettings from "@/components/router_settings";
-import Fallbacks from "@/components/Settings/RouterSettings/Fallbacks/Fallbacks";
-import RoutingGroups from "@/components/routing_groups";
+
+
+
 import { t } from "@/i18n";
 
 const PROMPT_CACHING_TAB = "prompt_caching";
 const ENABLE_ANTHROPIC_PROMPT_CACHING = "enable_anthropic_prompt_caching";
 const ANTHROPIC_PROMPT_CACHING_TTL = "anthropic_prompt_caching_ttl";
 
-const SETTINGS_TABS = ["loadbalancing", "routing-groups", "fallbacks", "prompt-caching", "general"] as const;
+const SETTINGS_TABS = ["prompt-caching", "general"] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 const visibleTabs = (omit: readonly string[] | undefined): SettingsTab[] =>
@@ -285,33 +285,11 @@ const GeneralSettings: React.FC<GeneralSettingsPageProps> = ({ accessToken, user
     <div className="w-full">
       <Tabs defaultValue={tabs[0] ?? "general"} className={tabsClass}>
         <TabsList variant="line">
-          {show("loadbalancing") && (
-            <TabsTrigger value="loadbalancing">{t("pages.routerSettings.loadbalancing")}</TabsTrigger>
-          )}
-          {show("routing-groups") && (
-            <TabsTrigger value="routing-groups">{t("pages.routerSettings.routingGroups")}</TabsTrigger>
-          )}
-          {show("fallbacks") && <TabsTrigger value="fallbacks">{t("pages.routerSettings.fallbacks")}</TabsTrigger>}
           {show("prompt-caching") && (
             <TabsTrigger value="prompt-caching">{t("pages.routerSettings.promptCaching")}</TabsTrigger>
           )}
           {show("general") && <TabsTrigger value="general">{t("pages.routerSettings.general")}</TabsTrigger>}
         </TabsList>
-        {show("loadbalancing") && (
-          <TabsContent value="loadbalancing" className="pt-6" keepMounted>
-            <RouterSettings accessToken={accessToken} userRole={userRole} userID={userID} />
-          </TabsContent>
-        )}
-        {show("routing-groups") && (
-          <TabsContent value="routing-groups" className="pt-6" keepMounted>
-            <RoutingGroups />
-          </TabsContent>
-        )}
-        {show("fallbacks") && (
-          <TabsContent value="fallbacks" className="pt-6" keepMounted>
-            <Fallbacks accessToken={accessToken} userRole={userRole} userID={userID} />
-          </TabsContent>
-        )}
         {show("prompt-caching") && (
           <TabsContent value="prompt-caching" className="pt-6" keepMounted>
             <PromptCachingPanel accessToken={accessToken} settings={generalSettings} onChange={handleInputChange} />

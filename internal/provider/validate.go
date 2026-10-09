@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"slices"
+	"strings"
 )
 
 // ValidateDeployment 校验新系统的显式端点绑定，不从历史字段推断默认值。
@@ -11,14 +12,14 @@ import (
 // 返回 error：缺少传输、端点、供应商不匹配或固定模型不在白名单时返回错误；合法时为 nil。
 // 调用：模型写入校验、DeploymentEndpoints。测试：validate_test.go。
 func ValidateDeployment(m config.ModelEntry) error {
+	if err := ValidateCatalogBinding(str(m.ModelInfo["catalog_id"]), m); err != nil {
+		return err
+	}
 	id := SelectedTransport(m)
 	if id == "" {
 		return fmt.Errorf("model_info.transport must select a registered transport")
 	}
 	ids := stringList(m.ModelInfo["endpoint_types"])
-	if len(ids) == 0 {
-		return fmt.Errorf("model_info.endpoint_types is required")
-	}
 	seen := map[string]bool{}
 	for _, endpoint := range ids {
 		if seen[endpoint] {
@@ -30,20 +31,20 @@ func ValidateDeployment(m config.ModelEntry) error {
 		if t.ID != id {
 			continue
 		}
+		// 对话别名可包含模型路径和版本冒号；只拒绝会被 URL 清理改变的空段、点段，保证 Google 入口可调用。
+		if DialogueProtocol(t.Protocol) {
+			for _, segment := range strings.Split(m.ModelName, "/") {
+				if strings.TrimSpace(segment) == "" || segment == "." || segment == ".." {
+					return fmt.Errorf("对外模型名称不能为空，路径段不能留空或为 .、..；支持斜杠（/）和冒号（:）")
+				}
+			}
+		}
 		for _, endpoint := range ids {
 			valid := false
 			for _, entry := range EndpointTypes() {
-				if entry.ID == endpoint && entry.Kind == KindBypass && entry.Protocol == t.Protocol && (DialogueProtocol(t.Protocol) || endpoint == t.EndpointID) {
+				if entry.ID == endpoint && CompatibleEndpoint(entry, t) {
 					valid = true
 				}
-			}
-			for _, entry := range EndpointTypes() {
-				if entry.ID == endpoint && entry.Kind == KindAdapted && entry.Protocol == t.Protocol {
-					valid = true
-				}
-			}
-			if DialogueProtocol(t.Protocol) {
-				valid = valid || slices.Contains([]string{"chat", "responses", "messages"}, endpoint)
 			}
 			if !valid {
 				return fmt.Errorf("transport %s is incompatible with endpoint type %s", id, endpoint)

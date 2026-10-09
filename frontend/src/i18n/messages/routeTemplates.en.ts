@@ -36,7 +36,7 @@ export const routeTemplatesEn = {
   loadBalancing: "Load balancing",
   fallbacksTab: "Fallbacks",
   strategy: "Routing strategy",
-  priorityStrategy: "Highest deployment weight",
+  priorityStrategy: "Simple shuffle",
   strategyHint: "How traffic is split when one public name has several deployments.",
   strategyDescriptions: {
     "simple-shuffle":

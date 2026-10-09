@@ -17,9 +17,9 @@ func officialHost(up *httptest.Server, models ...config.ModelEntry) *logicHost {
 	return &logicHost{cfg: &config.Config{}, client: up.Client(), models: models, pins: map[string]string{}}
 }
 
-// TestOfficialTemplateWeightsAndCredentialPin 验证模板显式权重选中凭据并在任务查询时保持该凭据。
+// TestOfficialModelDefaultWeightsAndCredentialPin 验证模型默认权重选中凭据并在任务查询时保持该凭据。
 // 参数 t：测试上下文；返回：无。前置本地上游与两条部署；断言创建和查询一致，服务关闭清理，无外部调用。
-func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
+func TestOfficialModelDefaultWeightsAndCredentialPin(t *testing.T) {
 	var seen []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get("Authorization"))
@@ -29,16 +29,18 @@ func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
 	a := deployment("video", "volcengine/model", "key-a", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "a", "weight": 0.0, "deployment_id": "a"})
 	b := deployment("video", "volcengine/model", "key-b", up.URL, "ark_contents_generation", map[string]any{"litellm_credential_name": "b", "weight": 1.0, "deployment_id": "b"})
 	h := officialHost(up, a, b)
-	h.settings = map[string]any{"routing_strategy": "weighted-split", "routing_strategy_args": map[string]any{
-		"weights": map[string]any{router.WeightID(a): 0.0, router.WeightID(b): 1.0},
-	}}
+	h.modelDefaults = map[string]any{"video": map[string]any{"allocations": []any{
+		map[string]any{"deployment_id": router.DeploymentID(a), "weight": 0.0},
+		map[string]any{"deployment_id": router.DeploymentID(b), "weight": 100.0},
+	}}}
+
 	if rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", `{"model":"video"}`); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	if h.spend[0].depID != router.CooldownID(b) {
 		t.Fatalf("wrong credential recorded: %+v", h.spend)
 	}
-	h.settings = map[string]any{"routing_strategy": "simple-shuffle"}
+	h.modelDefaults = nil
 	if rec := h.call(t, http.MethodGet, "/api/v3/contents/generations/tasks/task-1", ""); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
@@ -47,7 +49,8 @@ func TestOfficialTemplateWeightsAndCredentialPin(t *testing.T) {
 	}
 }
 
-func TestOfficialUsesModelRoutingOverride(t *testing.T) {
+// TestOfficialTemplateTrafficSplitUsesLiveModelWeights 验证模板只选择策略，部署分配实时读取模型默认权重。
+func TestOfficialTemplateTrafficSplitUsesLiveModelWeights(t *testing.T) {
 	var seen []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get("Authorization"))
@@ -58,15 +61,14 @@ func TestOfficialUsesModelRoutingOverride(t *testing.T) {
 	b := deployment("video", "provider/model-b", "key-b", up.URL, "ark_contents_generation", map[string]any{"weight": 1.0, "deployment_id": "model-b"})
 	h := officialHost(up, a, b)
 	h.settings = map[string]any{
-		"routing_strategy":      "simple-shuffle",
-		"routing_strategy_args": map[string]any{"weights": map[string]any{"deployment:model-a": 1.0}},
-		"model_routing": []any{map[string]any{
-			"model_name": "video", "routing_strategy": "weighted-split",
-			"routing_strategy_args": map[string]any{"weights": map[string]any{
-				"deployment:model-a": 0.0, "deployment:model-b": 1.0,
-			}},
-		}},
+		"model_routes": []any{map[string]any{"model": "video", "strategy": "traffic-split"}},
+		"retry_policy": map[string]any{"max_attempts": 1, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
 	}
+	h.modelDefaults = map[string]any{"video": map[string]any{"allocations": []any{
+		map[string]any{"deployment_id": "model-a", "weight": 0.0},
+		map[string]any{"deployment_id": "model-b", "weight": 100.0},
+	}}}
+
 	rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", "{\"model\":\"video\"}")
 	if rec.Code != http.StatusOK || len(seen) != 1 || seen[0] != "Bearer key-b" {
 		t.Fatalf("official model policy was not applied: status=%d seen=%v body=%s", rec.Code, seen, rec.Body.String())
@@ -84,7 +86,10 @@ func TestOfficialTemplateRetriesHTTPFailure(t *testing.T) {
 	}))
 	defer up.Close()
 	h := officialHost(up, deployment("video", "volcengine/model", "key", up.URL, "ark_contents_generation", nil))
-	h.settings = map[string]any{"num_retries": 2}
+	h.settings = map[string]any{
+		"model_routes": []any{},
+		"retry_policy": map[string]any{"max_attempts": 2, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
+	}
 	rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", `{"model":"video"}`)
 	if rec.Code != 200 || calls.Load() != 2 || len(h.failures) != 1 {
 		t.Fatalf("status=%d calls=%d failures=%v", rec.Code, calls.Load(), h.failures)
@@ -102,7 +107,10 @@ func TestOfficialTimeoutDoesNotReplayAmbiguousCreate(t *testing.T) {
 	}))
 	defer up.Close()
 	h := officialHost(up, deployment("video", "volcengine/model", "key", up.URL, "ark_contents_generation", nil))
-	h.settings = map[string]any{"num_retries": 3, "timeout": 0.03}
+	h.settings = map[string]any{
+		"model_routes": []any{},
+		"retry_policy": map[string]any{"max_attempts": 3, "timeout_seconds": 0.03, "failure_threshold": 3, "cooldown_seconds": 0},
+	}
 	rec := h.call(t, http.MethodPost, "/api/v3/contents/generations/tasks", `{"model":"video"}`)
 	if rec.Code != 502 || calls.Load() != 1 {
 		t.Fatalf("ambiguous create replayed: status=%d calls=%d", rec.Code, calls.Load())

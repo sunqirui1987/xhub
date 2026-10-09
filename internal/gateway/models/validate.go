@@ -14,8 +14,7 @@ import (
 
 var logTraceOnceValidate sync.Once
 
-// validateDeployment uses base-unit USD prices, just like the price catalog.
-// Existing inline connections remain editable; new UI deployments use credentials.
+// validateDeployment 校验显式端点、公开模型名称、上游凭据与以 USD 基础单位保存的价格。
 // 参数 s（Host）：读取凭据和目录的宿主；name（string）：公开部署名；params（map[string]any）：上游连接和人工费率；info（map[string]any）：计价来源和目录基准模型。
 // 返回 error（error）：字段、价格或凭据不一致时返回可展示的校验错误。
 // 调用：New、Update。
@@ -23,7 +22,7 @@ var logTraceOnceValidate sync.Once
 func validateDeployment(s Host, name string, params, info map[string]any) error {
 	logTraceOnceValidate.Do(func() { logx.Trace("enter models.validateDeployment") })
 	if _, exists := params["weight"]; exists {
-		return fmt.Errorf("deployment weight is obsolete; configure weights in route templates")
+		return fmt.Errorf("deployment weight is obsolete; configure default weights in model management or customer overrides in route templates")
 	}
 	if strings.TrimSpace(name) == "" || strings.TrimSpace(str(params["model"])) == "" {
 		return fmt.Errorf("model_name and litellm_params.model are required")
@@ -31,7 +30,20 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 	if strings.HasPrefix(str(params["model"]), "auto_router/") || strings.HasPrefix(str(params["model"]), "adaptive_router/") {
 		return fmt.Errorf("auto routers are no longer supported")
 	}
-	if err := provider.ValidateDeployment(config.ModelEntry{LiteLLMParams: params, ModelInfo: info}); err != nil {
+	// 目录绑定只来自保存的连接，覆盖请求元数据，禁止部署冒用另一供应商。
+	delete(info, "catalog_id")
+	if supplier := str(params["litellm_credential_name"]); supplier != "" {
+		record, err := s.RecordStore().GetKV("credentials", supplier)
+		if err != nil || record == nil {
+			return fmt.Errorf("model provider %s is not configured", supplier)
+		}
+		if !credentialProtocolMatches(supplier, record, str(params["custom_llm_provider"])) {
+			return fmt.Errorf("model protocol does not match its provider")
+		}
+		meta, _ := record["credential_info"].(map[string]any)
+		info["catalog_id"] = credentialText(meta, "catalog_id")
+	}
+	if err := provider.ValidateDeployment(config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info}); err != nil {
 		return err
 	}
 	for _, field := range rateFields {
@@ -101,15 +113,7 @@ func validateDeployment(s Host, name string, params, info map[string]any) error 
 			return fmt.Errorf("pricing model %s has no prices", id)
 		}
 	}
-	if supplier := str(params["litellm_credential_name"]); supplier != "" {
-		record, err := s.RecordStore().GetKV("credentials", supplier)
-		if err != nil || record == nil {
-			return fmt.Errorf("model provider %s is not configured", supplier)
-		}
-		if !credentialProtocolMatches(supplier, record, str(params["custom_llm_provider"])) {
-			return fmt.Errorf("model protocol does not match its provider")
-		}
-	}
+
 	return nil
 }
 

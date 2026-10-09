@@ -2,10 +2,12 @@ package models
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/provider"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/catalog"
@@ -240,7 +242,8 @@ func RefreshBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	ListBuiltin(s, w, r)
 }
 
-// ListBuiltin 按供应商凭据读取目录，首选地址返回 404 时自动尝试增减一层 /v1。
+// ListBuiltin 按保存连接读取完整 /models，合并已登记专用模型，不以执行能力表截断供应商上架列表。
+// OpenAI 兼容连接允许增减一层 /v1 重试；专用连接只返回登记型号，目录失败仍保留专用型号并返回原因。
 // 参数 s：管理宿主；w：响应写入器；r：含供应商或凭据名称的管理请求。
 // 返回：无；响应包含目录及可观察的拉取错误，不修改凭据或部署。请求取消会停止外部调用。
 // 调用：模型编辑器和供应商目录；测试：regression/model_discovery_test.go。
@@ -251,12 +254,16 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	var available []CatalogModel
 	var fetchErr string
-	items, err := fetchCatalog(r.Context(), ModelsURL("", source.spec.Base), source.key)
+	var items []CatalogModel
+	var err error
+	if source.discover {
+		items, err = fetchCatalog(r.Context(), ModelsURL("", source.spec.Base), source.key)
+	}
+	items = mergeCatalogModels(items, provider.CatalogModels()[source.catalogID])
 	if err != nil {
 		fetchErr = err.Error()
-	} else {
-		available = items
 	}
+	available = items
 	if available == nil {
 		available = []CatalogModel{}
 	}
@@ -279,6 +286,26 @@ func ListBuiltin(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, out)
 }
 
+// mergeCatalogModels 合并供应商完整模型列表与本地专用型号，供 ListBuiltin 使用。
+// 参数 items 为外部目录、registered 为已实现型号；返回按 ID 排序的去重列表，保留外部模型元数据，不修改输入。
+func mergeCatalogModels(items []CatalogModel, registered map[string][]string) []CatalogModel {
+	out := make([]CatalogModel, 0, len(items)+len(registered))
+	seen := map[string]bool{}
+	for _, item := range items {
+		if item.ID != "" && !seen[item.ID] {
+			out = append(out, item)
+			seen[item.ID] = true
+		}
+	}
+	for id := range registered {
+		if !seen[id] {
+			out = append(out, CatalogModel{ID: id})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // AddBuiltinModels is the retired catalog-to-deployment shortcut. Catalog rows
 // now enter /price/model and deployments are created through /model/new, so a
 // caller cannot bypass the unified pricing editor.
@@ -298,9 +325,11 @@ type catalogSource struct {
 	rows           []store.ProxyModel
 	key            string
 	credentialName string
+	catalogID      string
+	discover       bool
 }
 
-// openCatalog 读取用户已保存的 OpenAI 兼容凭据；请求不能覆盖连接地址和密钥。
+// openCatalog 读取已保存的目录连接或 OpenAI 兼容凭据；请求不能覆盖目录、连接地址和密钥。
 // 参数 s（Host）：目录发现使用的数据面宿主；w（http.ResponseWriter）：错误响应写入这里；r（*http.Request）：包含 provider 或 credential_name 的管理请求。
 // 返回 catalogSource（catalogSource）：已解析的目录连接和现有部署；bool（bool）：请求有效且可以发起目录请求时为真。
 // 调用：ListBuiltin。
@@ -320,12 +349,28 @@ func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource,
 		httpx.WriteError(w, 400, "invalid_request", "credential_name is required for generic model discovery")
 		return catalogSource{}, false
 	}
-	record, ok := openAICompatibleCredential(s, w, name)
-	if !ok {
+	record, lookupErr := s.RecordStore().GetKV("credentials", name)
+	if lookupErr != nil || record == nil {
+		httpx.WriteError(w, 400, "invalid_request", "model provider is not configured")
 		return catalogSource{}, false
 	}
 	info, _ := record["credential_info"].(map[string]any)
 	values, _ := record["credential_values"].(map[string]any)
+	protocol := credentialText(info, "custom_llm_provider")
+	if protocol == "" {
+		protocol = credentialText(values, "custom_llm_provider")
+	}
+	discover := protocol == "" || openAICompatibleProtocol(protocol)
+	catalogID := credentialText(info, "catalog_id")
+	_, knownCatalog := provider.CatalogModels()[catalogID]
+	if !knownCatalog {
+		// 未注册目录走真实 /models，仍须校验兼容协议，不能把错误连接当成 OpenAI 请求。
+		var ok bool
+		record, ok = openAICompatibleCredential(s, w, name)
+		if !ok {
+			return catalogSource{}, false
+		}
+	}
 	base := credentialText(values, "api_base")
 	if base == "" {
 		base = credentialText(info, "api_base")
@@ -335,7 +380,7 @@ func openCatalog(s Host, w http.ResponseWriter, r *http.Request) (catalogSource,
 	}
 	// 目录地址和密钥只来自用户已保存的凭据，忽略请求中的供应商提示、URL 和密钥。
 	return catalogSource{spec: catalogConnection{ID: name, Base: base}, rows: rows,
-		key: credentialSecret(record, "api_key"), credentialName: name}, true
+		key: credentialSecret(record, "api_key"), credentialName: name, catalogID: catalogID, discover: discover}, true
 }
 
 // openAICompatibleCredential 读取一个已保存凭据，并校验其声明的线协议能否访问 OpenAI /models 端点。

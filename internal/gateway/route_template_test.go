@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -40,6 +41,14 @@ func templateID(t *testing.T, f *fixture, name string, body string) string {
 	return id
 }
 
+// routeTemplateJSON 返回当前唯一合法的模板格式，供接口权限测试专注于自身行为。
+func routeTemplateJSON(attempts int, routes string) string {
+	if routes == "" {
+		routes = "[]"
+	}
+	return fmt.Sprintf(`{"model_routes":%s,"retry_policy":{"max_attempts":%d,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0}}`, routes, attempts)
+}
+
 // TestTemplatesAreThePlatformAdministratorsToEdit 证明模板正文只有平台管理员能改。
 //
 // 一份模板决定怎么路由。团队管理员能选自己的团队用哪一份，但改不了那一份的内容——
@@ -51,13 +60,14 @@ func TestTemplatesAreThePlatformAdministratorsToEdit(t *testing.T) {
 
 	// 只有平台管理员建得出模板。
 	for _, a := range []actor{f.member, f.teamAdmin, f.outsider} {
+		payload := fmt.Sprintf(`{"name":"sneaky-%s","body":%s}`, a.name, routeTemplateJSON(1, ""))
 		code, _ := f.call(a, http.MethodPost, "/route_template/new",
-			[]byte(`{"name":"sneaky-`+a.name+`","body":{}}`))
+			[]byte(payload))
 		if code == http.StatusOK {
 			t.Fatalf("%s created a template", a.label())
 		}
 	}
-	id := templateID(t, f, "owned", `{"num_retries":3}`)
+	id := templateID(t, f, "owned", routeTemplateJSON(3, ""))
 
 	// 列表对每个调用方返回**他看得见的那一份子集**：平台模板加本组织、本团队的。
 	// 所以团队管理员读得到列表，但读到的只能是这些；看得见不等于改得动。
@@ -74,19 +84,21 @@ func TestTemplatesAreThePlatformAdministratorsToEdit(t *testing.T) {
 	}
 
 	// 团队管理员改不动正文。
+	updatePayload := fmt.Sprintf(`{"name":"owned","body":%s}`, routeTemplateJSON(99, ""))
 	code, _ = f.call(f.teamAdmin, http.MethodPost, "/route_template/"+id+"/update",
-		[]byte(`{"name":"owned","body":{"num_retries":99}}`))
+		[]byte(updatePayload))
 	if code == http.StatusOK {
 		t.Fatal("a team administrator edited a template body")
 	}
 	// 而平台管理员改得动。
 	code, raw = f.call(f.admin, http.MethodPost, "/route_template/"+id+"/update",
-		[]byte(`{"name":"owned","body":{"num_retries":99}}`))
+		[]byte(updatePayload))
 	if code != http.StatusOK {
 		t.Fatalf("the platform administrator could not edit a template -> %d: %s", code, raw)
 	}
 	got := f.templateBody(t, id)
-	if got["num_retries"] != float64(99) {
+	retry, _ := got["retry_policy"].(map[string]any)
+	if retry["max_attempts"] != float64(99) {
 		t.Fatalf("the edit did not take: %#v", got)
 	}
 }
@@ -99,7 +111,7 @@ func TestTemplatesAreThePlatformAdministratorsToEdit(t *testing.T) {
 // 返回：无。
 func TestSelectingATemplateRespectsTheScope(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "selectable", `{"num_retries":4}`)
+	id := templateID(t, f, "selectable", routeTemplateJSON(4, ""))
 
 	cases := []struct {
 		name    string
@@ -144,7 +156,7 @@ func TestSelectingATemplateRespectsTheScope(t *testing.T) {
 // 返回：无。
 func TestAnOrganizationAdministratorPointsTheirOwnOrganization(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "org-level", `{"num_retries":5}`)
+	id := templateID(t, f, "org-level", routeTemplateJSON(5, ""))
 
 	// 把 teamAdmin 设为组织 A 的管理员。他仍然管不了组织 B。
 	if _, err := f.db.AddOrgAdmin(context.Background(), iam.Actor{Kind: "system"},
@@ -183,7 +195,7 @@ func TestAnOrganizationAdministratorPointsTheirOwnOrganization(t *testing.T) {
 // 返回：无。
 func TestDeletingATemplateStillInUseIsRefusedWithTheList(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "in-use", `{}`)
+	id := templateID(t, f, "in-use", routeTemplateJSON(1, ""))
 
 	code, raw := f.call(f.admin, http.MethodPost, "/route_template/binding",
 		[]byte(`{"scope":"team","scope_id":"`+f.teamA.ID+`","route_template_id":"`+id+`"}`))
@@ -221,7 +233,7 @@ func TestDeletingATemplateStillInUseIsRefusedWithTheList(t *testing.T) {
 // 返回：无。
 func TestClearingASelectionIsNotTheSameAsLeavingItOut(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "clearable", `{"num_retries":6}`)
+	id := templateID(t, f, "clearable", routeTemplateJSON(6, ""))
 
 	bind := []byte(`{"scope":"team","scope_id":"` + f.teamA.ID + `","route_template_id":"` + id + `"}`)
 	if code, raw := f.call(f.admin, http.MethodPost, "/route_template/binding", bind); code != http.StatusOK {
@@ -253,7 +265,7 @@ func TestClearingASelectionIsNotTheSameAsLeavingItOut(t *testing.T) {
 // 返回：无。
 func TestTheEffectiveTemplateNamesWhereItCameFrom(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "inherited", `{"num_retries":7}`)
+	id := templateID(t, f, "inherited", routeTemplateJSON(7, ""))
 
 	// 组织选了，团队没选。
 	if code, raw := f.call(f.admin, http.MethodPost, "/route_template/binding",
@@ -288,7 +300,7 @@ func TestTheEffectiveTemplateNamesWhereItCameFrom(t *testing.T) {
 // 返回：无。
 func TestAnUnknownScopeIsRefused(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "scope-check", `{}`)
+	id := templateID(t, f, "scope-check", routeTemplateJSON(1, ""))
 
 	code, raw := f.call(f.admin, http.MethodPost, "/route_template/binding",
 		[]byte(`{"scope":"teams; DROP TABLE teams","scope_id":"x","route_template_id":"`+id+`"}`))
@@ -353,7 +365,7 @@ func (f *fixture) otherOrgID(t *testing.T) string {
 // 返回：无。
 func TestATeamAdministratorSelectsThroughTheTeamRoute(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "via-team-route", `{"num_retries":8}`)
+	id := templateID(t, f, "via-team-route", routeTemplateJSON(8, ""))
 
 	code, raw := f.call(f.teamAdmin, http.MethodPost, "/team/update",
 		[]byte(`{"team_id":"`+f.teamA.ID+`","route_template_id":"`+id+`"}`))
@@ -384,7 +396,7 @@ func TestATeamAdministratorSelectsThroughTheTeamRoute(t *testing.T) {
 // 返回：无。
 func TestTheTeamReadExposesTheSelection(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "visible", `{}`)
+	id := templateID(t, f, "visible", routeTemplateJSON(1, ""))
 
 	if code, raw := f.call(f.admin, http.MethodPost, "/team/update",
 		[]byte(`{"team_id":"`+f.teamA.ID+`","route_template_id":"`+id+`"}`)); code != http.StatusOK {
@@ -396,80 +408,69 @@ func TestTheTeamReadExposesTheSelection(t *testing.T) {
 	}
 }
 
-// TestANewTemplateIsSeededFromThePlatformDefault 证明新模板是一份完整文档。
+// TestANewTemplateUsesTheBuiltinDocument 证明新模板使用固定的新格式骨架。
 //
-// 解析是整份替换，不是按字段合并。所以模板里少写一个键就意味着那个键的零值：
-// 少写 num_retries 是"只尝试一次"，少写 timeout 是"零超时"。这两个都是
-// 可以配的，但不该是新建一份模板时不小心得到的。
+// 模板不再从全局 router settings 播种。调用方传入完整文档后，后台只校验并保存，
+// 因此模板行为不会随另一套设置变化。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
-func TestANewTemplateIsSeededFromThePlatformDefault(t *testing.T) {
+func TestANewTemplateUsesTheBuiltinDocument(t *testing.T) {
 	f := newPermFixture(t)
-
-	// 先改平台默认，这样"种子来自平台"和"种子是写死的"能区分开。
-	if code, raw := f.call(f.admin, http.MethodPost, "/config/update",
-		[]byte(`{"router_settings":{"num_retries":7,"allowed_fails":9}}`)); code >= 300 {
-		t.Fatalf("set platform default -> %d: %s", code, raw)
-	}
-
-	id := templateID(t, f, "seeded", `{}`)
+	id := templateID(t, f, "builtin-shape", routeTemplateJSON(1, ""))
 	body := f.templateBody(t, id)
-
-	// 平台里改过的值要出现在新模板里。
-	if body["num_retries"] != float64(7) {
-		t.Fatalf("the seed did not carry num_retries: %#v", body["num_retries"])
+	routes, ok := body["model_routes"].([]any)
+	if !ok || len(routes) != 0 {
+		t.Fatalf("model_routes = %#v, want an empty array", body["model_routes"])
 	}
-	if body["allowed_fails"] != float64(9) {
-		t.Fatalf("the seed did not carry allowed_fails: %#v", body["allowed_fails"])
-	}
-	// 而平台里本来就有的其它键也要在，否则模板会把这些键变成零值。
-	if _, ok := body["timeout"]; !ok {
-		t.Fatalf("the seed dropped timeout, which would mean a zero timeout: %#v", body)
-	}
-	if _, ok := body["routing_strategy"]; !ok {
-		t.Fatalf("the seed dropped routing_strategy: %#v", body)
+	retry, ok := body["retry_policy"].(map[string]any)
+	if !ok || retry["max_attempts"] != float64(1) || retry["timeout_seconds"] != float64(60) ||
+		retry["failure_threshold"] != float64(3) || retry["cooldown_seconds"] != float64(0) {
+		t.Fatalf("retry_policy does not match the submitted document: %#v", retry)
 	}
 }
 
-// TestASuppliedBodyIsNotSecondGuessed 证明种子里填的键不覆盖调用方写下的值。
-//
-// 种子的作用是补上**没写**的键。调用方显式写 0 次重试是可以的，种子不该把它
-// 改回默认值——那是"我填了没生效"。
+// TestASuppliedDocumentIsStoredExactly 证明完整合法文档按原值保存。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
-func TestASuppliedBodyIsNotSecondGuessed(t *testing.T) {
+func TestASuppliedDocumentIsStoredExactly(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "explicit", `{"num_retries":0,"allowed_fails":0}`)
+	document := `{"model_routes":[{"model":"chat","strategy":"least-busy"}],"retry_policy":{"max_attempts":4,"timeout_seconds":17,"failure_threshold":0,"cooldown_seconds":9}}`
+	id := templateID(t, f, "explicit", document)
 	body := f.templateBody(t, id)
-
-	if body["num_retries"] != float64(0) {
-		t.Fatalf("an explicit num_retries was overwritten by the seed: %#v", body["num_retries"])
-	}
-	if body["allowed_fails"] != float64(0) {
-		t.Fatalf("an explicit allowed_fails was overwritten by the seed: %#v", body["allowed_fails"])
+	retry, _ := body["retry_policy"].(map[string]any)
+	if retry["max_attempts"] != float64(4) || retry["timeout_seconds"] != float64(17) ||
+		retry["failure_threshold"] != float64(0) || retry["cooldown_seconds"] != float64(9) {
+		t.Fatalf("saved retry policy changed: %#v", retry)
 	}
 }
 
-func TestRouteTemplateWritesValidateModelRouting(t *testing.T) {
+// TestRouteTemplateWritesValidateTheNewDocument 证明模板接口严格拒绝旧字段、未知字段和歧义规则。
+// 参数 t（*testing.T）：当前测试。返回：无；每个创建请求由独立测试数据库自动清理。
+func TestRouteTemplateWritesValidateTheNewDocument(t *testing.T) {
 	f := newPermFixture(t)
-	invalid := "{\"name\":\"invalid-model-policy\",\"body\":{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"not-a-strategy\"}]}}"
-	if code, _ := f.call(f.admin, http.MethodPost, "/route_template/new", []byte(invalid)); code != http.StatusBadRequest {
-		t.Fatalf("invalid model routing create returned %d, want 400", code)
+	invalidBodies := []string{
+		`{"model_routing":[],"retry_policy":{"max_attempts":1,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0}}`,
+		`{"model_routes":[],"retry_policy":{"max_attempts":1,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0},"custom_root":true}`,
+		`{"model_routes":[{"model":"chat","strategy":"least-busy","endpoint_id":"chat"}],"retry_policy":{"max_attempts":1,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0}}`,
+		`{"model_routes":[{"model":"chat","strategy":"traffic-split","allocations":null}],"retry_policy":{"max_attempts":1,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0}}`,
+		`{"model_routes":[{"model":"chat","strategy":"least-busy"},{"model":"chat","strategy":"traffic-split"}],"retry_policy":{"max_attempts":1,"timeout_seconds":60,"failure_threshold":3,"cooldown_seconds":0}}`,
 	}
-	id := templateID(t, f, "valid-model-policy", "{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"least-busy\",\"custom\":true}],\"custom_root\":{\"kept\":true}}")
-	if body := f.templateBody(t, id); body["custom_root"] == nil || body["model_routing"] == nil {
-		t.Fatalf("valid model policy or custom fields were dropped: %#v", body)
+	for index, body := range invalidBodies {
+		payload := fmt.Sprintf(`{"name":"invalid-%d","body":%s}`, index, body)
+		if code, _ := f.call(f.admin, http.MethodPost, "/route_template/new", []byte(payload)); code != http.StatusBadRequest {
+			t.Fatalf("invalid document %d returned %d, want 400", index, code)
+		}
 	}
-	badUpdate := "{\"name\":\"valid-model-policy\",\"body\":{\"model_routing\":[{\"model_name\":\"chat\",\"routing_strategy\":\"least-busy\"},{\"model_name\":\"chat\",\"routing_strategy\":\"weighted-split\"}]}}"
-	if code, _ := f.call(f.admin, http.MethodPost, "/route_template/"+id+"/update", []byte(badUpdate)); code != http.StatusBadRequest {
-		t.Fatalf("duplicate model routing update returned %d, want 400", code)
+	id := templateID(t, f, "valid-model-policy", routeTemplateJSON(2, `[{"model":"chat","strategy":"least-busy"}]`))
+	if body := f.templateBody(t, id); body["model_routes"] == nil || body["retry_policy"] == nil {
+		t.Fatalf("valid new document was not stored: %#v", body)
 	}
 }
 
 // TestASingleTeamSessionPicksUpItsTeamsTemplate 覆盖一个真实缺口。
 //
 // 预算链只在有密钥行时才走，而控制台的演练场是**会话**调用。如果不给会话单独
-// 解析一次，团队选了模板，演练场里的请求却仍然按平台默认路由 —— 配上没生效，
+// 解析一次，团队选了模板，演练场里的请求却仍然按模型默认路由 —— 配上没生效，
 // 而且只有那一个入口不对，最难发现。
 //
 // 这里走真实 HTTP：登录拿到会话，再发一次推理请求，断言会话真的拿这个模板。
@@ -477,7 +478,7 @@ func TestRouteTemplateWritesValidateModelRouting(t *testing.T) {
 // 返回：无。
 func TestASingleTeamSessionPicksUpItsTeamsTemplate(t *testing.T) {
 	f := newPermFixture(t)
-	id := templateID(t, f, "session-visible", `{"routing_strategy":"least-busy"}`)
+	id := templateID(t, f, "session-visible", routeTemplateJSON(1, `[{"model":"chat","strategy":"least-busy"}]`))
 
 	if code, raw := f.call(f.admin, http.MethodPost, "/route_template/binding",
 		[]byte(`{"scope":"team","scope_id":"`+f.teamA.ID+`","route_template_id":"`+id+`"}`)); code != http.StatusOK {

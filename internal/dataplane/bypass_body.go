@@ -74,12 +74,12 @@ func parseBypassBody(raw []byte, contentType string) (bypassBody, error) {
 	return b, nil
 }
 
-// Payload 仅替换用于路由的模型名；路径固定模型则移除请求体中的模型字段。
+// Payload 替换用于路由的模型名并剥离网关回退开关；路径固定模型则移除请求体中的模型字段。
 // 参数 field、model（string）：模型字段名和上游 ID；pathModel（bool）：模型是否已经编码在固定路径中。
 // 返回 []byte、error：可发送的原生请求体或序列化错误。JSON 大整数、未知参数、文件字节与边界均保留。
 // 调用：serveBypassCreate。测试：TestNativeBypassJSONAndUsage、TestNativeImageEditMultipart。
 func (b bypassBody) Payload(field, model string, pathModel bool) ([]byte, error) {
-	if field == "" && !pathModel {
+	if field == "" && !pathModel && b.Fields["disable_fallbacks"] == nil {
 		return b.Raw, nil
 	}
 	if pathModel {
@@ -93,15 +93,17 @@ func (b bypassBody) Payload(field, model string, pathModel bool) ([]byte, error)
 				return nil, err
 			}
 		}
+		// 回退开关属于网关，不能泄露为供应商的未知请求字段。
+		delete(fields, "disable_fallbacks")
 		if pathModel {
 			delete(fields, field)
-		} else {
+		} else if field != "" {
 			fields[field], _ = json.Marshal(model)
 		}
 		return json.Marshal(fields)
 	}
 	if b.Media == "multipart/form-data" {
-		if b.Fields[field] == model && !pathModel {
+		if b.Fields[field] == model && !pathModel && b.Fields["disable_fallbacks"] == nil {
 			return b.Raw, nil
 		}
 		var out bytes.Buffer
@@ -110,8 +112,11 @@ func (b bypassBody) Payload(field, model string, pathModel bool) ([]byte, error)
 			return nil, err
 		}
 		for _, part := range b.Parts {
+			if part.Name == "disable_fallbacks" {
+				continue
+			}
 			data := part.Data
-			if part.Name == field {
+			if field != "" && part.Name == field {
 				if pathModel {
 					continue
 				}

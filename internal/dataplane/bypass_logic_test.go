@@ -209,7 +209,9 @@ type logicHost struct {
 	spend    []spendNote
 	notes    []CallNote
 	settings map[string]any
-	failures []string
+	// modelDefaults 模拟“模型与端点”中按公开模型保存的实时默认权重。
+	modelDefaults map[string]any
+	failures      []string
 }
 
 func (h *logicHost) call(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
@@ -232,9 +234,11 @@ func (h *logicHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
 }
 func (h *logicHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
 	if h.settings != nil {
-		return prefs.RouteSettings{Settings: h.settings}
+		return prefs.RouteSettings{Settings: h.settings, ModelDefaults: h.modelDefaults}
 	}
-	return prefs.PlatformSettings(nil)
+	settings := prefs.BuiltinSettings()
+	settings.ModelDefaults = h.modelDefaults
+	return settings
 }
 
 func (h *logicHost) GatewayConfig() *config.Config   { return h.cfg }

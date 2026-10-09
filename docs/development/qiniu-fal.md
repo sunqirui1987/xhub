@@ -1,6 +1,8 @@
 # 七牛 Fal 视频扩展与验证
 
-Fal 是传输协议，七牛兼容地址由用户配置，具体路径是模型标识，市场价格 ID 是计价来源。这四项分别登记，避免混用同名模型、不同协议或不同供应商价格。原生 qiniu_contents_generation 保留；Fal 使用独立 transport。XHub 不预置七牛凭据供应商，也不读取 `QINIU_API_KEY` 自动创建账户；管理员在凭据表单选择 Custom 或 Custom OpenAI，填写地址和密钥后，再为模型显式选择对应传输。
+Fal 是传输协议，七牛兼容地址由用户配置，具体路径是模型标识，市场价格 ID 是计价来源。这四项分别登记，避免混用同名模型、不同协议或不同供应商价格。原生 qiniu_contents_generation 保留；Fal 使用独立 transport。XHub 不预置七牛凭据供应商，也不读取 `QINIU_API_KEY` 自动创建账户；管理员在凭据表单选择 Custom、Custom OpenAI 或 OpenAI，填写地址和密钥后，再为模型选择对应传输。
+
+上游模型 `bytedance/doubao-seedance-2-0-260128` 对应 Ark Video；FAL Doubao 使用 `bytedance/seedance-2.0/text-to-video`，FAL Dreamina 使用 `byteplus/seedance-2.0/text-to-video`。菜单会显示 `FAL · Dreamina Seedance 2.0` 等明确协议名。对外模型名称支持 `/`、`:` 和中文 `：`，修改别名不会改变上游型号或协议。七牛连接可填写目录 ID `qiniu` 自动选择登记能力；普通中转商目录按实际上游列表发现，并允许显式选择精确匹配路径的 FAL 协议。
 
 ## 模型与队列
 
@@ -32,7 +34,7 @@ model_list:
       api_key: os.environ/QINIU_API_KEY
     model_info:
       transport: qiniu_fal_kling
-      endpoint_types: ["bypass:fal-video"]
+      endpoint_types: ["fal:queue"]
 ~~~
 
 也可以在模型添加界面使用 Custom 凭据选择七牛的 Fal 模型；目录提供默认 transport 和市场价格绑定。生产环境应使用 litellm_credential_name 引用手工保存的 Custom 凭据。凭据名称、模型名称和 API hostname 都不会把普通凭据隐式升级为七牛账户。

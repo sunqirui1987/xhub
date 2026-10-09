@@ -1,3 +1,4 @@
+import { UnavailableEndpoint } from "@/components/llm_calls/UnavailableEndpoint";
 import { Settings, X } from "lucide-react";
 import { useId, useState } from "react";
 import { ComparisonInstance } from "../CompareUI";
@@ -16,6 +17,7 @@ import { t } from "@/i18n";
 import { SearchSelect } from "@/components/shared/SearchSelect";
 
 interface ComparisonPanelProps {
+  unavailableReason?: string;
   supportsGatewaySettings?: boolean;
   endpointOptions?: { value: string; label: string }[];
   comparison: ComparisonInstance;
@@ -44,6 +46,7 @@ export function ComparisonPanel({
   isLoadingOptions,
   endpointConfig,
   apiKey,
+  unavailableReason,
   endpointOptions = [],
   supportsGatewaySettings = false,
 }: ComparisonPanelProps) {
@@ -220,6 +223,7 @@ export function ComparisonPanel({
 
   return (
     <div className="bg-card first:border-l-0 border-l border-border flex flex-col min-h-0">
+      {!isA2AMode && comparison.model && !endpointOptions.length && <UnavailableEndpoint reason={unavailableReason} compare />}
       <div className="border-b flex items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-3 flex-1">
           <UnifiedSelector

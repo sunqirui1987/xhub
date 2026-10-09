@@ -138,6 +138,8 @@ func call(h *priceHost, method, path string, body any) (int, map[string]any) {
 		UpsertPriceModel(h, w, r)
 	case path == "/price/model" && method == http.MethodDelete:
 		DeletePriceModel(h, w, r)
+	case path == "/price/model/listing":
+		SetPriceListing(h, w, r)
 	case path == "/price/model/reset":
 		ResetPriceModel(h, w, r)
 	case path == "/price/provider" && method == http.MethodPost:
@@ -274,38 +276,56 @@ func TestPriceModelEditOverridesTheBaselineAndResetRestoresIt(t *testing.T) {
 	}
 }
 
+// TestPriceModelDeleteOfABaselineRowIsRemembered 验证旧删除入口仅下架，重载保留价格且可重新上架。
+// 前置隔离数据库；验证完整价格及持久状态；测试结束清理数据库，不调用外部服务。
 func TestPriceModelDeleteOfABaselineRowIsRemembered(t *testing.T) {
 	h := &priceHost{store: openPriceStore(t), allow: true}
-
 	status, _ := call(h, http.MethodDelete, "/price/model", map[string]any{"id": "kimi-k2"})
-	if status != http.StatusOK {
-		t.Fatalf("status %d", status)
+	if status != 200 {
+		t.Fatal(status)
 	}
-	if _, _, ok := catalog.TokenRates("kimi-k2"); ok {
-		t.Fatal("the deleted row is still priced")
-	}
-
-	// The deletion survives a restart, and the console can still see the id so
-	// the action is reversible.
-	LoadPriceOverrides(&priceHost{store: h.store, allow: true})
-	if _, _, ok := catalog.TokenRates("kimi-k2"); ok {
-		t.Fatal("the deleted row came back after a reload")
-	}
-	status, body := call(h, http.MethodGet, "/price/catalog", nil)
-	if status != http.StatusOK {
-		t.Fatalf("status %d", status)
-	}
+	LoadPriceOverrides(h)
+	_, body := call(h, http.MethodGet, "/price/catalog", nil)
 	row := priceRow(t, body, "kimi-k2")
-	if row == nil || row["removed"] != true {
-		t.Fatalf("removed row %#v", row)
+	if row == nil || row["delisted"] != true || row["input_cost_per_token"] == nil {
+		t.Fatalf("下架丢失完整价格: %#v", row)
 	}
+	status, _ = call(h, http.MethodPost, "/price/model/listing", map[string]any{"id": "kimi-k2", "delisted": false})
+	if status != 200 {
+		t.Fatal(status)
+	}
+	_, body = call(h, http.MethodGet, "/price/catalog", nil)
+	if priceRow(t, body, "kimi-k2")["delisted"] != false {
+		t.Fatal("上架状态未恢复")
+	}
+}
 
-	status, reset := call(h, http.MethodPost, "/price/model/reset", map[string]any{"id": "kimi-k2"})
-	if status != http.StatusOK || reset["restored"] != true {
-		t.Fatalf("reset status=%d body=%#v", status, reset)
+// TestPriceListingValidation 验证上下架鉴权、无效输入、未知模型及自定义价格不能通过重置被删除。
+// 前置隔离数据库；验证错误契约及价格保留；store 和模型由清理钩子回收。
+func TestPriceListingValidation(t *testing.T) {
+	h := &priceHost{store: openPriceStore(t), allow: true}
+	for _, tc := range []struct {
+		body   any
+		status int
+	}{
+		{map[string]any{}, 400}, {map[string]any{"id": "kimi-k2", "delisted": "true"}, 400},
+		{map[string]any{"id": "unknown-model", "delisted": true}, 404},
+	} {
+		if code, _ := call(h, http.MethodPost, "/price/model/listing", tc.body); code != tc.status {
+			t.Fatalf("上下架校验: %d != %d", code, tc.status)
+		}
 	}
-	if _, _, ok := catalog.TokenRates("kimi-k2"); !ok {
-		t.Fatal("the restored row has no rates")
+	h.allow = false
+	if code, _ := call(h, http.MethodPost, "/price/model/listing", map[string]any{}); code != 401 {
+		t.Fatal(code)
+	}
+	h.allow = true
+	call(h, http.MethodPost, "/price/model", map[string]any{"id": "acme-chat-v1", "litellm_provider": "custom", "input_cost_per_token": 1})
+	if code, _ := call(h, http.MethodPost, "/price/model/reset", map[string]any{"id": "acme-chat-v1"}); code != 409 {
+		t.Fatal(code)
+	}
+	if _, ok := catalog.ModelRow("acme-chat-v1"); !ok {
+		t.Fatal("重置删除了本地自定义模型")
 	}
 }
 

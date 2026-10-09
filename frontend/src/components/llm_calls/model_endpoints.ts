@@ -24,7 +24,7 @@ export const modelEndpoints = (model?: ModelGroup): ModelEndpoint[] => model?.en
  * 原生文本只共用界面，发送时保留实际路径及协议字段。
  */
 export const endpointUIType = (endpoint?: ModelEndpoint): EndpointType | null =>
-  endpoint
+  endpoint && !(endpoint.kind === "bypass" && endpoint.protocol === "openai-images")
     ? (UI_ENDPOINTS[endpoint.path] ??
       (
         {
@@ -271,3 +271,11 @@ export async function callTextEndpoint({
     await reader.cancel();
   }
 }
+
+/** endpointLabel 将真实绑定显示为协议名称与调用路径。
+ * 参数 endpoint 为后台已校验绑定，返回可访问标签；调用：Playground 与对比选择框，无网络副作用。 */
+export const endpointLabel = (endpoint: ModelEndpoint): string => {
+  const names: Record<string, string> = { "openai-chat": "OpenAI Chat", "openai-responses": "OpenAI Responses", "anthropic-messages": "Anthropic Messages", "openai-images": endpoint.path.endsWith("/edits") ? "OpenAI Images 编辑" : "OpenAI Images 创建", "openai-videos": "OpenAI Video", "openai-embeddings": "OpenAI Embedding", "openai-audio-speech": "OpenAI Audio Speech", "openai-audio-transcription": "OpenAI Audio Transcription", "gemini": "Gemini", "vertex": "Vertex AI", "fal": "Fal Queue" };
+  const category = endpoint.endpoint_id?.startsWith("bypass:") ? "Bypass · " : "";
+  return category + (names[endpoint.protocol] ?? endpoint.protocol) + " · " + endpoint.path;
+};

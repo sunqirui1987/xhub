@@ -36,12 +36,9 @@ export const toTemplateRows = (templates: RouteTemplate[]): RouteTemplateRow[] =
   }));
 
 /**
- * One line describing what a template does, from its settings document.
- *
- * It reads the same keys the request path reads, so the summary cannot claim a
- * strategy the data plane would ignore. Missing keys fall back to the platform
- * defaults rather than to blank, because a template seeded from the default has
- * no reason to spell them out.
+ * summarizeTemplate 为模板库生成执行摘要；参数为正文和本地化标签函数，返回一行策略、例外数量及可靠性说明。
+ * 优先显示模板默认策略；旧正文未设置默认时显示模型规则或继承，缺失可靠性字段使用展示默认值。
+ * 仅转换展示数据，不补写配置或调用后台。
  */
 export const summarizeTemplate = (
   body: Record<string, unknown>,
@@ -54,25 +51,18 @@ export const summarizeTemplate = (
     models?: (value: number) => string;
   },
 ): string => {
-  const strategy =
-    typeof body.routing_strategy === "string" && body.routing_strategy !== ""
-      ? labels.strategy(body.routing_strategy)
-      : labels.strategy("simple-shuffle");
-  const retries =
-    typeof body.num_retries === "number" && Number.isFinite(body.num_retries) && body.num_retries >= 1
-      ? Math.trunc(body.num_retries)
-      : 1;
-  // A missing or non-positive timeout is 60 on the request path. The summary
-  // says that, so the row does not claim a timeout the call will not use.
-  const timeout =
-    typeof body.timeout === "number" && Number.isFinite(body.timeout) && body.timeout > 0 ? body.timeout : 60;
-  const fallbacks = Array.isArray(body.fallbacks) ? body.fallbacks.length : 0;
-  const parts = [strategy, labels.retries(retries), labels.timeout(timeout)];
-  if (Array.isArray(body.model_routing) && body.model_routing.length && labels.models) {
-    parts.push(labels.models(body.model_routing.length));
-  }
-  parts.push(fallbacks > 0 ? labels.fallbacks(fallbacks) : labels.none);
-  return parts.join(" · ");
+  const count = Array.isArray(body.model_routes) ? body.model_routes.length : 0;
+  const retry =
+    body.retry_policy && typeof body.retry_policy === "object" ? (body.retry_policy as Record<string, unknown>) : {};
+  return [
+    typeof body.routing_strategy === "string"
+      ? labels.strategy(body.routing_strategy) + (count ? " · 模型例外 " + count + " 条" : "")
+      : count
+        ? "模型规则 " + count + " 条"
+        : "全部使用模型默认",
+    labels.retries(typeof retry.max_attempts === "number" ? retry.max_attempts : 1),
+    labels.timeout(typeof retry.timeout_seconds === "number" ? retry.timeout_seconds : 60),
+  ].join(" · ");
 };
 
 /** The scope kinds a template can be selected on, in inheritance order. */

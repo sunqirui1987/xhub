@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/sunqirui1987/xhub/internal/config"
 )
@@ -21,7 +22,7 @@ func Execution(m config.ModelEntry) (Transport, bool) {
 // DialogueProtocol 判断注册协议是否实现首版对话转换；参数为协议 ID，返回支持状态。
 // 调用：部署校验和统一入口；媒体协议保持原执行器，不跨媒体转换。
 func DialogueProtocol(protocol string) bool {
-	return slices.Contains([]string{"openai-chat", "openai-responses", "anthropic-messages"}, protocol)
+	return slices.Contains([]string{"openai-chat", "openai-responses", "anthropic-messages", "gemini", "vertex"}, protocol)
 }
 
 // AllowsEndpoint 校验入口目录、部署声明与上游协议兼容性，返回明确的排除原因。
@@ -34,7 +35,13 @@ func AllowsEndpoint(m config.ModelEntry, endpoint string) error {
 		return err
 	}
 	declared := stringList(m.ModelInfo["endpoint_types"])
-	if !slices.Contains(declared, endpoint) {
+	standard := false
+	for _, e := range EndpointTypes() {
+		if e.ID == endpoint && e.Category != "bypass" {
+			standard = true
+		}
+	}
+	if !standard && !slices.Contains(declared, endpoint) {
 		return fmt.Errorf("endpoint %s is not enabled", endpoint)
 	}
 	for _, e := range EndpointTypes() {
@@ -42,10 +49,7 @@ func AllowsEndpoint(m config.ModelEntry, endpoint string) error {
 			continue
 		}
 		if t, ok := Execution(m); ok {
-			if e.Kind == KindAdapted && (e.Protocol == t.Protocol || (DialogueProtocol(e.Protocol) && DialogueProtocol(t.Protocol))) {
-				return nil
-			}
-			if e.Kind == KindBypass && e.Protocol == t.Protocol && (DialogueProtocol(t.Protocol) || endpoint == t.EndpointID) {
+			if CompatibleEndpoint(e, t) {
 				return nil
 			}
 		}
@@ -68,7 +72,22 @@ func ResolveHit(hit Hit, m config.ModelEntry) (Hit, error) {
 	model := OfficialID(t.StripPrefix, m.ParamString("model", ""))
 	for _, a := range t.Actions {
 		if a.Name == hit.Action.Name && (a.Model == "" || a.Model == model) {
-			return Hit{Transport: t, Action: a, Names: hit.Names}, nil
+			// 一个原生协议有多个 create 操作，必须保持入站操作后缀，禁止流式被发成非流式。
+			if t.Protocol == "gemini" || t.Protocol == "vertex" {
+				if a.PublicPath[strings.LastIndex(a.PublicPath, ":")+1:] != hit.Action.PublicPath[strings.LastIndex(hit.Action.PublicPath, ":")+1:] {
+					continue
+				}
+			}
+			// 路径模型来自部署，入口范围保持入站协议，避免模板与任务跨入口。
+			names := make(map[string]string, len(hit.Names)+1)
+			for k, v := range hit.Names {
+				names[k] = v
+			}
+			if t.Protocol == "gemini" || t.Protocol == "vertex" {
+				names["model"] = model
+			}
+			t.EndpointID = hit.Transport.EndpointID
+			return Hit{Transport: t, Action: a, Names: names}, nil
 		}
 	}
 	return Hit{}, fmt.Errorf("operation is not registered")

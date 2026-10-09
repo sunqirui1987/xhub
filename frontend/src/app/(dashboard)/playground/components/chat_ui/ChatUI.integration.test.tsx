@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders as render } from "@/../tests/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChatUI from "./ChatUI";
+import { endpointLabel } from "@/components/llm_calls/model_endpoints";
 import * as fetchModelsModule from "@/components/llm_calls/fetch_models";
 import { makeOpenAIChatCompletionRequest } from "@/components/llm_calls/chat_completion";
 import { makeAnthropicMessagesRequest } from "../../llm_calls/anthropic_messages";
@@ -52,7 +53,7 @@ async function openComboboxByPlaceholder(placeholder: string) {
 async function selectComboboxOption(placeholder: string, optionLabel: string) {
   const user = userEvent.setup();
   await openComboboxByPlaceholder(placeholder);
-  const option = await screen.findByText(optionLabel);
+  const option = await screen.findByRole("option", { name: optionLabel.startsWith("/") ? new RegExp(optionLabel + "$" ) : optionLabel });
   await user.click(option);
 }
 
@@ -72,21 +73,25 @@ describe("ChatUI", () => {
   });
 
 
+  /** 前置三个显式部署夹具；验证列表、切换、无绑定状态与禁止发送，自动卸载清理。 */
   it("只列出所选模型的端点，切换模型后清除失效绑定", async () => {
     render(<ChatUI accessToken="test" token="test" userRole="user" userID="test" disabledPersonalKeyCreation={false} />);
     expect(screen.getByPlaceholderText("Select an endpoint")).toBeDisabled();
     await selectComboboxOption(translate("en", "Select a Model"), "Model 1");
     await openComboboxByPlaceholder("Select an endpoint");
-    expect(screen.getByRole("option", { name: "/v1/messages" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "/v1/audio/speech" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("option", { name: "/v1/messages" }));
+    expect(screen.getByRole("option", { name: /\/v1\/messages$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/v1\/audio\/speech$/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: /\/v1\/messages$/ }));
     await selectComboboxOption(translate("en", "Select a Model"), "Model 2");
-    expect(screen.getByPlaceholderText("Select an endpoint")).toHaveValue("/v1/audio/speech");
+    expect(screen.getByPlaceholderText("Select an endpoint")).toHaveValue(endpointLabel(endpoint("/v1/audio/speech")));
     await selectComboboxOption(translate("en", "Select a Model"), "Model 3");
     expect(screen.getByPlaceholderText("Select an endpoint")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("该模型没有可调用的端点");
+    expect(screen.queryByPlaceholderText("Describe the image you want to generate...")).not.toBeInTheDocument();
   });
 
+  /** 前置原生与适配绑定及本地响应；验证精确路径和原生字段，不写外部数据，恢复 fetch。 */
   it("原生与适配 Responses 可以独立选择，并把原生请求发往实际路径", async () => {
     vi.mocked(fetchModelsModule.fetchAvailableModels).mockResolvedValueOnce([{ model_group: "NativeModel", endpoints: [
       endpoint("/v1/responses"), endpoint("/bypass/openai/v1/responses", "bypass", "openai-responses"),
@@ -234,7 +239,7 @@ describe("ChatUI", () => {
     expect(screen.getByPlaceholderText(translate("en", "Select a Model"))).toHaveValue("Model 1");
 
     await user.click(screen.getAllByRole("button", { name: "Clear" })[0]);
-    const input = screen.getByPlaceholderText("Describe the image you want to generate...");
+    const input = screen.getByPlaceholderText("请先选择模型和有效端点");
     fireEvent.change(input, { target: { value: "Contract endpoint check" } });
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
@@ -538,7 +543,7 @@ describe("ChatUI", () => {
 
     await selectComboboxOption(translate("en", "Select a Model"), "ChatModel");
 
-    expect(screen.getByPlaceholderText("Select an endpoint")).toHaveValue("/v1/responses");
+    expect(screen.getByPlaceholderText("Select an endpoint")).toHaveValue(endpointLabel(endpoint("/v1/responses")));
   });
 
   it("should list configured models before choosing an endpoint", async () => {

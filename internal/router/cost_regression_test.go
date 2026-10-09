@@ -32,7 +32,7 @@ func TestCostRoutingUsesSettlementRatePrecedenceAndWindow(t *testing.T) {
 		}{
 			{peak, "https://b.example"}, {offpeak, "https://a.example"},
 		} {
-			got := Pick([]config.ModelEntry{b, a}, "shared-name", "lowest_cost", State{Now: tc.at})
+			got := Pick([]config.ModelEntry{b, a}, "shared-name", "cost-based-routing", State{Now: tc.at})
 			if got == nil || got.ParamString("api_base", "") != tc.want {
 				t.Fatalf("table=%v at=%s got=%v want=%s", table, tc.at, got, tc.want)
 			}

@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Fallbacks from "./Fallbacks";
 import * as networkingModule from "../../../networking";
 import * as fetchModelsModule from "@/components/llm_calls/fetch_models";
 
 vi.mock("../../../networking", () => ({
+  getProxyBaseUrl: vi.fn(() => "http://localhost"),
   getCallbacksCall: vi.fn(),
   setCallbacksCall: vi.fn(),
 }));
@@ -17,18 +18,6 @@ vi.mock("@/components/llm_calls/fetch_models", () => ({
 
 vi.mock("@/app/(dashboard)/hooks/models/useModelCostMap", () => ({
   useModelCostMap: vi.fn().mockReturnValue({ data: null }),
-}));
-
-vi.mock("openai", () => ({
-  default: {
-    OpenAI: vi.fn().mockImplementation(() => ({
-      chat: {
-        completions: {
-          create: vi.fn(),
-        },
-      },
-    })),
-  },
 }));
 
 vi.mock("../../../common_components/DeleteResourceModal", () => ({
@@ -76,6 +65,8 @@ vi.mock("./AddFallbacks", () => ({
   },
 }));
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("Fallbacks", () => {
   const mockAccessToken = "test-token";
   const mockUserRole = "Admin";
@@ -113,6 +104,27 @@ describe("Fallbacks", () => {
       { model_group: "gpt-3.5-turbo", mode: "chat" },
       { model_group: "claude-3-opus", mode: "chat" },
     ]);
+  });
+
+  /** 前置隔离设置及真实 JSON Response；点击回退测试，验证模型、鉴权和失败传播到界面处理；结束恢复 fetch。 */
+  it.each([200, 400])("回退测试保留 fetch 契约，HTTP %s", async (status) => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify(status === 200 ? { model: "fallback" } : { error: { message: "unavailable" } }), {
+          status,
+        }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+    renderWithQueryClient(<Fallbacks {...defaultProps} />);
+    const buttons = await screen.findAllByRole("button", { name: "Test fallback" });
+    await user.click(buttons[0]);
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe("http://localhost/chat/completions");
+    expect(JSON.parse(options.body)).toMatchObject({ model: "gpt-4", mock_testing_fallbacks: true });
+    expect(options.headers.get("authorization")).toBe("Bearer test-token");
   });
 
   it("should render the component", async () => {

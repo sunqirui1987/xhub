@@ -23,7 +23,12 @@ func bypassURL(base, path string) string {
 	} else {
 		u.Path = root + path
 	}
-	u.RawPath = ""
+	// 保留注册参数的转义，防止模型或任务 ID 中的斜杠变为路径分隔符。
+	encoded := u.Path
+	if decoded, err := url.PathUnescape(encoded); err == nil {
+		u.Path = decoded
+		u.RawPath = encoded
+	}
 	return u.String()
 }
 
@@ -32,7 +37,11 @@ func bypassURL(base, path string) string {
 // 返回 string：只由已登记路径及编码后的任务参数构成的地址。
 // 调用：原生创建、查询。测试：TestNativeSupplierURLs。
 func bypassDeploymentURL(base string, hit provider.Hit, dep config.ModelEntry) string {
-	path := provider.Expand(hit.Action.UpstreamPath, hit.Names)
+	names := make(map[string]string, len(hit.Names))
+	for k, v := range hit.Names {
+		names[k] = url.PathEscape(v)
+	}
+	path := provider.Expand(hit.Action.UpstreamPath, names)
 	return bypassURL(base, path)
 }
 

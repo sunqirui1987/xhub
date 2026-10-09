@@ -20,6 +20,13 @@ func NativeUsage(protocol string) func(map[string]any, map[string]any) map[strin
 				return map[string]any{"pricing_blocked": "response_not_completed"}
 			}
 		}
+		if protocol == "gemini" || protocol == "vertex" {
+			source, _ := doc["usageMetadata"].(map[string]any)
+			if len(source) == 0 {
+				return map[string]any{"pricing_blocked": "upstream_usage_missing"}
+			}
+			return map[string]any{"prompt_tokens": source["promptTokenCount"], "completion_tokens": nativeNumber(source["candidatesTokenCount"]) + nativeNumber(source["thoughtsTokenCount"]), "prompt_tokens_details": map[string]any{"cached_tokens": source["cachedContentTokenCount"]}}
+		}
 		source, _ := doc["usage"].(map[string]any)
 		out := map[string]any{}
 		for k, v := range source {
@@ -142,6 +149,15 @@ func (s *NativeStreamState) Observe(protocol string, raw []byte) {
 		s.Failed = true
 	}
 	switch protocol {
+	case "gemini", "vertex":
+		if candidates, ok := doc["candidates"].([]any); ok {
+			for _, candidate := range candidates {
+				item, _ := candidate.(map[string]any)
+				if reason, _ := item["finishReason"].(string); reason != "" {
+					s.Completed = true
+				}
+			}
+		}
 	case "openai-chat":
 		if strings.TrimSpace(strings.Join(data, "\n")) == "[DONE]" {
 			s.Completed = true
@@ -163,4 +179,19 @@ func (s *NativeStreamState) Observe(protocol string, raw []byte) {
 			s.Images++
 		}
 	}
+}
+
+// nativeNumber 读取原生响应中的数值；参数为解码字段，返回数字或零。
+// 调用：Gemini 实测候选与思考 token 汇总；不存在或非数字不推测用量，无副作用。
+func nativeNumber(value any) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case json.Number:
+		n, _ := v.Float64()
+		return n
+	}
+	return 0
 }

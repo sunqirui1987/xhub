@@ -182,6 +182,20 @@ func ApplyDocument(doc PriceDocument) (int, error) {
 	modelCostMu.Lock()
 	modelCostMapValue = rows
 	modelsByProvider = sets
+	// 供应商和别名与价格一起换入，避免选择器继续显示旧目录。
+	baseProviders = append([]map[string]any(nil), doc.Providers...)
+	baselineProviders = append([]map[string]any(nil), doc.Providers...)
+	officialAlias = map[string]string{}
+	for id, row := range doc.Models {
+		for _, alias := range stringListField(row, "model_alias") {
+			if alias != "" && alias != id {
+				officialAlias[alias] = id
+			}
+		}
+	}
+	for slug := range sets {
+		knownLLMProviders[slug] = struct{}{}
+	}
 	refreshContributionsLocked()
 	if doc.Source != "" {
 		priceSource = doc.Source

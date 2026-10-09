@@ -152,7 +152,7 @@ func sseLines(data []byte, atEOF bool) (int, []byte, error) {
 // 调用：forwardOfficial。测试：TestNativeBypassJSONAndUsage。
 func bypassHeader(k string, headers http.Header) bool {
 	switch strings.ToLower(k) {
-	case "authorization", "host", "content-length", "cookie", "set-cookie", "x-api-key", "api-key", "x-litellm-api-key", "connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade":
+	case "x-goog-api-key", "authorization", "host", "content-length", "cookie", "set-cookie", "x-api-key", "api-key", "x-litellm-api-key", "connection", "proxy-connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade":
 		return false
 	}
 	for _, named := range strings.Split(headers.Get("Connection"), ",") {

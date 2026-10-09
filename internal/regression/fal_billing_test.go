@@ -10,6 +10,8 @@ import (
 	"testing"
 )
 
+// TestFalSettlementUsesOutputSecondsAndDeduplicates 验证 FAL 成功任务按输出秒数计费且重复查询不重复扣费。
+// 参数 t：测试上下文；前置显式 FAL 部署和本地上游；返回无，待处理及失败不扣费，成功仅结算一次；宿主清理数据库，上游随测试关闭。
 func TestFalSettlementUsesOutputSecondsAndDeduplicates(t *testing.T) {
 	const model = "qiniu/fal-ai/kling-video/v2.5-turbo/pro/text-to-video"
 	const create = "/queue/fal-ai/kling-video/v2.5-turbo/pro/text-to-video"
@@ -36,6 +38,9 @@ func TestFalSettlementUsesOutputSecondsAndDeduplicates(t *testing.T) {
 	}))
 	defer up.Close()
 	dep := seedanceDeployment(model, "qiniu_fal_kling")
+	// FAL 使用自己的固定队列端点和兼容连接；不能沿用辅助函数的 Ark 协议声明。
+	dep.ModelInfo["endpoint_types"] = []string{"fal:queue"}
+	dep.LiteLLMParams["custom_llm_provider"] = "openai"
 	dep.LiteLLMParams["api_base"] = up.URL
 	dep.LiteLLMParams["api_key"] = "sk-fake"
 	h := newHarness(t, dep)

@@ -5,6 +5,7 @@
 package models
 
 import (
+	"encoding/json"
 	"math"
 	"net/http"
 	"sort"
@@ -19,7 +20,9 @@ import (
 
 const (
 	// priceModelNS holds one row per hand-entered or edited model, keyed by id.
-	priceModelNS = "price_model"
+	priceModelNS    = "price_model"
+	priceSnapshotNS = "price_snapshot"
+	priceListingNS  = "price_listing"
 	// priceProviderNS holds one row per hand-added supplier, keyed by slug.
 	priceProviderNS = "price_provider"
 	// priceRemovedNS holds the ids an operator deleted from the catalog.
@@ -51,6 +54,8 @@ var textFields = []string{
 	"upstream_model",
 	"supplier_name",
 	"mode",
+	// 控制台价格下拉写入执行类型 ID；保留旧 endpoint_type 字段兼容历史目录。
+	"endpoint_id",
 	"endpoint_type",
 	"source",
 	"max_input_tokens",
@@ -83,12 +88,29 @@ func LoadPriceOverrides(s Host) {
 	if st == nil {
 		return
 	}
-	// Deletions first: a row that was removed must not come back when the
-	// stored overrides are replayed.
+	// 启动先恢复本地市场快照，再叠加手工价格；离线重启仍可浏览。
+	if saved, err := st.ListConfig(priceSnapshotNS); err == nil {
+		if raw, ok := saved["catalog"]; ok {
+			bytes, _ := json.Marshal(raw)
+			var doc catalog.PriceDocument
+			if json.Unmarshal(bytes, &doc) == nil {
+				_, _ = catalog.ApplyDocument(doc)
+			}
+		}
+	}
+	// 旧版删除迁移为下架，恢复完整基线并保留既有手工价格。
 	if removed, err := st.ListConfig(priceRemovedNS); err == nil {
 		for id, raw := range removed {
-			if gone, ok := raw.(bool); ok && gone {
-				catalog.RemoveModel(id)
+			if raw != true {
+				continue
+			}
+			if _, exists := catalog.ModelRow(id); !exists {
+				if row, ok := catalog.BaselineModel(id); ok {
+					catalog.SetModel(id, row)
+				}
+			}
+			if err := st.PutConfig(priceListingNS, id, true); err == nil {
+				_ = st.DeleteConfig(priceRemovedNS, id)
 			}
 		}
 	}
@@ -99,7 +121,20 @@ func LoadPriceOverrides(s Host) {
 	}
 	for id, raw := range rows {
 		if row, ok := raw.(map[string]any); ok {
-			catalog.SetModel(id, row)
+			// 价格覆盖不能带回旧可售状态、价格档位或能力；这些字段始终取最新市场基线。
+			merged := map[string]any{}
+			for key, value := range row {
+				merged[key] = value
+			}
+			if base, ok := catalog.BaselineModel(id); ok {
+				for _, key := range []string{"market_catalog", "private", "feed_unavailable", "retirement_at", "pricing_rules_v2", "input_modalities", "output_modalities", "architecture", "rank", "features", "hot_tags", "support_api_protocols", "model_doc_url", "integration_doc_url"} {
+					delete(merged, key)
+					if value, exists := base[key]; exists {
+						merged[key] = value
+					}
+				}
+			}
+			catalog.SetModel(id, merged)
 		}
 	}
 	providers, err := st.ListConfig(priceProviderNS)
@@ -136,6 +171,10 @@ func PriceList(s Host, w http.ResponseWriter, r *http.Request) {
 	rows := catalog.CostMap()
 	overrides := storedKeys(s, priceModelNS)
 	removed := storedKeys(s, priceRemovedNS)
+	listings := map[string]any{}
+	if s.RecordStore() != nil {
+		listings, _ = s.RecordStore().ListConfig(priceListingNS)
+	}
 	models := make([]map[string]any, 0, len(rows)+len(removed))
 	for id, row := range rows {
 		entry := make(map[string]any, len(row)+3)
@@ -145,6 +184,7 @@ func PriceList(s Host, w http.ResponseWriter, r *http.Request) {
 		entry["id"] = id
 		entry["baseline"] = catalog.IsBaseline(id)
 		entry["overridden"] = overrides[id]
+		entry["delisted"] = listings[id] == true
 		models = append(models, entry)
 	}
 	// A baseline row the operator deleted is gone from the live map, so the
@@ -237,32 +277,43 @@ func UpsertPriceModel(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"status": "success", "id": id})
 }
 
-// DeletePriceModel removes one model from the live catalog. The embedded file is
-// not rewritten, so the deletion is remembered as a tombstone.
-// 参数 s（Host）：能写框架记录的宿主；w（http.ResponseWriter）：响应写到这；r（*http.Request）：入站请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：gateway/models/mount.go
-// 测试：无直接单测
-func DeletePriceModel(s Host, w http.ResponseWriter, r *http.Request) {
+// DeletePriceModel 兼容旧入口，将删除请求转为下架，完整价格与本地记录保留。
+// 参数为宿主和HTTP请求响应；返回HTTP状态；由旧客户端调用，与上下架接口使用相同持久化规则。
+func DeletePriceModel(s Host, w http.ResponseWriter, r *http.Request) { setPriceListing(s, w, r, true) }
+
+// SetPriceListing 设置本地模型上下架状态；参数为宿主和HTTP请求响应，正文含id及delisted布尔值。
+// 返回HTTP结果；管理列表调用。只改变广场展示，不删除价格或禁用已部署接口。
+func SetPriceListing(s Host, w http.ResponseWriter, r *http.Request) { setPriceListing(s, w, r, false) }
+
+// setPriceListing 校验并持久化上下架；legacy表示旧删除入口，默认下架。
+// 返回HTTP结果；被管理入口调用。未知模型404，错误输入400，数据库写入失败500，无价格清理副作用。
+func setPriceListing(s Host, w http.ResponseWriter, r *http.Request, legacy bool) {
 	if s.RequireManage(w, r) == nil {
 		return
 	}
-	id := strings.TrimSpace(str(readMap(r)["id"]))
-	if id == "" {
-		httpx.WriteError(w, 400, "invalid_request", "id is required")
+	body := readMap(r)
+	id := strings.TrimSpace(str(body["id"]))
+	delisted, valid := body["delisted"].(bool)
+	if legacy {
+		delisted, valid = true, true
+	}
+	if id == "" || !valid {
+		httpx.WriteError(w, 400, "invalid_request", "id and boolean delisted are required")
 		return
 	}
-	if _, ok := catalog.BaselineModel(id); ok {
-		if err := s.RecordStore().PutConfig(priceRemovedNS, id, true); err != nil {
-			httpx.WriteError(w, 500, "internal", err.Error())
-			return
-		}
+	if _, ok := catalog.ModelRow(id); !ok {
+		httpx.WriteError(w, 404, "not_found", "model is not in the local catalog")
+		return
 	}
-	if err := s.RecordStore().DeleteConfig(priceModelNS, id); err != nil {
-		logx.Debug("price override for %s was already absent", id)
+	if s.RecordStore() == nil {
+		httpx.WriteError(w, 500, "internal", "local catalog store unavailable")
+		return
 	}
-	catalog.RemoveModel(id)
-	httpx.WriteJSON(w, 200, map[string]any{"status": "success", "id": id})
+	if err := s.RecordStore().PutConfig(priceListingNS, id, delisted); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"status": "success", "id": id, "delisted": delisted})
 }
 
 // ResetPriceModel drops an override and restores the embedded row.
@@ -279,16 +330,17 @@ func ResetPriceModel(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", "id is required")
 		return
 	}
-	if err := s.RecordStore().DeleteConfig(priceModelNS, id); err != nil {
-		logx.Debug("price override for %s was already absent", id)
-	}
-	if err := s.RecordStore().DeleteConfig(priceRemovedNS, id); err != nil {
-		logx.Debug("price tombstone for %s was already absent", id)
-	}
 	row, ok := catalog.BaselineModel(id)
 	if !ok {
-		catalog.RemoveModel(id)
-		httpx.WriteJSON(w, 200, map[string]any{"status": "success", "id": id, "restored": false})
+		httpx.WriteError(w, 409, "no_baseline", "custom models have no market baseline; delist instead")
+		return
+	}
+	if s.RecordStore() == nil {
+		httpx.WriteError(w, 500, "internal", "local catalog store unavailable")
+		return
+	}
+	if err := s.RecordStore().DeleteConfig(priceModelNS, id); err != nil {
+		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
 	catalog.SetModel(id, row)

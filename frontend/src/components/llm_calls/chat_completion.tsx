@@ -1,5 +1,4 @@
-import openai from "openai";
-import { ChatCompletion, ChatCompletionChunk, ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { postLLMRequest, readJSONStream } from "./transport";
 import { TokenUsage } from "../chat_ui/ResponseMetrics";
 import { VectorStoreSearchResponse } from "../chat_ui/types";
 import { getProxyBaseUrl } from "@/components/networking";
@@ -7,7 +6,16 @@ import { MCPServer, MCPToolset, type MCPEvent } from "@/components/mcp_tools/typ
 import { extractPromptCacheTokens } from "@/utils/promptCacheUsage";
 import { parseUsageCost } from "./usage_cost";
 
-const completionAsSingleChunk = (completion: ChatCompletion): ChatCompletionChunk =>
+/** Chat 协议响应保留供应商扩展字段，供 UI 增量处理。 */
+interface ChatChunk {
+  id?: string;
+  created?: number;
+  model?: string;
+  usage?: unknown;
+  choices: { finish_reason?: string | null; message?: any; delta?: any }[];
+}
+/** 将 JSON 完整回答转换为一个增量；参数为 Chat 响应，返回 UI 共用的 chunk。 */
+const completionAsSingleChunk = (completion: ChatChunk): ChatChunk =>
   ({
     id: completion.id,
     object: "chat.completion.chunk",
@@ -21,8 +29,11 @@ const completionAsSingleChunk = (completion: ChatCompletion): ChatCompletionChun
         delta: completion.choices[0]?.message ?? {},
       },
     ],
-  }) as unknown as ChatCompletionChunk;
+  }) as unknown as ChatChunk;
 
+/** 发送 Chat 请求并分派文本、推理、工具、图片、搜索及用量回调。
+ * 参数包含历史、模型、虚拟密钥、网关配置和可选回调；返回完成 Promise。
+ * 供 Playground/对比调用，HTTP、流解析和取消错误向调用方传播。 */
 export async function makeOpenAIChatCompletionRequest(
   chatHistory: { role: string; content: string | any[] }[],
   updateUI: (chunk: string, model?: string) => void,
@@ -57,18 +68,6 @@ export async function makeOpenAIChatCompletionRequest(
     console.log = function () {};
   }
   const proxyBaseUrl = customBaseUrl || getProxyBaseUrl();
-  // Prepare headers with tags and trace ID
-  const headers: Record<string, string> = {};
-  if (tags && tags.length > 0) {
-    headers["x-litellm-tags"] = tags.join(",");
-  }
-
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: headers,
-  });
 
   try {
     const startTime = Date.now();
@@ -130,7 +129,7 @@ export async function makeOpenAIChatCompletionRequest(
     const requestBody = {
       model: selectedModel,
       litellm_trace_id: traceId,
-      messages: chatHistory as ChatCompletionMessageParam[],
+      messages: chatHistory as { role: string; content: string | any[] }[],
       ...(vector_store_ids ? { vector_store_ids } : {}),
       ...(guardrails ? { guardrails } : {}),
       ...(policies ? { policies } : {}),
@@ -140,18 +139,19 @@ export async function makeOpenAIChatCompletionRequest(
       ...(mockTestFallbacks ? { mock_testing_fallbacks: true } : {}),
     };
 
-    const response: AsyncIterable<ChatCompletionChunk> | ChatCompletionChunk[] = streamingEnabled
-      ? await client.chat.completions.create(
-          { ...requestBody, stream: true, stream_options: { include_usage: true } },
-          { signal },
-        )
-      : await (async () => {
-          const nonStreamingResponse = await client.chat.completions
-            .create({ ...requestBody, stream: false }, { signal })
-            .withResponse();
-          servedFromResponseCache = nonStreamingResponse.response.headers.get("x-litellm-cache-key") !== null;
-          return [completionAsSingleChunk(nonStreamingResponse.data)];
-        })();
+    const httpResponse = await postLLMRequest(
+      "chat/completions",
+      {
+        ...requestBody,
+        stream: streamingEnabled,
+        ...(streamingEnabled ? { stream_options: { include_usage: true } } : {}),
+      },
+      { baseUrl: proxyBaseUrl, accessToken, tags, signal },
+    );
+    servedFromResponseCache = !streamingEnabled && httpResponse.headers.has("x-litellm-cache-key");
+    const response = streamingEnabled
+      ? readJSONStream(httpResponse, signal)
+      : [completionAsSingleChunk(await httpResponse.json())];
 
     for await (const chunk of response) {
       // Process content and measure time to first token

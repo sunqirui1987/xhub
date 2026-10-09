@@ -2,7 +2,7 @@ import { useModelCostMap } from "@/app/(dashboard)/hooks/models/useModelCostMap"
 import { ArrowRight, Pencil, Play, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import openai from "openai";
+import { postLLMRequest } from "@/components/llm_calls/transport";
 import React, { useEffect, useState } from "react";
 import DeleteResourceModal from "../../../common_components/DeleteResourceModal";
 import { ProviderLogo } from "../../../molecules/models/ProviderLogo";
@@ -75,36 +75,39 @@ interface FallbacksProps {
   userID: string | null;
 }
 
+/** 向真实数据面发送回退测试；参数为模型与密钥，返回完成 Promise；结果通过 toast 告知设置页用户。 */
 async function testFallbackModelResponse(selectedModel: string, accessToken: string) {
   const isLocal = process.env.NODE_ENV === "development";
   if (isLocal != true) {
     console.log = function () {};
   }
   const proxyBaseUrl = getProxyBaseUrl();
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-  });
 
   try {
     toast.info(t("Testing fallback model response..."));
 
-    const response = await client.chat.completions.create({
-      model: selectedModel,
-      messages: [
-        {
-          role: "user",
-          content: "Hi, this is a test message",
-        },
-      ],
-      // @ts-ignore
-      mock_testing_fallbacks: true,
-    });
+    const httpResponse = await postLLMRequest(
+      "chat/completions",
+      {
+        model: selectedModel,
+        messages: [
+          {
+            role: "user",
+            content: "Hi, this is a test message",
+          },
+        ],
+        // @ts-ignore
+        mock_testing_fallbacks: true,
+      },
+      { baseUrl: proxyBaseUrl, accessToken },
+    );
+    const response = await httpResponse.json();
 
     toast.success(
       <span>
-        {t("Test model=")}<strong>{selectedModel}</strong>{t(", received model=")}
+        {t("Test model=")}
+        <strong>{selectedModel}</strong>
+        {t(", received model=")}
         <strong>{response.model}</strong>
       </span>,
     );
@@ -287,7 +290,14 @@ const Fallbacks: React.FC<FallbacksProps> = ({ accessToken, userRole, userID }) 
                           <TooltipTrigger
                             render={
                               <span
+                                role="button"
+                                tabIndex={0}
+                                aria-label={t("Test fallback")}
                                 onClick={() => testFallbackModelResponse(Object.keys(item)[0], accessToken || "")}
+                                onKeyDown={(e) =>
+                                  e.key === "Enter" &&
+                                  testFallbackModelResponse(Object.keys(item)[0], accessToken || "")
+                                }
                                 className={`${iconWrapperClass} cursor-pointer hover:text-info`}
                               />
                             }

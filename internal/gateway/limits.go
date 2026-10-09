@@ -7,6 +7,8 @@ package gateway
 import (
 	"context"
 	"errors"
+	"github.com/sunqirui1987/xhub/internal/provider"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -50,14 +52,16 @@ var (
 	errCredentialInvalid     = errors.New("credential_invalid")
 )
 
-// 按部署上的凭据名补上 api_key 和 api_base。没有凭据名时原样返回这部署。
-// 参数 dep（config.ModelEntry）：要补密钥的部署。没有 litellm_credential_name 时原样返回。
+// withCredential 读取当前连接目录并校验模型能力，再补上 api_key 和 api_base。
+// 没有连接时使用部署的内联目录；元数据独立复制，不写入上游参数。
+// 参数 dep（config.ModelEntry）：含上游模型、执行传输、连接名或内联连接的部署。
 // 返回：填好 api_key 和 api_base 的副本。凭证库不可用或凭证无效时返回错误。
 // 调用：gateway/wire.go
-// 测试：无直接单测
+// 测试：credential_catalog_test.go、regression/supplier_catalog_test.go。
 func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error) {
 	name := dep.ParamString("litellm_credential_name", "")
 	var values map[string]any
+	catalogID, _ := dep.ModelInfo["catalog_id"].(string)
 	if name != "" {
 		if s.Store == nil {
 			return dep, errCredentialUnavailable
@@ -67,6 +71,8 @@ func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error
 			logx.Error("credential lookup failed name=%s err=%v", name, err)
 			return dep, errCredentialUnavailable
 		} else {
+			meta, _ := rec["credential_info"].(map[string]any)
+			catalogID, _ = meta["catalog_id"].(string)
 			values, _ = rec["credential_values"].(map[string]any)
 			if values == nil {
 				logx.Error("credential invalid name=%s reason=missing credential_values", name)
@@ -74,7 +80,16 @@ func (s *Server) withCredential(dep config.ModelEntry) (config.ModelEntry, error
 			}
 		}
 	}
+	// 每次请求读取当前目录，防止连接编辑后沿用旧能力；元数据不进入上游参数。
+	if err := provider.ValidateCatalogBinding(catalogID, dep); err != nil {
+		return dep, errCredentialInvalid
+	}
 	out := dep
+	out.ModelInfo = maps.Clone(dep.ModelInfo)
+	if out.ModelInfo == nil {
+		out.ModelInfo = map[string]any{}
+	}
+	out.ModelInfo["catalog_id"] = catalogID
 	out.LiteLLMParams = llm.Hydrate(dep.LiteLLMParams, values)
 	return out, nil
 }

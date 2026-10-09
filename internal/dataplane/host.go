@@ -16,6 +16,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/hooks"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
+	"github.com/sunqirui1987/xhub/internal/llm"
 	"github.com/sunqirui1987/xhub/internal/logx"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/provider"
@@ -375,6 +376,8 @@ type Host interface {
 // Caller 是密钥哈希或用户 id，避免不同租户共用一根钉。
 // Pinned 是上一次部署 id。非空时 Serve 把该部署放在候选第一位。Bypass 不使用 Pinned。
 type RoutePlan struct {
+	// History 是按调用方、模型和响应 ID 隔离的一小时续接上下文，不代表上游 store。
+	History []llm.Turn
 	// Endpoint、Required、Err 隔离入口并阻止不存在的响应继续请求回退。
 	Endpoint  string
 	Required  bool

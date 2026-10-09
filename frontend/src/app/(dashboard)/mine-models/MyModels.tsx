@@ -10,16 +10,19 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cva.config";
 import { uiHref } from "@/utils/uiHref";
 import type { MyModelCard } from "./grantedModelCards";
+import { MyModelDetail, type ModelDetailTab } from "./MyModelDetail";
 
 export type { MyModelCard };
 
 type SortOrder = "name" | "input" | "output";
 
+/** 格式化卡片费率；参数为每百万 Token 单价，返回金额或缺价提示；供模型卡片使用，无副作用。 */
 function priceText(value: number | null): string {
   if (value == null) return t("Price unavailable");
   return "$" + new Intl.NumberFormat("en-US", { maximumSignificantDigits: 8 }).format(value);
 }
 
+/** 返回模型类别的展示名称；参数为后台类别，返回本地化名称，未知类别原样展示；供列表分组使用。 */
 function categoryLabel(category: string): string {
   const labels: Record<string, string> = {
     chat: t("Chat"),
@@ -37,7 +40,10 @@ function categoryLabel(category: string): string {
   return labels[category] ?? category;
 }
 
-function ModelCard({ model }: { model: MyModelCard }) {
+/** 展示授权模型摘要和四类详情入口；参数为模型及打开回调，返回卡片。
+ * 供我的模型列表调用；只按实际绑定展示可用状态，不因目录分类推断接口。 */
+function ModelCard({ model, onOpen }: { model: MyModelCard; onOpen: (tab: ModelDetailTab) => void }) {
+  const unavailable = Boolean(model.unavailable_reason) || model.endpoints?.length === 0;
   return (
     <article
       data-testid={"my-model-" + model.id}
@@ -53,8 +59,15 @@ function ModelCard({ model }: { model: MyModelCard }) {
             {model.provider ?? t("myModels.unknownProvider")}
           </p>
         </div>
-        <Badge className="shrink-0 border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-          {t("myModels.available")}
+        <Badge
+          className={cn(
+            "shrink-0",
+            unavailable
+              ? "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+          )}
+        >
+          {t(unavailable ? "myModels.needsConfiguration" : "myModels.available")}
         </Badge>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -113,7 +126,20 @@ function ModelCard({ model }: { model: MyModelCard }) {
           )}
         </div>
       )}
-      <div className="mt-auto pt-5">
+      <div className="mt-auto space-y-3 pt-5">
+        <nav
+          aria-label={model.id + " " + t("myModels.howToCall")}
+          className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-1"
+        >
+          {(["pricing", "access", "api", "docs"] as const).map((tab) => (
+            <Button key={tab} variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpen(tab)}>
+              {t("myModels." + tab)}
+            </Button>
+          ))}
+        </nav>
+        <Button className="w-full" onClick={() => onOpen("api")}>
+          {t("myModels.howToCall")} <ArrowRight aria-hidden="true" />
+        </Button>
         <Link href={uiHref("playground")} className={cn(buttonVariants({ variant: "outline" }), "w-full")}>
           {t("myModels.useInPlayground")} <ArrowRight aria-hidden="true" />
         </Link>
@@ -122,6 +148,8 @@ function ModelCard({ model }: { model: MyModelCard }) {
   );
 }
 
+/** 展示授权模型列表及接入详情；参数为模型、加载/失败状态和重试回调，返回可筛选页面。
+ * 供我的模型路由调用；详情仅使用授权列表，不读取管理员部署或供应商凭据。 */
 export function MyModels({
   models,
   isLoading = false,
@@ -133,6 +161,7 @@ export function MyModels({
   isError?: boolean;
   onRetry?: () => void;
 }) {
+  const [detail, setDetail] = useState<{ model: MyModelCard; tab: ModelDetailTab } | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [provider, setProvider] = useState("all");
@@ -173,6 +202,7 @@ export function MyModels({
       });
   }, [category, models, provider, query, sort]);
 
+  /** 清除搜索、类别和供应商条件；无参数和返回值，供清除按钮调用，只更新本地筛选状态。 */
   function resetFilters() {
     setQuery("");
     setCategory("all");
@@ -189,6 +219,7 @@ export function MyModels({
           </p>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">{t("myModels.title")}</h1>
           <p className="mt-4 text-sm leading-7 text-muted-foreground sm:text-base">{t("myModels.description")}</p>
+          <p className="mt-3 text-xs text-cyan-700 dark:text-cyan-300">{t("myModels.guideHint")}</p>
         </header>
         <section aria-label={t("myModels.title")}>
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row">
@@ -310,10 +341,12 @@ export function MyModels({
                 }, new Map<string, MyModelCard[]>()),
               ).map(([group, items]) => (
                 <section key={group} aria-label={categoryLabel(group)}>
-                  <h2 className="mb-4 text-sm font-semibold tracking-wide text-muted-foreground">{categoryLabel(group)}</h2>
+                  <h2 className="mb-4 text-sm font-semibold tracking-wide text-muted-foreground">
+                    {categoryLabel(group)}
+                  </h2>
                   <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     {items.map((model) => (
-                      <ModelCard key={model.id} model={model} />
+                      <ModelCard key={model.id} model={model} onOpen={(tab) => setDetail({ model, tab })} />
                     ))}
                   </div>
                 </section>
@@ -331,6 +364,13 @@ export function MyModels({
           )}
         </section>
       </div>
+      {detail && (
+        <MyModelDetail
+          model={models.find((model) => model.id === detail.model.id) ?? detail.model}
+          initialTab={detail.tab}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </div>
   );
 }

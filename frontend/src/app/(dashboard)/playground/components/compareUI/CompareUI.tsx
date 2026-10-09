@@ -16,7 +16,7 @@ import type { TokenUsage } from "@/components/chat_ui/ResponseMetrics";
 import type { MessageType, VectorStoreSearchResponse } from "@/components/chat_ui/types";
 import { makeOpenAIChatCompletionRequest } from "@/components/llm_calls/chat_completion";
 import { getProxyBaseUrl } from "@/components/networking";
-import { callTextEndpoint, selectEndpoint, textEndpoints } from "@/components/llm_calls/model_endpoints";
+import { endpointLabel, callTextEndpoint, selectEndpoint, textEndpoints } from "@/components/llm_calls/model_endpoints";
 import type { ModelGroup } from "@/components/llm_calls/fetch_models";
 import { fetchAvailableModels } from "@/components/llm_calls/fetch_models";
 import { Agent, fetchAvailableAgents } from "../../llm_calls/fetch_agents";
@@ -856,9 +856,10 @@ Error fetching response: ${errorMessage}`
               isLoadingOptions={isLoadingOptions}
               endpointConfig={endpointConfig}
               apiKey={effectiveApiKey}
+              unavailableReason={modelInfo.find((model) => model.model_group === comparison.model)?.unavailable_reason}
               supportsGatewaySettings={comparison.endpoint === "/v1/chat/completions"}
               endpointOptions={textEndpoints(modelInfo.find((model) => model.model_group === comparison.model)).map(
-                (endpoint) => ({ value: endpoint.path, label: endpoint.path }),
+                (endpoint) => ({ value: endpoint.path, label: endpointLabel(endpoint) }),
               )}
             />
           ))}

@@ -175,11 +175,11 @@ func stripBearer(v string) string {
 	return v
 }
 
-// APIKeyFrom reads the credential in LiteLLM order: x-litellm-api-key, then Authorization, then api-key and x-api-key.
+// APIKeyFrom 按通用鉴权优先级读取网关凭据，Google 原生入口额外接受原厂密钥形式。
 // 参数 r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 调用：gateway/engine.go、gateway/session.go
-// 测试：无直接单测
-// 返回：按 x-litellm-api-key、Authorization、api-key、x-api-key 的顺序找到的第一把密钥。都没有时为空串。
+// 测试：google_key_test.go。
+// 返回：通用头优先，其次 Google 路径的 x-goog-api-key 或 key 查询参数；未提供凭据时为空。
 func APIKeyFrom(r *http.Request) string {
 	// Same precedence as LiteLLM user_api_key_auth: x-litellm-api-key wins,
 	// then Authorization, then the Azure/OpenAI api-key headers.
@@ -205,6 +205,13 @@ func APIKeyFrom(r *http.Request) string {
 	}
 	if v := stripBearer(r.Header.Get("x-api-key")); v != "" {
 		return v
+	}
+	// Google 原生 SDK 的凭据只在已登记 Gemini/Vertex 入口接受，避免其他接口读取 URL 密钥。
+	if strings.HasPrefix(r.URL.Path, "/v1beta/models/") || strings.HasPrefix(r.URL.Path, "/vertex/v1/models/") {
+		if v := stripBearer(r.Header.Get("x-goog-api-key")); v != "" {
+			return v
+		}
+		return strings.TrimSpace(r.URL.Query().Get("key"))
 	}
 	return ""
 }

@@ -14,11 +14,11 @@ import (
 
 // Config is the loaded process configuration. RouterRaw and GeneralRaw keep YAML keys the typed structs do not name, so a database overlay can compare by key.
 type Config struct {
-	ModelList       []ModelEntry    `yaml:"model_list"`
-	RouterSettings  RouterSettings  `yaml:"router_settings"`
-	LiteLLMSettings map[string]any  `yaml:"litellm_settings"`
+	ModelList       []ModelEntry     `yaml:"model_list"`
+	RouterSettings  RouterSettings   `yaml:"router_settings"`
+	LiteLLMSettings map[string]any   `yaml:"litellm_settings"`
 	Guardrails      []map[string]any `yaml:"guardrails"`
-	GeneralSettings GeneralSettings `yaml:"general_settings"`
+	GeneralSettings GeneralSettings  `yaml:"general_settings"`
 	// Raw maps keep YAML keys the typed structs do not name. Database overlay wins per key.
 	RouterRaw  map[string]any `yaml:"-"`
 	GeneralRaw map[string]any `yaml:"-"`
@@ -126,7 +126,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("general_settings.database_url must be a postgres:// or postgresql:// URL")
 	}
 	if c.RouterSettings.RoutingStrategy == "" {
-		c.RouterSettings.RoutingStrategy = "simple-shuffle"
+		c.RouterSettings.RoutingStrategy = "random"
 	}
 	if c.RouterSettings.NumRetries == 0 {
 		c.RouterSettings.NumRetries = 2
@@ -175,4 +175,3 @@ func (e ModelEntry) ParamString(key, fallback string) string {
 	}
 	return s
 }
-

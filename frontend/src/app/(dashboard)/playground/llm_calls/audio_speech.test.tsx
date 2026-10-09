@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOpenAIAudioSpeechRequest } from "./audio_speech";
-import OpenAI from "openai";
-
-vi.mock("openai");
+import { installLLMFetchFixture } from "../../../../../tests/llmFetchFixture";
 
 // Mock URL.createObjectURL
 global.URL.createObjectURL = vi.fn(() => "blob:mock-audio-url");
@@ -19,16 +17,7 @@ describe("audio_speech", () => {
       blob: vi.fn().mockResolvedValue(mockBlob),
     });
 
-    // Mock the OpenAI constructor and its methods
-    (OpenAI as any).mockImplementation(function () {
-      return {
-        audio: {
-          speech: {
-            create: mockCreate,
-          },
-        },
-      };
-    });
+    installLLMFetchFixture(mockCreate);
   });
 
   afterEach(() => {
@@ -38,8 +27,10 @@ describe("audio_speech", () => {
       abortController = null;
     }
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should make a request to the audio speech API with basic parameters", async () => {
     await makeOpenAIAudioSpeechRequest("Hello, world!", "alloy", mockUpdateUI, "tts-1", "sk-1234567890", []);
 
@@ -54,6 +45,7 @@ describe("audio_speech", () => {
     expect(mockUpdateUI).toHaveBeenCalledWith("blob:mock-audio-url", "tts-1");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should include optional parameters when provided", async () => {
     abortController = new AbortController();
     const signal = abortController.signal;
@@ -83,6 +75,7 @@ describe("audio_speech", () => {
     expect(mockUpdateUI).toHaveBeenCalledWith("blob:mock-audio-url", "tts-1-hd");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should handle errors gracefully", async () => {
     const mockError = new Error("API Error");
     mockCreate.mockRejectedValue(mockError);

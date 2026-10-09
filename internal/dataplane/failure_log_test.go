@@ -52,7 +52,7 @@ func (h *logHost) ResolveRequest(*http.Request) (*auth.Principal, error) {
 	return &auth.Principal{Kind: "session", UserID: "log-user"}, nil
 }
 func (h *logHost) RouteSettingsFor(*auth.Principal) prefs.RouteSettings {
-	return prefs.PlatformSettings(nil)
+	return prefs.BuiltinSettings()
 }
 
 func (h *logHost) GatewayConfig() *config.Config   { return h.cfg }

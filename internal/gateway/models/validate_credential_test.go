@@ -2,6 +2,22 @@ package models
 
 import "testing"
 
+// TestGoogleDeploymentAlias 验证网关传递真实公开别名并拒绝不能匹配原生路径的名称。
+// 参数 t：测试上下文；前置内存宿主和显式 Gemini/Vertex 声明；返回无，斜杠和冒号名称通过、空段及点段失败，无持久数据需清理。
+func TestGoogleDeploymentAlias(t *testing.T) {
+	for _, protocol := range []string{"gemini", "vertex"} {
+		for _, name := range []string{"native-model", "space name", "group/name", "name:latest", "", ".", "..", "group//name", "group/../name"} {
+			params := map[string]any{"model": "upstream-model", "custom_llm_provider": "custom"}
+			info := map[string]any{"transport": protocol + "_generate_content", "endpoint_types": []string{protocol}}
+			err := validateDeployment(&modelTestHost{}, name, params, info)
+			valid := name == "native-model" || name == "space name" || name == "group/name" || name == "name:latest"
+			if (err == nil) != valid {
+				t.Fatalf("%s 公开别名 %q 校验=%v，合法=%v", protocol, name, err, valid)
+			}
+		}
+	}
+}
+
 // TestCredentialProtocolMatches 验证正常协议、OpenAI 兼容别名、身份不能替代协议、空字段和不兼容输入。
 // 参数 t：单测上下文；返回：无。仅构造内存凭据，无外部依赖或清理副作用。
 func TestCredentialProtocolMatches(t *testing.T) {

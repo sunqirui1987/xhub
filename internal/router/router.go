@@ -4,6 +4,7 @@ package router
 import (
 	"encoding/json"
 	"math"
+	"math/rand/v2"
 	"regexp"
 	"sort"
 	"strconv"
@@ -34,21 +35,21 @@ func All(list []config.ModelEntry, alias string) []config.ModelEntry {
 // State is the Redis-backed view of deployments. Zero values keep the old
 // in-process behavior (busy map only).
 type State struct {
-	Busy     map[string]int
-	Cooldown map[string]bool
-	Latency  map[string]float64
-	Usage    map[string]float64
+	// ModelNames 仅在请求显式组名时展开成员，保留真实部署身份。
+	ModelNames []string
+	Busy       map[string]int
+	Cooldown   map[string]bool
+	Latency    map[string]float64
+	Usage      map[string]float64
 	// Now is the instant a time-aware strategy should price at. A window-priced
 	// deployment costs twice as much during its peak hours, so the cost strategy
 	// needs to know which hour it is choosing for. Zero means time.Now(), which
 	// is right for a live request and wrong for a test.
 	Now time.Time
-	// Splits holds the weighted-split cursors, keyed by deployment id. It is the
-	// router's only mutable state: every other strategy is a pure function of the
-	// pool, while an even split has to remember how far it got last time.
-	Splits *SplitState
-	// SplitScope 按模板版本、公开模型和入口隔离轮询。
-	SplitScope string
+	// Allocations 仅按稳定部署 ID 记录相对权重分流，不读取部署旧权重。
+	Allocations map[string]float64
+	// Draw 用于确定性测试；生产使用并发安全随机源，返回 [0,1)。
+	Draw func() float64
 }
 
 // instant returns the time this routing decision is being made for.
@@ -154,7 +155,7 @@ func deploymentRates(e config.ModelEntry) []catalog.Rate {
 // 参数 list（[]config.ModelEntry）：候选部署列表，后面按策略挑一条；alias（string）：对外模型名；strategy（string）：路由策略名，决定多条部署谁先被尝试；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
 // 返回：尝试顺序。还有其它部署可用时，处于冷却的不会排在第一。
 func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry {
-	pool := All(list, alias)
+	pool := candidatesForState(list, alias, st)
 	if IsSplitStrategy(strategy) {
 		pool = splitCandidates(pool, st)
 	} else {
@@ -162,10 +163,7 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 	}
 	first := Pick(list, alias, strategy, st)
 	if first == nil {
-		if IsSplitStrategy(strategy) {
-			return nil
-		}
-		return pool
+		return nil
 	}
 	fid := CooldownID(*first)
 	out := []config.ModelEntry{*first}
@@ -183,23 +181,12 @@ func Order(list []config.ModelEntry, alias, strategy string, st State) []config.
 // 参数 list（[]config.ModelEntry）：候选部署列表，后面按策略挑一条；alias（string）：对外模型名；strategy（string）：路由策略名，决定多条部署谁先被尝试；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
 // 返回：Order 的第一条。没有可用部署时为 nil。
 func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry {
-	pool := matchDeployments(list, alias)
+	pool := openCandidates(candidatesForState(list, alias, st), st)
 	if IsSplitStrategy(strategy) {
 		return pickSplit(pool, st)
 	}
 	if len(pool) == 0 {
 		return nil
-	}
-	if len(st.Cooldown) > 0 {
-		open := make([]config.ModelEntry, 0, len(pool))
-		for _, e := range pool {
-			if !st.Cooldown[CooldownID(e)] {
-				open = append(open, e)
-			}
-		}
-		if len(open) > 0 {
-			pool = open
-		}
 	}
 	kind, ok := strategyKind(strategy)
 	if !ok {
@@ -274,105 +261,72 @@ func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.Mo
 		return &pool[0]
 	case "split":
 		return pickSplit(pool, st)
+	case "random":
+		draw := rand.Float64()
+		if st.Draw != nil {
+			draw = st.Draw()
+		}
+		return &pool[int(draw*float64(len(pool)))]
 	default:
-		// 非加权策略不读取历史部署权重，同优先级采用稳定声明顺序。
-		return &pool[0]
+		return nil
 	}
 
 }
 
-// pickSplit chooses the first deployment by configured traffic share.
-//
-// A weight is a share, so 3 and 7 mean the same as 30 and 70 - the numbers do
-// not have to total 100. Every deployment defaults to 1, so a pool where nobody
-// set a weight splits evenly instead of always landing on the first one.
-//
-// A deployment in cooldown is offered no traffic and its cursor is dropped, so
-// its share goes to the others for as long as it is out and it comes back at
-// zero rather than immediately claiming everything it accrued while down.
-//
-// A session pinned to one deployment is applied by the caller before this runs,
-// so a pinned request deliberately ignores the split. That is what pinning is
-// for, and it means a workload with many pinned sessions will not show exactly
-// the configured ratio.
-//
-// 参数 pool（[]config.ModelEntry）：候选部署列表，后面按策略挑一条；st（State）：此刻的冷却、延迟、用量和并发，用来排序。
-// 返回 *config.ModelEntry（*config.ModelEntry）：选中的部署。没有可接流量的部署时为 nil，调用方退回原顺序。
-// 调用：Pick 的 split 分支。
-// 测试：split_test.go
+// pickSplit 在健康候选中按相对权重随机抽取，自动归一化剩余份额。
+// 参数 pool 为兼容候选，st 为快照；返回部署或 nil，无轮询状态及配置副作用。
 func pickSplit(pool []config.ModelEntry, st State) *config.ModelEntry {
-	if len(pool) == 0 {
+	pool = splitCandidates(pool, st)
+	total := 0.0
+	for _, e := range pool {
+		total += allocationWeight(st, e)
+	}
+	if total <= 0 {
 		return nil
 	}
-	ids := make([]string, len(pool))
-	weights := make([]float64, len(pool))
-	available := make([]bool, len(pool))
+	draw := rand.Float64()
+	if st.Draw != nil {
+		draw = st.Draw()
+	}
+	point := draw * total
 	for i, e := range pool {
-		ids[i] = CooldownID(e)
-		weights[i] = paramFloat(e, "route_template_weight", 1)
-		available[i] = !st.Cooldown[ids[i]] && weights[i] > 0 && !math.IsNaN(weights[i]) && !math.IsInf(weights[i], 0)
-	}
-	// st.Splits is nil when the gateway never installed one. Falling back to the
-	// highest weight keeps that case working rather than failing every request.
-	if st.Splits == nil {
-		best := -1
-		bestW := -1.0
-		for i, w := range weights {
-			if !available[i] {
-				continue
-			}
-			if w > bestW {
-				bestW = w
-				best = i
-			}
+		point -= allocationWeight(st, e)
+		if point < 0 {
+			return &pool[i]
 		}
-		if best < 0 {
-			return nil
-		}
-		return &pool[best]
 	}
-	picked := st.Splits.Scoped(st.SplitScope).PickWeighted(ids, weights, available)
-	if picked < 0 {
-		return nil
-	}
-	return &pool[picked]
+	return &pool[len(pool)-1]
 }
 
-// splitCandidates returns the retry pool for a weighted split. Cooling deployments and deployments with invalid or nonpositive weights cannot receive either the first attempt or a retry.
-// 参数 pool（[]config.ModelEntry）：分流前的候选部署；st（State）：此刻的冷却状态和分流状态。
-// 返回 []config.ModelEntry（[]config.ModelEntry）：仍可接收请求的候选部署，顺序与 pool 相同。
-// 调用：Order 的分流策略分支。
-// 测试：split_test.go、template_regression_test.go。
+// allocationWeight 读取当前策略的部署权重，未填写为1，明确0不分流；供抽样和候选筛选使用，无副作用。
+func allocationWeight(st State, e config.ModelEntry) float64 {
+	if weight, exists := st.Allocations[DeploymentID(e)]; exists {
+		return weight
+	}
+	return 1
+}
+
+// splitCandidates 排除冷却、未列出和零份额部署，供调度、重试和预览使用；返回新切片，无副作用。
 func splitCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
 	out := make([]config.ModelEntry, 0, len(pool))
 	for _, e := range pool {
-		w := paramFloat(e, "route_template_weight", 1)
-		if w > 0 && !math.IsNaN(w) && !math.IsInf(w, 0) && !st.Cooldown[CooldownID(e)] {
+		p := allocationWeight(st, e)
+		if p > 0 && !math.IsNaN(p) && !math.IsInf(p, 0) && !st.Cooldown[CooldownID(e)] {
 			out = append(out, e)
 		}
 	}
 	return out
 }
 
-// openCandidates removes cooling deployments when at least one candidate is open. If every candidate is cooling, it returns the original pool so non-split strategies retain their documented fail-open behavior.
-// 参数 pool（[]config.ModelEntry）：同一公开模型名下的候选部署；st（State）：此刻的冷却状态。
-// 返回 []config.ModelEntry（[]config.ModelEntry）：有健康候选时只含健康部署；全部冷却时返回原池。
-// 调用：Order。
-// 测试：template_regression_test.go。
+// openCandidates 排除冷却部署，供所有非分流策略使用；返回健康候选，没有健康部署则返回空池。
 func openCandidates(pool []config.ModelEntry, st State) []config.ModelEntry {
-	if len(st.Cooldown) == 0 {
-		return pool
-	}
-	open := make([]config.ModelEntry, 0, len(pool))
+	out := make([]config.ModelEntry, 0, len(pool))
 	for _, e := range pool {
 		if !st.Cooldown[CooldownID(e)] {
-			open = append(open, e)
+			out = append(out, e)
 		}
 	}
-	if len(open) == 0 {
-		return pool
-	}
-	return open
+	return out
 }
 
 // matchDeployments finds deployments whose public model name matches, including wildcards. It does not sort them. matchDeployments prefers an exact model_name. Otherwise it applies LiteLLM wildcard routing (openai/* → openai/<id>) and rewrites litellm_params.model.
@@ -484,30 +438,13 @@ func applyWildcardModel(upstream, request string, groups []string) string {
 	return upstream
 }
 
-// WeightID is the template-weight identity. A deployment id wins
-// because it names one configured row even when several suppliers share a
-// pricing record, endpoint, and upstream model. Database-backed deployments
-// keep that stable id in model_info.id; configuration files may provide it as
-// litellm_params.deployment_id. A configured pricing_id is the next-best
-// stable identity. Rows without either stable ID have no template-weight identity.
-// 参数 e（config.ModelEntry）：候选部署。
-// 返回 string：部署或定价的稳定权重身份；没有稳定 ID 时返回空串。
-// 调用：模板权重匹配与部署筛选。
-// 测试：router_test.go
-func WeightID(e config.ModelEntry) string {
-	if id := strings.TrimSpace(e.ParamString("deployment_id", "")); id != "" {
-		return "deployment:" + id
+// DeploymentID 返回稳定部署 ID，供分配、目录和日志调用；缺失时返回空字符串，不使用定价 ID。
+func DeploymentID(e config.ModelEntry) string {
+	if id := e.ParamString("deployment_id", ""); id != "" {
+		return id
 	}
-	if id, _ := e.ModelInfo["id"].(string); strings.TrimSpace(id) != "" {
-		return "deployment:" + strings.TrimSpace(id)
-	}
-	if id := strings.TrimSpace(e.ParamString("pricing_id", "")); id != "" {
-		return "pricing:" + id
-	}
-	if id, _ := e.ModelInfo["pricing_id"].(string); strings.TrimSpace(id) != "" {
-		return "pricing:" + strings.TrimSpace(id)
-	}
-	return ""
+	id, _ := e.ModelInfo["id"].(string)
+	return id
 }
 
 // CooldownID is the runtime deployment identity. It isolates cooldown, busy,
@@ -560,44 +497,8 @@ func stateFloat(values map[string]float64, e config.ModelEntry) (float64, bool) 
 	return value, ok
 }
 
-// IsSplitStrategy reports whether strategy divides traffic by weight.
-// Hyphens and underscores are the same name. Anything else, including
-// simple-shuffle, is not a split: simple-shuffle still picks the heaviest
-// deployment, and treating it as a split would change that.
-// 参数 strategy（string）：路由策略名。
-// 返回 bool（bool）：这个名字是按权重分流时为真。
-// 调用：dataplane/serve.go，只在这时把文档里的份额写进部署。
-// 测试：split_test.go
-func IsSplitStrategy(strategy string) bool {
-	switch strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_") {
-	case "weighted_split", "weighted_round_robin", "traffic_split":
-		return true
-	default:
-		return false
-	}
-}
-
-// ApplyWeights 从模板构造私有部署副本；未配置使用 1，明确 0 排除部署。
-// 参数 list：候选；overrides：稳定部署 ID 到权重。返回副本，不读取旧 weight，不修改配置。
-// 调用：统一、原生与预览；测试：unified_policy_test.go。
-func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry {
-	out := make([]config.ModelEntry, len(list))
-	for i, entry := range list {
-		weight := 1.0
-		if v, ok := overrides[WeightID(entry)]; ok {
-			weight = v
-		}
-		params := make(map[string]any, len(entry.LiteLLMParams)+1)
-		for key, value := range entry.LiteLLMParams {
-			params[key] = value
-		}
-
-		params["route_template_weight"] = weight
-		entry.LiteLLMParams = params
-		out[i] = entry
-	}
-	return out
-}
+// IsSplitStrategy 判断唯一的相对权重分流策略，供候选筛选调用；无副作用，不接受旧别名。
+func IsSplitStrategy(strategy string) bool { return strategy == "traffic-split" }
 
 // paramFloat reads a float from deployment parameters. A missing value returns fallback.
 //
@@ -645,33 +546,23 @@ type strategyError string
 // 返回：未知策略的说明文本，给 ValidateStrategy 的调用方。
 func (e strategyError) Error() string { return string(e) }
 
-// strategyKind folds a strategy alias into the internal name. Hyphens become underscores first. An unrecognized name returns ok false.
-// 调用：仅在 router.go 内使用
-// 测试：无直接单测
-// 参数 strategy（string）：路由策略名，决定多条部署谁先被尝试。
-// 返回：内部策略名（weight、busy、cost、latency）以及这个名字是否被承认。不认识时 ok 为 false，不会当成 simple-shuffle。
+// strategyKind 将公开策略名转换为内部策略，供校验和调度调用；参数为策略名，
+// 返回策略分类和支持状态。simple-shuffle 与 random 都使用均匀随机，不读取旧部署权重；
+// 未知策略返回 false，避免配置错误时静默分流。无副作用。
 func strategyKind(strategy string) (string, bool) {
-	s := strings.ReplaceAll(strings.TrimSpace(strategy), "-", "_")
-	switch s {
-	case "", "simple_shuffle", "base_routing_strategy", "adaptive_router", "auto_router", "complexity_router", "quality_router":
-		return "weight", true
-	case "least_busy":
-		return "busy", true
-	case "lowest_cost", "budget_limiter", "savings_baseline":
-		return "cost", true
-	case "lowest_latency", "lar1_routing", "latency_based_routing":
-		return "latency", true
-	case "lowest_tpm_rpm", "lowest_tpm_rpm_v2", "usage_based_routing", "usage_based_routing_v2":
-		return "tpm", true
-	case "cost_based_routing":
-		return "cost", true
-	case "tag_based_routing":
-		return "tag", true
-	case "weighted_split", "weighted_round_robin", "traffic_split":
-		// Its own kind rather than a change to "weight". simple_shuffle already
-		// routes here, and six other aliases share it; making "weight" mean a
-		// ratio would change all of them and break a pinned regression case.
+	switch strategy {
+	case "random", "simple-shuffle":
+		return "random", true
+	case "traffic-split":
 		return "split", true
+	case "least-busy":
+		return "busy", true
+	case "cost-based-routing":
+		return "cost", true
+	case "latency-based-routing":
+		return "latency", true
+	case "usage-based-routing":
+		return "tpm", true
 	default:
 		return "", false
 	}

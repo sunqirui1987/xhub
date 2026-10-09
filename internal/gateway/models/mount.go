@@ -23,6 +23,12 @@ func Module(h Host) httpx.Module {
 	return httpx.Bind("models", func(reg httpx.Registrar) {
 		reg.Handle("GET /v1/models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
 		reg.Handle("GET /models", func(w http.ResponseWriter, r *http.Request) { List(h, w, r) })
+		for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+			reg.Handle(method+" /routing/groups", func(w http.ResponseWriter, r *http.Request) { RoutingGroups(h, w, r) })
+		}
+		reg.Handle("GET /model/groups", func(w http.ResponseWriter, r *http.Request) { Groups(h, w, r) })
+		reg.Handle("PUT /model/fallback", func(w http.ResponseWriter, r *http.Request) { SetFallback(h, w, r) })
+		reg.Handle("PUT /model/default", func(w http.ResponseWriter, r *http.Request) { SetDefault(h, w, r) })
 		reg.Handle("GET /model/available", func(w http.ResponseWriter, r *http.Request) { Available(h, w, r) })
 		// The console's Models and Endpoints page reads this and nothing else.
 		// Without it the page fell through to the catalog's generic store and
@@ -38,6 +44,7 @@ func Module(h Host) httpx.Module {
 		reg.Handle("GET /price/catalog", func(w http.ResponseWriter, r *http.Request) { PriceList(h, w, r) })
 		reg.Handle("POST /price/model", func(w http.ResponseWriter, r *http.Request) { UpsertPriceModel(h, w, r) })
 		reg.Handle("DELETE /price/model", func(w http.ResponseWriter, r *http.Request) { DeletePriceModel(h, w, r) })
+		reg.Handle("POST /price/model/listing", func(w http.ResponseWriter, r *http.Request) { SetPriceListing(h, w, r) })
 		reg.Handle("POST /price/model/reset", func(w http.ResponseWriter, r *http.Request) { ResetPriceModel(h, w, r) })
 		reg.Handle("POST /price/provider", func(w http.ResponseWriter, r *http.Request) { UpsertPriceProvider(h, w, r) })
 		reg.Handle("DELETE /price/provider", func(w http.ResponseWriter, r *http.Request) { DeletePriceProvider(h, w, r) })

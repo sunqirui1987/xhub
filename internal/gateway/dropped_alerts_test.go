@@ -8,8 +8,7 @@ import (
 
 // TestDroppedAlertsAreGone checks the products that left the logging page.
 // CloudZero, email events, and alerting settings answer 404. Saving an alert
-// destination or probing one answers 400. Router settings still come back from
-// the callbacks document, and Vantage stays mounted.
+// destination or probing one answers 400. Vantage stays mounted。
 func TestDroppedAlertsAreGone(t *testing.T) {
 	srv, base, db := bootGateway(t)
 	defer srv.Close()
@@ -42,18 +41,12 @@ func TestDroppedAlertsAreGone(t *testing.T) {
 			t.Fatalf("alerting %s status %d %s", dest, status, trim(body))
 		}
 	}
-	status, body = authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"routing_strategy":"simple-shuffle"}}`))
-	if status != http.StatusOK {
-		t.Fatalf("router settings status %d %s", status, trim(body))
-	}
-
 	status, body = authed(t, base, key, http.MethodGet, "/get/config/callbacks", nil)
 	if status != http.StatusOK {
 		t.Fatalf("callbacks status %d %s", status, trim(body))
 	}
 	var callbacks struct {
-		Alerts         []any          `json:"alerts"`
-		RouterSettings map[string]any `json:"router_settings"`
+		Alerts []any `json:"alerts"`
 	}
 	if err := json.Unmarshal(body, &callbacks); err != nil {
 		t.Fatal(err)
@@ -61,10 +54,6 @@ func TestDroppedAlertsAreGone(t *testing.T) {
 	if len(callbacks.Alerts) != 0 {
 		t.Fatalf("alerts = %#v", callbacks.Alerts)
 	}
-	if callbacks.RouterSettings["routing_strategy"] != "simple-shuffle" {
-		t.Fatalf("router settings missing from callbacks: %s", trim(body))
-	}
-
 	for _, service := range []string{"email", "ms_teams", "slack"} {
 		status, body = authed(t, base, key, http.MethodGet, "/health/services?service="+service, nil)
 		if status != http.StatusBadRequest {
@@ -79,51 +68,6 @@ func TestDroppedAlertsAreGone(t *testing.T) {
 	status, body = authed(t, base, key, http.MethodGet, "/alerting/settings", nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("alerting settings status %d %s", status, trim(body))
-	}
-}
-
-// TestPlatformTemplateSaveCanClearModelRouting verifies that an explicit empty
-// list clears model-specific rules while omitted fields retain patch semantics.
-func TestPlatformTemplateSaveCanClearModelRouting(t *testing.T) {
-	srv, base, db := bootGateway(t)
-	defer srv.Close()
-	key := loginAdmin(t, base, db)
-
-	status, body := authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"model_routing":[{"model_name":"chat","routing_strategy":"least-busy"}]}}`))
-	if status != http.StatusOK {
-		t.Fatalf("save model routing status %d %s", status, trim(body))
-	}
-
-	// A regular partial update must preserve model_routing.
-	status, body = authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"timeout":17}}`))
-	if status != http.StatusOK {
-		t.Fatalf("partial update status %d %s", status, trim(body))
-	}
-	var response struct {
-		RouterSettings map[string]any `json:"router_settings"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := response.RouterSettings["model_routing"]; !ok {
-		t.Fatalf("partial update removed model_routing: %s", trim(body))
-	}
-
-	// The editor sends an explicit empty list when all rules are removed.
-	status, body = authed(t, base, key, http.MethodPost, "/config/update", []byte(`{"router_settings":{"model_routing":[]}}`))
-	if status != http.StatusOK {
-		t.Fatalf("remove model routing status %d %s", status, trim(body))
-	}
-	response.RouterSettings = nil
-	if err := json.Unmarshal(body, &response); err != nil {
-		t.Fatal(err)
-	}
-	rules, ok := response.RouterSettings["model_routing"].([]any)
-	if !ok || len(rules) != 0 {
-		t.Fatalf("explicit empty list did not clear model_routing: %s", trim(body))
-	}
-	if response.RouterSettings["timeout"] != float64(17) {
-		t.Fatalf("removing model_routing changed unrelated settings: %s", trim(body))
 	}
 }
 

@@ -16,6 +16,15 @@ export type EditorModel = {
   model_info: Record<string, unknown>;
 };
 
+/** suggestedModelName 为上游模型生成可用于所有对话接口的默认公开名称。
+ * 参数 upstream：原始模型 ID；provider：可选的连接协议前缀。返回去掉开头协议前缀、
+ * 保留路径分隔符和版本冒号的名称；供 ModelEditor 联动调用，不修改上游 ID 或用户自定义名称。 */
+export function suggestedModelName(upstream: string, provider = ""): string {
+  const prefix = provider ? provider + "/" : "";
+  const bare = (prefix && upstream.startsWith(prefix) ? upstream.slice(prefix.length) : upstream).trim();
+  return bare === "." || bare === ".." ? "model" : bare;
+}
+
 /** catalogModelId 解析独立的价格目录模型 ID。
  * 参数 rows：目录映射；upstream：模型或目录 ID；provider：可选供应商。
  * 返回：有价候选优先的目录 ID；无匹配时为空字符串。
@@ -201,6 +210,10 @@ export function buildEditorModel(values: Record<string, unknown>, original?: Edi
     !values.endpoint_types.length
   )
     throw new Error("请选择端点类型。");
+  // Google 接口按操作后缀解析完整模型路径；拒绝会被 URL 清理改变的空段和点段，允许 / 与 :。
+  if (values.endpoint_types.some(id => ["chat", "responses", "messages", "gemini", "vertex", "bypass:openai-chat", "bypass:openai-responses", "bypass:anthropic-messages", "bypass:gemini", "bypass:vertex"].includes(String(id))) &&
+    name.split("/").some(segment => !segment.trim() || segment === "." || segment === ".."))
+    throw new Error("对外模型名称的路径段不能留空或为 .、..；支持斜杠（/）和冒号（:）。");
   if (values.supplier === "__existing__" && !original) throw new Error("请选择已配置的模型提供商。");
   if (values.supplier !== "__existing__") {
     params.litellm_credential_name = values.supplier;

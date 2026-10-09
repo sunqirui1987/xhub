@@ -27,10 +27,9 @@ func TestRetiredRouterPreferencesReturnBadRequest(t *testing.T) {
 		})
 	}
 
+	// 路由策略已经完全移入命名模板；全局设置不再保留旧的策略入口。
 	status, body := authed(t, base, key, http.MethodPost, "/config/field/update", []byte(`{"config_type":"router_settings","field_name":"routing_strategy","field_value":"simple-shuffle"}`))
-	if status != http.StatusOK {
-		t.Fatalf("supported router preference status %d %s", status, trim(body))
-	}
+	assertInvalidPreference(t, status, body, "routing_strategy")
 }
 
 func assertInvalidPreference(t *testing.T, status int, body []byte, field string) {

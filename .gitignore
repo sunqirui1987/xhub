@@ -27,3 +27,5 @@ frontend/.next-e2e/
 frontend/tsconfig.e2e.json
 e2e-report.txt
 scripts/__pycache__/
+docs/development/model-marketplace-proof
+frontend/.next-playground-diagnosis

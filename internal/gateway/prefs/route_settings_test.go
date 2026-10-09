@@ -7,410 +7,138 @@ import (
 	"github.com/sunqirui1987/xhub/internal/iam"
 )
 
-// fakeScopes is a lookup backed by three maps, one per scope, plus the templates
-// themselves. It stands in for the identity store so these tests are about the
-// resolution rules rather than about SQL.
+// fakeScopes 用内存映射模拟范围绑定和模板存储，使解析测试不依赖数据库。
 type fakeScopes struct {
 	bound     map[string]string
 	templates map[string]*iam.RouteTemplate
 }
 
+// newFakeScopes 返回空的范围存储；调用方可继续绑定模板，无外部副作用。
 func newFakeScopes() *fakeScopes {
 	return &fakeScopes{bound: map[string]string{}, templates: map[string]*iam.RouteTemplate{}}
 }
 
-// bind points one scope at a template.
+// bind 将一个身份范围绑定到模板并返回自身，供测试链式构造。
 func (f *fakeScopes) bind(kind, id, templateID string) *fakeScopes {
 	f.bound[kind+"\x00"+id] = templateID
 	return f
 }
 
-// template adds a template with a document.
+// template 添加一份经过 JSON 编码的模板，模拟真实存储格式。
 func (f *fakeScopes) template(id, name string, body map[string]any) *fakeScopes {
-	f.templates[id] = &iam.RouteTemplate{ID: id, Name: name, Body: encodeBody(body)}
-	return f
-}
-
-// delete removes a template, leaving any scope that points at it dangling.
-func (f *fakeScopes) delete(id string) *fakeScopes {
-	delete(f.templates, id)
-	return f
-}
-
-func (f *fakeScopes) TemplateFor(kind, id string) string {
-	return f.bound[kind+"\x00"+id]
-}
-
-func (f *fakeScopes) Load(id string) *iam.RouteTemplate {
-	return f.templates[id]
-}
-
-// encodeBody renders a settings document the way the store holds it. It goes
-// through the same JSON encoder the store does, so a test cannot pass on a body
-// the real write path would never produce.
-func encodeBody(body map[string]any) string {
-	if body == nil {
-		return "{}"
-	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		panic(err)
 	}
-	return string(raw)
+	f.templates[id] = &iam.RouteTemplate{ID: id, Name: name, Body: string(raw)}
+	return f
 }
 
-// platform is the baseline every test resolves against.
-func platform() map[string]any {
+// delete 删除模板但保留绑定，用来模拟并发删除后的悬空引用。
+func (f *fakeScopes) delete(id string) *fakeScopes { delete(f.templates, id); return f }
+
+// templateDocument 创建一份完整的新模板文档；模型规则为空时只配置执行参数。
+func templateDocument(attempts int) map[string]any {
 	return map[string]any{
-		"routing_strategy": "simple-shuffle",
-		"num_retries":      2,
-		"timeout":          float64(60),
-		"allowed_fails":    3,
-		"cooldown_time":    float64(0),
+		"model_routes": []any{},
+		"retry_policy": map[string]any{"max_attempts": attempts, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
 	}
 }
 
-// TestNoTemplateSelectedReadsThePlatformDocument 钉住兼容线。
-//
-// 三处都不选时，取出来的必须就是平台那一份，来源标成 platform。这条断了
-// 意味着这次改动改变了所有现有部署的行为。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestNoTemplateSelectedReadsThePlatformDocument(t *testing.T) {
-	got := Resolve(platform(), newFakeScopes(),
-		ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+// TemplateFor 返回范围当前选择的模板 ID；未绑定返回空串。
+func (f *fakeScopes) TemplateFor(kind, id string) string { return f.bound[kind+"\x00"+id] }
 
-	if got.Source != PlatformSource {
-		t.Fatalf("source = %q, want %q", got.Source, PlatformSource)
-	}
-	if got.TemplateID != "" {
-		t.Fatalf("a template was reported with nothing selected: %q", got.TemplateID)
-	}
-	// 取到的就是平台文档本身，不是空表。
-	if got.Strategy() != "simple-shuffle" || got.Retries() != 2 || got.TimeoutSeconds() != 60 {
-		t.Fatalf("the platform baseline did not come through: %+v", got.Settings)
+// Load 返回模板实体；模板不存在时返回 nil。
+func (f *fakeScopes) Load(id string) *iam.RouteTemplate { return f.templates[id] }
+
+// TestNoTemplateUsesBuiltinModelDefault 验证没有任何绑定时直接使用模型管理默认分配。
+// 测试不读取平台 router_settings，也不访问数据库，无需清理。
+func TestNoTemplateUsesBuiltinModelDefault(t *testing.T) {
+	got := Resolve(newFakeScopes(), ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	if got.Source != BuiltinSource || got.TemplateID != "" || got.Strategy() != "traffic-split" || got.Retries() != 1 || got.TimeoutSeconds() != 60 {
+		t.Fatalf("未绑定模板没有使用内置模型默认: %+v", got)
 	}
 }
 
-// TestTheNarrowestSelectionWins 覆盖整条链。
-//
-// 密钥、团队、组织都选了，生效的是密钥那一份。这不是"合并"，所以另外两层的
-// 字段一个都不该出现在结果里。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestTheNarrowestSelectionWins(t *testing.T) {
+// TestNarrowestTemplateSelectionWins 验证密钥、团队、组织均绑定时选择最窄范围的完整模板。
+// 模板之间不合并；测试使用内存数据，无需清理。
+func TestNarrowestTemplateSelectionWins(t *testing.T) {
 	f := newFakeScopes().
-		template("T-key", "key choice", map[string]any{"routing_strategy": "lowest-cost", "num_retries": 9}).
-		template("T-team", "team choice", map[string]any{"routing_strategy": "least-busy", "num_retries": 5}).
-		template("T-org", "org choice", map[string]any{"routing_strategy": "latency-based-routing", "num_retries": 3}).
-		bind("key", "k1", "T-key").
-		bind("team", "t1", "T-team").
-		bind("organization", "o1", "T-org")
-
-	got := Resolve(platform(), f,
-		ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
-
-	if got.TemplateID != "T-key" || got.Source != "key" {
-		t.Fatalf("the key's selection did not win: id=%q source=%q", got.TemplateID, got.Source)
-	}
-	if got.Strategy() != "lowest-cost" || got.Retries() != 9 {
-		t.Fatalf("the winning document is not the one in effect: %+v", got.Settings)
-	}
-	// 整份替换：团队那一份的 least-busy 不该出现在结果里。
-	if got.Strategy() == "least-busy" {
-		t.Fatal("a wider scope's strategy leaked into the result")
+		template("key-template", "key", templateDocument(9)).
+		template("team-template", "team", templateDocument(5)).
+		template("org-template", "org", templateDocument(3)).
+		bind("key", "k1", "key-template").bind("team", "t1", "team-template").bind("organization", "o1", "org-template")
+	got := Resolve(f, ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	if got.TemplateID != "key-template" || got.Source != "key" || got.Retries() != 9 {
+		t.Fatalf("最窄范围没有生效: %+v", got)
 	}
 }
 
-// TestNotSelectingInheritsRatherThanFallingBack 是这次改动最容易写错的一条。
-//
-// 组织选了模板、团队没选 —— 团队必须用组织那一份，而不是跳回平台默认。
-// 写成"没选就用默认"会让组织级的配置对整个组织都不起作用，而界面上看起来
-// 明明配好了。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestNotSelectingInheritsRatherThanFallingBack(t *testing.T) {
-	f := newFakeScopes().
-		template("T-org", "org choice", map[string]any{"routing_strategy": "lowest-cost"}).
-		bind("organization", "o1", "T-org")
-
-	got := Resolve(platform(), f,
-		ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
-
-	if got.TemplateID != "T-org" {
-		t.Fatalf("the team did not inherit from its organization: %q", got.TemplateID)
-	}
-	if got.Source != "organization" {
-		t.Fatalf("source = %q, want organization", got.Source)
-	}
-	if got.Strategy() != "lowest-cost" {
-		t.Fatalf("the inherited document is not in effect: %+v", got.Settings)
+// TestUnselectedNarrowScopesInheritWiderTemplate 验证密钥和团队未绑定时会使用组织绑定模板。
+// 这是范围选择继承，不是模型规则合并；测试仅使用内存数据。
+func TestUnselectedNarrowScopesInheritWiderTemplate(t *testing.T) {
+	f := newFakeScopes().template("org-template", "org", templateDocument(4)).bind("organization", "o1", "org-template")
+	got := Resolve(f, ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	if got.TemplateID != "org-template" || got.Source != "organization" || got.Retries() != 4 {
+		t.Fatalf("组织模板没有被继承: %+v", got)
 	}
 }
 
-// TestANarrowerSelectionOverridesTheWiderOne 证明团队自己选了就用团队的。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestANarrowerSelectionOverridesTheWiderOne(t *testing.T) {
-	f := newFakeScopes().
-		template("T-org", "org choice", map[string]any{"num_retries": 3}).
-		template("T-team", "team choice", map[string]any{"num_retries": 7}).
-		bind("organization", "o1", "T-org").
-		bind("team", "t1", "T-team")
-
-	got := Resolve(platform(), f,
-		ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
-
-	if got.TemplateID != "T-team" || got.Retries() != 7 {
-		t.Fatalf("the team's own selection did not win: %+v", got)
+// TestDanglingSelectionFallsBackToModelDefault 验证已选择模板被删除后不静默改用更宽范围模板。
+// 解析应回到模型管理默认分配；测试构造悬空引用后无需额外清理。
+func TestDanglingSelectionFallsBackToModelDefault(t *testing.T) {
+	f := newFakeScopes().template("team-template", "team", templateDocument(2)).template("org-template", "org", templateDocument(8)).bind("team", "t1", "team-template").bind("organization", "o1", "org-template").delete("team-template")
+	got := Resolve(f, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
+	if got.Source != BuiltinSource || got.TemplateID != "" || got.Strategy() != "traffic-split" {
+		t.Fatalf("悬空绑定没有回到模型默认: %+v", got)
 	}
 }
 
-// TestADeletedTemplateFallsBackWithoutUsingAWiderOne 覆盖一个具体的竞态。
-//
-// 绑定还在、模板已经被删。这时不能顺着链去用更宽那一层的模板 —— 那等于把这次
-// 请求换成另一个运维没选过的配置。退回平台默认，也就是"这一层没选"的状态。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestADeletedTemplateFallsBackWithoutUsingAWiderOne(t *testing.T) {
-	f := newFakeScopes().
-		template("T-org", "org choice", map[string]any{"routing_strategy": "lowest-cost"}).
-		template("T-team", "team choice", map[string]any{"routing_strategy": "least-busy"}).
-		bind("organization", "o1", "T-org").
-		bind("team", "t1", "T-team").
-		delete("T-team")
-
-	got := Resolve(platform(), f,
-		ScopeRef{"key", "k1"}, ScopeRef{"team", "t1"}, ScopeRef{"organization", "o1"})
-
-	if got.Source != PlatformSource {
-		t.Fatalf("a deleted template let a wider one take over: source=%q id=%q", got.Source, got.TemplateID)
-	}
-	if got.Strategy() != "simple-shuffle" {
-		t.Fatalf("the platform default is not in effect: %+v", got.Settings)
-	}
-}
-
-// TestAMissingScopeIsSkipped 证明链里缺的那一层不参与。
-//
-// 没有密钥的调用（会话）只有团队和组织两级；keyID 为空时不能去查"空的密钥"，
-// 那会是一个永远查不到的 id，白白多一次查询。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAMissingScopeIsSkipped(t *testing.T) {
-	f := newFakeScopes().
-		template("T-team", "team choice", map[string]any{"num_retries": 4}).
-		bind("team", "t1", "T-team")
-
-	got := Resolve(platform(), f, RequestChain("", "t1", "o1")...)
-	if got.TemplateID != "T-team" {
-		t.Fatalf("a session with no key did not reach its team's template: %+v", got)
-	}
-}
-
-// TestRequestChainIsNarrowestFirst 钉住链的顺序。
-//
-// 顺序写反了就是"组织覆盖团队"，而结果是"能跑但行为不对"，最难查的一类。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
+// TestRequestChainIsNarrowestFirst 验证请求范围顺序固定为密钥、团队、组织，并跳过空 ID。
+// 测试为纯函数断言，无需清理。
 func TestRequestChainIsNarrowestFirst(t *testing.T) {
 	chain := RequestChain("k1", "t1", "o1")
 	want := []string{"key", "team", "organization"}
 	if len(chain) != len(want) {
-		t.Fatalf("chain = %+v", chain)
+		t.Fatalf("范围数量错误: %+v", chain)
 	}
 	for i, kind := range want {
 		if chain[i].Kind != kind {
-			t.Fatalf("chain order: got %+v want %v", chain, want)
+			t.Fatalf("范围顺序错误: %+v", chain)
 		}
 	}
-	// 缺的那些不在链里。
 	if short := RequestChain("k1", "", ""); len(short) != 1 || short[0].Kind != "key" {
-		t.Fatalf("a chain with only a key came out as %+v", short)
+		t.Fatalf("空范围未被跳过: %+v", short)
 	}
 }
 
-// TestATemplateThatOmitsAKeyMeansTheDefaultNotZero 钉住类型化读取的兜底。
-//
-// 模板里没写 num_retries 时不能变成 0（请求永不尝试），没写 timeout 时不能变成
-// 0 秒（每个请求立刻超时）。这两个都是"能跑但全错"。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestATemplateThatOmitsAKeyMeansTheDefaultNotZero(t *testing.T) {
-	empty := RouteSettings{Settings: map[string]any{}, Source: "team"}
-
-	if empty.Retries() < 1 {
-		t.Fatalf("retries = %d; a request that is never attempted cannot succeed", empty.Retries())
+// TestTypedExecutionDefaultsAndBoundaries 验证公共执行参数的默认值、零值和错误类型处理。
+// 这些读取器不得让请求变成零次尝试或零秒超时；纯内存测试无需清理。
+func TestTypedExecutionDefaultsAndBoundaries(t *testing.T) {
+	empty := RouteSettings{Settings: map[string]any{}}
+	if empty.Retries() != 1 || empty.TimeoutSeconds() != 60 || empty.AllowedFails() != 3 || empty.Strategy() != "traffic-split" {
+		t.Fatalf("缺省执行参数错误: %+v", empty)
 	}
-	if empty.TimeoutSeconds() != 60 {
-		t.Fatalf("timeout = %v, want the default 60", empty.TimeoutSeconds())
+	zero := RouteSettings{Settings: map[string]any{"retry_policy": map[string]any{"max_attempts": 0.0, "timeout_seconds": 60, "failure_threshold": 0.0, "cooldown_seconds": 0}}}
+	if zero.Retries() != 1 || zero.AllowedFails() != 0 {
+		t.Fatalf("零值边界错误: %+v", zero)
 	}
-	if empty.Strategy() != "simple-shuffle" {
-		t.Fatalf("strategy = %q, want the default", empty.Strategy())
-	}
-	if empty.AllowedFails() != 3 {
-		t.Fatalf("allowed_fails = %d, want the default 3", empty.AllowedFails())
-	}
-}
-
-// TestAnExplicitZeroRetryIsClampedToOne 证明显式写 0 也不会让请求不发出。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAnExplicitZeroRetryIsClampedToOne(t *testing.T) {
-	zero := RouteSettings{Settings: map[string]any{"num_retries": float64(0)}}
-	if zero.Retries() != 1 {
-		t.Fatalf("retries = %d, want 1", zero.Retries())
-	}
-}
-
-// TestAllowedFailsKeepsZeroMeaningOff 钉住一个反例。
-//
-// 和重试次数不同，allowed_fails 为 0 是**有意义的**：它表示不做冷却。
-// 把它也兜底成默认值会让"关掉冷却"这个设置失效。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAllowedFailsKeepsZeroMeaningOff(t *testing.T) {
-	off := RouteSettings{Settings: map[string]any{"allowed_fails": float64(0)}}
-	if off.AllowedFails() != 0 {
-		t.Fatalf("allowed_fails = %d, want 0 to stay 0 so cooldown can be turned off", off.AllowedFails())
-	}
-}
-
-// TestAQuotedNumberIsNotReadAsANumber 证明字符串数字不被当成数字。
-//
-// 设置页写的是数字，写进字符串是一次误操作。把它读成数字会让一个"0 秒超时"
-// 静默生效；当成没写则是默认值，行为可预期。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAQuotedNumberIsNotReadAsANumber(t *testing.T) {
-	quoted := RouteSettings{Settings: map[string]any{"timeout": "30"}}
+	quoted := RouteSettings{Settings: map[string]any{"retry_policy": map[string]any{"max_attempts": 1, "timeout_seconds": "30", "failure_threshold": 3, "cooldown_seconds": 0}}}
 	if quoted.TimeoutSeconds() != 60 {
-		t.Fatalf("a quoted number became %v; a string is a mistake, not a value", quoted.TimeoutSeconds())
+		t.Fatalf("字符串数字被错误接受: %v", quoted.TimeoutSeconds())
+	}
+	fromYAML := RouteSettings{Settings: templateDocument(5)}
+	fromYAML.Settings["retry_policy"].(map[string]any)["timeout_seconds"] = 90
+	if fromYAML.Retries() != 5 || fromYAML.TimeoutSeconds() != 90 {
+		t.Fatalf("整数读取错误: %+v", fromYAML)
 	}
 }
 
-// TestIntegersFromYAMLAreRead 覆盖 YAML 基线里数字是 int 的情况。
-//
-// 内嵌目录从文件读时会给出 int，从 JSON 读时给出 float64。两条都要认。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestIntegersFromYAMLAreRead(t *testing.T) {
-	fromYAML := RouteSettings{Settings: map[string]any{"num_retries": 5, "timeout": 90}}
-	if fromYAML.Retries() != 5 {
-		t.Fatalf("an int retry count read as %d", fromYAML.Retries())
-	}
-	if fromYAML.TimeoutSeconds() != 90 {
-		t.Fatalf("an int timeout read as %v", fromYAML.TimeoutSeconds())
-	}
-}
-
-// TestAPlatformWithNoLookupStillResolves 证明没有身份库时取默认。
-//
-// 一个拿不到库的进程不该因为解析不了模板就拒绝请求。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestAPlatformWithNoLookupStillResolves(t *testing.T) {
-	got := Resolve(platform(), nil, ScopeRef{"team", "t1"})
-	if got.Source != PlatformSource || got.Strategy() != "simple-shuffle" {
-		t.Fatalf("resolution without a lookup gave %+v", got)
-	}
-}
-
-// TestWeightOverridesReadsTheDocument 证明份额是这份 JSON 的一部分。
-//
-// 表单写成列表，手改的文件可以写成 map。两种都要落到同一个部署 id 上。
-// 没写份额时必须是 nil，调用方才会不去改部署自己的 weight。
-// 参数 t（*testing.T）：当前测试。
-// 返回：无。
-func TestWeightOverridesReadsTheDocument(t *testing.T) {
-	listed := RouteSettings{Settings: map[string]any{
-		"routing_strategy_args": map[string]any{
-			"weights": []any{
-				map[string]any{"deployment_id": "first", "weight": 70.0},
-				map[string]any{"deployment_id": "other", "weight": 0.0},
-				map[string]any{"pricing_id": "supplier-a", "weight": 11.0},
-				map[string]any{"api_base": "https://a", "model": "gpt-4o", "weight": 5.0},
-				map[string]any{"model_name": "legacy-name", "weight": 4.0},
-			},
-		},
-	}}
-	got := listed.WeightOverrides()
-	zero, hasZero := got["deployment:other"]
-	if got["deployment:first"] != 70 || !hasZero || zero != 0 || got["pricing:supplier-a"] != 11 || len(got) != 3 {
-		t.Fatalf("list weights: %#v", got)
-	}
-	mapped := RouteSettings{Settings: map[string]any{
-		"routing_strategy_args": map[string]any{
-			"weights": map[string]any{"deployment:second": 30.0, "https://b|gpt-4o": 20.0},
-		},
-	}}
-	if mapped.WeightOverrides()["deployment:second"] != 30 || len(mapped.WeightOverrides()) != 1 {
-		t.Fatalf("map weights: %#v", mapped.WeightOverrides())
-	}
-	if (RouteSettings{Settings: map[string]any{}}).WeightOverrides() != nil {
-		t.Fatalf("a document without shares must not invent any")
-	}
-}
-
-func TestForEndpointReplacesOnlyRoutingPolicy(t *testing.T) {
-	rootArgs := map[string]any{"weights": map[string]any{"deployment:root": 99.0}}
-	chatArgs := map[string]any{"weights": map[string]any{"deployment:chat-a": 3.0, "deployment:chat-b": 7.0}}
-	original := map[string]any{
-		"routing_strategy":      "simple-shuffle",
-		"routing_strategy_args": rootArgs,
-		"num_retries":           4.0,
-		"timeout":               25.0,
-		"custom_policy":         map[string]any{"kept": true},
-		"model_routing": []any{
-			map[string]any{"model_name": "chat", "routing_strategy": "weighted-split", "routing_strategy_args": chatArgs},
-			map[string]any{"model_name": "embedding", "routing_strategy": "least-busy"},
-		},
-	}
-	base := RouteSettings{Settings: original, TemplateID: "template", TemplateName: "team policy", Source: "team"}
-
-	chat := base.ForEndpoint("chat", "chat")
-	if chat.Err != nil || chat.Strategy() != "weighted-split" || chat.WeightOverrides()["deployment:chat-b"] != 7 {
-		t.Fatalf("chat policy = strategy %q weights %#v err %v", chat.Strategy(), chat.WeightOverrides(), chat.Err)
-	}
-	if chat.Retries() != 4 || chat.TimeoutSeconds() != 25 || chat.Settings["custom_policy"] == nil {
-		t.Fatalf("model policy lost global or custom fields: %#v", chat.Settings)
-	}
-	if chat.TemplateID != base.TemplateID || chat.TemplateName != base.TemplateName || chat.Source != base.Source {
-		t.Fatalf("model policy lost template provenance: %#v", chat)
-	}
-
-	embedding := base.ForEndpoint("embedding", "embedding")
-	if embedding.Strategy() != "least-busy" || embedding.WeightOverrides() != nil {
-		t.Fatalf("an override without args inherited root weights: strategy=%q weights=%#v", embedding.Strategy(), embedding.WeightOverrides())
-	}
-	other := base.ForEndpoint("other", "chat")
-	if other.Strategy() != "simple-shuffle" || other.WeightOverrides()["deployment:root"] != 99 {
-		t.Fatalf("unlisted model did not use root policy: strategy=%q weights=%#v", other.Strategy(), other.WeightOverrides())
-	}
-
-	if base.Strategy() != "simple-shuffle" || base.WeightOverrides()["deployment:root"] != 99 {
-		t.Fatalf("ForEndpoint mutated its receiver: strategy=%q weights=%#v", base.Strategy(), base.WeightOverrides())
-	}
-	if original["routing_strategy"] != "simple-shuffle" {
-		t.Fatalf("ForEndpoint mutated the source document: %#v", original)
-	}
-}
-
-func TestValidateModelRoutingDocumentRejectsAmbiguousRules(t *testing.T) {
-	cases := []map[string]any{
-		{"model_routing": map[string]any{}},
-		{"model_routing": []any{"bad"}},
-		{"model_routing": []any{map[string]any{"model_name": "", "routing_strategy": "least-busy"}}},
-		{"model_routing": []any{map[string]any{"model_name": "chat", "routing_strategy": "unknown"}}},
-		{"model_routing": []any{map[string]any{"model_name": "chat", "routing_strategy": "least-busy", "routing_strategy_args": []any{}}}},
-		{"model_routing": []any{
-			map[string]any{"model_name": "chat", "routing_strategy": "least-busy"},
-			map[string]any{"model_name": "chat", "routing_strategy": "weighted-split"},
-		}},
-	}
-	for i, document := range cases {
-		if err := ValidateModelRoutingDocument(document); err == nil {
-			t.Fatalf("case %d was accepted: %#v", i, document)
-		}
+// TestResolveWithoutLookupUsesModelDefault 验证身份库不可用时仍可使用模型管理默认分配。
+// nil lookup 不应导致请求失败；测试无外部状态。
+func TestResolveWithoutLookupUsesModelDefault(t *testing.T) {
+	got := Resolve(nil, ScopeRef{"team", "t1"})
+	if got.Source != BuiltinSource || got.Strategy() != "traffic-split" {
+		t.Fatalf("无 lookup 时解析错误: %+v", got)
 	}
 }

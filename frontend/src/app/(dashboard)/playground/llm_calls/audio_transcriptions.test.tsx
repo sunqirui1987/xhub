@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOpenAIAudioTranscriptionRequest } from "./audio_transcriptions";
-import OpenAI from "openai";
-
-vi.mock("openai");
+import { installLLMFetchFixture } from "../../../../../tests/llmFetchFixture";
 
 describe("audio_transcription", () => {
   const mockCreate = vi.fn();
@@ -15,16 +13,7 @@ describe("audio_transcription", () => {
       text: "This is the transcribed text from the audio file.",
     });
 
-    // Mock the OpenAI constructor and its methods
-    (OpenAI as any).mockImplementation(function () {
-      return {
-        audio: {
-          transcriptions: {
-            create: mockCreate,
-          },
-        },
-      };
-    });
+    installLLMFetchFixture(mockCreate);
   });
 
   afterEach(() => {
@@ -34,8 +23,10 @@ describe("audio_transcription", () => {
       abortController = null;
     }
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should make a request to the audio transcription API with basic parameters", async () => {
     const mockFile = new File(["audio data"], "test.wav", {
       type: "audio/wav",
@@ -53,6 +44,7 @@ describe("audio_transcription", () => {
     expect(mockUpdateUI).toHaveBeenCalledWith("This is the transcribed text from the audio file.", "whisper-1");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should include optional parameters when provided", async () => {
     const mockFile = new File(["audio data"], "test.mp3", {
       type: "audio/mpeg",
@@ -87,6 +79,7 @@ describe("audio_transcription", () => {
     expect(mockUpdateUI).toHaveBeenCalledWith("This is the transcribed text from the audio file.", "whisper-1");
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should handle errors gracefully", async () => {
     const mockError = new Error("API Error");
     mockCreate.mockRejectedValue(mockError);
@@ -101,6 +94,7 @@ describe("audio_transcription", () => {
     expect(mockUpdateUI).not.toHaveBeenCalled();
   });
 
+  /** 前置隔离协议响应；验证请求参数、业务回调或错误边界；afterEach 恢复 fetch 和 mock，无外部数据。 */
   it("should handle missing text in response", async () => {
     mockCreate.mockResolvedValue({});
     const mockFile = new File(["audio data"], "test.wav", {
@@ -113,4 +107,26 @@ describe("audio_transcription", () => {
 
     expect(mockUpdateUI).not.toHaveBeenCalled();
   });
+});
+
+/** 前置非 JSON 字幕格式；验证原始文本回调，结束恢复 fetch，不产生外部数据。 */
+it.each(["text", "srt", "vtt"])("转写保留 %s 文本响应", async (format) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("transcript")));
+  try {
+    const update = vi.fn();
+    await makeOpenAIAudioTranscriptionRequest(
+      new File(["a"], "a.wav"),
+      update,
+      "whisper",
+      "key",
+      [],
+      undefined,
+      undefined,
+      undefined,
+      format,
+    );
+    expect(update).toHaveBeenCalledWith("transcript", "whisper");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

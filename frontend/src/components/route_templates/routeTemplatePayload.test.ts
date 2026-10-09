@@ -36,32 +36,36 @@ describe("toTemplateRows", () => {
 });
 
 describe("summarizeTemplate", () => {
-  it("reads the same keys the request path reads", () => {
-    const summary = summarizeTemplate(
-      { routing_strategy: "lowest-cost", num_retries: 5, fallbacks: [{ "gpt-4o": ["claude"] }] },
-      labels,
+  /** 前置带默认策略的正文；验证模型例外不掩盖默认行为及空规则边界，纯函数无清理副作用。 */
+  it("shows template defaults and model exceptions", () => {
+    expect(summarizeTemplate({ routing_strategy: "cost-based-routing", model_routes: [] }, labels)).toBe(
+      "strategy:cost-based-routing · 1 retries · 60s",
     );
-    expect(summary).toBe("strategy:lowest-cost · 5 retries · 60s · 1 fallbacks");
+    expect(
+      summarizeTemplate(
+        { routing_strategy: "simple-shuffle", model_routes: [{ model: "a", strategy: "least-busy" }] },
+        labels,
+      ),
+    ).toBe("strategy:simple-shuffle · 模型例外 1 条 · 1 retries · 60s");
   });
-
-  it("reads an explicit timeout instead of the 60 second default", () => {
-    expect(summarizeTemplate({ timeout: 90 }, labels)).toContain("90s");
-    expect(summarizeTemplate({ timeout: 0 }, labels)).toContain("60s");
-  });
-
-  it("falls back to the defaults a template need not spell out", () => {
-    // A template seeded from the platform default has no reason to name the
-    // strategy, so a blank summary would be wrong about what it does.
-    expect(summarizeTemplate({}, labels)).toBe("strategy:simple-shuffle · 1 retries · 60s · no fallbacks");
-  });
-
-  it("reports no fallbacks when the list is absent or empty", () => {
-    expect(summarizeTemplate({ fallbacks: [] }, labels)).toContain("no fallbacks");
-    expect(summarizeTemplate({}, labels)).toContain("no fallbacks");
-  });
-
-  it("does not claim a fallback count from something that is not a list", () => {
-    expect(summarizeTemplate({ fallbacks: "broken" }, labels)).toContain("no fallbacks");
+  /** 验证模型规则数量和失败策略摘要，输入为新文档，无外部清理。 */
+  it("describes model rules and retry policy", () => {
+    expect(summarizeTemplate({}, labels)).toBe("全部使用模型默认 · 1 retries · 60s");
+    expect(
+      summarizeTemplate(
+        {
+          model_routes: [
+            { model: "a", strategy: "random" },
+            { model: "b", strategy: "least-busy" },
+          ],
+          retry_policy: { max_attempts: 5, timeout_seconds: 90 },
+        },
+        labels,
+      ),
+    ).toBe("模型规则 2 条 · 5 retries · 90s");
+    expect(
+      summarizeTemplate({ model_routes: [], retry_policy: { max_attempts: 1, timeout_seconds: 60 } }, labels),
+    ).toContain("全部使用模型默认");
   });
 });
 

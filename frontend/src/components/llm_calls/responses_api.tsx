@@ -1,4 +1,4 @@
-import openai from "openai";
+import { postLLMRequest, readJSONStream } from "./transport";
 import { MessageType } from "../chat_ui/types";
 import { TokenUsage } from "../chat_ui/ResponseMetrics";
 import { getProxyBaseUrl } from "@/components/networking";
@@ -38,6 +38,7 @@ type SynthesizedResponseEvent =
   | { type: "response.output_text.delta"; delta: string }
   | { type: "response.completed"; response: NonStreamedResponse };
 
+/** 将完整 Responses 回答转换为文本、推理、工具及完成事件，供共用 UI 处理。 */
 const responseAsEvents = (response: NonStreamedResponse): SynthesizedResponseEvent[] => {
   const outputItems = response.output ?? [];
   const outputText = outputItems
@@ -60,6 +61,9 @@ const responseAsEvents = (response: NonStreamedResponse): SynthesizedResponseEve
   ];
 };
 
+/** 发送 Responses 请求并维护会话 ID、文本、推理、工具和用量回调。
+ * 参数为消息、模型、虚拟密钥、会话及工具配置；返回完成 Promise。
+ * 供 Playground/对比调用，缺少密钥或模型、HTTP/流错误、取消均抛出。 */
 export async function makeOpenAIResponsesRequest(
   messages: MessageType[],
   updateTextUI: (role: string, delta: string, model?: string) => void,
@@ -102,18 +106,6 @@ export async function makeOpenAIResponsesRequest(
   }
 
   const proxyBaseUrl = customBaseUrl || getProxyBaseUrl();
-  // Prepare headers with tags and trace ID
-  const headers: Record<string, string> = {};
-  if (tags && tags.length > 0) {
-    headers["x-litellm-tags"] = tags.join(",");
-  }
-
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: headers,
-  });
 
   try {
     const startTime = Date.now();
@@ -203,17 +195,18 @@ export async function makeOpenAIResponsesRequest(
       ...(tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
     };
 
-    // Create request to OpenAI responses API
-    // Use 'any' type to avoid TypeScript issues with the experimental API
-    const response = streamingEnabled
-      ? await (client as any).responses.create({ ...requestBody, stream: true }, { signal })
-      : await (async () => {
-          const nonStreamingResponse = await (client as any).responses
-            .create({ ...requestBody, stream: false }, { signal })
-            .withResponse();
-          servedFromResponseCache = nonStreamingResponse.response.headers.get("x-litellm-cache-key") !== null;
-          return nonStreamingResponse.data;
-        })();
+    const httpResponse = await postLLMRequest(
+      "responses",
+      { ...requestBody, stream: streamingEnabled },
+      {
+        baseUrl: proxyBaseUrl,
+        accessToken,
+        tags,
+        signal,
+      },
+    );
+    servedFromResponseCache = !streamingEnabled && httpResponse.headers.has("x-litellm-cache-key");
+    const response = streamingEnabled ? readJSONStream(httpResponse, signal) : await httpResponse.json();
     const events = streamingEnabled ? response : responseAsEvents(response);
 
     let mcpToolUsed = "";

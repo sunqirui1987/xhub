@@ -26,7 +26,7 @@ var logTraceOnceLive sync.Once
 func State(h Runtime) router.State {
 	logTraceOnceLive.Do(func() { logx.Trace("enter dataplane.State") })
 
-	st := router.State{Busy: h.BusyMap(), Splits: router.SharedSplit()}
+	st := router.State{Busy: h.BusyMap()}
 	redis := h.Redis()
 	if redis == nil {
 		return st

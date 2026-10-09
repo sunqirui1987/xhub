@@ -32,7 +32,7 @@ func TestCandidatesUseDeclaredProtocols(t *testing.T) {
 	}
 	for _, mutate := range []func(*config.ModelEntry){
 		func(d *config.ModelEntry) { d.ModelInfo["transport"] = "missing" },
-		func(d *config.ModelEntry) { d.ModelInfo["endpoint_types"] = []string{"responses"} },
+		func(d *config.ModelEntry) { d.ModelInfo["endpoint_types"] = []string{"image"} },
 	} {
 		dep := deps[0]
 		dep.ModelInfo = map[string]any{"transport": protocols[0], "endpoint_types": []string{"chat"}}
@@ -49,7 +49,7 @@ func TestCandidatesUseDeclaredProtocols(t *testing.T) {
 func TestDialogueBindingsUseEndpointDirectory(t *testing.T) {
 	dep := config.ModelEntry{ModelName: "shared", LiteLLMParams: map[string]any{"model": "org/model", "custom_llm_provider": "vendor-10000"}, ModelInfo: map[string]any{"transport": "bypass_openai_responses", "endpoint_types": []string{"chat", "responses", "messages", "bypass:openai-responses"}}}
 	bindings := provider.DeploymentEndpoints(dep)
-	if len(bindings) != 4 {
+	if len(bindings) != 8 {
 		t.Fatalf("入口目录投影错误: %+v", bindings)
 	}
 	for _, binding := range bindings {

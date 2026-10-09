@@ -63,6 +63,7 @@ func dropDisabled(pool []config.ModelEntry) ([]config.ModelEntry, int) {
 // 参数 h：Adapted，不含官方任务钉。w：调用方响应。r：入站请求，正文只读一次。
 // 参数 op：目录操作名，例如 chat、embedding。
 // 返回：无。成功、失败和拒绝都写在 w 上。
+// Responses 先恢复已校验归属的历史，再执行预算和护栏；成功终态发布前保存下一轮上下文。
 // 调用：gateway/limits.go dataPlane。测试：failure_log_test.go 的 TestServeLogs*。
 func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	traceHop(r.URL.Path)
@@ -94,12 +95,24 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model required")
 		return
 	}
+	plan := h.PlanRoute(r, alias, body, p)
+	if plan.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", plan.Err.Error())
+		return
+	}
+	if op == "responses" {
+		body, err = responsesRequestBody(body, plan.History)
+		if err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 400, "unsupported_capability", err.Error())
+			return
+		}
+	}
 	est := EstimateTokens(body)
 	if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
 		logx.Debug("process path=%s step=limits refused model=%s", r.URL.Path, alias)
 		return
 	}
-	if op == "chat" || op == "responses" || op == "messages" || op == "" {
+	if op == "chat" || op == "responses" || op == "messages" || op == "gemini" || op == "vertex" || op == "" {
 		if blocked, msg := h.GuardrailBlocks(callID, body); blocked {
 			logx.Error("process path=%s step=guardrail blocked model=%s", r.URL.Path, alias)
 			// The refusal is still a request. Record it so the logs drawer can
@@ -142,7 +155,8 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "route template unavailable")
 		return
 	}
-	routeCfg = routeCfg.ForEndpoint(alias, provider.EndpointForOp(op))
+	baseRouteCfg := routeCfg
+	routeCfg = routeCfg.ForModel(alias)
 	if routeCfg.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", routeCfg.Err.Error())
 		return
@@ -150,11 +164,6 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	tenant := p.Hash
 	if tenant == "" {
 		tenant = "user:" + p.UserID
-	}
-	plan := h.PlanRoute(r, alias, body, p)
-	if plan.Err != nil {
-		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", plan.Err.Error())
-		return
 	}
 	var dialogue llm.Dialogue
 	if callerProtocol(op) != "" {
@@ -164,17 +173,27 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			return
 		}
 	}
-	cacheScope, err := json.Marshal(map[string]any{
+	scope := map[string]any{
 		"models": cfg.ModelList, "router": routeCfg.Settings,
 		"session": plan.SessionID, "query": r.URL.RawQuery,
-	})
+	}
+	// 未配置组或回退时保持既有缓存键；配置变动必须使旧跨模型结果失效。
+	if len(routeCfg.RoutingGroups) > 0 {
+		scope["routing_groups"] = routeCfg.RoutingGroups
+	}
+	if len(routeCfg.ModelFallbacks) > 0 {
+		scope["fallbacks"] = routeCfg.ModelFallbacks
+	}
+	cacheScope, err := json.Marshal(scope)
 	if err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "invalid route configuration")
 		return
 	}
 	ck := cache.Key(tenant, op, alias, string(raw), string(cacheScope))
 	stream, _ := body["stream"].(bool)
-	if !stream {
+	// 跨模型结果不从响应缓存读取：权限或预算可能在两次请求之间变化。
+	// Responses 的响应 ID 必须对应本次执行和上下文，不能复用已过期的响应缓存 ID。
+	if op != "responses" && !stream && len(baseRouteCfg.ModelFallbacks) == 0 && len(baseRouteCfg.RoutingGroups) == 0 {
 		if hit, ok := h.ResponseCache().Get(ck); ok {
 			elapsed := time.Since(start)
 			pt, ct := bodyUsage(hit)
@@ -195,9 +214,6 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	// 权重仅取自解析后的模板，旧部署权重不会参与任何策略。
 	models := cfg.ModelList
-	if router.IsSplitStrategy(routeCfg.Strategy()) {
-		models = router.ApplyWeights(models, routeCfg.WeightOverrides())
-	}
 	models, disabled := dropDisabled(models)
 	// 实际请求与预览使用同一兼容性判断，策略只处理已经兼容的候选。
 	if callerProtocol(op) != "" {
@@ -206,14 +222,23 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		models, _ = provider.Candidates(models, provider.EndpointForOp(op), nil)
 	}
 	state := h.RouteState()
-	state.SplitScope = routeCfg.CursorScope(alias, provider.EndpointForOp(op))
-	pool := router.Schedule(models, alias, routeCfg.Strategy(), state, plan.Pinned)
+	state.Allocations = routeCfg.Policy.Shares()
+	pool := routeCfg.Schedule(models, alias, state, plan.Pinned)
 	if plan.Required && (state.Cooldown[plan.Pinned] || len(pool) == 0 || router.CooldownID(pool[0]) != plan.Pinned) {
 		httpx.WriteTypedError(w, r.URL.Path, 409, "continuation_unavailable", "original deployment is unavailable")
 		return
 	}
 	if plan.Required {
 		pool = pool[:1]
+	}
+	disableFallbacks, _ := body["disable_fallbacks"].(bool)
+	fallbacks := newFallbackQueue(baseRouteCfg, alias, plan.Required || disableFallbacks)
+	if len(pool) == 0 {
+		pool, routeCfg = fallbacks.next("general", models, state)
+	}
+	if routeCfg.Err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "fallback route unavailable")
+		return
 	}
 	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
 	if len(pool) == 0 {
@@ -228,7 +253,6 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	// Retries already clamps to at least one, so a template that leaves the key
 	// out cannot turn a request into one that is never attempted.
-	attempts := routeCfg.Retries()
 
 	var lastErr error
 	var lastStatus int
@@ -241,202 +265,250 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	// checked and therefore cannot tell the two failures apart: an operator who
 	// misspelled a provider name used to be told their API key was missing.
 
-	for _, rawDep := range pool {
-		if triedHTTP {
-			// A retry is a new request against the upstream, so the credential
-			// is resolved again: a key revoked between attempts must not carry
-			// the retry, and the hierarchy is re-checked before spend is added.
-			p2, err := h.ResolveRequest(r)
-			if err != nil || p2 == nil || !p2.CanInfer() {
-				httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
+	for len(pool) > 0 {
+		kind := "general"
+		for _, rawDep := range pool {
+			// 组耗尽后采用最后尝试成员的回退链，保留原组名的初始权限检查。
+			fallbacks.useDeployment(rawDep.ModelName)
+			// 回退目标可能是另一个组；组别名与真实成员都必须通过权限和预算检查。
+			if fallbacks.poolAlias != alias && fallbacks.poolAlias != rawDep.ModelName && !h.EnforceIdentityLimits(w, r.URL.Path, p, fallbacks.poolAlias, est) {
 				return
 			}
-			p = p2
-			if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
-				return
-			}
-		}
-		dep, credentialErr := h.AttachCredential(rawDep)
-		if credentialErr != nil {
-			missingCredential = true
-			logx.Debug("skip deployment path=%s model=%s reason=credential_unavailable", r.URL.Path, alias)
-			continue
-		}
-		upstreamModel := dep.ParamString("model", alias)
-		supplier := dep.ParamString("custom_llm_provider", "")
-		realModel := upstreamModel
-		lastProvider = supplier
-		var built llm.Upstream
-		var err error
-		apiBase := dep.ParamString("api_base", "")
-		did := router.CooldownID(rawDep)
-		if callerProtocol(op) != "" {
-			built, err = buildDialogue(dep, dialogue)
-			if errors.Is(err, errDialogueCredentials) {
-				missingCredential = true
-				logx.Debug("skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, supplier, realModel)
-				continue
-			}
-			if err != nil {
-				lastErr = err
-				continue
-			}
-		} else {
-			built, err = buildRegisteredOperation(dep, body, op)
-			if errors.Is(err, errDialogueCredentials) {
-				missingCredential = true
-				continue
-			}
-			if err != nil {
-				lastErr = err
-				continue
-			}
-		}
-
-		for try := 0; try < attempts; try++ {
-			if try > 0 {
-				fresh, err := h.ResolveRequest(r)
-				if err != nil || fresh == nil || !fresh.CanInfer() {
-					httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
+			if triedHTTP {
+				// A retry is a new request against the upstream, so the credential
+				// is resolved again: a key revoked between attempts must not carry
+				// the retry, and the hierarchy is re-checked before spend is added.
+				p2, err := h.ResolveRequest(r)
+				if err != nil || p2 == nil || !p2.CanInfer() {
+					httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "Authentication Error, No api key passed in.")
 					return
 				}
-				p = fresh
+				p = p2
 				if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
 					return
 				}
 			}
-			triedHTTP = true
-			logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, supplier, realModel, baseHost(apiBase))
-			h.IncBusy(did)
-			// The timeout belongs to this request's document, not to the process
-			// client. The shared client is copied so its Timeout of 0 lets the
-			// context be the only deadline; otherwise a template that says 10
-			// seconds still waits for the timeout frozen at startup.
-			attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), time.Duration(routeCfg.TimeoutSeconds()*float64(time.Second)))
-			req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, built.URL, bytes.NewReader(built.Body))
-			if err != nil {
-				cancelAttempt()
-				h.DecBusy(did)
-				lastErr = err
-				logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, supplier, realModel, safeErr(err))
+			if rawDep.ModelName != alias && !h.EnforceIdentityLimits(w, r.URL.Path, p, rawDep.ModelName, est) {
+				return
+			}
+			dep, credentialErr := h.AttachCredential(rawDep)
+			if credentialErr != nil {
+				missingCredential = true
+				logx.Debug("skip deployment path=%s model=%s reason=credential_unavailable", r.URL.Path, alias)
 				continue
 			}
-			for key, values := range built.Header {
-				req.Header[key] = values
+			upstreamModel := dep.ParamString("model", alias)
+			supplier := dep.ParamString("custom_llm_provider", "")
+			realModel := upstreamModel
+			lastProvider = supplier
+			var built llm.Upstream
+			var err error
+			apiBase := dep.ParamString("api_base", "")
+			did := router.CooldownID(rawDep)
+			if callerProtocol(op) != "" {
+				built, err = buildDialogue(dep, dialogue)
+				if errors.Is(err, errDialogueCredentials) {
+					missingCredential = true
+					logx.Debug("skip deployment path=%s provider=%s model=%s reason=missing api key or api base", r.URL.Path, supplier, realModel)
+					continue
+				}
+				if err != nil {
+					lastErr = err
+					continue
+				}
+			} else {
+				built, err = buildRegisteredOperation(dep, body, op)
+				if errors.Is(err, errDialogueCredentials) {
+					missingCredential = true
+					continue
+				}
+				if err != nil {
+					lastErr = err
+					continue
+				}
 			}
-			client := *h.HTTPClient()
-			client.Timeout = 0
-			// 明确地址不跟随重定向，防止凭据被转发到未配置的连接。
-			client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-			resp, err := client.Do(req)
-			if err != nil {
-				cancelAttempt()
-				h.DecBusy(did)
-				lastErr = err
-				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
-				logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(err))
-				continue
-			}
-			if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-				_, _ = io.ReadAll(resp.Body)
+
+			for try := 0; try < routeCfg.Retries(); try++ {
+				if try > 0 {
+					fresh, err := h.ResolveRequest(r)
+					if err != nil || fresh == nil || !fresh.CanInfer() {
+						httpx.WriteTypedError(w, r.URL.Path, 401, "invalid_api_key", "invalid api key")
+						return
+					}
+					p = fresh
+					if rawDep.ModelName != alias && !h.EnforceIdentityLimits(w, r.URL.Path, p, rawDep.ModelName, est) {
+						return
+					}
+					if !h.EnforceIdentityLimits(w, r.URL.Path, p, alias, est) {
+						return
+					}
+				}
+				triedHTTP = true
+				logx.Trace("process path=%s step=attempt n=%d provider=%s model=%s base_host=%s", r.URL.Path, try+1, supplier, realModel, baseHost(apiBase))
+				h.IncBusy(did)
+				// The timeout belongs to this request's document, not to the process
+				// client. The shared client is copied so its Timeout of 0 lets the
+				// context be the only deadline; otherwise a template that says 10
+				// seconds still waits for the timeout frozen at startup.
+				attemptCtx, cancelAttempt := context.WithTimeout(r.Context(), time.Duration(routeCfg.TimeoutSeconds()*float64(time.Second)))
+				req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, built.URL, bytes.NewReader(built.Body))
+				if err != nil {
+					cancelAttempt()
+					h.DecBusy(did)
+					lastErr = err
+					logx.Error("upstream request path=%s provider=%s model=%s err=%s", r.URL.Path, supplier, realModel, safeErr(err))
+					continue
+				}
+				for key, values := range built.Header {
+					req.Header[key] = values
+				}
+				client := *h.HTTPClient()
+				client.Timeout = 0
+				// 明确地址不跟随重定向，防止凭据被转发到未配置的连接。
+				client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+				resp, err := client.Do(req)
+				if err != nil {
+					cancelAttempt()
+					h.DecBusy(did)
+					lastErr = err
+					h.NoteFailure(router.CooldownID(rawDep), routeCfg)
+					logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(err))
+					continue
+				}
+				if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+					_, _ = io.ReadAll(resp.Body)
+					resp.Body.Close()
+					cancelAttempt()
+					h.DecBusy(did)
+					h.NoteFailure(router.CooldownID(rawDep), routeCfg)
+					lastStatus = resp.StatusCode
+					lastErr = errUpstreamStatus
+					logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, supplier, realModel, baseHost(apiBase), resp.StatusCode)
+					continue
+				}
+
+				// 专用 4xx 在分类后切换模型；普通 4xx 保留原状态与正文。
+				if resp.StatusCode >= 400 {
+					errorBody, readErr := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					resp.Body = io.NopCloser(bytes.NewReader(errorBody))
+					errorKind := fallbackKind(resp.StatusCode, errorBody)
+					if readErr == nil && errorKind != "" && !fallbacks.disabled && len(baseRouteCfg.ModelFallbacks[fallbacks.current].Targets(errorKind)) > 0 {
+						cancelAttempt()
+						h.DecBusy(did)
+						lastStatus = resp.StatusCode
+						lastErr = errUpstreamStatus
+						kind = errorKind
+						goto nextFallbackModel
+					}
+				}
+				h.NoteLatency(did, float64(time.Since(start).Milliseconds()))
+				h.SetChatHeaders(w, p, alias, apiBase)
+				if stream {
+					var wrote bool
+					var usage map[string]any
+					var ttft time.Duration
+					var streamed []byte
+					var streamErr error
+					if callerProtocol(op) != "" && resp.StatusCode < 400 {
+						execution, _ := provider.Execution(dep)
+						// 终态发送前提交归属与历史，使收到完成事件的客户端能立即续接。
+						// commit 参数 result 为验证后的回复，无返回值；其他协议不提前提交。
+						commit := func(result llm.DialogueResult) {
+							if op == "responses" {
+								plan.History = responseHistory(dialogue, body, result)
+								h.CommitRoute(plan, did, result.ID)
+							}
+						}
+						wrote, usage, ttft, streamed, streamErr = pipeDialogue(w, resp, start, alias, execution.Protocol, callerProtocol(op), commit)
+					} else {
+						wrote, usage, ttft, streamed, streamErr = pipeStream(w, resp, start)
+					}
+					h.DecBusy(did)
+					cancelAttempt()
+					if streamErr != nil {
+						lastErr = streamErr
+						h.NoteFailure(did, routeCfg)
+						logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(streamErr))
+						if wrote {
+							h.RememberExchange(callID, r, raw, streamed)
+							h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck, SessionID: plan.SessionID})
+							h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusBadGateway, did)
+							return
+						}
+						continue
+					}
+					if wrote {
+						if callerProtocol(op) != "" {
+							usage = llm.NormalizeDialogueUsage(usage)
+						} else {
+							usage = completeUsage(usage, body, streamed)
+						}
+						pt, ct := usageCounts(usage)
+						logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
+						depID := did
+						h.RememberExchange(callID, r, raw, streamed)
+						h.AnnotateCall(callID, CallNote{
+							TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck,
+							SessionID: plan.SessionID,
+						})
+						if resp.StatusCode < 400 && op != "responses" {
+							h.CommitRoute(plan, depID, responseID(streamed))
+						}
+						h.RecordSpend(w, p, callID, alias, op, usage, start, false, resp.StatusCode, depID)
+						return
+					}
+					lastErr = errEmptyUpstream
+					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
+					continue
+				}
+				respBody, readErr := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				cancelAttempt()
 				h.DecBusy(did)
-				h.NoteFailure(router.CooldownID(rawDep), routeCfg)
-				lastStatus = resp.StatusCode
-				lastErr = errUpstreamStatus
-				logx.Error("upstream status path=%s provider=%s model=%s base_host=%s status=%d", r.URL.Path, supplier, realModel, baseHost(apiBase), resp.StatusCode)
-				continue
-			}
-
-			h.NoteLatency(did, float64(time.Since(start).Milliseconds()))
-			h.SetChatHeaders(w, p, alias, apiBase)
-			if stream {
-				var wrote bool
-				var usage map[string]any
-				var ttft time.Duration
-				var streamed []byte
-				var streamErr error
+				if readErr != nil {
+					lastErr = readErr
+					h.NoteFailure(did, routeCfg)
+					continue
+				}
 				if callerProtocol(op) != "" && resp.StatusCode < 400 {
 					execution, _ := provider.Execution(dep)
-					wrote, usage, ttft, streamed, streamErr = pipeDialogue(w, resp, start, alias, execution.Protocol, callerProtocol(op))
-				} else {
-					wrote, usage, ttft, streamed, streamErr = pipeStream(w, resp, start)
-				}
-				h.DecBusy(did)
-				cancelAttempt()
-				if streamErr != nil {
-					lastErr = streamErr
-					h.NoteFailure(did, routeCfg)
-					logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(streamErr))
-					if wrote {
-						h.RememberExchange(callID, r, raw, streamed)
-						h.AnnotateCall(callID, CallNote{TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck, SessionID: plan.SessionID})
-						h.RecordSpend(w, p, callID, alias, op, usage, start, false, http.StatusBadGateway, did)
-						return
+					result, conversionErr := llm.ParseDialogueResult(execution.Protocol, respBody)
+					if conversionErr != nil {
+						lastErr = conversionErr
+						continue
 					}
-					continue
-				}
-				if wrote {
-					if callerProtocol(op) != "" {
-						usage = llm.NormalizeDialogueUsage(usage)
-					} else {
-						usage = completeUsage(usage, body, streamed)
+					respBody, conversionErr = llm.EncodeDialogueResult(result, callerProtocol(op), alias)
+					if conversionErr != nil {
+						lastErr = conversionErr
+						continue
 					}
-					pt, ct := usageCounts(usage)
-					logMetrics(r.URL.Path, alias, false, pt, ct, ttft, time.Since(start))
-					depID := did
-					h.RememberExchange(callID, r, raw, streamed)
-					h.AnnotateCall(callID, CallNote{
-						TTFTMs: ttftMillis(ttft), Provider: supplier, CacheKey: ck,
-						SessionID: plan.SessionID,
-					})
-					if resp.StatusCode < 400 {
-						h.CommitRoute(plan, depID, responseID(streamed))
+					if op == "responses" {
+						plan.History = responseHistory(dialogue, body, result)
 					}
-					h.RecordSpend(w, p, callID, alias, op, usage, start, false, resp.StatusCode, depID)
-					return
 				}
-				lastErr = errEmptyUpstream
-				logx.Error("upstream stream path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(errEmptyUpstream))
-				continue
-			}
-			respBody, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			cancelAttempt()
-			h.DecBusy(did)
-			if readErr != nil {
-				lastErr = readErr
-				h.NoteFailure(did, routeCfg)
-				continue
-			}
-			if callerProtocol(op) != "" && resp.StatusCode < 400 {
-				execution, _ := provider.Execution(dep)
-				result, conversionErr := llm.ParseDialogueResult(execution.Protocol, respBody)
-				if conversionErr != nil {
-					lastErr = conversionErr
-					continue
+				elapsed := time.Since(start)
+				pt, ct := bodyUsage(respBody)
+				logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, supplier, realModel)
+				logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
+				depID := did
+				h.RememberExchange(callID, r, raw, respBody)
+				h.AnnotateCall(callID, CallNote{
+					TTFTMs: ttftMillis(elapsed), Provider: supplier, CacheKey: ck,
+					SessionID: plan.SessionID,
+				})
+				if resp.StatusCode < 400 {
+					h.CommitRoute(plan, depID, responseID(respBody))
 				}
-				respBody, conversionErr = llm.EncodeDialogueResult(result, callerProtocol(op), alias)
-				if conversionErr != nil {
-					lastErr = conversionErr
-					continue
-				}
+				h.WriteChatJSON(w, p, callID, alias, ck, op, "", respBody, resp.StatusCode, start, depID)
+				return
 			}
-			elapsed := time.Since(start)
-			pt, ct := bodyUsage(respBody)
-			logx.Info("process path=%s step=upstream status=%d provider=%s model=%s", r.URL.Path, resp.StatusCode, supplier, realModel)
-			logMetrics(r.URL.Path, alias, false, pt, ct, elapsed, elapsed)
-			depID := did
-			h.RememberExchange(callID, r, raw, respBody)
-			h.AnnotateCall(callID, CallNote{
-				TTFTMs: ttftMillis(elapsed), Provider: supplier, CacheKey: ck,
-				SessionID: plan.SessionID,
-			})
-			if resp.StatusCode < 400 {
-				h.CommitRoute(plan, depID, responseID(respBody))
-			}
-			h.WriteChatJSON(w, p, callID, alias, ck, op, "", respBody, resp.StatusCode, start, depID)
+		}
+
+	nextFallbackModel:
+		pool, routeCfg = fallbacks.next(kind, models, state)
+		if routeCfg.Err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "fallback route unavailable")
 			return
 		}
 	}

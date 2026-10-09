@@ -2,7 +2,6 @@
 package prefs
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/sunqirui1987/xhub/internal/httpx"
@@ -11,12 +10,6 @@ import (
 )
 
 var logTraceOnceSettings sync.Once
-
-var retiredRouterSettings = map[string]struct{}{
-	"model_group_alias":        {},
-	"model_group_retry_policy": {},
-	"retry_policy":             {},
-}
 
 type invalidPreferenceError struct{ message string }
 
@@ -27,23 +20,6 @@ type invalidPreferenceError struct{ message string }
 // 测试：gateway/retired_preferences_test.go。
 func (e invalidPreferenceError) Error() string { return e.message }
 
-// rejectRetiredRouterSettings rejects settings removed from model management.
-// 参数 namespace（string）：设置命名空间；patch（map[string]any）：待更新字段。
-// 返回 error：包含已移除的路由设置时返回错误，否则为 nil。
-// 调用：设置更新处理器。
-// 测试：gateway/retired_preferences_test.go。
-func rejectRetiredRouterSettings(namespace string, patch map[string]any) error {
-	if namespace != "router_settings" {
-		return nil
-	}
-	for field := range retiredRouterSettings {
-		if _, ok := patch[field]; ok {
-			return invalidPreferenceError{message: fmt.Sprintf("%s is no longer supported", field)}
-		}
-	}
-	return nil
-}
-
 // Base is the router-settings baseline from YAML and code defaults. allowed_fails is fixed at 3 here. A merged allowed_fails of at least 1 records the failure in Redis and starts cooldown. A cooldown_time of 0 means one minute. Only an explicit value below 1 skips recording the failure.
 // 参数 s（Host）：根地址使用的数据面宿主。
 // 返回 map[string]any（map[string]any）：根地址的字段表。缺键表示上游或库里没有这个字段。
@@ -52,26 +28,13 @@ func rejectRetiredRouterSettings(namespace string, patch map[string]any) error {
 func Base(s Host) map[string]any {
 	logTraceOnceSettings.Do(func() { logx.Trace("enter prefs.Base") })
 
-	rs := map[string]any{
-		"routing_strategy":         s.Config().RouterSettings.RoutingStrategy,
-		"routing_strategy_args":    map[string]any{},
-		"routing_groups":           []any{},
-		"num_retries":              s.Config().RouterSettings.NumRetries,
-		"timeout":                  s.Config().RouterSettings.Timeout,
-		"stream_timeout":           nil,
-		"max_fallbacks":            5,
-		"fallbacks":                []any{},
-		"context_window_fallbacks": []any{},
-		"content_policy_fallbacks": []any{},
-		"allowed_fails":            3,
-		"cooldown_time":            0,
-		"retry_after":              0,
-		"enable_pre_call_checks":   false,
-		"enable_tag_filtering":     false,
+	rs := map[string]any{"num_retries": s.Config().RouterSettings.NumRetries, "timeout": s.Config().RouterSettings.Timeout, "allowed_fails": 3, "cooldown_time": 0}
+	for _, key := range []string{"num_retries", "timeout", "allowed_fails", "cooldown_time"} {
+		if v, ok := s.Config().RouterRaw[key]; ok {
+			rs[key] = v
+		}
 	}
-	for k, v := range s.Config().RouterRaw {
-		rs[k] = v
-	}
+
 	return rs
 }
 
@@ -85,9 +48,12 @@ func MergedRouter(s Host) map[string]any {
 	if err != nil || db == nil {
 		db = map[string]any{}
 	}
-	merged := Overlay(Base(s), db)
-	for field := range retiredRouterSettings {
-		delete(merged, field)
+	// 全局设置仅投影当前执行字段；已废弃数据不参与运行，也不转换成新规则。
+	merged := Base(s)
+	for _, key := range []string{"num_retries", "timeout", "allowed_fails", "cooldown_time"} {
+		if value, exists := db[key]; exists {
+			merged[key] = value
+		}
 	}
 	return merged
 }
@@ -118,8 +84,16 @@ func MergedGeneral(s Host) map[string]any {
 // 调用：仅在 settings.go 内使用
 // 测试：无直接单测
 func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
-	if err := rejectRetiredRouterSettings(namespace, patch); err != nil {
-		return err
+	// 全局执行设置只接受当前四个参数，禁止把废弃字段重新写入数据库。
+	// 与模板策略独立校验，避免客户模板结构改变全局设置的接口契约。
+	if namespace == "router_settings" {
+		for key := range patch {
+			switch key {
+			case "num_retries", "timeout", "allowed_fails", "cooldown_time":
+			default:
+				return invalidPreferenceError{message: "unsupported router setting field: " + key}
+			}
+		}
 	}
 	var current map[string]any
 	switch namespace {
@@ -135,11 +109,6 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 		current = db
 	}
 	merged := MergePatch(current, patch)
-	if namespace == "router_settings" {
-		if err := ValidateModelRoutingDocument(merged); err != nil {
-			return invalidPreferenceError{message: err.Error()}
-		}
-	}
 	for k := range patch {
 		if err := s.RecordStore().PutConfig(namespace, k, merged[k]); err != nil {
 			return err
@@ -157,9 +126,6 @@ func saveNamespacePatch(s Host, namespace string, patch map[string]any) error {
 // 调用：gateway/server.go
 // 测试：无直接单测
 func ApplyTyped(s Host, m map[string]any) {
-	if v := str(m["routing_strategy"]); v != "" {
-		s.Config().RouterSettings.RoutingStrategy = v
-	}
 	if _, ok := m["num_retries"]; ok {
 		s.Config().RouterSettings.NumRetries = asInt(m["num_retries"])
 	}

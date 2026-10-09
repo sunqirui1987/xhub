@@ -1,4 +1,5 @@
 export const pageDescriptionsZhCN = {
+  "model-providers": "管理供应商连接与账号凭据",
   "route-templates": "路由模板，包含系统默认。组织、团队和密钥各选一份。",
   "api-keys": "管理用于 API 访问与鉴权的虚拟密钥",
   "llm-playground": "交互式调试台，用于测试 LLM 请求",

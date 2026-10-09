@@ -99,6 +99,13 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
+	// 校验与目录修改共用锁，避免模型创建与路由组创建同时占用同一名称。
+	s.LockModels()
+	defer s.UnlockModels()
+	if err := checkRoutingGroupName(s, name); err != nil {
+		httpx.WriteError(w, 409, "routing_group_conflict", err.Error())
+		return
+	}
 	// A model created from the page is stored in the database. After a restart LoadStored adds it back and marks it db_model.
 	info["db_model"] = true
 	if str(info["created_at"]) == "" {
@@ -109,9 +116,7 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
-	s.LockModels()
 	*s.ModelTable() = append(*s.ModelTable(), entry)
-	s.UnlockModels()
 	httpx.WriteJSON(w, 200, Public(entry))
 }
 
@@ -151,12 +156,11 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	if params, ok := body["litellm_params"].(map[string]any); ok {
 		if _, exists := params["weight"]; exists {
-			httpx.WriteError(w, 400, "invalid_request", "deployment weight is obsolete; configure weights in route templates")
+			httpx.WriteError(w, 400, "invalid_request", "deployment weight is obsolete; configure default weights in model management or customer overrides in route templates")
 			return
 		}
 	}
 	m.LiteLLMParams = maps.Clone(m.LiteLLMParams)
-	// 更新历史记录时移除旧权重，避免普通编辑重新持久化无效策略。
 
 	m.ModelInfo = maps.Clone(m.ModelInfo)
 	if v := str(body["model_name"]); v != "" {
@@ -192,6 +196,17 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		m.ModelInfo["disabled"] = m.Disabled()
 	}
 	m.ModelInfo["db_model"] = true
+	// 改名最后一个部署前检查公开名引用，不能让回退策略指向已消失的模型。
+	if old := (*s.ModelTable())[i]; old.ModelName != m.ModelName {
+		if err := checkRoutingGroupName(s, m.ModelName); err != nil {
+			httpx.WriteError(w, 409, "routing_group_conflict", err.Error())
+			return
+		}
+		if err := checkFallbackRemoval(s, old.ModelName, id); err != nil {
+			httpx.WriteError(w, 409, "fallback_conflict", err.Error())
+			return
+		}
+	}
 	if err := validateDeployment(s, m.ModelName, m.LiteLLMParams, m.ModelInfo); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
@@ -231,6 +246,11 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	if !modelIsDB(m) {
 		httpx.WriteError(w, 400, "invalid_request", "Config model cannot be deleted on the dashboard. Delete it from the config file.")
+		return
+	}
+	// 拒绝移除仍被策略引用的最后一个部署；管理员清除策略后可安全删除。
+	if err := checkFallbackRemoval(s, m.ModelName, str(m.ModelInfo["id"])); err != nil {
+		httpx.WriteError(w, 409, "fallback_conflict", err.Error())
 		return
 	}
 	if err := s.RecordStore().DeleteProxyModel(str(m.ModelInfo["id"])); err != nil {

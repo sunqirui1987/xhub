@@ -36,6 +36,10 @@ func Available(s Host, w http.ResponseWriter, r *http.Request) {
 		}
 		if index, ok := seen[entry.ModelName]; ok {
 			data[index]["endpoints"] = provider.MergeEndpoints(data[index]["endpoints"].([]provider.EndpointBinding), provider.DeploymentEndpoints(entry))
+			// 同名部署只要存在有效绑定就可调用，不能被另一条无效部署的错误覆盖。
+			if len(data[index]["endpoints"].([]provider.EndpointBinding)) > 0 {
+				delete(data[index], "unavailable_reason")
+			}
 			continue
 		}
 		seen[entry.ModelName] = len(data)
@@ -64,6 +68,9 @@ func availableCard(entry config.ModelEntry) map[string]any {
 		"output_price":      firstPrice(info, row, "output_price", "output_cost_per_token"),
 		"cache_read_price":  firstPrice(info, row, "cache_read_price", "cache_read_input_token_cost"),
 		"cache_write_price": firstPrice(info, row, "cache_write_price", "cache_creation_input_token_cost"),
+	}
+	if err := provider.ValidateDeployment(entry); err != nil {
+		card["unavailable_reason"] = err.Error()
 	}
 	if card["provider"] == "" {
 		card["provider"] = firstString(entry.LiteLLMParams, nil, "custom_llm_provider")

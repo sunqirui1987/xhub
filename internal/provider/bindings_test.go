@@ -24,7 +24,7 @@ func TestDeploymentEndpointProjection(t *testing.T) {
 	m.LiteLLMParams["custom_llm_provider"] = "openai"
 	merged := provider.MergeEndpoints(endpoints, provider.DeploymentEndpoints(m))
 	merged = provider.MergeEndpoints(merged, endpoints)
-	if len(merged) != 2 {
+	if len(merged) != 9 {
 		t.Fatalf("alias endpoint union: %d", len(merged))
 	}
 	delete(m.ModelInfo, "transport")

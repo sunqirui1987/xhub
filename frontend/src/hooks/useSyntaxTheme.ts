@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useTheme } from "next-themes";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
 
 export type SyntaxTheme = Record<string, CSSProperties>;
 

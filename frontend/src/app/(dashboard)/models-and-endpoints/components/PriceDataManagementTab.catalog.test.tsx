@@ -20,6 +20,9 @@ vi.mock("@/components/networking", () => ({
   getModelCostMapSource: vi.fn(),
   reloadModelCostMap: vi.fn(),
   scheduleModelCostMapReload: vi.fn(),
+  apiClient: { get: vi.fn(), post: vi.fn() },
+  getProxyBaseUrl: vi.fn(() => ""),
+  modelInfoCall: vi.fn(),
 }));
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({ default: () => ({ accessToken: "sk-test" }) }));
@@ -44,6 +47,7 @@ const catalog = {
   generated_at: "2026-10-07T00:00:00Z",
 };
 
+/** 渲染独立目录页面；无参数，返回测试视图，查询不重试，DOM及缓存由测试清理。 */
 function renderScreen() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -60,46 +64,35 @@ describe("PriceDataManagementTab", () => {
     vi.mocked(getPriceCatalog).mockResolvedValue(catalog as never);
   });
 
-  it("renders the models from the catalog API", async () => {
+  /** 前置旧本地目录；验证无市场声明的模型只留在本地，且供应商标签已移除；测试结束清理DOM。 */
+  it("keeps legacy records locally without exposing them in the marketplace", async () => {
     const user = userEvent.setup();
     renderScreen();
-    // A row with no token rate must read as unavailable, never as $0.
-    expect(await screen.findByTestId("price-row-blank-one")).toBeInTheDocument();
-    expect(within(screen.getByTestId("price-row-blank-one")).getAllByText("Price unavailable")).toHaveLength(2);
-    // A genuine zero is kept and shown.
-    await user.type(screen.getByRole("textbox", { name: "Search" }), "zero-rate");
-    expect(within(screen.getByTestId("price-row-zero-rate")).getAllByText("$0")).toHaveLength(2);
-    // A per-token rate is displayed per 1M tokens, without float noise.
-    await user.clear(screen.getByRole("textbox", { name: "Search" }));
-    await user.type(screen.getByRole("textbox", { name: "Search" }), "embed-one");
-    expect(within(screen.getByTestId("price-row-embed-one")).getByText("$2.5")).toBeInTheDocument();
-    expect(
-      within(screen.getByTestId("price-row-embed-one")).getByRole("link", { name: "Deploy model" }),
-    ).toHaveAttribute("href", "/models-and-endpoints?catalog=embed-one");
+    expect(await screen.findByText("No matching models")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Providers" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "本地模型列表" }));
+    expect(screen.getByRole("status")).toHaveTextContent("本地共 64 个模型");
+    expect(screen.getByTestId("local-model-blank-one")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
   });
 
-  it("hides the models past the first page until asked", async () => {
-    const user = userEvent.setup();
+  /** 前置公开、私有、下架市场记录；验证目录仅展示在售公开模型及编辑入口；DOM自动清理。 */
+  it("shows only public sale models and permits editing", async () => {
+    vi.mocked(getPriceCatalog).mockResolvedValue({
+      ...catalog,
+      models: {
+        public: { market_catalog: true, baseline: true, mode: "chat" },
+        private: { market_catalog: true, private: true },
+        down: { market_catalog: true, delisted: true },
+      },
+    } as never);
     renderScreen();
-    await screen.findByText("chat-00");
-    expect(screen.getAllByRole("article")).toHaveLength(60);
-    await user.click(screen.getByRole("button", { name: /Show more models/ }));
-    expect(screen.getAllByRole("article")).toHaveLength(64);
-  });
-
-  it("offers add and edit only on the models the catalog owns", async () => {
-    const user = userEvent.setup();
-    renderScreen();
-    await screen.findByText("chat-00");
+    const card = await screen.findByTestId("price-row-public");
+    expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(screen.getByTestId("price-add-model")).toBeInTheDocument();
-    expect(within(screen.getByTestId("price-row-chat-00")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
-    // Reset restores the generated row, so it is only offered once a row is overridden.
-    expect(
-      within(screen.getByTestId("price-row-chat-00")).queryByRole("button", { name: "Restore the built-in price" }),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Providers" }));
-    expect(screen.getByText("Acme")).toBeInTheDocument();
-    expect(screen.getByTestId("price-add-provider")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "下架" })).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: "Restore the built-in price" })).not.toBeInTheDocument();
   });
 });
 

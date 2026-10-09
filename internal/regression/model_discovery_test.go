@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// TestModelDiscoveryPathFallback 验证真实管理路由遵循已存供应商地址并双向适配 /v1。
-// 参数 t：测试上下文；返回：无。前置为真实 PostgreSQL 与本地上游；核对目录、错误、
+// TestModelDiscoveryPathFallback 验证真实管理路由遵循已存供应商地址并在 404 或网站正文时双向适配 /v1。
+// 参数 t：测试上下文；返回：无。前置为真实 PostgreSQL、未注册中转目录与本地上游；核对目录、错误、
 // 鉴权和请求顺序，拒绝请求中的连接覆盖；每个子用例的隔离 schema 随 harness 删除。
 func TestModelDiscoveryPathFallback(t *testing.T) {
 	for _, tc := range []struct {
@@ -20,6 +20,9 @@ func TestModelDiscoveryPathFallback(t *testing.T) {
 	}{
 		{"root direct", "", "/models", 404, []string{"/models"}},
 		{"root needs v1", "", "/v1/models", 404, []string{"/models", "/v1/models"}},
+		{"website needs v1", "", "/v1/models", 200, []string{"/models", "/v1/models"}},
+		{"website needs root", "/v1", "/models", 200, []string{"/v1/models", "/models"}},
+		{"both invalid", "", "", 200, []string{"/models", "/v1/models"}},
 		{"v1 needs root", "/v1", "/models", 404, []string{"/v1/models", "/models"}},
 		{"custom prefix", "/relay", "/relay/v1/models", 404, []string{"/relay/models", "/relay/v1/models"}},
 		{"explicit models URL", "/v1/models/", "/v1/models", 404, []string{"/v1/models"}},
@@ -38,13 +41,16 @@ func TestModelDiscoveryPathFallback(t *testing.T) {
 				}
 				if r.URL.Path != tc.working {
 					w.WriteHeader(tc.status)
+					if tc.status == 200 {
+						_, _ = fmt.Fprint(w, "<!doctype html><html>saved-secret</html>")
+					}
 					return
 				}
 				writeJSON(w, map[string]any{"data": []any{map[string]any{"id": "supplier-chat"}}})
 			}))
 			defer upstream.Close()
 			h.ok(http.MethodPost, "/credentials", admin, map[string]any{
-				"credential_name": "path-supplier", "credential_info": map[string]any{"custom_llm_provider": "openai"},
+				"credential_name": "path-supplier", "credential_info": map[string]any{"custom_llm_provider": "openai", "catalog_id": "fennoai"},
 				"credential_values": map[string]any{"api_key": "saved-secret", "api_base": upstream.URL + tc.base},
 			})
 			got := h.ok(http.MethodPost, "/model/builtin/models", admin, map[string]any{
@@ -64,15 +70,21 @@ func TestModelDiscoveryPathFallback(t *testing.T) {
 				if got["error"] != nil || len(models) != 1 || stringField(models[0], "id") != "supplier-chat" {
 					t.Fatalf("供应商目录错误：%v", got)
 				}
-			} else if len(models) != 0 || !strings.Contains(fmt.Sprint(got["error"]), fmt.Sprint(tc.status)) {
-				t.Fatalf("目录失败未返回空列表和原始状态：%v", got)
+			} else {
+				wantErr := fmt.Sprint(tc.status)
+				if tc.status == 200 {
+					wantErr = "invalid model discovery response"
+				}
+				if len(models) != 0 || !strings.Contains(fmt.Sprint(got["error"]), wantErr) {
+					t.Fatalf("目录失败未返回空列表和具体原因：%v", got)
+				}
 			}
 		})
 	}
 }
 
 // TestDiscoveryTreatsProviderNamesUniformly 验证供应商名称和 builtin 元数据不会改变普通 Custom 凭据的行为。
-// 参数 t：测试上下文；返回：无。真实数据库与本地目录返回两条模型，名称为 qiniu、fennoai 或普通名称时结果一致；schema 自动清理。
+// 参数 t：测试上下文；返回：无。真实数据库与本地目录返回两条模型，名称为 qiniu、fennoai 或普通名称且绑定未注册中转目录时结果一致；schema 自动清理。
 func TestDiscoveryTreatsProviderNamesUniformly(t *testing.T) {
 	h := newHarness(t)
 	admin := h.adminSession()
@@ -85,7 +97,7 @@ func TestDiscoveryTreatsProviderNamesUniformly(t *testing.T) {
 	defer upstream.Close()
 	for _, name := range []string{"qiniu", "fennoai", "ordinary-openai"} {
 		h.ok(http.MethodPost, "/credentials", admin, map[string]any{
-			"credential_name": name, "credential_info": map[string]any{"custom_llm_provider": "custom_openai", "provider_id": "CUSTOM_OPENAI", "builtin": name},
+			"credential_name": name, "credential_info": map[string]any{"custom_llm_provider": "custom_openai", "provider_id": "CUSTOM_OPENAI", "builtin": name, "catalog_id": "fennoai"},
 			"credential_values": map[string]any{"api_key": "sk-fake", "api_base": upstream.URL + "/v1"},
 		})
 		got := h.ok(http.MethodPost, "/model/builtin/models", admin, map[string]any{"credential_name": name}).json()

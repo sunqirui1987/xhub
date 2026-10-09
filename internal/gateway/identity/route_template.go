@@ -143,7 +143,7 @@ func RouteTemplateCreate(g Gate, w http.ResponseWriter, r *http.Request) {
 	// means that key's zero value - one attempt, a zero timeout. Seeding makes every
 	// template in the table a working configuration, and an operator who wants
 	// one attempt can still delete the line.
-	encoded, err := encodeTemplateBody(seedFromPlatform(g.RouterDocument(), body["body"]))
+	encoded, err := encodeTemplateBody(seedFromBuiltin(body["body"]))
 	if err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
@@ -169,6 +169,12 @@ func RouteTemplateCreate(g Gate, w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
+	}
+	if catalog, ok := g.(interface{ ValidateRoutingTemplate(string) error }); ok {
+		if err := catalog.ValidateRoutingTemplate(encoded); err != nil {
+			httpx.WriteError(w, 400, "invalid_request", err.Error())
+			return
+		}
 	}
 	row, err := g.Identity().CreateRouteTemplate(r.Context(), actorOf(p), owner, name, encoded)
 	if err != nil {
@@ -216,6 +222,12 @@ func RouteTemplateUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	if err := validateTemplateModelRouting(encoded); err != nil {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
+	}
+	if catalog, ok := g.(interface{ ValidateRoutingTemplate(string) error }); ok {
+		if err := catalog.ValidateRoutingTemplate(encoded); err != nil {
+			httpx.WriteError(w, 400, "invalid_request", err.Error())
+			return
+		}
 	}
 	row, err := g.Identity().UpdateRouteTemplate(r.Context(), actorOf(p), id, str(body["name"]), encoded)
 	if err != nil {
@@ -374,7 +386,7 @@ func RouteTemplateBinding(g Gate, w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		inherited := routeTemplateResolution{ScopeType: prefs.PlatformSource}
+		inherited := routeTemplateResolution{ScopeType: prefs.BuiltinSource}
 		if parent, parentID, parentErr := parentScope(g.Identity(), r, scope, scopeID); parentErr != nil {
 			http.Error(w, parentErr.Error(), http.StatusInternalServerError)
 			return
@@ -494,7 +506,7 @@ func resolveRouteTemplate(g Gate, r *http.Request, scope, scopeID string) (route
 			if lookup.err != nil {
 				return routeTemplateResolution{}, lookup.err
 			}
-			resolved := prefs.Resolve(g.RouterDocument(), lookup, chain...)
+			resolved := prefs.Resolve(lookup, chain...)
 			if lookup.err != nil {
 				return routeTemplateResolution{}, lookup.err
 			}
@@ -509,7 +521,7 @@ func resolveRouteTemplate(g Gate, r *http.Request, scope, scopeID string) (route
 			return routeTemplateResolution{}, lookup.err
 		}
 	}
-	return routeTemplateResolution{ScopeType: prefs.PlatformSource}, nil
+	return routeTemplateResolution{ScopeType: prefs.BuiltinSource}, nil
 }
 
 // requestLookup caches the template reads one console request makes.
@@ -591,26 +603,14 @@ func parentScope(db *iam.DB, r *http.Request, scope, scopeID string) (string, st
 	}
 }
 
-// seedFromPlatform fills a new template's document from the platform default, so
-// every template in the table is a complete configuration.
-//
-// Resolution replaces rather than merges. A template that omitted num_retries
-// would mean one attempt; one that omitted timeout would mean a zero timeout. Those
-// are legitimate things to configure and surprising things to get by accident, so
-// the starting point is the platform document and the operator edits it down.
-//
-// A body the caller did supply wins outright, including one that sets a key to
-// its zero value - the point is to fill what was left out, not to second-guess
-// what was written.
-// 参数 platform（map[string]any）：平台默认那一份路由设置；supplied（any）：调用方提交的正文，可能缺失。
+// seedFromBuiltin 为新模板提供完整的新格式骨架，避免表单和 JSON 依赖任何全局路由配置。
+// 调用方提供正文时按新格式字段覆盖骨架；后续严格校验要求 model_routes 与 retry_policy 完整有效。
+// 参数 supplied（any）：调用方提交的正文，可能缺失。
 // 返回 map[string]any（map[string]any）：要存进库的完整文档。
 // 调用：RouteTemplateCreate。
 // 测试：route_template_test.go
-func seedFromPlatform(platform map[string]any, supplied any) map[string]any {
-	seed := map[string]any{}
-	for key, value := range platform {
-		seed[key] = value
-	}
+func seedFromBuiltin(supplied any) map[string]any {
+	seed := prefs.BuiltinDocument()
 	override, ok := supplied.(map[string]any)
 	if !ok {
 		// An empty or absent body keeps the seed as it stands. RouteTemplateUpdate
@@ -667,7 +667,7 @@ func validateTemplateModelRouting(encoded string) error {
 	if err := json.Unmarshal([]byte(encoded), &document); err != nil {
 		return errors.New("body must be a JSON object")
 	}
-	return prefs.ValidateModelRoutingDocument(document)
+	return prefs.ValidateRouteTemplateDocument(document)
 }
 
 // ctx0 is the request context, or the background context when the request has

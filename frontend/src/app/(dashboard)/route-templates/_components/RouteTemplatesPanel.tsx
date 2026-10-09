@@ -1,14 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Copy, FileJson, Loader2, Pencil, Plus, Shield } from "lucide-react";
+import { ArrowLeft, Loader2, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 import { formatTemplateStrategyLabel } from "@/components/route_templates/strategyLabel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import RouteTemplateGuide from "@/components/route_templates/RouteTemplateGuide";
 import {
   Dialog,
@@ -20,12 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import RouteTemplateLibrary from "./RouteTemplateLibrary";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
-import {
-  getRouterSettingsCall,
-  modelInfoCall,
-  setCallbacksCall,
-  type RouteTemplateUsage,
-} from "@/components/networking";
+import { modelInfoCall, type RouteTemplateUsage } from "@/components/networking";
 import {
   deleteRefusalText,
   loadRouteTemplates,
@@ -39,48 +33,37 @@ import TemplateEditor from "@/components/route_templates/TemplateEditor";
 import {
   bodyFromForm,
   deploymentsFromInfo,
-  documentFromSettingsResponse,
+  emptyForm,
   formFromBody,
   nextCopyName,
-  omitUntouchedRoutingGroups,
   prettyDocument,
   type SplitDeployment,
   type TemplateFormState,
 } from "@/components/route_templates/templateForm";
 
-const PLATFORM_ID = "platform";
-
 type Draft = {
   id: string;
   name: string;
   form: TemplateFormState;
-  lockedName: boolean;
-  routingGroupsAtOpen: string;
-  hadModelRouting: boolean;
 };
 type UsageView = { name: string; rows: RouteTemplateUsage[]; refused: boolean };
 type JsonView = { name: string; body: Record<string, unknown> };
 
-const draftFrom = (id: string, name: string, body: Record<string, unknown>, lockedName: boolean): Draft => {
+const draftFrom = (id: string, name: string, body: Record<string, unknown>): Draft => {
   const form = formFromBody(body);
   return {
     id,
     name,
     form,
-    lockedName,
-    routingGroupsAtOpen: lockedName ? form.routing_groups : "",
-    hadModelRouting: "model_routing" in body,
   };
 };
 
 const editorTitle = (draft: Draft | null) => {
-  if (draft?.lockedName) return t("pages.routeTemplates.platformDefault");
   if (draft?.id) return t("pages.routeTemplates.edit");
   return t("pages.routeTemplates.create");
 };
 
 const editorDescription = (draft: Draft | null) => {
-  if (draft?.lockedName) return t("pages.routeTemplates.platformEditHint");
   if (draft?.id) return t("pages.routeTemplates.editHint");
   return t("pages.routeTemplates.createHint");
 };
@@ -96,13 +79,13 @@ const scopeLabel = (scope: RouteTemplateUsage["scope_type"]) => {
 /**
  * The route template library.
  *
- * A template is one whole router settings document. The platform default card
- * holds the document every scope uses when it has not selected a template.
- * Named rows are what an organization, a team or a key can select.
+ * 参数为令牌，返回模板库和独立编辑草稿；创建、复制和更新时保存整份文档。
+ * 非法 JSON 禁止保存，绑定中的模板拒绝删除；未绑定模板不影响数据面。
  */
 const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessToken }) => {
   const { userId, userRole } = useAuthorized();
   const [deployments, setDeployments] = useState<SplitDeployment[]>([]);
+  const [catalogError, setCatalogError] = useState("");
   const [jsonValid, setJsonValid] = useState(true);
   const [jsonView, setJsonView] = useState<JsonView | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -115,15 +98,10 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     queryKey: ["route-template-library", accessToken],
     enabled: !!accessToken,
     queryFn: async () => {
-      const [rows, settings] = await Promise.all([
-        loadRouteTemplates(accessToken!),
-        getRouterSettingsCall(accessToken!),
-      ]);
-      return { rows, platform: documentFromSettingsResponse(settings) };
+      return loadRouteTemplates(accessToken!);
     },
   });
-  const rows = library.data?.rows ?? [];
-  const platform = library.data?.platform ?? {};
+  const rows = library.data ?? [];
   const loading = library.isPending;
   const refresh = () => library.refetch();
   const showLibrary = !draft && !library.isError && !loading;
@@ -131,11 +109,19 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
   useEffect(() => {
     if (!accessToken || !userId || !userRole) return;
     let cancelled = false;
-    void modelInfoCall(accessToken, userId, userRole, 1, 200)
-      .then((data) => {
-        if (!cancelled) setDeployments(deploymentsFromInfo(data?.data ?? []));
-      })
-      .catch(() => undefined);
+    // 目录按部署分页，必须获取全部页面才能为同名模型编辑完整权重。
+    void (async () => {
+      const rows: unknown[] = [];
+      for (let page = 1; !cancelled; page++) {
+        const data = await modelInfoCall(accessToken, userId, userRole, page, 200);
+        rows.push(...(data?.data ?? []));
+        if (page >= (data?.total_pages ?? 1)) break;
+      }
+      if (!cancelled) {
+        setDeployments(deploymentsFromInfo(rows));
+        setCatalogError("");
+      }
+    })().catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -153,9 +139,10 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     [],
   );
 
+  /** startCreate 创建可编辑草稿；无参数，无返回值，只重置本地状态，保存前不影响请求。 */
   const startCreate = () => {
     setJsonValid(true);
-    setDraft(draftFrom("", "", platform, false));
+    setDraft({ id: "", name: "", form: emptyForm() });
   };
 
   const save = async () => {
@@ -168,20 +155,12 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
     }
     setSaving(true);
     try {
-      if (draft.lockedName) {
-        const patch = omitUntouchedRoutingGroups(written.body, draft.form.routing_groups, draft.routingGroupsAtOpen);
-        // The platform endpoint merges a patch: omission would keep deleted rules.
-        if (draft.hadModelRouting && !("model_routing" in patch)) patch.model_routing = [];
-        await setCallbacksCall(accessToken, { router_settings: patch });
-        toast.success(t("pages.routeTemplates.platformSaved"));
-      } else {
-        await saveRouteTemplate(accessToken, {
-          id: draft.id || undefined,
-          name: draft.name.trim(),
-          body: written.body,
-        });
-        toast.success(t("pages.routeTemplates.saved"));
-      }
+      await saveRouteTemplate(accessToken, {
+        id: draft.id || undefined,
+        name: draft.name.trim(),
+        body: written.body,
+      });
+      toast.success(t("pages.routeTemplates.saved"));
       setDraft(null);
       await refresh();
     } catch {
@@ -198,7 +177,7 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
       (source) => t("pages.routeTemplates.copyOf", { name: source }),
     );
     setJsonValid(true);
-    setDraft(draftFrom("", nextName, body, false));
+    setDraft(draftFrom("", nextName, body));
   };
 
   const showUsage = async (row: RouteTemplateRow, refused: boolean) => {
@@ -239,12 +218,7 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
 
   const openNamed = (row: RouteTemplateRow) => {
     setJsonValid(true);
-    setDraft(draftFrom(row.id, row.name, row.body, false));
-  };
-
-  const openPlatform = () => {
-    setJsonValid(true);
-    setDraft(draftFrom(PLATFORM_ID, t("pages.routeTemplates.platformDefault"), platform, true));
+    setDraft(draftFrom(row.id, row.name, row.body));
   };
 
   if (!accessToken) return null;
@@ -267,14 +241,19 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
           </p>
         </div>
         {!draft && (
-          <Button onClick={startCreate} disabled={loading || library.isError}>
+          <Button onClick={() => startCreate()} disabled={loading || library.isError}>
             <Plus />
             {t("pages.routeTemplates.create")}
           </Button>
         )}
       </div>
 
-      <RouteTemplateGuide compact={!!draft} />
+      <RouteTemplateGuide compact />
+      {catalogError && (
+        <p role="alert" className="text-destructive">
+          {catalogError}
+        </p>
+      )}
 
       {library.isError && (
         <Card>
@@ -296,60 +275,18 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
         </div>
       )}
       {showLibrary && (
-        <>
-          <Card>
-            <CardContent className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Shield className="size-5" />
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{t("pages.routeTemplates.platformDefault")}</h3>
-                    <Badge variant="secondary">{t("pages.routeTemplates.defaultBadge")}</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{summarizeTemplate(platform, summaryLabels)}</p>
-                  <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.platformDefaultHint")}</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setJsonView({ name: t("pages.routeTemplates.platformDefault"), body: platform })}
-                >
-                  <FileJson />
-                  {t("pages.routeTemplates.jsonTab")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => copyDocument(t("pages.routeTemplates.platformDefault"), platform)}
-                >
-                  <Copy />
-                  {t("pages.routeTemplates.copy")}
-                </Button>
-                <Button size="sm" variant="outline" onClick={openPlatform}>
-                  <Pencil />
-                  {t("pages.routeTemplates.edit")}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <RouteTemplateLibrary
-            rows={rows}
-            search={search}
-            onSearch={setSearch}
-            summaryLabels={summaryLabels}
-            onCreate={startCreate}
-            onViewJson={setJsonView}
-            onCopy={(row) => copyDocument(row.name, row.body)}
-            onDelete={setPendingDelete}
-            onEdit={openNamed}
-            onUsage={(row) => void showUsage(row, false)}
-          />
-        </>
+        <RouteTemplateLibrary
+          rows={rows}
+          search={search}
+          onSearch={setSearch}
+          summaryLabels={summaryLabels}
+          onCreate={() => startCreate()}
+          onViewJson={setJsonView}
+          onCopy={(row) => copyDocument(row.name, row.body)}
+          onDelete={setPendingDelete}
+          onEdit={openNamed}
+          onUsage={(row) => void showUsage(row, false)}
+        />
       )}
 
       {draft && (
@@ -362,7 +299,7 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
               </Button>
               <Button onClick={() => void save()} disabled={saving || !jsonValid || !draft.name.trim()}>
                 {saving && <Loader2 className="animate-spin" />}
-                {t(draft.id ? "Save" : "pages.routeTemplates.create")}
+                保存模板
               </Button>
             </div>
           </div>
@@ -371,7 +308,6 @@ const RouteTemplatesPanel: React.FC<{ accessToken: string | null }> = ({ accessT
               <TemplateEditor
                 key={draft.id || "new"}
                 name={draft.name}
-                nameLocked={draft.lockedName}
                 form={draft.form}
                 deployments={deployments}
                 accessToken={accessToken}

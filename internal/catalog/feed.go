@@ -14,36 +14,58 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// MarketURL 保留旧生成器常量契约；默认无远程价格源，调用方必须显式提供地址。
-// 生成器和运行时均只读取调用方显式指定的源。
-const MarketURL = ""
+// MarketURL 是默认价格来源；运行时可通过 XHUB_PRICE_FEED_URL 指定内部镜像。
+const MarketURL = "https://api.modelink.ai/v1/market/models"
 
 // feedDocument is the configured price feed response.
 type feedDocument struct {
-	Status bool        `json:"status"`
+	Status *bool       `json:"status"`
 	Data   []feedModel `json:"data"`
 }
 
 // feedModel is one model in the market feed. Only the fields the catalog keeps
 // are decoded; the feed carries several more that no rate depends on.
 type feedModel struct {
-	ID                string            `json:"id"`
-	Name              string            `json:"name"`
-	Description       string            `json:"description"`
-	Avatar            string            `json:"avatar"`
-	Features          []string          `json:"features"`
-	ModelConstraints  feedConstraints   `json:"model_constraints"`
-	Issuer            feedIssuer        `json:"issuer"`
-	Architecture      feedArchitecture  `json:"architecture"`
-	PricingRulesV2    []feedPricingRule `json:"pricing_rules_v2"`
-	SupportAPIProtos  []string          `json:"support_api_protocols"`
-	RetirementAt      string            `json:"retirement_at"`
-	ReleaseAt         string            `json:"release_at"`
-	SuggestedModel    string            `json:"suggested_model"`
-	ModelAlias        []string          `json:"model_alias"`
-	PricingPageURL    string            `json:"pricing_page_url"`
-	ModelDocURL       string            `json:"model_doc_url"`
-	IntegrationDocURL string            `json:"integration_doc_url"`
+	RawPricingRules     json.RawMessage   `json:"-"`
+	Private             bool              `json:"private"`
+	Rank                float64           `json:"rank"`
+	HotTags             []string          `json:"hot_tags"`
+	RateLimit           json.RawMessage   `json:"rate_limit"`
+	SupportedParameters json.RawMessage   `json:"supported_parameters"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Description         string            `json:"description"`
+	Avatar              string            `json:"avatar"`
+	Features            []string          `json:"features"`
+	ModelConstraints    feedConstraints   `json:"model_constraints"`
+	Issuer              feedIssuer        `json:"issuer"`
+	Architecture        feedArchitecture  `json:"architecture"`
+	PricingRulesV2      []feedPricingRule `json:"pricing_rules_v2"`
+	SupportAPIProtos    []string          `json:"support_api_protocols"`
+	RetirementAt        string            `json:"retirement_at"`
+	ReleaseAt           string            `json:"release_at"`
+	SuggestedModel      string            `json:"suggested_model"`
+	ModelAlias          []string          `json:"model_alias"`
+	PricingPageURL      string            `json:"pricing_page_url"`
+	ModelDocURL         string            `json:"model_doc_url"`
+	IntegrationDocURL   string            `json:"integration_doc_url"`
+}
+
+// UnmarshalJSON 同时保留原始定价规则和计费解析字段；参数为市场JSON，返回解码错误。
+// 市场抓取调用；完整字段用于内部详情，缺失金额保持缺失，不误显示为免费。
+func (model *feedModel) UnmarshalJSON(data []byte) error {
+	type plain feedModel
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*model = feedModel(decoded)
+	model.RawPricingRules = raw["pricing_rules_v2"]
+	return nil
 }
 
 type feedConstraints struct {
@@ -70,7 +92,11 @@ type feedSupport struct {
 }
 
 type feedPricingRule struct {
-	DetailsV2 map[string]feedUnit `json:"details_v2"`
+	InputRange     []float64           `json:"input_range"`
+	OutputRange    []float64           `json:"output_range"`
+	InputItemType  string              `json:"input_item_type"`
+	OutputItemType string              `json:"output_item_type"`
+	DetailsV2      map[string]feedUnit `json:"details_v2"`
 }
 
 // feedUnit is one rate in the feed. UnitPriceUSD is dollars per UnitSize units.
@@ -309,6 +335,9 @@ func BuildPriceDocument(raw []byte) (PriceDocument, error) {
 	if err := json.Unmarshal(raw, &feed); err != nil {
 		return PriceDocument{}, fmt.Errorf("market feed is not readable: %w", err)
 	}
+	if feed.Status != nil && !*feed.Status {
+		return PriceDocument{}, fmt.Errorf("market feed reported failure")
+	}
 	if len(feed.Data) == 0 {
 		logx.Error("market feed carried no models; refusing to build an empty catalog")
 		return PriceDocument{}, fmt.Errorf("market feed returned no models")
@@ -351,7 +380,7 @@ func BuildPriceDocument(raw []byte) (PriceDocument, error) {
 
 	return PriceDocument{
 		Version:     1,
-		Source:      "configured_feed",
+		Source:      MarketURL,
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		Providers:   providers,
 		Models:      models,
@@ -424,12 +453,30 @@ func convertFeedModel(model feedModel) map[string]any {
 	details := feedDetails(model.PricingRulesV2)
 
 	row := map[string]any{
-		"mode":              modeOf(model.Architecture),
-		"source":            "configured_feed",
-		"display_name":      firstNonEmpty(model.Name, model.ID),
-		"max_input_tokens":  positiveOrNil(model.ModelConstraints.ContextLength),
-		"max_output_tokens": positiveOrNil(firstPositive(model.ModelConstraints.MaxCompletionTokens, model.ModelConstraints.MaxTokens)),
+		"mode":                 modeOf(model.Architecture),
+		"source":               MarketURL,
+		"market_catalog":       true,
+		"private":              model.Private,
+		"rank":                 model.Rank,
+		"issuer":               model.Issuer.Name,
+		"input_modalities":     model.Architecture.InputModalities,
+		"output_modalities":    model.Architecture.OutputModalities,
+		"architecture":         model.Architecture,
+		"pricing_rules_v2":     model.PricingRulesV2,
+		"hot_tags":             model.HotTags,
+		"rate_limit":           model.RateLimit,
+		"supported_parameters": model.SupportedParameters,
+		"display_name":         firstNonEmpty(model.Name, model.ID),
+		"max_input_tokens":     positiveOrNil(model.ModelConstraints.ContextLength),
+		"max_output_tokens":    positiveOrNil(firstPositive(model.ModelConstraints.MaxCompletionTokens, model.ModelConstraints.MaxTokens)),
 	}
+	if len(model.RawPricingRules) > 0 {
+		var rules any
+		if json.Unmarshal(model.RawPricingRules, &rules) == nil {
+			row["pricing_rules_v2"] = rules
+		}
+	}
+
 	putNonEmpty(row, "description", model.Description)
 	putNonEmpty(row, "avatar", model.Avatar)
 	putNonEmpty(row, "retirement_at", model.RetirementAt)

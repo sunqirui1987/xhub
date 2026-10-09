@@ -1,8 +1,11 @@
-import openai from "openai";
+import { postLLMRequest } from "@/components/llm_calls/transport";
 import { getProxyBaseUrl } from "@/components/networking";
 import { toast } from "@/lib/toast";
 import { t } from "@/i18n";
 
+/** 调用媒体数据面并回调结果；参数包含输入、模型、密钥、标签及取消信号。
+ * 返回完成 Promise，供 Playground 使用；HTTP/解析失败和取消向调用方传播。
+ * 上传保留原文件，语音对象 URL 由消费组件释放。 */
 export async function makeOpenAIImageEditsRequest(
   imageFiles: File | File[],
   prompt: string,
@@ -20,13 +23,6 @@ export async function makeOpenAIImageEditsRequest(
   }
   const proxyBaseUrl = customBaseUrl || getProxyBaseUrl();
 
-  const client = new openai.OpenAI({
-    apiKey: accessToken,
-    baseURL: proxyBaseUrl,
-    dangerouslyAllowBrowser: true,
-    defaultHeaders: tags && tags.length > 0 ? { "x-litellm-tags": tags.join(",") } : undefined,
-  });
-
   try {
     // handle single and multiple images
     const imagesToProcess = Array.isArray(imageFiles) ? imageFiles : [imageFiles];
@@ -38,14 +34,17 @@ export async function makeOpenAIImageEditsRequest(
     for (let i = 0; i < imagesToProcess.length; i++) {
       const image = imagesToProcess[i];
 
-      const response = await client.images.edit(
-        {
-          model: selectedModel,
-          image: image,
-          prompt: prompt,
-        },
-        { signal },
-      );
+      const form = new FormData();
+      form.append("model", selectedModel);
+      form.append("image", image);
+      form.append("prompt", prompt);
+      const httpResponse = await postLLMRequest("images/edits", form, {
+        baseUrl: proxyBaseUrl,
+        accessToken,
+        tags,
+        signal,
+      });
+      const response = await httpResponse.json();
 
       if (response.data && response.data[0]) {
         // Handle either URL or base64 data from response
@@ -64,7 +63,7 @@ export async function makeOpenAIImageEditsRequest(
     }
 
     if (results.length > 1) {
-      toast.success(t("Successfully processed {value0} images", { value0: (results.length) }));
+      toast.success(t("Successfully processed {value0} images", { value0: results.length }));
     }
   } catch (error: any) {
     console.error("Error making image edit request:", error);

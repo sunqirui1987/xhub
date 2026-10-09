@@ -1,6 +1,7 @@
 @layer theme, base, components, utilities;
 
-@import "tailwindcss";
+/* 仅扫描产品源码，避免多个 Next 构建目录中的压缩缓存被识别为任意选择器。 */
+@import "tailwindcss" source("../");
 @import "tw-animate-css";
 
 @plugin '@headlessui/tailwindcss';

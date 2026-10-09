@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   callTextEndpoint,
   endpointUIType,
+  endpointLabel,
   endpointURL,
   modelEndpoints,
   selectEndpoint,
@@ -47,6 +48,8 @@ describe("explicit model endpoints", () => {
     expect(selectEndpoint(model, endpoints[1].path)).toBe(endpoints[1].path);
     expect(selectEndpoint(model, "/v1/images/generations")).toBe(endpoints[0].path);
     expect(endpointUIType(endpoints[1])).toBe(EndpointType.ANTHROPIC_MESSAGES);
+    expect(endpointUIType(binding("/v1/images/generations", "openai-images"))).toBeNull();
+    expect(endpointUIType(binding("/v1/images/edits", "openai-images"))).toBeNull();
     expect(
       textEndpoints({ model_group: "vidu", endpoints: [binding("/queue/fal-ai/vidu/q1/text-to-video", "fal")] }),
     ).toEqual([]);
@@ -174,4 +177,12 @@ describe("explicit model endpoints", () => {
       ).rejects.toThrow("Stream ended before completion");
     },
   );
+});
+
+/** 前置显式协议绑定；验证目录标签区分图片操作、Bypass 与 Google 路径，纯函数无需清理。 */
+it("labels protocol and executable path without guessing media mode", () => {
+ expect(endpointLabel({...binding("/v1/images/edits", "openai-images"), endpoint_id:"image_edit"})).toBe("OpenAI Images 编辑 · /v1/images/edits");
+ expect(endpointLabel({...binding("/bypass/openai/v1/responses"), endpoint_id:"bypass:openai-responses"})).toMatch(/^Bypass · OpenAI Responses/);
+ expect(endpointLabel(binding("/v1beta/models/demo:generateContent", "gemini"))).toBe("Gemini · /v1beta/models/demo:generateContent");
+ expect(textEndpoints({model_group:"google",endpoints:[binding("/v1beta/models/demo:generateContent", "gemini")]})).toEqual([]);
 });

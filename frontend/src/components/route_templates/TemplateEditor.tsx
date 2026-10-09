@@ -1,27 +1,24 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { t } from "@/i18n";
-import { fetchAvailableModels } from "@/components/llm_calls/fetch_models";
-import { formatTemplateStrategyLabel } from "./strategyLabel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import AdvancedTemplateSettings from "./AdvancedTemplateSettings";
+
+import { TemplateGroups, TemplateFallbacks } from "./TemplateRoutingSections";
 import ModelRoutingFields from "./ModelRoutingFields";
 import {
   bodyFromForm,
   formFromBody,
   parseDocument,
   prettyDocument,
-  strategyOptions,
   type SplitDeployment,
   type TemplateFormState,
 } from "./templateForm";
-import WeightedSplitFields from "./WeightedSplitFields";
-import RoutePreview from "./RoutePreview";
 
+/** NumberField 渲染可靠性数值输入；参数为名称、说明、草稿值和回调，返回标签关联控件。
+ * 编辑器调用；只更新父级草稿，非法数值由文档校验阻止保存，无后台副作用。 */
 const NumberField: React.FC<{
   label: string;
   hint: string;
@@ -42,20 +39,11 @@ const NumberField: React.FC<{
   </label>
 );
 
-const StrategyOption: React.FC<{ option: string }> = ({ option }) => (
-  <SelectItem value={option}>{t(formatTemplateStrategyLabel(option))}</SelectItem>
-);
-
-/**
- * Edits one template: how traffic is split, which model to try after a failure,
- * and the same document as JSON.
- *
- * The parent owns the draft. This component only reports the next form, so a
- * cancel throws the draft away without a second copy of the document.
- */
+/** TemplateEditor 编辑模板内负载均衡、路由组、故障转移与JSON，供模板库创建和编辑调用。
+ * 参数包含名称、草稿、部署目录及更新回调；返回三个业务表单与双向同步JSON。
+ * 父级拥有草稿；所有字段通过表单编辑，导入文件仍严格校验，组与回退仅随完整模板提交。 */
 const TemplateEditor: React.FC<{
   name: string;
-  nameLocked?: boolean;
   form: TemplateFormState;
   deployments: SplitDeployment[];
   accessToken: string | null;
@@ -65,40 +53,16 @@ const TemplateEditor: React.FC<{
   onName: (name: string) => void;
   onChange: (form: TemplateFormState) => void;
   onJsonValid: (valid: boolean) => void;
-}> = ({ name, nameLocked = false, form, deployments, accessToken, templateId, organizationId, teamId, onName, onChange, onJsonValid }) => {
+}> = ({ name, form, deployments, onName, onChange, onJsonValid }) => {
   const [jsonOverride, setJsonOverride] = useState<string | null>(null);
   const [jsonError, setJsonError] = useState("");
-  const [catalog, setCatalog] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
+  /** patch 合并表单局部修改；参数为变更字段，无返回值，清除 JSON 覆盖并通知父级更新草稿。 */
   const patch = (next: Partial<TemplateFormState>) => {
     setJsonOverride(null);
     setJsonError("");
     onChange({ ...form, ...next });
   };
-  useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-    void fetchAvailableModels(accessToken)
-      .then((list) => {
-        if (!cancelled) setCatalog(list.map((item) => item.model_group));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken]);
-
-  const modelNames = useMemo(() => {
-    const names = new Set(catalog);
-    for (const deployment of deployments) {
-      if (deployment.model_name) names.add(deployment.model_name);
-    }
-    return [...names];
-  }, [catalog, deployments]);
-
-  const options = strategyOptions(form.routing_strategy);
-  const selectedKey = `pages.routeTemplates.strategyDescriptions.${form.routing_strategy}`;
-  const selectedDescription = t(selectedKey);
   const written = bodyFromForm(form);
   useEffect(() => {
     onJsonValid(written.ok && !jsonError);
@@ -106,8 +70,7 @@ const TemplateEditor: React.FC<{
   const generatedJson = written.ok ? prettyDocument(written.body) : "";
   const jsonText = jsonOverride ?? generatedJson;
 
-  const chooseStrategy = (strategy: string) => patch({ routing_strategy: strategy });
-
+  /** editJson 校验输入正文；参数为 JSON 文本，无返回值，合法时同步表单，失败时保留文本并阻止保存。 */
   const editJson = (text: string) => {
     setJsonOverride(text);
     const parsed = parseDocument(text);
@@ -120,11 +83,19 @@ const TemplateEditor: React.FC<{
     onChange(formFromBody(parsed.body));
   };
 
+  /** uploadJson 读取用户选择的文件；参数允许未选择，无返回值，读取失败显示错误且不覆盖当前草稿。 */
   const uploadJson = (file: File | undefined) => {
     if (!file) return;
-    void file.text().then((text) => editJson(text));
+    void file
+      .text()
+      .then((text) => editJson(text))
+      .catch(() => {
+        setJsonError("无法读取 JSON 文件，请重新选择。");
+        onJsonValid(false);
+      });
   };
 
+  /** downloadJson 导出当前文本；无参数和返回值，使用模板名命名文件并释放临时对象 URL。 */
   const downloadJson = () => {
     const blob = new Blob([jsonText], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -144,154 +115,126 @@ const TemplateEditor: React.FC<{
         <Input
           aria-label={t("pages.routeTemplates.name")}
           value={name}
-          readOnly={nameLocked}
           placeholder={t("pages.routeTemplates.namePlaceholder")}
           required
-          autoFocus={!nameLocked}
+          autoFocus
           onChange={(event) => onName(event.target.value)}
         />
-        {nameLocked && <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.platformNameLocked")}</p>}
       </label>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList variant="line" className="h-auto w-full justify-start rounded-none border-b p-0">
-          <TabsTrigger value="basic" disabled={!!jsonError} className="px-4 py-2">
-            {t("pages.routeTemplates.basicSettings")}
-          </TabsTrigger>
-          <TabsTrigger value="advanced" disabled={!!jsonError} className="px-4 py-2">
-            {t("pages.routeTemplates.advancedSettings")}
-          </TabsTrigger>
-          <TabsTrigger value="json" className="px-4 py-2">
-            {t("pages.routeTemplates.jsonTab")}
-          </TabsTrigger>
-        </TabsList>
+      <div className="min-w-0">
+        <Tabs orientation="horizontal" value={activeTab} onValueChange={setActiveTab} className="min-w-0">
+          <TabsList variant="line" aria-label="路由配置分区" className="h-auto w-full flex-wrap justify-start border-b">
+            <TabsTrigger value="basic" disabled={!!jsonError} className="!h-auto !flex-none px-4 py-2">
+              负载均衡
+            </TabsTrigger>
+            <TabsTrigger value="groups" disabled={!!jsonError}>
+              路由组
+            </TabsTrigger>
+            <TabsTrigger value="fallbacks" disabled={!!jsonError}>
+              故障转移
+            </TabsTrigger>
+            <TabsTrigger value="json" className="!h-auto !flex-none px-4 py-2">
+              {t("pages.routeTemplates.jsonTab")}
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="basic" className="space-y-6 pt-4">
-          <div className="max-w-xl space-y-1">
-            <span className="text-xs font-medium uppercase tracking-wide text-foreground">
-              {t("pages.routeTemplates.modelRouting.defaultTitle")}
-            </span>
-            <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.modelRouting.defaultHint")}</p>
-            <Select value={form.routing_strategy} onValueChange={(value) => value && chooseStrategy(value)}>
-              <SelectTrigger className="w-full" aria-label={t("pages.routeTemplates.strategy")}>
-                <SelectValue>{t(formatTemplateStrategyLabel(form.routing_strategy))}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((option) => (
-                  <StrategyOption key={option} option={option} />
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedDescription !== selectedKey && (
-              <p className="text-xs text-muted-foreground">{selectedDescription}</p>
-            )}
-          </div>
-
-          {form.routing_strategy === "weighted-split" && (
-            <WeightedSplitFields
-              saved={form.weights}
-              deployments={deployments}
-              onChange={(weights) => patch({ weights })}
-            />
-          )}
-
-          <ModelRoutingFields
-            rules={form.model_routing}
-            deployments={deployments}
-            defaultStrategy={form.routing_strategy}
-            onChange={(model_routing) => patch({ model_routing })}
-          />
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <NumberField
-              label={t("pages.routeTemplates.retries")}
-              hint={t("pages.routeTemplates.retriesHint")}
-              value={form.num_retries}
-              onChange={(num_retries) => patch({ num_retries })}
-            />
-            <NumberField
-              label={t("pages.routeTemplates.timeout")}
-              hint={t("pages.routeTemplates.timeoutHint")}
-              value={form.timeout}
-              onChange={(timeout) => patch({ timeout })}
-            />
-            <NumberField
-              label={t("pages.routeTemplates.allowedFails")}
-              hint={t("pages.routeTemplates.allowedFailsHint")}
-              value={form.allowed_fails}
-              onChange={(allowed_fails) => patch({ allowed_fails })}
-            />
-            <NumberField
-              label={t("pages.routeTemplates.cooldown")}
-              hint={t("pages.routeTemplates.cooldownHint")}
-              value={form.cooldown_time}
-              onChange={(cooldown_time) => patch({ cooldown_time })}
-            />
-          </div>
-
-          {form.routing_strategy === "latency-based-routing" && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <NumberField
-                label={t("pages.routeTemplates.ttl")}
-                hint={t("pages.routeTemplates.ttlHint")}
-                value={form.ttl}
-                onChange={(ttl) => patch({ ttl })}
+          <div className="min-w-0">
+            <TabsContent value="basic" className="pt-6 space-y-6">
+              <div>
+                <h3 className="text-lg font-semibold">负载均衡</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  选择需要调整策略的模型；其余模型读取模型管理中的端点权重。
+                </p>
+              </div>
+              <ModelRoutingFields
+                rules={form.model_routes}
+                deployments={deployments}
+                onChange={(model_routes) => patch({ model_routes })}
               />
-              <NumberField
-                label={t("pages.routeTemplates.latencyBuffer")}
-                hint={t("pages.routeTemplates.latencyBufferHint")}
-                value={form.lowest_latency_buffer}
-                onChange={(lowest_latency_buffer) => patch({ lowest_latency_buffer })}
-              />
-            </div>
-          )}
-        </TabsContent>
+              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                部署地址、凭据、能力和权重在“模型与端点”中维护；模板负责选择策略。
+              </p>
 
-        <TabsContent value="advanced" className="space-y-4 pt-4">
-          <AdvancedTemplateSettings
-            form={form}
-            modelNames={modelNames}
-            availableStrategies={options}
-            onChange={patch}
-          />
-        </TabsContent>
-
-        <TabsContent value="json" className="space-y-3 pt-4">
-          <p className="text-xs text-muted-foreground">{t("pages.routeTemplates.jsonHint")}</p>
-          <textarea
-            aria-label={t("pages.routeTemplates.jsonTab")}
-            className="h-96 w-full rounded-md border border-border bg-transparent p-3 font-mono text-xs"
-            value={jsonText}
-            spellCheck={false}
-            onChange={(event) => editJson(event.target.value)}
-          />
-          {jsonError && (
-            <p role="alert" className="text-xs text-destructive">
-              {jsonError} · {t("pages.routeTemplates.jsonFixHint")}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={downloadJson}>
-              {t("pages.routeTemplates.downloadJson")}
-            </Button>
-            <label className="inline-flex cursor-pointer items-center">
-              <input
-                type="file"
-                accept="application/json,.json"
-                className="sr-only"
-                onChange={(event) => {
-                  uploadJson(event.target.files?.[0]);
-                  event.target.value = "";
-                }}
+              <div>
+                <h3 className="font-semibold">重试、超时与被动冷却</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  先在当前公开模型的部署池中尝试；429、5xx
+                  和传输失败可以重试或切换部署。流式内容已经发出后不会重新开始响应。
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <NumberField
+                  label={t("pages.routeTemplates.retries")}
+                  hint={t("pages.routeTemplates.retriesHint")}
+                  value={form.max_attempts}
+                  onChange={(max_attempts) => patch({ max_attempts })}
+                />
+                <NumberField
+                  label={t("pages.routeTemplates.timeout")}
+                  hint={t("pages.routeTemplates.timeoutHint")}
+                  value={form.timeout_seconds}
+                  onChange={(timeout_seconds) => patch({ timeout_seconds })}
+                />
+                <NumberField
+                  label={t("pages.routeTemplates.allowedFails")}
+                  hint={t("pages.routeTemplates.allowedFailsHint")}
+                  value={form.failure_threshold}
+                  onChange={(failure_threshold) => patch({ failure_threshold })}
+                />
+                <NumberField
+                  label={t("pages.routeTemplates.cooldown")}
+                  hint={t("pages.routeTemplates.cooldownHint")}
+                  value={form.cooldown_seconds}
+                  onChange={(cooldown_seconds) => patch({ cooldown_seconds })}
+                />
+              </div>
+            </TabsContent>
+            <TabsContent value="groups" className="pt-6">
+              <TemplateGroups form={form} deployments={deployments} onChange={patch} />
+            </TabsContent>
+            <TabsContent value="fallbacks" className="pt-6">
+              <TemplateFallbacks form={form} deployments={deployments} onChange={patch} />
+            </TabsContent>
+            <TabsContent value="json" className="space-y-3 pt-4">
+              <p className="text-xs text-muted-foreground">
+                JSON 与三个表单编辑同一份模板。导入、下载或修改 JSON 后，保存模板统一生效。
+              </p>
+              <textarea
+                aria-label={t("pages.routeTemplates.jsonTab")}
+                className="h-96 w-full rounded-md border border-border bg-transparent p-3 font-mono text-xs"
+                value={jsonText}
+                spellCheck={false}
+                onChange={(event) => editJson(event.target.value)}
               />
-              <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-sm">
-                {t("pages.routeTemplates.importJson")}
-              </span>
-            </label>
+              {jsonError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {jsonError} · {t("pages.routeTemplates.jsonFixHint")}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={downloadJson}>
+                  {t("pages.routeTemplates.downloadJson")}
+                </Button>
+                <label className="inline-flex cursor-pointer items-center">
+                  <input
+                    type="file"
+                    accept="application/json,.json"
+                    className="sr-only"
+                    onChange={(event) => {
+                      uploadJson(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                  />
+                  <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-sm">
+                    {t("pages.routeTemplates.importJson")}
+                  </span>
+                </label>
+              </div>
+            </TabsContent>
           </div>
-        </TabsContent>
-      </Tabs>
-      <RoutePreview accessToken={accessToken} models={modelNames} body={written.ok && !jsonError ? written.body : null} templateId={templateId} organizationId={organizationId} teamId={teamId} />
+        </Tabs>
+      </div>
       {!written.ok && !jsonError && (
         <p role="alert" className="text-xs text-destructive">
           {t("pages.routeTemplates.invalidField", { field: written.field })}

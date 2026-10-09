@@ -48,10 +48,11 @@ describe("legacyPageRedirectHref", () => {
     expect(redirect("page=constructor")).toBeNull();
   });
 
-  it("covers every sidebar page id with the route the sidebar itself links to", () => {
+  /** 新增独立页面没有旧书签入口；仅检查已有旧页面映射，无数据写入。 */
+  it("covers every existing sidebar page id with the route the sidebar itself links to", () => {
     const leaves = menuGroups
       .flatMap((group) => group.items.flatMap((item) => item.children ?? [item]))
-      .filter((item) => !item.external_url);
+      .filter((item) => !item.external_url && item.page !== "model-providers");
     expect(leaves.length).toBeGreaterThan(10);
     for (const leaf of leaves) {
       expect(redirect(`page=${leaf.page}`), leaf.page).toBe(`/ui/${leaf.route ?? leaf.page}`);

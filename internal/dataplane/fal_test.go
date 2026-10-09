@@ -155,7 +155,10 @@ func TestFalCreateDoesNotReplayAmbiguousServerFailure(t *testing.T) {
 	second := deployment("kling", "qiniu/"+model, "second-key", up.URL, "qiniu_fal_kling", nil)
 	h := &logicHost{
 		cfg: &config.Config{}, client: up.Client(), models: []config.ModelEntry{first, second},
-		pins: map[string]string{}, settings: map[string]any{"num_retries": 3.},
+		pins: map[string]string{}, settings: map[string]any{
+			"model_routes": []any{},
+			"retry_policy": map[string]any{"max_attempts": 3, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
+		},
 	}
 	r := h.call(t, "POST", "/queue/"+model, `{"prompt":"apple"}`)
 	if calls != 1 || r.Code != http.StatusInternalServerError || r.Body.String() != response {

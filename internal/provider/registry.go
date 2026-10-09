@@ -13,6 +13,7 @@ var (
 	mu             sync.Mutex
 	transports     []Transport
 	modelEndpoints = map[string]string{}
+	catalogModels  = map[string]map[string][]string{}
 )
 
 // RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
@@ -51,11 +52,12 @@ type Model struct {
 	PriceSource string
 }
 
-// RegisterModel 登记一条可选模型，并记录它的默认执行传输。
+// RegisterModel 登记模型默认传输及供应商目录的模型实现白名单。
+// 同一目录型号可以登记多个执行实现；对外目录 ID 与显示名称无关。
 // 参数 m（Model）：正在累加或展示的模型。
 // 返回：无。id 为空时不登记。
 // 调用：provider/volcengine/seedance.go
-// 测试：无直接单测
+// 测试：catalog_binding_test.go。
 func RegisterModel(m Model) {
 	m.ID = strings.TrimSpace(m.ID)
 	if m.ID == "" {
@@ -64,6 +66,16 @@ func RegisterModel(m Model) {
 	if m.TransportID != "" {
 		mu.Lock()
 		modelEndpoints[m.ID] = m.TransportID
+		if m.Provider != "" {
+			if catalogModels[m.Provider] == nil {
+				catalogModels[m.Provider] = map[string][]string{}
+			}
+			model := m.Official
+			if model == "" {
+				model = strings.TrimPrefix(m.ID, m.Provider+"/")
+			}
+			catalogModels[m.Provider][model] = append(catalogModels[m.Provider][model], m.TransportID)
+		}
 		mu.Unlock()
 	}
 	mode := m.Mode
@@ -165,6 +177,7 @@ func PublicBody() map[string]any {
 		"capabilities":   Capabilities(),
 		"transports":     Transports(),
 		"models":         ModelEndpoints(),
+		"catalogs":       CatalogModels(),
 	}
 }
 
@@ -194,13 +207,16 @@ func Match(method, path string, models []config.ModelEntry) (Hit, bool) {
 			if !ok {
 				continue
 			}
+			if strings.HasPrefix(action.PublicPath, "/bypass/") && (t.Protocol == "gemini" || t.Protocol == "vertex") {
+				t.EndpointID = "bypass:" + t.Protocol
+			}
 			return Hit{Transport: t, Action: action, Names: names}, true
 		}
 	}
 	return Hit{}, false
 }
 
-// 把路径模板和真实路径逐段比较，抽出花括号里的参数。
+// 把路径模板和真实路径比较，抽出花括号里的参数；Google 的末尾模型占位符允许包含多段路径。
 // 参数 pattern（string）：路径模板；path（string）：真实路径。
 // 返回 map[string]string（map[string]string）：抽出的参数；bool（bool）：逐段对上时为真。
 // 调用：仅在 registry.go 内使用
@@ -212,17 +228,38 @@ func matchPath(pattern, path string) (map[string]string, bool) {
 	if pattern == "" || path == "" {
 		return nil, false
 	}
+	// 只扩展末尾 {model}:操作，其他任务 ID 仍必须逐段匹配，避免扩大任意队列路径的匹配范围。
+	if len(pp) > 0 && strings.HasPrefix(pp[len(pp)-1], "{model}:") && len(aa) >= len(pp) {
+		start := len(pp) - 1
+		model := strings.Join(aa[start:], "/")
+		suffix := strings.TrimPrefix(pp[start], "{model}")
+		if !strings.HasSuffix(model, suffix) {
+			return nil, false
+		}
+		for _, segment := range strings.Split(strings.TrimSuffix(model, suffix), "/") {
+			if strings.TrimSpace(segment) == "" || segment == "." || segment == ".." {
+				return nil, false
+			}
+		}
+		aa = append(aa[:start], model)
+	}
 	if len(pp) != len(aa) {
 		return nil, false
 	}
 	names := map[string]string{}
 	for i := range pp {
-		if strings.HasPrefix(pp[i], "{") && strings.HasSuffix(pp[i], "}") {
-			name := strings.Trim(pp[i], "{}")
-			if aa[i] == "" {
+		// 原生 Gemini 将模型占位符与操作后缀放在同一段，后缀必须精确匹配。
+		if strings.HasPrefix(pp[i], "{") && strings.Contains(pp[i], "}") {
+			end := strings.Index(pp[i], "}")
+			suffix := pp[i][end+1:]
+			if !strings.HasSuffix(aa[i], suffix) {
 				return nil, false
 			}
-			names[name] = aa[i]
+			value := strings.TrimSuffix(aa[i], suffix)
+			if value == "" || value == "." || value == ".." {
+				return nil, false
+			}
+			names[pp[i][1:end]] = value
 			continue
 		}
 		if pp[i] != aa[i] {

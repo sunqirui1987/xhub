@@ -13,18 +13,18 @@ import (
 // 护栏在选部署之前拦住，两条都不拨。
 func TestFallbackChain(t *testing.T) { runSimulated(t, fallbackSimulated) }
 
+// fallbackSimulated 在隔离网关中验证部署回退、预算复核和护栏；参数 t 为测试上下文，无返回值。
+// 显式成本策略保证候选顺序，关闭模板冷却避免前序失败影响断言；隔离 schema 清理全部数据。
 func fallbackSimulated(t *testing.T) {
 	const public = "regression-failover"
 	h := newHarness(t)
 	admin := h.adminSession()
 	c := h.openScope(t, admin, "failover")
-	// This test deliberately accumulates failures to exercise fallback. Disable
-	// cooldown so those earlier requests cannot change the candidate order.
-	if r := h.setRouter(admin, map[string]any{"allowed_fails": 0}); r.status >= 300 {
-		t.Fatalf("disable cooldown for deterministic failover: %s", r.text())
-	}
-	h.addDBModel(t, admin, public, "fail-a", "dep-fail-a", nil)
+	h.addDBModel(t, admin, public, "fail-a", "dep-fail-a", map[string]any{"input_cost_per_token": testInputRate / 2})
 	h.addDBModel(t, admin, public, "fail-b", "dep-fail-b", nil)
+	// 默认权重采用随机顺序，不能据此断言先 fail-a；使用真实模板明确成本排序与冷却设置。
+	template := routeTemplate(t, h, admin, "deterministic failover", routeTemplateBody([]any{map[string]any{"model": public, "strategy": "cost-based-routing"}}, 1, 60, 0, 0))
+	h.ok(http.MethodPost, "/key/update", admin, map[string]any{"key": c.key, "route_template_id": template})
 
 	h.scriptStatus("fail-a", http.StatusInternalServerError)
 	before := h.moneyOf(t, c)

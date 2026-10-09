@@ -14,7 +14,7 @@ type Turn struct {
 	Calls                           []Turn
 }
 
-// Dialogue 保存统一对话请求；Options 只保存三种协议可表达的已验证参数。
+// Dialogue 保存统一对话请求；Options 只保存已实现协议可表达的已验证参数。
 type Dialogue struct {
 	Turns   []Turn
 	Tools   []map[string]any
@@ -22,7 +22,7 @@ type Dialogue struct {
 	Stream  bool
 }
 
-// DialogueResult 保存实测回复与用量；ID 仅来源上游，不制造可继续响应的存储状态。
+// DialogueResult 保存实测回复与用量；ID 来源上游，由网关按该 ID 保存临时续接上下文。
 type DialogueResult struct {
 	ID, Text, Stop string
 	Calls          []Turn
@@ -64,9 +64,12 @@ func textContent(v any) (string, error) {
 	return out.String(), nil
 }
 
-// ParseDialogue 将用户 Chat、Responses 或 Messages 解码成共享表示。参数为协议及正文；返回对话或字段错误。
-// 调用：统一入口在发起上游前；不支持的能力明确拒绝，原生入口不调用此函数。
+// ParseDialogue 将用户 OpenAI、Anthropic、Gemini/Vertex 对话解码成共享表示。参数为协议及正文；返回对话或字段错误。
+// 调用：统一入口在发起上游前；不支持的能力明确拒绝，Bypass 入口不调用此函数。
 func ParseDialogue(protocol string, body map[string]any) (Dialogue, error) {
+	if protocol == "gemini" || protocol == "vertex" {
+		return parseGoogleDialogue(body)
+	}
 	d := Dialogue{Options: map[string]any{}}
 	if !strings.Contains("|openai-chat|openai-responses|anthropic-messages|", "|"+protocol+"|") {
 		return d, fmt.Errorf("unregistered dialogue protocol %s", protocol)
@@ -324,6 +327,9 @@ func ParseDialogue(protocol string, body map[string]any) (Dialogue, error) {
 // EncodeDialogue 按显式上游协议编码对话，型号原样传递。参数为内部表示、协议、真实型号；返回正文或能力错误。
 // 调用：统一执行器；工具 ID 和参数不重新生成，Messages 工具结果按相邻角色合并。
 func EncodeDialogue(d Dialogue, protocol, model string) (map[string]any, error) {
+	if protocol == "gemini" || protocol == "vertex" {
+		return encodeGoogleDialogue(d)
+	}
 	out := map[string]any{"model": model, "stream": d.Stream}
 	if d.Stream && protocol == "openai-chat" {
 		out["stream_options"] = map[string]any{"include_usage": true}
@@ -481,6 +487,9 @@ func EncodeDialogue(d Dialogue, protocol, model string) (map[string]any, error) 
 // ParseDialogueResult 提取上游文本、工具调用、结束原因和用量事实。参数为协议与响应；返回结果或格式错误。
 // 调用：统一同步响应和流终态；不参与价格计算，不推断供应商。
 func ParseDialogueResult(protocol string, raw []byte) (DialogueResult, error) {
+	if protocol == "gemini" || protocol == "vertex" {
+		return parseGoogleDialogueResult(raw)
+	}
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return DialogueResult{}, err
@@ -571,8 +580,11 @@ func ParseDialogueResult(protocol string, raw []byte) (DialogueResult, error) {
 }
 
 // EncodeDialogueResult 将共享回复输出到用户协议；参数为结果、入口协议及公开型号，返回 JSON。
-// 调用：统一同步入口及 SSE 终态；Responses 明确 store=false，客户端继续对话需提供完整历史。
+// 调用：统一同步入口及 SSE 终态；Responses 上游 store=false，网关通过临时上下文支持 previous_response_id。
 func EncodeDialogueResult(r DialogueResult, protocol, model string) ([]byte, error) {
+	if protocol == "gemini" || protocol == "vertex" {
+		return encodeGoogleDialogueResult(r)
+	}
 	var out map[string]any
 	u := r.Usage
 	if u == nil {

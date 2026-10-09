@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "next-themes";
 import type { ReactNode } from "react";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import oneDark from "react-syntax-highlighter/dist/esm/styles/prism/one-dark";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { useSyntaxTheme, type SyntaxTheme } from "./useSyntaxTheme";
 

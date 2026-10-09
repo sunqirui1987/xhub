@@ -1,11 +1,14 @@
 package provider
 
-import "github.com/sunqirui1987/xhub/internal/config"
+import (
+	"github.com/sunqirui1987/xhub/internal/config"
+	"net/url"
+)
 
 // EndpointBinding 表示客户端可调用的公开端点契约，不包含上游密钥和内部地址。
 // 同一模型别名可以绑定多种协议；路径、方法和后续任务操作均来自已验证的部署。
 type EndpointBinding struct {
-	// EndpointID 是公开协议目录中的稳定 ID，例如 bypass:fal-video；不是模型名称。
+	// EndpointID 是公开协议目录中的稳定 ID，例如 fal:queue；不是模型名称。
 	EndpointID string `json:"endpoint_id"`
 	// Transport 是执行该部署的注册传输 ID，供配置和排查使用；客户端仍以 Path 调用。
 	Transport string `json:"transport"`
@@ -23,7 +26,7 @@ type EndpointBinding struct {
 }
 
 // DeploymentEndpoints 将有效部署投影成可公开的端点列表。
-// 参数 m（config.ModelEntry）：模型部署，必须显式声明传输与端点类型。
+// 参数 m（config.ModelEntry）：模型部署，必须显式声明传输，标准接口自动生成，Bypass 按声明开放。
 // 返回 []EndpointBinding：只含该模型可调用的创建路径和配套任务操作；无效或禁用部署返回空列表。
 // 调用：模型可用列表、管理页面模型分组。测试：bindings_test.go。
 func DeploymentEndpoints(m config.ModelEntry) []EndpointBinding {
@@ -34,11 +37,11 @@ func DeploymentEndpoints(m config.ModelEntry) []EndpointBinding {
 	// 对话入口路径来自公开目录；供应商和自定义执行配置只决定如何访问上游。
 	selected := SelectedTransport(m)
 	for _, e := range EndpointTypes() {
-		if (e.Kind != KindAdapted && !DialogueProtocol(e.Protocol)) || AllowsEndpoint(m, e.ID) != nil {
+		if !DialogueProtocol(e.Protocol) || AllowsEndpoint(m, e.ID) != nil {
 			continue
 		}
 		for _, path := range e.Paths {
-			out = append(out, EndpointBinding{EndpointID: e.ID, Transport: selected, Kind: e.Kind, Protocol: e.Protocol, Family: e.Family, Method: "POST", Path: path})
+			out = append(out, EndpointBinding{EndpointID: e.ID, Transport: selected, Kind: e.Kind, Protocol: e.Protocol, Family: e.Family, Method: "POST", Path: Expand(path, map[string]string{"model": url.PathEscape(m.ModelName)})})
 		}
 	}
 	// 非对话异步操作保留显式执行器的任务路径，不承诺跨媒体转换。
@@ -56,9 +59,9 @@ func DeploymentEndpoints(m config.ModelEntry) []EndpointBinding {
 				if action.Model != "" && action.Model != model {
 					continue
 				}
-				actions = append(actions, Action{Name: action.Name, Method: action.Method, PublicPath: action.PublicPath, TaskQuery: action.TaskQuery})
+				actions = append(actions, Action{Name: action.Name, Method: action.Method, PublicPath: Expand(action.PublicPath, map[string]string{"model": url.PathEscape(m.ModelName)}), TaskQuery: action.TaskQuery})
 			}
-			out = append(out, EndpointBinding{EndpointID: t.EndpointID, Transport: selected, Kind: t.Kind, Protocol: t.Protocol, Family: t.Family, Method: a.Method, Path: a.PublicPath, Actions: actions})
+			out = append(out, EndpointBinding{EndpointID: t.EndpointID, Transport: selected, Kind: t.Kind, Protocol: t.Protocol, Family: t.Family, Method: a.Method, Path: Expand(a.PublicPath, map[string]string{"model": url.PathEscape(m.ModelName)}), Actions: actions})
 		}
 	}
 	return out

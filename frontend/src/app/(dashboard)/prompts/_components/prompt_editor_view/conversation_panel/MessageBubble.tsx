@@ -1,8 +1,8 @@
 import React from "react";
 import { Bot, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import coy from "react-syntax-highlighter/dist/esm/styles/prism/coy";
 
 import { useSyntaxTheme } from "@/hooks/useSyntaxTheme";
 import ResponseMetrics from "@/components/chat_ui/ResponseMetrics";

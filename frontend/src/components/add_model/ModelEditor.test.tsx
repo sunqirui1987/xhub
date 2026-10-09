@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelEditor from "./ModelEditor";
@@ -42,7 +42,7 @@ vi.mock("@/components/networking", () => ({
   modelCreateCall: (...args: unknown[]) => mocks.create(...args),
   modelPatchUpdateCall: (...args: unknown[]) => mocks.patch(...args),
 }));
-vi.mock("./EndpointTypeField", () => ({ default: () => null }));
+vi.mock("./EndpointTypeField", () => ({ default: ({catalogId}: {catalogId?:string}) => <output aria-label="供应商能力目录">{catalogId}</output> }));
 vi.mock("../model_add/ProviderModelDialog", () => ({ ProviderModelDialog: () => null }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn() } }));
 
@@ -116,6 +116,24 @@ describe("ModelEditor", () => {
     mocks.patch.mockImplementation(async (_token, payload) => payload);
   });
 
+  /** 前置真实编辑器及隔离目录；验证自动公开名合法、随上游联动、保留人工名称；测试库自动卸载，无数据写入。 */
+  it("suggests safe aliases for path model IDs and preserves custom names", async () => {
+    const user = userEvent.setup();
+    mocks.apiPost.mockResolvedValue({models:[{id:"openai/group/model:latest"},{id:"group/next"}]});
+    renderEditor();
+    await user.selectOptions(screen.getByLabelText("模型提供商 *"), "relay-a");
+    await chooseUpstream(user, "openai/group/model:latest");
+    const name = screen.getByLabelText("对外模型名称 *");
+    expect(name).toHaveValue("group/model:latest");
+    expect(screen.getByRole("combobox", {name:"上游模型 *"})).toHaveValue("openai/group/model:latest");
+    await chooseUpstream(user, "group/next");
+    expect(name).toHaveValue("group/next");
+    await user.clear(name);
+    await user.type(name, "my-model");
+    await chooseUpstream(user, "openai/group/model:latest");
+    expect(name).toHaveValue("my-model");
+  });
+
   it("auto-fetches upstream suggestions only from the saved provider and refreshes on request", async () => {
     const user = userEvent.setup();
     mocks.apiPost.mockImplementation(async (_path, options: { body: { credential_name: string } }) => ({
@@ -153,6 +171,32 @@ describe("ModelEditor", () => {
     expect(await screen.findByRole("option", { name: /^relay-b-discovered/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /^relay-a-discovered/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "claude-sonnet" })).not.toBeInTheDocument();
+  });
+
+  /** 前置目录接口返回专用型号和远程错误；验证错误可见、保留型号且允许手动输入；自动卸载清理，无后台写入。 */
+  it("keeps native suggestions and a warning when remote discovery fails", async () => {
+    mocks.apiPost.mockResolvedValue({ models: [{ id: "byteplus/seedance-2.0/text-to-video" }], error: "upstream returned 503" });
+    const user = userEvent.setup();
+    renderEditor({ initialSupplier: relayA });
+    expect(await screen.findByRole("alert")).toHaveTextContent("upstream returned 503");
+    await chooseUpstream(user, "byteplus/seedance-2.0/text-to-video");
+    const upstream = screen.getByRole("combobox", { name: "上游模型 *" });
+    expect(upstream).toHaveValue("byteplus/seedance-2.0/text-to-video");
+    await user.clear(upstream);
+    await user.type(upstream, "gpt-5.6-sol");
+    expect(upstream).toHaveValue("gpt-5.6-sol");
+  });
+
+  /** 前置目录接口只有失败原因；验证没有伪造型号、展示真实错误且保留手动输入；自动卸载清理，无后台写入。 */
+  it("shows the upstream failure without blocking manual model IDs", async () => {
+    mocks.apiPost.mockResolvedValue({ models: [], error: "upstream returned 401" });
+    const user = userEvent.setup();
+    renderEditor({ initialSupplier: relayA });
+    expect(await screen.findByText(/获取模型列表失败：upstream returned 401/)).toBeInTheDocument();
+    const upstream = screen.getByRole("combobox", { name: "上游模型 *" });
+    await user.type(upstream, "manual/model：latest");
+    expect(upstream).toHaveValue("manual/model：latest");
+    expect(within(screen.getByRole("listbox", { name: "上游模型联想列表" })).queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("keeps catalog pricing independent when selecting or typing an upstream model", async () => {
@@ -252,4 +296,12 @@ describe("ModelEditor", () => {
     });
     expect(payload.model_info).not.toHaveProperty("team_id");
   });
+});
+
+/** 前置带旧目录的部署及未绑定目录的新连接；验证编辑使用当前连接目录，切换时不沿用旧能力；自动卸载清理。 */
+it("does not inherit a model directory when its current connection is unscoped", async () => {
+ renderEditor({model:{model_name:"saved",litellm_params:{model:"private-a",custom_llm_provider:"openai",litellm_credential_name:"relay-a"},model_info:{catalog_id:"qiniu",transport:"bypass_openai_chat",endpoint_types:["chat"]}}});
+ expect(screen.getByLabelText("供应商能力目录")).toHaveTextContent(/^$/);
+ await userEvent.selectOptions(screen.getByLabelText("模型提供商 *"),"relay-b");
+ expect(screen.getByLabelText("供应商能力目录")).toHaveTextContent(/^$/);
 });

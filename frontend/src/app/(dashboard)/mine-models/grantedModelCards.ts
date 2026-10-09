@@ -1,4 +1,8 @@
+import type { ModelEndpoint } from "@/components/llm_calls/fetch_models";
+
 export type MyModelCard = {
+  endpoints?: ModelEndpoint[];
+  unavailable_reason?: string;
   id: string;
   provider: string | null;
   category: string;
@@ -56,11 +60,14 @@ export function grantedModelCards(
     if (info.role === "provider") continue;
     const priced = costRow(costMap, id);
     const endpointTypes = Array.isArray(info.endpoint_types) ? info.endpoint_types : null;
-    const category = stringValue(info.category)
-      ?? (stringValue(info.transport) && info.transport !== "adapted" ? stringValue(info.transport) : null)
-      ?? (endpointTypes ? endpointTypes.find((value): value is string => typeof value === "string" && value.trim() !== "") : null)
-      ?? stringValue(priced?.mode)
-      ?? "chat";
+    const category =
+      stringValue(info.category) ??
+      (stringValue(info.transport) && info.transport !== "adapted" ? stringValue(info.transport) : null) ??
+      (endpointTypes
+        ? endpointTypes.find((value): value is string => typeof value === "string" && value.trim() !== "")
+        : null) ??
+      stringValue(priced?.mode) ??
+      "chat";
     cards.push({
       id,
       category,

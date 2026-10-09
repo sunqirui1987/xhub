@@ -37,7 +37,10 @@ func TestStreamFailureAfterOutputDoesNotRetryOrPin(t *testing.T) {
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(&fragmentedErrorReader{parts: [][]byte{[]byte("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")}, err: errors.New("reset")})}, nil
 	})}
 	cfg := chatConfig(config.ModelEntry{ModelName: "audit", LiteLLMParams: map[string]any{"model": "openai/audit", "api_base": "https://example.invalid/v1", "api_key": "test-key"}})
-	h := &streamAuditHost{logHost: newLogHost(cfg, client), settings: prefs.PlatformSettings(map[string]any{"num_retries": 3})}
+	h := &streamAuditHost{logHost: newLogHost(cfg, client), settings: prefs.RouteSettings{Settings: map[string]any{
+		"model_routes": []any{},
+		"retry_policy": map[string]any{"max_attempts": 3, "timeout_seconds": 60, "failure_threshold": 3, "cooldown_seconds": 0},
+	}}}
 	rec := httptest.NewRecorder()
 	Serve(h, rec, chatRequest(t, "audit", true), "chat")
 	if attempts != 1 || h.status != 502 || h.commits != 0 || rec.Body.Len() == 0 {

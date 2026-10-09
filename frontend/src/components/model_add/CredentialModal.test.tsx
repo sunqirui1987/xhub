@@ -54,7 +54,7 @@ describe("CredentialModal", () => {
     const submit=vi.fn(); renderModal({onSubmit:submit});
     await choose("New Supplier"); await fillSupplier();
     await userEvent.click(screen.getByRole("button",{name:"Add model provider"}));
-    await waitFor(() => expect(submit).toHaveBeenCalledWith({credential_name:"test-provider", custom_llm_provider:"new_supplier", provider_id:"NewSupplier", api_key:"test-secret", api_base:"https://new.example/v1"}));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith({credential_name:"test-provider", custom_llm_provider:"new_supplier", provider_id:"NewSupplier", catalog_id:"", api_key:"test-secret", api_base:"https://new.example/v1"}));
   });
   /** 验证切换保留名称且清旧 key、组织和地址，前置 OpenAI 草稿；无写入，自动卸载清理。 */
   it("clears previous authentication on provider switch", async () => {
@@ -124,4 +124,23 @@ describe("CredentialModal", () => {
     await userEvent.click(screen.getByRole("button",{name:"Retry"}));
     await choose("New Supplier"); expect(screen.getByLabelText("Supplier API Key")).toBeVisible();
   });
+});
+
+/** 前置供应商元数据及独立草稿；验证目录格式失败、合法目录独立于名称保存、编辑回填；自动卸载清理。 */
+it("validates and persists a supplier directory separately from the connection name", async () => {
+ const submit=vi.fn(); renderModal({onSubmit:submit}); await choose("New Supplier"); await fillSupplier();
+ const input=screen.getByLabelText("供应商目录 ID");
+ await userEvent.type(input,"../qiniu"); await userEvent.click(screen.getByRole("button",{name:"Add model provider"}));
+ expect(submit).not.toHaveBeenCalled(); expect(await screen.findByText(/目录 ID 只能/)).toBeVisible();
+ await userEvent.clear(input); await userEvent.type(input,"qiniu");
+ await userEvent.click(screen.getByRole("button",{name:"Add model provider"}));
+ await waitFor(()=>expect(submit).toHaveBeenCalledWith(expect.objectContaining({credential_name:"test-provider",catalog_id:"qiniu"})));
+});
+
+/** 前置已保存七牛目录连接；验证编辑回填并显式提交空目录以解除绑定；只改草稿，自动卸载清理。 */
+it("hydrates and clears an existing supplier directory", async () => {
+ const submit=vi.fn();renderModal({mode:"edit",onSubmit:submit,existingCredential:{credential_name:"legacy",credential_info:{custom_llm_provider:"openai",catalog_id:"qiniu"},credential_values:{api_key:"legacy-secret",api_base:"https://legacy.example"}}});
+ const input=await screen.findByLabelText("供应商目录 ID");expect(input).toHaveValue("qiniu");
+ await userEvent.clear(input);await userEvent.click(screen.getByRole("button",{name:"Save model provider"}));
+ await waitFor(()=>expect(submit).toHaveBeenCalledWith(expect.objectContaining({catalog_id:""})));
 });

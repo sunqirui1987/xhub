@@ -11,7 +11,6 @@ import { useModelDetailRouting } from "@/app/(dashboard)/models-and-endpoints/de
 import { useModelDashboardData } from "@/app/(dashboard)/models-and-endpoints/useModelDashboardData";
 import AllModelsPanel from "@/app/(dashboard)/models-and-endpoints/panels/AllModelsPanel";
 import AddModelPanel from "@/app/(dashboard)/models-and-endpoints/panels/AddModelPanel";
-import LlmCredentialsPanel from "@/app/(dashboard)/models-and-endpoints/panels/LlmCredentialsPanel";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n";
@@ -30,7 +29,6 @@ export default function ModelsAndEndpointsPage() {
 
   const isAdmin = all_admin_roles.includes(userRole);
   const canCreate = isAdmin && !isViewOnly;
-  const showProviders = isAdmin;
   const allModelsLabel = isAdmin ? t("pages.models.all") : t("pages.models.yours");
 
   const handleRefreshClick = () => {
@@ -48,7 +46,7 @@ export default function ModelsAndEndpointsPage() {
             <div>
               <h2 className="text-2xl font-semibold tracking-tight">{t("Model Management")}</h2>
               {isAdmin ? (
-                <p className="text-sm text-muted-foreground">{t("管理供应商连接、模型端点与计费规则")}</p>
+                <p className="text-sm text-muted-foreground">{t("按公开模型管理部署、默认分配、用户入口与计费规则")}</p>
               ) : (
                 <p className="text-sm text-muted-foreground">{t("查看可用模型及调用配置。")}</p>
               )}
@@ -71,7 +69,7 @@ export default function ModelsAndEndpointsPage() {
         ) : (
           <>
             <Tabs
-              value={activeKey === "llm-credentials" || activeKey === BASE_TAB_KEY ? activeKey : ""}
+              value={activeKey === BASE_TAB_KEY ? activeKey : ""}
               onValueChange={setActiveKey}
             >
               <div className="flex min-w-0 flex-nowrap items-center gap-3 border-b">
@@ -80,11 +78,7 @@ export default function ModelsAndEndpointsPage() {
                     <TabsTrigger value={BASE_TAB_KEY} className="flex-none">
                       {allModelsLabel}
                     </TabsTrigger>
-                    {showProviders && (
-                      <TabsTrigger value="llm-credentials" className="flex-none">
-                        模型提供商
-                      </TabsTrigger>
-                    )}
+
                   </TabsList>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 pb-1">
@@ -106,13 +100,12 @@ export default function ModelsAndEndpointsPage() {
               </div>
             </Tabs>
             <div className="pt-4">
-              {activeKey !== BASE_TAB_KEY && activeKey !== "llm-credentials" && (
+              {activeKey !== BASE_TAB_KEY && (
                 <Button variant="ghost" size="sm" className="mb-3" onClick={() => setActiveKey(BASE_TAB_KEY)}>
                   {t("pages.models.backToModels")}
                 </Button>
               )}
               {activeKey === BASE_TAB_KEY && <AllModelsPanel />}
-              {activeKey === "llm-credentials" && showProviders && <LlmCredentialsPanel />}
               {activeKey === "add" && canCreate && (
                 <AddModelPanel
                   initialCatalogId={catalogId}
