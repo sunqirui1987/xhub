@@ -271,3 +271,4 @@ RPM and TPM follow the same hierarchy: team allocations sum within the organizat
 
 See [quota management](docs/quota-management.md) for examples, administrator permissions, membership changes, historical spending, and the request-admission/settlement boundary.
 For code ownership, allocation invariants, admission and accounting flow, and layered test commands, see [quota implementation and verification](docs/development/quota-chain.md).
+Quota acceptance uses fresh temporary ownership chains for each budget and RPM/TPM check, verifies rejection before any upstream call and successful billed recovery, then deletes all temporary resources. Existing allocations and spending remain intact. The actual acceptance script is covered by a local gateway/database regression test; see [acceptance dataset documentation](docs/testdata/real-acceptance/README.md).

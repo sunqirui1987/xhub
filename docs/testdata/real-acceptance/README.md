@@ -24,6 +24,8 @@ runtime 由 runner 每次生成：随机端口、管理员密码、master key、
 
 `Observer` 位于网关和供应商之间。正常路径把请求转发到 manifest 指定的 HTTPS 供应商，保留供应商真实响应与 `usage`；故障路径在转发前注入 429，用于验证回退；它同时记录供应商、模型、请求标记、是否转发、状态码和 usage 到 `upstream-observations.json`。它不模拟成功补全，也不证明供应商侧最终账单；金额验证使用 manifest 固定的输入、输出 token 单价。观察记录含请求消息，应把整个运行目录视为私密材料。
 
+限额用例为每项检查新建未消费的组织 → 团队 → 个人 → API Key，并附加项目归属。其余层金额/RPM/TPM 均为 null，共享上级；临时 Key 使用基线 Key 实际生效的路由模板与被测模型。分别将五级预算以及组织、团队、个人、Key 的 RPM/TPM 设为 0，验证 429 和零上游调用，再提高被测上限，验证实际响应、usage 与五级账单。不能把已有固定子级分配或已消费的保留对象直接降为 0，否则 400 超配拒绝是正确行为。每创建一项立即注册逆序清理，失败也删除已创建项；单用户删除契约是 `POST /user/delete {"user_id": "..."}`。保留的 27 个成员和 81 把 Key 的额度配置保持原值。
+
 浏览器层启动独立 Next.js dev server，不拦截网关请求。它验证管理员登录、组织展示、Playground 真实回答与五级账单、日志可见、护栏创建/调试/保存/删除，以及 `platform_admin`、`organization_admin`、`team_admin`、`member` 四种身份的团队可见范围和编辑权限。API 与浏览器之后，SQL 读取隔离 schema：成功事件数、唯一 request ID 和总费用；`usage_daily` 总费用必须等于事件费用；organization、team、user、project、api_key 的 `spend` 必须分别等于对应事件维度的费用和。
 
 ## 运行

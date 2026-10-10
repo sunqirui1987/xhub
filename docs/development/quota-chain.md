@@ -75,6 +75,7 @@
 | 纯准入单元 | internal/live/rate_plan_test.go | 两维度各 30 种顺序，容量内放行与匹配上界 |
 | 计数及并发 | internal/live/rates_test.go、internal/gateway/rates_test.go | 真实临时 Redis、本地计数、拒绝不扣量、分钟恢复、故障、100 并发仅放行 7 |
 | 后台 regression | cmd/regression/{quota_hierarchy,rate_hierarchy,budget_chain,teamless_keys}_test.go | 真实 HTTP/数据库/本地供应商，汇总、共享、权限、退出历史；混合字段失败金额/角色全回滚 |
+| 验收脚本回归 | e2e/test_real_dataset.py、cmd/regression/real_dataset_limits_test.go | 实际执行 Python 限额验收；已消费且有固定分配的基线保持不变，五预算及八分钟限制拦截/恢复对账，正常与异常路径逆序清理 |
 | 页面测试 | 配套 payload/schema、表单、QuotaGuide、HTTP 客户端测试 | 可空字段、三项限额、双语说明及错误、保存转换 |
 | 浏览器 E2E | frontend/e2e/{rate-hierarchy,quota-hierarchy,personal-keys}.spec.ts | 页面操作→真实持久化→真实数据面放行/429；输入保留、修正、双语、唯一团队、退出、清空及删除 |
 

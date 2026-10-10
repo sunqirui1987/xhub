@@ -161,7 +161,12 @@ test("hierarchical budgets reserve allocations and enforce a single team", async
   } finally {
     // 为失败后的真实接口清理保留独立时间，避免测试超时掩盖原始错误。
     test.setTimeout(test.info().timeout + 30_000);
-    if (userID) await page.request.post(GATEWAY + "/user/delete", { headers, data: { user_ids: [userID] } });
+    if (userID) {
+      const deleted = await page.request.post(GATEWAY + "/user/delete", { headers, data: { user_id: userID } });
+      expect(deleted.ok(), await deleted.text()).toBeTruthy();
+      const gone = await page.request.get(GATEWAY + "/user/info?user_id=" + userID, { headers });
+      expect(gone.status()).toBe(404);
+    }
     for (const id of teamIDs) {
       const deleted = await page.request.post(GATEWAY + "/team/delete", { headers, data: { team_id: id } });
       expect(deleted.ok(), await deleted.text()).toBeTruthy();

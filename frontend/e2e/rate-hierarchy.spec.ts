@@ -150,7 +150,13 @@ test("rate allocations are editable and enforced along the unique ownership chai
     }
   } finally {
     test.setTimeout(test.info().timeout + 30_000);
-    if (userID) await page.request.post(GATEWAY + "/user/delete", { headers, data: { user_ids: [userID] } });
+    if (userID) {
+      // 单用户删除使用 user_id，且读取 404 证明清理成功，防止忽略错误后留下测试账号。
+      const deleted = await page.request.post(GATEWAY + "/user/delete", { headers, data: { user_id: userID } });
+      expect(deleted.ok(), await deleted.text()).toBeTruthy();
+      const gone = await page.request.get(GATEWAY + "/user/info?user_id=" + userID, { headers });
+      expect(gone.status()).toBe(404);
+    }
     if (teamID) await page.request.post(GATEWAY + "/team/delete", { headers, data: { team_id: teamID } });
     const deleted = await page.request.delete(GATEWAY + "/organization/delete", { headers, data: { organization_id: orgID } });
     expect(deleted.ok(), await deleted.text()).toBeTruthy();
