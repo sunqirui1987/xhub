@@ -89,4 +89,6 @@ route_template_config_test 覆盖完整配置往返、平台播种一次、整�
 go test ./cmd/regression/... -count=1
 ```
 
+Fenno 与七牛的付费全套、实时 `RUN`/`PASS`/`FAIL` 日志和运行目录见[真实供应商回归执行说明](../../docs/development/regression-live.md)。入口是 `bash scripts/regression-live-log.sh`。密钥只放在环境变量里。
+
 数据库验收设置 XHUB_REGRESSION_STRICT=1 并检查跳过项；Redis 和真实供应商需单独配置。每个同时运行的回归进程必须使用专用 Redis，花费队列和冷却 key 属于共享外部状态，不能跨 runner 共用。harness 清理先等待 HTTP handler 结束，在私有 schema 仍存在时排空最终花费记录，再关闭 Redis 客户端。接口、字段或行为改变后同步本说明及相关功能文档。

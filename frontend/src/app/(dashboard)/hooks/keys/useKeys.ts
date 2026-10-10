@@ -34,6 +34,7 @@ export interface DeletedKeysResponse {
 }
 
 export interface KeyListCallOptions {
+  scope?: "personal";
   organizationID?: string | null;
   teamID?: string | null;
   projectID?: string | null;
@@ -48,15 +49,14 @@ export interface KeyListCallOptions {
   status?: string | null;
 }
 
+/** 请求密钥列表；参数为会话、页码、页大小和筛选项，返回分页结果；个人范围由后台按会话强制隔离，网络或接口失败抛错。供密钥查询 hooks 调用。 */
 const keyListCall = async (accessToken: string, page: number, pageSize: number, options: KeyListCallOptions = {}) => {
-  /**
-   * Get all available keys on proxy
-   */
   try {
     const baseUrl = getProxyBaseUrl();
 
     const params = new URLSearchParams(
       Object.entries({
+        scope: options.scope,
         team_id: options.teamID,
         project_id: options.projectID,
         agent_id: options.agentID,
@@ -107,19 +107,20 @@ const keyListCall = async (accessToken: string, page: number, pageSize: number, 
   }
 };
 
+/** 查询指定范围的密钥；参数为分页与筛选，返回查询状态；按会话分开缓存，个人查询缺少用户身份时不发送。供密钥页面调用。 */
 export const useKeys = (
   page: number,
   pageSize: number,
   options: KeyListCallOptions = {},
 ): UseQueryResult<KeysResponse> => {
-  const { accessToken } = useAuthorized();
+  const { accessToken, userId } = useAuthorized();
 
   return useQuery<KeysResponse>({
-    queryKey: keyKeys.list({ page, limit: pageSize, ...options }),
+    queryKey: [...keyKeys.list({ page, limit: pageSize, ...options }), accessToken],
     queryFn: async () => await keyListCall(accessToken!, page, pageSize, options),
-    enabled: Boolean(accessToken),
+    enabled: Boolean(accessToken) && (options.scope !== "personal" || Boolean(userId)),
     staleTime: 30000, // 30 seconds
-    placeholderData: keepPreviousData,
+    placeholderData: options.scope === "personal" ? undefined : keepPreviousData,
   });
 };
 

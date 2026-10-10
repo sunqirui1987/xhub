@@ -64,7 +64,7 @@
   "key_profiles": [
     "inherit",
     "fenno-only",
-    "modelink-only"
+    "qiniu-only"
   ],
   "providers": [
     {
@@ -83,50 +83,38 @@
     }
   ],
   "routing": {
-    "alias": "企业智能助手",
-    "backup_alias": "企业智能助手备用",
-    "weights": [
-      7,
-      3
-    ],
     "max_attempts": 1,
-    "timeout_seconds": 90,
+    "timeout_seconds": 300,
     "templates": {
       "organization-default": {
         "model_routes": [
           {
-            "model": "$alias",
+            "model": "$shared_chat_model",
             "strategy": "traffic-split",
             "allocations": [
               {
                 "deployment_id": "$fenno_deployment",
-                "weight": 7
+                "weight": 3
               },
               {
-                "deployment_id": "$modelink_deployment",
-                "weight": 3
+                "deployment_id": "$qiniu_deployment",
+                "weight": 7
               }
             ]
           }
         ],
         "retry_policy": {
           "max_attempts": 1,
-          "timeout_seconds": 90,
+          "timeout_seconds": 300,
           "failure_threshold": 0,
           "cooldown_seconds": 60
         },
-        "fallbacks": [
-          {
-            "$alias": [
-              "$backup_alias"
-            ]
-          }
-        ]
+        "fallbacks": []
       },
       "team-default": {
         "model_routes": [
           {
-            "model": "$alias",
+            "model": "$shared_chat_model",
             "strategy": "traffic-split",
             "allocations": [
               {
@@ -134,7 +122,7 @@
                 "weight": 3
               },
               {
-                "deployment_id": "$modelink_deployment",
+                "deployment_id": "$qiniu_deployment",
                 "weight": 7
               }
             ]
@@ -142,22 +130,16 @@
         ],
         "retry_policy": {
           "max_attempts": 1,
-          "timeout_seconds": 90,
+          "timeout_seconds": 300,
           "failure_threshold": 0,
           "cooldown_seconds": 60
         },
-        "fallbacks": [
-          {
-            "$alias": [
-              "$backup_alias"
-            ]
-          }
-        ]
+        "fallbacks": []
       },
       "fenno-only": {
         "model_routes": [
           {
-            "model": "$alias",
+            "model": "$shared_chat_model",
             "strategy": "traffic-split",
             "allocations": [
               {
@@ -165,7 +147,7 @@
                 "weight": 100
               },
               {
-                "deployment_id": "$modelink_deployment",
+                "deployment_id": "$qiniu_deployment",
                 "weight": 0
               }
             ]
@@ -173,22 +155,16 @@
         ],
         "retry_policy": {
           "max_attempts": 1,
-          "timeout_seconds": 90,
+          "timeout_seconds": 300,
           "failure_threshold": 0,
           "cooldown_seconds": 60
         },
-        "fallbacks": [
-          {
-            "$alias": [
-              "$backup_alias"
-            ]
-          }
-        ]
+        "fallbacks": []
       },
-      "modelink-only": {
+      "qiniu-only": {
         "model_routes": [
           {
-            "model": "$alias",
+            "model": "$shared_chat_model",
             "strategy": "traffic-split",
             "allocations": [
               {
@@ -196,7 +172,7 @@
                 "weight": 0
               },
               {
-                "deployment_id": "$modelink_deployment",
+                "deployment_id": "$qiniu_deployment",
                 "weight": 100
               }
             ]
@@ -204,17 +180,11 @@
         ],
         "retry_policy": {
           "max_attempts": 1,
-          "timeout_seconds": 90,
+          "timeout_seconds": 300,
           "failure_threshold": 0,
           "cooldown_seconds": 60
         },
-        "fallbacks": [
-          {
-            "$alias": [
-              "$backup_alias"
-            ]
-          }
-        ]
+        "fallbacks": []
       }
     },
     "inheritance": [
@@ -223,7 +193,18 @@
       "organization",
       "builtin"
     ],
-    "document_semantics": "最近作用域整体覆盖；零权重不得转发；7:3为随机流量比例，不保证有限样本精确比例。"
+    "document_semantics": "公开模型 gpt-5.6-sol 由 Fenno gpt-5.6-sol 与七牛 openai/gpt-5.6-sol 两个真实部署组成；默认权重 3:7，单供应商模板使用 100:0 或 0:100。"
+  },
+  "shared_chat_model": {
+    "public_name": "gpt-5.6-sol",
+    "default_weights": [
+      3,
+      7
+    ],
+    "deployments": {
+      "fennoai": "gpt-5.6-sol",
+      "qiniu": "openai/gpt-5.6-sol"
+    }
   },
   "billing": {
     "currency": "USD",
@@ -233,7 +214,30 @@
   "limits": {
     "max_probe_models_per_provider": 5,
     "max_output_tokens": 32,
-    "max_upstream_attempts": 150
+    "max_upstream_attempts": 500
+  },
+  "logic_chains": {
+    "cache_consistency": {
+      "identical_replays": 2,
+      "cross_key_isolation": true,
+      "route_change_invalidates": true,
+      "cache_hit_cost": 0
+    },
+    "weighted_route_switch": {
+      "initial_weights": [
+        100,
+        0
+      ],
+      "updated_weights": [
+        0,
+        100
+      ]
+    },
+    "fallback_cache": {
+      "primary_failure_status": 429,
+      "repeat_requests": 2,
+      "cache_must_remain_disabled": true
+    }
   },
   "guardrails": [
     {
@@ -467,8 +471,8 @@
     },
     {
       "page": "models",
-      "resources": "实时目录选取的模型与备用部署",
-      "verification": "目录发现、探测、权重、回退"
+      "resources": "供应商连接后逐个添加的真实模型端点",
+      "verification": "供应商连接、精确模型 ID、协议、端点和启用状态"
     },
     {
       "page": "route-templates",
@@ -511,12 +515,20 @@
       "status": "requires_additional_credentials"
     },
     {
-      "feature": "图像、音频、视频、Responses原生协议",
-      "status": "covered_by_separate_protocol_suites_not_this_chat_dataset"
-    },
-    {
       "feature": "供应商实际账单金额",
       "status": "gateway_fixed_prices_only"
+    },
+    {
+      "feature": "Fenno gpt-image-2 图片 bypass",
+      "status": "live_minimum_generation_covered"
+    },
+    {
+      "feature": "七牛 Ark/FAL Seedance 与 FAL Kling 视频",
+      "status": "live_minimum_generation_and_settlement_covered"
+    },
+    {
+      "feature": "供应商账户最终出账",
+      "status": "outside_gateway_observability"
     }
   ],
   "limit_scenarios": {
@@ -575,21 +587,143 @@
       }
     ],
     "model_allowlist": {
-      "disallowed_alias": "未授权模型",
+      "disallowed_model": "xhub/non-allowlisted-model",
       "expected_status": 401
     }
   },
   "model_lifecycle": {
-    "alias": "企业广场生命周期模型",
+    "selection": "additional_live_chat_model",
     "steps": [
       "add_from_live_catalog",
       "real_request",
-      "disable_alias",
+      "disable_model",
       "access_refused_without_egress",
-      "enable_alias",
+      "enable_model",
       "real_request",
       "delete"
     ],
     "cleanup": true
-  }
+  },
+  "models": [
+    {
+      "id": "fenno-chat",
+      "provider": "fennoai",
+      "kind": "chat",
+      "selection": "exact",
+      "upstream_model": "gpt-5.6-sol",
+      "public_name": "gpt-5.6-sol",
+      "stored_model": "gpt-5.6-sol",
+      "transport": "bypass_openai_chat",
+      "endpoint_types": [
+        "chat",
+        "responses"
+      ],
+      "create_path": "/v1/chat/completions"
+    },
+    {
+      "id": "qiniu-chat",
+      "provider": "qiniu",
+      "kind": "chat",
+      "selection": "exact",
+      "upstream_model": "openai/gpt-5.6-sol",
+      "public_name": "gpt-5.6-sol",
+      "stored_model": "openai/gpt-5.6-sol",
+      "transport": "bypass_openai_chat",
+      "endpoint_types": [
+        "chat",
+        "responses"
+      ],
+      "create_path": "/v1/chat/completions"
+    },
+    {
+      "id": "qiniu-glm",
+      "provider": "qiniu",
+      "kind": "chat",
+      "selection": "exact",
+      "upstream_model": "z-ai/glm-5",
+      "public_name": "z-ai/glm-5",
+      "stored_model": "z-ai/glm-5",
+      "transport": "bypass_openai_chat",
+      "endpoint_types": [
+        "chat",
+        "responses"
+      ],
+      "create_path": "/v1/chat/completions"
+    },
+    {
+      "id": "fenno-image",
+      "provider": "fennoai",
+      "kind": "image",
+      "upstream_model": "gpt-image-2",
+      "public_name": "gpt-image-2",
+      "stored_model": "gpt-image-2",
+      "transport": "bypass_openai_image_generation",
+      "endpoint_types": [
+        "bypass:openai-images"
+      ],
+      "create_path": "/bypass/openai/v1/images/generations",
+      "base_model": "openai/gpt-image-2"
+    },
+    {
+      "id": "qiniu-ark-seedance",
+      "provider": "qiniu",
+      "kind": "video",
+      "upstream_model": "bytedance/doubao-seedance-2-0-mini-260615",
+      "public_name": "bytedance/doubao-seedance-2-0-mini-260615",
+      "stored_model": "qiniu/bytedance/doubao-seedance-2-0-mini-260615",
+      "transport": "qiniu_contents_generation",
+      "endpoint_types": [
+        "bypass:ark-video"
+      ],
+      "create_path": "/v3/contents/generations/tasks",
+      "query_prefix": "/v3/contents/generations/tasks/",
+      "base_model": "qiniu/bytedance/doubao-seedance-2-0-mini-260615"
+    },
+    {
+      "id": "qiniu-fal-seedance",
+      "provider": "qiniu",
+      "kind": "video",
+      "upstream_model": "bytedance/seedance-2.0/mini/text-to-video",
+      "public_name": "bytedance/seedance-2.0/mini/text-to-video",
+      "stored_model": "qiniu/bytedance/seedance-2.0/mini/text-to-video",
+      "transport": "qiniu_fal_doubao_20",
+      "endpoint_types": [
+        "fal:queue"
+      ],
+      "create_path": "/queue/bytedance/seedance-2.0/mini/text-to-video",
+      "query_prefix": "/queue/bytedance/seedance-2.0/requests/",
+      "base_model": "qiniu/bytedance/seedance-2.0/mini/text-to-video"
+    },
+    {
+      "id": "qiniu-fal-kling",
+      "provider": "qiniu",
+      "kind": "video",
+      "upstream_model": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "public_name": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "stored_model": "qiniu/fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "transport": "qiniu_fal_kling",
+      "endpoint_types": [
+        "fal:queue"
+      ],
+      "create_path": "/queue/fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "query_prefix": "/queue/fal-ai/kling-video/requests/",
+      "base_model": "qiniu/fal-ai/kling-video/v2.5-turbo/pro/text-to-video"
+    }
+  ],
+  "agent_conversation": {
+    "agent_type": "codex",
+    "endpoint": "/v1/responses",
+    "turns": 3,
+    "max_output_tokens": 128,
+    "instructions": "You are Codex, a coding agent. Follow the user instructions and reply with only the requested project marker.",
+    "user_agent": "codex_cli_rs/0.1.0 (xhub acceptance simulator)"
+  },
+  "verification_order": [
+    "gpt-5.6-sol",
+    "z-ai/glm-5",
+    "fenno-image",
+    "qiniu-ark-seedance",
+    "qiniu-fal-seedance",
+    "qiniu-fal-kling"
+  ]
 }

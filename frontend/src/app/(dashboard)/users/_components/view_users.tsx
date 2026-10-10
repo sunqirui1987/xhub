@@ -145,10 +145,12 @@ const ViewUserDashboard: React.FC<ViewUserDashboardProps> = ({
     [setSelectedUserId],
   );
 
+  /** 关闭详情并刷新用户目录；无参数和返回值，供详情返回按钮调用，使账号和团队编辑在列表立即可见。 */
   const handleCloseUserInfo = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["userList"] });
     void setSelectedUserId(null);
     setOpenInEditMode(false);
-  }, [setSelectedUserId]);
+  }, [setSelectedUserId, queryClient]);
 
   const handleDelete = useCallback((user: UserInfo) => {
     setUserToDelete(user);

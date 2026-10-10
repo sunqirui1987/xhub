@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/store"
 )
@@ -50,6 +49,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// TestLiveChains 验证真实登录后控制台各页面的读取接口及模型、日志、团队的响应契约。
+// 参数 t 为测试上下文；前置私有数据库，通过 HTTP 创建所需模型，避免依赖开发库已有部署。
+// 返回：无；不调用外部供应商，所有模型、账号和日志随私有 schema 清理，服务器在结束时关闭。
 func TestLiveChains(t *testing.T) {
 	srv, base, db := bootGateway(t)
 	defer srv.Close()
@@ -59,6 +61,12 @@ func TestLiveChains(t *testing.T) {
 	})
 	if key == "" {
 		t.Fatal("login did not return a session")
+	}
+	// 模型列表的非空断言需要显式夹具；私有配置库不应读取开发环境已有模型。
+	status, body := authed(t, base, key, http.MethodPost, "/model/new",
+		[]byte(`{"model_name":"chain-fixture","litellm_params":{"model":"openai/chain-fixture","api_base":"http://127.0.0.1:1/v1","api_key":"sk-test-only","input_cost_per_token":0.000001,"output_cost_per_token":0.000002},"model_info":{"transport":"bypass_openai_chat","pricing_source":"manual"}}`))
+	if status != http.StatusOK {
+		t.Fatalf("创建隔离模型夹具失败: %d %s", status, trim(body))
 	}
 
 	for _, chain := range liveChains {
@@ -219,6 +227,9 @@ func TestLiveChains(t *testing.T) {
 	})
 }
 
+// TestPlaygroundCompletionReachesUpstream 验证隔离配置中的模型通过真实网关到达本地上游。
+// 参数 t：测试上下文；前置私有 schema 和本地供应商，验证请求正文、鉴权及响应。
+// 返回：无；供应商、网关、连接池和测试数据在结束时清理，不覆盖开发环境模型。
 func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 	var calls int
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -237,17 +248,11 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-playground","object":"chat.completion","created":1,"model":"gpt-6-astra","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
 	}))
 	defer upstream.Close()
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg, st, db := testGatewayStores(t)
 	ensurePlaygroundModel(t, st, upstream.URL)
-	srv, base, db := bootGateway(t)
+	srv := httptest.NewServer(New(cfg, st, db).Handler())
 	defer srv.Close()
+	base := srv.URL
 	key := loginAdmin(t, base, db)
 	client := &http.Client{Timeout: 5 * time.Second}
 	payload := []byte(`{"model":"gpt-6-astra","messages":[{"role":"user","content":"ping"}]}`)
@@ -271,6 +276,9 @@ func TestPlaygroundCompletionReachesUpstream(t *testing.T) {
 	}
 }
 
+// ensurePlaygroundModel 在测试配置库中建立指向本地供应商的模型，供 Playground HTTP 流程调用。
+// 参数 t 为测试上下文、st 为私有配置库、upstreamURL 为本地上游；无返回值。
+// 写入失败终止测试；结束时恢复旧记录或删除夹具，随后由私有 schema 清理全部数据。
 func ensurePlaygroundModel(t *testing.T, st *store.Store, upstreamURL string) {
 	t.Helper()
 	rows, err := st.ListProxyModels()
@@ -308,19 +316,12 @@ func ensurePlaygroundModel(t *testing.T, st *store.Store, upstreamURL string) {
 	}
 }
 
-// bootGateway starts the real handler over a private identity store. The caller
-// signs in with loginAdmin, which seeds the administrator it logs in as.
+// bootGateway 在私有身份库、配置库和无共享 Redis 的配置上启动真实 HTTP 网关。
+// 参数 t：测试上下文；返回临时服务器、根 URL 和身份库，调用方使用 loginAdmin 登录。
+// 调用：路由、权限及日志测试；连接失败终止测试，连接池和 schema 自动清理，调用方关闭 HTTP 服务器。
 func bootGateway(t *testing.T) (*httptest.Server, string, *iam.DB) {
 	t.Helper()
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := testIdentityStore(t)
+	cfg, st, db := testGatewayStores(t)
 	gw := New(cfg, st, db)
 	srv := httptest.NewServer(gw.Handler())
 	return srv, srv.URL, db

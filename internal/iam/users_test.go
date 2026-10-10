@@ -2,10 +2,48 @@ package iam
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
+
+// TestAdminUpdateUserName 验证管理员名称增量更新；前置隔离数据库和普通账户，覆盖正常、空值、未指定及约束失败回滚。
+// 参数 t 为测试上下文，无返回值；断言会话版本不变及不存在账户返回 ErrNotFound，testDB 自动清理整个 schema。
+func TestAdminUpdateUserName(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	actor := Actor{Kind: "master"}
+	u, err := db.CreateUser(ctx, actor, UserInput{Email: "edit@example.com", Name: "Before", Password: "edit-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "After"
+	updated, err := db.AdminUpdateUser(ctx, actor, u.ID, UserUpdate{Name: &name})
+	if err != nil || updated.Name != name || updated.SessionVersion != u.SessionVersion {
+		t.Fatalf("名称更新或会话保留失败: %+v %v", updated, err)
+	}
+	name = ""
+	updated, err = db.AdminUpdateUser(ctx, actor, u.ID, UserUpdate{Name: &name})
+	if err != nil || updated.Name != "" {
+		t.Fatalf("清空名称失败: %+v %v", updated, err)
+	}
+	updated, err = db.AdminUpdateUser(ctx, actor, u.ID, UserUpdate{})
+	if err != nil || updated.Name != "" {
+		t.Fatalf("未指定字段覆盖名称: %+v %v", updated, err)
+	}
+	name, invalidRole := "must rollback", "invalid"
+	if _, err = db.AdminUpdateUser(ctx, actor, u.ID, UserUpdate{Name: &name, Role: &invalidRole}); err == nil {
+		t.Fatal("非法角色未拒绝")
+	}
+	updated, err = db.GetUser(ctx, u.ID)
+	if err != nil || updated.Name != "" {
+		t.Fatalf("失败更新未回滚名称: %+v %v", updated, err)
+	}
+	if _, err = db.AdminUpdateUser(ctx, actor, "missing", UserUpdate{Name: &name}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("不存在账户错误: %v", err)
+	}
+}
 
 // testDB opens the identity store on a private schema, so a test never touches
 // the tables a running gateway is using and never has to clean up after itself.

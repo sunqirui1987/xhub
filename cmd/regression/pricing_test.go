@@ -242,6 +242,56 @@ func TestLogDetailExplainsTheChargeWithoutRecomputing(t *testing.T) {
 	}
 }
 
+// TestGPTImage2NativeRouteRecordsCatalogChargeAndSnapshot 验证原生图片接口把真实形状的多模态 token 用量送入目录计价。
+// 参数 t：测试上下文。前置条件为私有数据库、真实网关路由和本地假图片供应商；返回无。
+// 验证结果：接口返回图片、响应头费用为 0.21076 美元，日志快照分别记录文本输入与图片输出费率；
+// 测试数据位于独立 schema，newHarness 注册的清理函数会关闭服务并删除测试数据。
+func TestGPTImage2NativeRouteRecordsCatalogChargeAndSnapshot(t *testing.T) {
+	h := newHarness(t)
+	admin := h.adminSession()
+	tn := h.provision(t, admin, "gpt-image-2")
+	h.ok(http.MethodPost, "/model/new", admin, map[string]any{
+		"model_name": "regression-gpt-image-2",
+		"litellm_params": map[string]any{
+			"model": "gpt-image-2", "api_key": "sk-fake-upstream",
+			"api_base": h.credentialAPIBase(), "custom_llm_provider": "openai",
+		},
+		"model_info": map[string]any{
+			"transport":      "bypass_openai_image_generation",
+			"endpoint_types": []string{"bypass:openai-images"},
+			"pricing_source": "catalog", "base_model": "openai/gpt-image-2",
+		},
+	})
+
+	r := h.ok(http.MethodPost, "/bypass/openai/v1/images/generations", tn.key, map[string]any{
+		"model": "regression-gpt-image-2", "prompt": "a red apple",
+		"n": 1, "size": "1024x1024",
+	})
+	data, _ := r.json()["data"].([]any)
+	if len(data) != 1 {
+		t.Fatalf("图片接口没有返回结果：%s", truncate(r.text(), 300))
+	}
+	charged := parseFloatOrZero(r.header("x-litellm-response-cost"))
+	if !nearlyEqual(charged, 0.21076) {
+		t.Fatalf("gpt-image-2 真实样例费用=%v，期望 0.21076", charged)
+	}
+
+	bill := breakdownOf(t, h, admin, r.header("x-litellm-call-id"))
+	if bill["source"] != "snapshot" {
+		t.Fatalf("图片调用价格来源=%v，期望 snapshot：%s", bill["source"], truncate(string(mustJSON(bill)), 400))
+	}
+	applied, _ := bill["applied"].([]any)
+	seen := map[string]float64{}
+	for _, item := range applied {
+		rate, _ := item.(map[string]any)
+		key := strField(rate, "side") + "/" + strField(rate, "variant")
+		seen[key] = numberOrZero(rate["quantity"])
+	}
+	if seen["input/text"] != 8 || seen["output/image"] != 7024 {
+		t.Fatalf("图片调用费率分桶错误：%v", seen)
+	}
+}
+
 // TestTheBreakdownSurvivesAPriceChange 钉住快照存在的理由。
 //
 // 同一次调用读两遍：中间把这条部署的费率改成十倍。数字不能动——否则"当时按什么价

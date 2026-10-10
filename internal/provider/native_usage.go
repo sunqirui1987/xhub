@@ -33,6 +33,9 @@ func NativeUsage(protocol string) func(map[string]any, map[string]any) map[strin
 			out[k] = v
 		}
 		if protocol == "openai-images" {
+			// Images 协议中的 output_tokens 表示图片输出 token。把这个上游事实
+			// 显式带给目录计价器，避免在同时存在多个输出 token 变体时猜价格。
+			out["output_variant"] = "image"
 			if doc["type"] == "image_generation.completed" || doc["type"] == "image_edit.completed" {
 				out["images"] = 1
 			}

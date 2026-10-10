@@ -1,7 +1,7 @@
 "use client";
 
 import { ColumnDef } from "@tanstack/react-table";
-import { Copy, Info, KeyRound, MoreHorizontal, Trash2 } from "lucide-react";
+import { Copy, Info, KeyRound, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import { UserInfo } from "@/components/networking";
 import { createSelectionColumn, DataTableSortHeader } from "@/components/shared/DataTable";
@@ -36,7 +36,8 @@ interface UserRowActionsProps {
   onResetPassword: (user: UserInfo) => void;
 }
 
-function UserRowActions({ user, onDeleteUser, onResetPassword }: UserRowActionsProps) {
+/** 用户行操作菜单；接收账户及编辑/删除/密码回调，返回菜单，编辑时通知列表打开该账户的编辑视图。 */
+function UserRowActions({ user, onUserClick, onDeleteUser, onResetPassword }: UserRowActionsProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -47,6 +48,9 @@ function UserRowActions({ user, onDeleteUser, onResetPassword }: UserRowActionsP
         <MoreHorizontal className="size-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem onClick={() => onUserClick(user.user_id, true)} data-testid="user-action-edit">
+          <Pencil />{t("pages.users.editUser")}
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => void copyToClipboard(user.user_id, t("pages.users.userIdCopied"))}
           data-testid="user-action-copy"

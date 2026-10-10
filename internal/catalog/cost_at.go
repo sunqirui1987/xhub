@@ -17,6 +17,12 @@ import (
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	// InputTextTokens 与 InputImageTokens 是输入 token 的模态分桶。
+	// InputTokenDetails 为真表示上游明确报告了至少一个分桶；为假时仍按原有
+	// 未限定输入价计费，不能把“缺少明细”误当成两个分桶都为零。
+	InputTextTokens   int
+	InputImageTokens  int
+	InputTokenDetails bool
 	// OutputVariant is measured by the provider.
 	OutputVariant string
 	ImageVariant  string
@@ -295,6 +301,23 @@ func NormalizeUsage(usage map[string]any) Usage {
 	out.PricingBlocked, _ = usage["pricing_blocked"].(string)
 	out.InputSeconds = firstFloatField(usage, "input_seconds")
 	out.InputImages = firstIntField(usage, "input_image_count")
+	if details, ok := usage["input_tokens_details"].(map[string]any); ok {
+		_, hasText := details["text_tokens"]
+		_, hasImage := details["image_tokens"]
+		out.InputTokenDetails = hasText || hasImage
+		if out.InputTokenDetails {
+			out.InputTextTokens = intField(details, "text_tokens")
+			out.InputImageTokens = intField(details, "image_tokens")
+			modalTotal := out.InputTextTokens + out.InputImageTokens
+			if out.PromptTokens == 0 {
+				// 少数兼容上游只给分桶，不给 input_tokens；分桶本身仍是可观测总量。
+				out.PromptTokens = modalTotal
+			} else if modalTotal > out.PromptTokens && out.PricingBlocked == "" {
+				// 互相矛盾的总量与分桶无法可靠计费，保留用量但阻止产生猜测账单。
+				out.PricingBlocked = "input_token_details_exceed_total"
+			}
+		}
+	}
 
 	// A cache read in its own top-level field is a second count, so the prompt
 	// count beside it excludes it and both have to be added up. The nested
@@ -456,6 +479,19 @@ type rateLookup struct {
 	// fallback is keyed by (measure, side, window) and holds the variant-chosen
 	// rate for a side that has no unqualified entry at all.
 	fallback map[string]Rate
+}
+
+// hasSide 判断费率表是否声明了某个计量维度和侧，不关心变体和时段。
+// 参数 measure：token、picture 等计量维度；side：input 或 output。
+// 返回：任一时段存在该侧费率时为真。
+// 调用：price 用它区分“该模型不按张收费”和“按张收费但缺少本次规格”；无副作用。
+func (l rateLookup) hasSide(measure, side string) bool {
+	for _, rate := range l.byKey {
+		if rate.Measure == measure && rate.Side == side {
+			return true
+		}
+	}
+	return false
 }
 
 // rateKey is the lookup key for one rate. The variant is folded in because two
@@ -701,7 +737,7 @@ func price(lookup rateLookup, usage Usage, window string) (Charge, bool) {
 	if usage.PricingBlocked != "" {
 		return Charge{}, false
 	}
-	if usage.Images > 0 && usage.ImageVariant != "" {
+	if usage.Images > 0 && usage.ImageVariant != "" && lookup.hasSide("picture", "output") {
 		if _, ok := lookup.find("picture", "output", usage.ImageVariant, window); !ok {
 			return Charge{}, false
 		}
@@ -720,6 +756,24 @@ func price(lookup rateLookup, usage Usage, window string) (Charge, bool) {
 	if usage.OutputVariant != "" && usage.Searches > 0 {
 		if _, ok := findFirst(lookup, window, [3]string{"query", "output", ""}, [3]string{"query", "input", ""}); !ok {
 			return Charge{}, false
+		}
+	}
+	if usage.InputTokenDetails && usage.CachedTokens == 0 {
+		// 模态分桶是上游测得的事实。目录若只给带变体的输入价，必须逐桶命中；
+		// 不能把图片输入按更便宜的文本输入价回退。无变体费率仍可作为通用价。
+		for _, measured := range []struct {
+			variant  string
+			quantity int
+		}{
+			{variant: "text", quantity: usage.InputTextTokens},
+			{variant: "image", quantity: usage.InputImageTokens},
+		} {
+			if measured.quantity <= 0 {
+				continue
+			}
+			if _, ok := lookup.find("token", "input", measured.variant, window); !ok {
+				return Charge{}, false
+			}
 		}
 	}
 	var charge Charge
@@ -747,7 +801,14 @@ func price(lookup rateLookup, usage Usage, window string) (Charge, bool) {
 	cacheCandidates := [][3]string{{"token", "input", "cached"}, {"token", "cache_read", ""}}
 
 	cacheRate, pricesCache := findFirst(lookup, window, cacheCandidates...)
-	if cached > 0 && pricesCache {
+	if usage.InputTokenDetails && cached == 0 {
+		// 图片协议可以同时报告文本输入和图片输入，两者按各自目录变体计费。
+		// 分桶没有覆盖的剩余 token 继续走通用输入价，兼容上游新增的其它模态。
+		chargeFirst(&charge, lookup, window, float64(usage.InputTextTokens), [3]string{"token", "input", "text"})
+		chargeFirst(&charge, lookup, window, float64(usage.InputImageTokens), [3]string{"token", "input", "image"})
+		remaining := usage.PromptTokens - usage.InputTextTokens - usage.InputImageTokens
+		chargeFirst(&charge, lookup, window, float64(remaining), inputCandidates...)
+	} else if cached > 0 && pricesCache {
 		chargeRate(&charge, cacheRate, float64(cached))
 		chargeFirst(&charge, lookup, window, float64(usage.PromptTokens-cached), inputCandidates...)
 	} else {

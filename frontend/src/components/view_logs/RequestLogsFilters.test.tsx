@@ -8,6 +8,8 @@ import { ERROR_CODE_OPTIONS } from "./constants";
 import { LOG_FILTER_IDS } from "./log_filter_logic";
 import { RequestLogsFilters } from "./RequestLogsFilters";
 
+const { authorizedMock } = vi.hoisted(() => ({ authorizedMock: vi.fn() }));
+
 vi.mock("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity")>();
   return { ...actual, useIsPlatformAdmin: () => true, useIsTeamAdminForAnyTeam: () => false };
@@ -19,7 +21,7 @@ vi.mock("@/app/(dashboard)/hooks/keys/useKeyAliases", () => ({
 }));
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
-  default: () => ({ accessToken: "sk-test", userId: "user-1", userRole: "Internal User" }),
+  default: authorizedMock,
 }));
 
 vi.mock("@/components/networking", () => ({
@@ -49,6 +51,8 @@ const emptyInfiniteQuery = {
 
 const LOGS_WINDOW = { start_date: "2026-07-23 00:00:00", end_date: "2026-07-24 00:00:00" };
 
+
+/** 渲染日志筛选器并返回查询写入回调；参数是初始筛选值，不写后台，组件由测试框架卸载。 */
 function renderFilters(filters: Record<string, string> = {}) {
   const set = vi.fn();
   renderWithProviders(
@@ -57,6 +61,7 @@ function renderFilters(filters: Record<string, string> = {}) {
   return { set };
 }
 
+/** 在测试中保存筛选状态；无参数，返回可交互筛选器，状态仅存在于测试组件且随卸载清理。 */
 function StatefulFilters() {
   const [filters, setFilters] = useState<Record<string, string | undefined>>({});
   return (
@@ -74,6 +79,7 @@ function StatefulFilters() {
 describe("RequestLogsFilters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authorizedMock.mockReturnValue({ accessToken: "sk-test", userId: "user-1", userRole: "Internal User" });
     testQueryClient.clear();
     vi.mocked(useInfiniteKeyAliases).mockReturnValue(
       emptyInfiniteQuery as unknown as ReturnType<typeof useInfiniteKeyAliases>,
@@ -85,6 +91,22 @@ describe("RequestLogsFilters", () => {
     vi.mocked(useInfiniteSpendLogEndUsers).mockReturnValue(
       emptyInfiniteQuery as unknown as ReturnType<typeof useInfiniteSpendLogEndUsers>,
     );
+  });
+
+  /** 前置错误日志视图；验证状态选择隐藏且缓存筛选仍可使用，自动卸载和查询缓存清理。 */
+  it("hides conflicting status choices in error logs", () => {
+    renderWithProviders(<RequestLogsFilters get={() => undefined} set={vi.fn()} teams={[]} logsWindow={LOGS_WINDOW} errorsOnly />);
+    expect(screen.queryByText("Status", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Cache", { exact: true })).toBeInTheDocument();
+  });
+
+  /** 前置普通日志筛选表单；展开状态选项后应只有成功和全部非失败状态，卸载与查询缓存由测试框架清理。 */
+  it("does not offer failure status in ordinary logs", async () => {
+    const user = userEvent.setup();
+    renderFilters();
+    await user.click(screen.getByText("All Statuses"));
+    expect(screen.queryByRole("option", { name: "Failure" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Success" })).toBeInTheDocument();
   });
 
   it("renders every backend-supported filter field", async () => {
@@ -200,6 +222,33 @@ describe("RequestLogsFilters", () => {
     expect(userAvailableModelsCall).not.toHaveBeenCalledWith("sk-test", expect.anything());
   });
 
+  /** 前置正常模型列表含重复与空 ID；验证只显示有效唯一项，模拟接口和组件由每次测试清理。 */
+  it("deduplicates available models and ignores empty ids", async () => {
+    vi.mocked(userAvailableModelsCall).mockResolvedValue({ data: [{ id: "visible-model" }, { id: "visible-model" }, { id: "" }, {}] });
+    renderFilters();
+    await waitFor(() => expect(userAvailableModelsCall).toHaveBeenCalled());
+    await userEvent.setup().click(screen.getByPlaceholderText("Search a model"));
+    expect(await screen.findAllByRole("option", { name: "visible-model" })).toHaveLength(1);
+  });
+
+  /** 前置没有登录凭据；验证不调用模型接口且显示空选项，测试不生成持久化数据。 */
+  it("does not load models without an access token", async () => {
+    authorizedMock.mockReturnValue({ accessToken: null, userId: "user-1", userRole: "Internal User" });
+    renderFilters();
+    await userEvent.setup().click(screen.getByPlaceholderText("Search a model"));
+    expect(await screen.findByText("No models found")).toBeInTheDocument();
+    expect(userAvailableModelsCall).not.toHaveBeenCalled();
+  });
+
+  /** 前置模型接口拒绝请求；验证页面降级为空列表且无未处理异常，模拟接口下一例重置。 */
+  it("shows empty model options when the lookup fails", async () => {
+    vi.mocked(userAvailableModelsCall).mockRejectedValue(new Error("model lookup unavailable"));
+    renderFilters();
+    await waitFor(() => expect(userAvailableModelsCall).toHaveBeenCalled());
+    await userEvent.setup().click(screen.getByPlaceholderText("Search a model"));
+    expect(await screen.findByText("No models found")).toBeInTheDocument();
+  });
+
   it("asks the server for a bounded page of end users scoped to the visible time window", async () => {
     renderFilters();
 
@@ -277,7 +326,7 @@ describe("RequestLogsFilters", () => {
   it.each([
     ["", "All Statuses"],
     ["success", "Success"],
-    ["failure", "Failure"],
+    ["failure", "All Statuses"],
   ])("shows the human label on the Status trigger for %s", async (status, label) => {
     renderFilters(status === "" ? {} : { [LOG_FILTER_IDS.STATUS]: status });
 

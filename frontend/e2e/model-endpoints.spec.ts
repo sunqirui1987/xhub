@@ -20,7 +20,7 @@ test("unbound model explains configuration and valid model restores a callable e
   await expect(page.getByRole("button", { name: t("Send message") })).toHaveCount(0);
   await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
   await page.getByRole("option", { name: "gpt-4o-mini", exact: true }).click();
-  await page.getByPlaceholder("Type your message... (Shift+Enter for new line)").fill("hello");
+  await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("hello");
   const called = page.waitForResponse(r => /^(\/v1)?\/chat\/completions$/.test(new URL(r.url()).pathname) && r.request().method() === "POST");
   await page.getByRole("button", { name: t("Send message") }).click();
   expect((await called).status()).toBe(200);
@@ -82,6 +82,8 @@ for (const native of [
       await expect(upstream).toHaveValue(upstreamModel);
       await form.getByRole("button", { name: "取消", exact: true }).click();
       await stableGoto(page, "/playground");
+      // 图像原生请求在窄屏执行，验证 JSON 编辑器、提交与真实结果不横向溢出。
+      if (native.id === "image_generation") await page.setViewportSize({width:390,height:844});
       await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
       await page.getByRole("option", { name, exact: true }).click();
       const path = native.google ? native.root + name + ":generateContent" : native.root;
@@ -93,6 +95,7 @@ for (const native of [
       await expect(page.getByText("POST " + path, { exact: true })).toBeVisible();
       const body = native.google ? { contents: [{ role: "user", parts: [{ text: "hello" }] }] } : { prompt: "hello" };
       await page.getByLabel("原生请求参数").fill(JSON.stringify(body));
+      await page.getByRole("button",{name:"格式化",exact:true}).click();
       if (native.id === "image_edit") {
         await page.getByLabel("编辑图片", { exact: true }).setInputFiles({ name: "edit.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII=", "base64") });
       }
@@ -101,6 +104,12 @@ for (const native of [
       const response = await inferred;
       expect(response.status(), await response.text()).toBe(200);
       await expect(page.getByLabel("原生响应")).toContainText("e2e-ok");
+      if (native.id === "image_generation") {
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+        await page.getByLabel("原生响应").scrollIntoViewIfNeeded();
+        await expect(page.getByLabel("原生响应")).toBeInViewport();
+        await page.screenshot({path:"../.e2e/playground/native-mobile.png",fullPage:true});
+      }
       if (native.google) expect(response.request().postDataJSON()).toEqual(body);
       else if (native.id === "image_edit") expect(response.request().headers()["content-type"]).toContain("multipart/form-data");
       const callId = response.headers()["x-litellm-call-id"];
@@ -434,7 +443,7 @@ for (const source of [
           await page.getByRole("button",{name:"提交请求",exact:true}).click();
         } else {
           await page.getByRole("button",{name:t("Clear Chat"),exact:true}).click();
-          await page.getByPlaceholder("Type your message... (Shift+Enter for new line)").fill("hello");
+          await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("hello");
           await page.getByRole("button",{name:t("Send message")}).click();
         }
         const response=await pending;

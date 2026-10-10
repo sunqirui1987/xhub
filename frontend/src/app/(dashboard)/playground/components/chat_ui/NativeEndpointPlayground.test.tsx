@@ -22,6 +22,29 @@ const endpoint: ModelEndpoint = {
 /** 每个用例结束恢复全局 fetch；参数/返回无，组件由测试环境卸载，无外部数据。 */
 afterEach(() => vi.unstubAllGlobals());
 
+/** 前置不响应 abort 的延迟传输；验证停止立即解锁、迟到任务不回填，新请求仍可成功；恢复 fetch，无外部数据。 */
+it("停止不等待底层响应且隔离迟到任务", async () => {
+  let resolve!: (response: Response) => void;
+  const fetchMock = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((done) => {
+          resolve = done;
+        }),
+    )
+    .mockImplementation(async () => new Response(JSON.stringify({ request_id: "new-task" })));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<NativeEndpointPlayground endpoint={endpoint} model="demo" apiKey="session" />);
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  fireEvent.click(screen.getByRole("button", { name: "停止" }));
+  expect(screen.getByRole("button", { name: "提交请求" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  await waitFor(() => expect(screen.getByLabelText("任务 ID")).toHaveValue("new-task"));
+  await act(async () => resolve(new Response(JSON.stringify({ request_id: "old-task" }))));
+  expect(screen.getByLabelText("任务 ID")).toHaveValue("new-task");
+});
+
 /** 前置挂起的本地 fetch；验证停止会中止请求并恢复提交入口，结束恢复全局状态，无外部任务。 */
 it("停止挂起请求后显示明确状态并可再次提交", async () => {
   vi.stubGlobal(
@@ -133,14 +156,44 @@ it("上游错误可见，切换模型重置任务和参数", async () => {
 
 /** 前置 Google 原生绑定与离线 fetch；验证 contents 默认值及提交无正文 model，恢复 fetch 无外部数据。 */
 it.each(["gemini", "vertex"])("%s 使用原厂正文与已绑定模型路径", async (protocol) => {
- const fetchMock=vi.fn().mockResolvedValue(new Response(JSON.stringify({candidates:[{content:{parts:[{text:"ok"}]}}]})));
- vi.stubGlobal("fetch",fetchMock);
- const path=(protocol==="gemini"?"/v1beta/models/":"/vertex/v1/models/")+"demo:generateContent";
- render(<NativeEndpointPlayground endpoint={{...endpoint, endpoint_id:protocol, protocol, path, actions:[]}} model="demo" apiKey="session"/>);
- expect(JSON.parse((screen.getByLabelText("原生请求参数") as HTMLTextAreaElement).value)).toHaveProperty("contents");
- fireEvent.change(screen.getByLabelText("原生请求参数"),{target:{value:JSON.stringify({contents:[{parts:[{text:"hello"}]}],generationConfig:{temperature:0.2}})}});
- fireEvent.click(screen.getByRole("button",{name:"提交请求"}));
- expect(await screen.findByLabelText("原生响应")).toHaveTextContent("ok");
- expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4100"+path);
- expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({contents:[{parts:[{text:"hello"}]}],generationConfig:{temperature:0.2}});
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] })));
+  vi.stubGlobal("fetch", fetchMock);
+  const path = (protocol === "gemini" ? "/v1beta/models/" : "/vertex/v1/models/") + "demo:generateContent";
+  render(
+    <NativeEndpointPlayground
+      endpoint={{ ...endpoint, endpoint_id: protocol, protocol, path, actions: [] }}
+      model="demo"
+      apiKey="session"
+    />,
+  );
+  expect(JSON.parse((screen.getByLabelText("原生请求参数") as HTMLTextAreaElement).value)).toHaveProperty("contents");
+  fireEvent.change(screen.getByLabelText("原生请求参数"), {
+    target: {
+      value: JSON.stringify({ contents: [{ parts: [{ text: "hello" }] }], generationConfig: { temperature: 0.2 } }),
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByLabelText("原生响应")).toHaveTextContent("ok");
+  expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4100" + path);
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    contents: [{ parts: [{ text: "hello" }] }],
+    generationConfig: { temperature: 0.2 },
+  });
+});
+
+/** 前置有效/无效 JSON；验证格式化保留字段、语法错误独立显示及重置协议模板；自动卸载，无网络写入。 */
+it("格式化和重置协议草稿", () => {
+  render(<NativeEndpointPlayground endpoint={endpoint} model="demo" apiKey="session" />);
+  const input = screen.getByLabelText("原生请求参数");
+  fireEvent.change(input, { target: { value: '{"prompt":"keep"}' } });
+  fireEvent.click(screen.getByRole("button", { name: "格式化" }));
+  expect(input).toHaveValue(JSON.stringify({ prompt: "keep" }, null, 2));
+  fireEvent.change(input, { target: { value: "[]" } });
+  fireEvent.click(screen.getByRole("button", { name: "格式化" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("JSON 对象");
+  fireEvent.click(screen.getByRole("button", { name: "重置参数" }));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(JSON.parse((input as HTMLTextAreaElement).value)).toEqual({});
 });

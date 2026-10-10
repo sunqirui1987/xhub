@@ -230,7 +230,10 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 				selectedID = router.CooldownID(rawDep)
 				if err != nil {
 					if response.Streamed {
-						h.AnnotateCall(callID, dataplaneNote(hit, dep, "", time.Since(start)))
+						h.RememberExchange(callID, r, raw, []byte(safeErr(err)))
+						note := dataplaneNote(hit, dep, "", time.Since(start))
+						note.Upstream = response.Diagnostics
+						h.AnnotateCall(callID, note)
 						h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, 502, selectedID)
 						return
 					}
@@ -240,6 +243,11 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 						continue
 					}
 					// 创建响应丢失时，上游可能已受理付费任务；结果不明确的创建请求不能重放。
+					h.RememberExchange(callID, r, raw, []byte(safeErr(err)))
+					note := dataplaneNote(hit, dep, plan.SessionID, time.Since(start))
+					note.Upstream = response.Diagnostics
+					h.AnnotateCall(callID, note)
+					h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, http.StatusBadGateway, selectedID)
 					httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
 					return
 				}
@@ -276,15 +284,20 @@ func serveBypassCreate(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	}
 forwarded:
 	if status == 0 {
+		h.RememberExchange(callID, r, raw, []byte("upstream request failed"))
+		h.RecordSpend(w, principal, callID, alias, hit.Transport.ID+":"+hit.Action.Name, nil, start, false, http.StatusBadGateway, selectedID)
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
 		return
 	}
 	var doc map[string]any
 	_ = json.Unmarshal(respBody, &doc)
 	depID := selectedID
+	taskRequestID := ""
 	if taskID := provider.ReadTaskID(doc, hit.Transport.TaskID); taskID != "" && status >= 200 && status < 300 && doc["error"] == nil && doc["detail"] == nil {
 		scope := officialTaskScope(principal, hit.Transport.ID, taskID)
 		if billing := hit.Transport.Billing; billing != nil {
+			// 创建请求身份随调用方隔离的任务钉保存，后续查询更新同一日志。
+			taskRequestID = callID
 			contextBody := body
 			if hit.Action.Model != "" {
 				contextBody = make(map[string]any, len(body)+1)
@@ -295,6 +308,7 @@ forwarded:
 			}
 			facts := billing.Context(contextBody)
 			facts.StartedAt = start
+			facts.RequestID = callID
 			h.PinOfficialContext(scope, facts)
 		}
 		h.PinOfficial(scope, selectedID)
@@ -308,7 +322,13 @@ forwarded:
 		h.CommitRoute(plan, selectedID, responseID)
 	}
 	h.RememberExchange(callID, r, raw, respBody)
-	h.AnnotateCall(callID, dataplaneNote(hit, dep, plan.SessionID, time.Since(start)))
+	note := dataplaneNote(hit, dep, plan.SessionID, time.Since(start))
+	if taskRequestID != "" {
+		note.TaskRequestID, note.TaskInitial = taskRequestID, true
+		note.TaskStatus = officialTaskStatus(status, doc, true)
+	}
+	note.Upstream = response.Diagnostics
+	h.AnnotateCall(callID, note)
 	var usage map[string]any
 	if status >= 200 && status < 300 && hit.Transport.ResponseUsage != nil {
 		usage = hit.Transport.ResponseUsage(doc, body)
@@ -324,7 +344,7 @@ forwarded:
 // serveBypassFollow 处理查询和列表。id 非空时走任务钉，并要求部署仍属于这个端点类型。
 // id 为空时是列表：只有一个上游密钥才转发，多个则写 400 和模型名。
 // 参数 id：路径或查询串里的任务 id，列表时为空。其余参数与创建相同。
-// 返回：无。
+// 返回：无。异步查询更新原日志状态与正文，成功实测用量只结算一次。
 // 调用：ServeBypass。测试：逻辑测试的重复扣费、跨供应商 404、列表和 Suno 查询参数。
 func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit provider.Hit, id, callID string, start time.Time, principal *auth.Principal) {
 	var dep config.ModelEntry
@@ -392,6 +412,20 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	response, err := forwardOfficial(h, r.WithContext(ctx), r.Method, url, key, nil, r.Header, hit.Transport, nil)
 	respBody, status := response.Body, response.StatusCode
 	if err != nil {
+		h.RememberExchange(callID, r, nil, []byte(safeErr(err)))
+		note := dataplaneNote(hit, dep, "", time.Since(start))
+		facts := h.OfficialContext(scopedID)
+		errorStart := start
+		if id != "" && hit.Transport.Billing != nil && (hit.Action.Name == "get" || hit.Action.Name == "status") {
+			note.TaskRequestID, note.TaskStatus = facts.RequestID, "failed"
+			note.SkipRouteUsage = true
+			if !facts.StartedAt.IsZero() {
+				errorStart = facts.StartedAt
+			}
+		}
+		note.Upstream = response.Diagnostics
+		h.AnnotateCall(callID, note)
+		h.RecordSpend(w, principal, callID, dep.ModelName, hit.Transport.ID+":"+hit.Action.Name, nil, errorStart, false, http.StatusBadGateway, depID)
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream request failed")
 		return
 	}
@@ -410,9 +444,8 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 		}
 	}
 	settlementID := ""
-	if id != "" && status >= 200 && status < 300 && positiveOfficialUsage(usage) && !officialPending(doc) {
-		// Re-submit on every completed poll. The durable request_id constraint,
-		// not a process-local marker written before persistence, claims the bill.
+	if id != "" && status >= 200 && status < 300 && positiveOfficialUsage(usage) && !officialPending(doc) && officialTaskStatus(status, doc, false) != "failed" {
+		// 每次完成查询都允许重试持久化；新任务由原日志事务标记去重，旧任务保留稳定结算 ID 兼容。
 		settlementID = officialSettlementID(scopedID, depID)
 	} else {
 		usage = nil
@@ -421,12 +454,46 @@ func serveBypassFollow(h Bypass, w http.ResponseWriter, r *http.Request, hit pro
 	plan := h.PlanRoute(r, dep.ModelName, nil, principal)
 	h.RememberExchange(callID, r, nil, respBody)
 	note := dataplaneNote(hit, dep, plan.SessionID, time.Since(start))
+	if id != "" && hit.Transport.Billing != nil && (hit.Action.Name == "get" || hit.Action.Name == "status") {
+		facts := h.OfficialContext(scopedID)
+		note.TaskRequestID = facts.RequestID
+		note.TaskStatus = officialTaskStatus(status, doc, false)
+		note.TaskSettlement = settlementID != ""
+		// FAL 结果端点直接返回产物而不带 status；计量适配器确认完成后才允许结算。
+		if note.TaskSettlement {
+			note.TaskStatus = "completed"
+		}
+		if !facts.StartedAt.IsZero() {
+			billingStart = facts.StartedAt
+		}
+	}
 	note.SettlementID = settlementID
 	note.SkipRouteUsage = true
+	note.Upstream = response.Diagnostics
 	h.AnnotateCall(callID, note)
 	h.RecordSpend(w, principal, callID, dep.ModelName, hit.Transport.ID+":"+hit.Action.Name, usage, billingStart, false, status, depID)
 	response.Body = respBody
 	writeThrough(w, response)
+}
+
+// officialTaskStatus 将供应商响应转换为原请求生命周期状态。
+// 参数 status、doc、initial：HTTP 状态、响应对象、是否创建；返回执行中、轮询中、完成或失败的协议值。
+// 调用创建与查询路径；未知或缺失状态保持活动态，HTTP 错误及供应商失败显示失败，无副作用。
+func officialTaskStatus(status int, doc map[string]any, initial bool) string {
+	if status >= 400 || doc["error"] != nil || doc["detail"] != nil {
+		return "failed"
+	}
+	state, _ := doc["status"].(string)
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "succeeded", "completed", "success":
+		return "completed"
+	case "failed", "expired", "cancelled", "canceled", "error":
+		return "failed"
+	}
+	if initial {
+		return "executing"
+	}
+	return "polling"
 }
 
 // dataplaneNote 组装 Bypass 写入用量行的备注。供应商优先用部署上的 custom_llm_provider，

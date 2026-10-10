@@ -659,3 +659,23 @@ describe("useChatHistory", () => {
     });
   });
 });
+
+/** 前置损坏或形状不符的历史/模式缓存；验证恢复为空历史及默认模式；各用例清除 sessionStorage。 */
+it.each(["{", "null", "{}", "[null]", '[{"role":"user"}]'])("损坏缓存可恢复 %s", (saved) => {
+  sessionStorage.setItem("chatHistory", saved);
+  sessionStorage.setItem("useApiSessionManagement", saved);
+  const { result, unmount } = renderHook(() => useChatHistory({ simplified: false }));
+  expect(result.current.chatHistory).toEqual([]);
+  expect(result.current.useApiSessionManagement).toBe(true);
+  unmount();
+  sessionStorage.clear();
+});
+/** 前置一条已持久化历史；失败或中止回滚至空历史后，验证刷新不会复活旧轮次；清除浏览器缓存。 */
+it("空历史回滚删除持久化缓存", () => {
+  sessionStorage.setItem("chatHistory", JSON.stringify([{ role: "user", content: "unfinished" }]));
+  const { result, unmount } = renderHook(() => useChatHistory({ simplified: false }));
+  act(() => result.current.setChatHistory([]));
+  expect(sessionStorage.getItem("chatHistory")).toBeNull();
+  unmount();
+  sessionStorage.clear();
+});

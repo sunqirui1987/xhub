@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
 import { LogEntry } from "../columns";
+import { fullErrorDetails, isRequestFailure } from "../logErrors";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { PROMPT_CACHE_CREATION_TOOLTIP, PROMPT_CACHE_READ_TOOLTIP } from "@/utils/promptCacheUsage";
 import GuardrailViewer from "../GuardrailViewer/GuardrailViewer";
@@ -49,6 +50,7 @@ import { PrettyMessagesView } from "./PrettyMessagesView";
 import { ClassifierAuditView } from "./ClassifierAuditView";
 import { AUTOROUTER_CLASSIFIER_ORIGIN } from "./ClassifyTag";
 import { t } from "@/i18n";
+import { logPromptCacheTokens } from "./promptCacheMetrics";
 
 export interface LogDetailContentProps {
   logEntry: LogEntry;
@@ -58,16 +60,15 @@ export interface LogDetailContentProps {
 }
 
 /**
- * The scrollable detail content for a single log entry.
- * Renders request details, metrics, cost breakdown, request/response,
- * guardrails, vector store data, and metadata.
- *
- * Designed to be placed inside LogDetailsDrawer's right panel so it can
- * be reused for both single-log and session-mode views.
+ * 在单请求或会话抽屉中展示日志详情；接收日志、加载状态和可选鉴权凭据，
+ * 返回请求、响应、费用和护栏视图。失败请求始终展示完整诊断正文，
+ * 真实响应优先于旧版错误摘要；加载详情时不显示缺失捕获提示。
+ * 上游响应默认折叠，用户通过标题按钮展开；切换请求时重置折叠状态，复制始终保留完整诊断。
  */
 export function LogDetailContent({ logEntry, isLoadingDetails = false, accessToken }: LogDetailContentProps) {
   const metadata = logEntry.metadata || {};
-  const hasError = metadata.status === "failure";
+  const hasError = isRequestFailure(logEntry);
+  const errorDetails = hasError ? fullErrorDetails(logEntry) : "";
   const errorInfo = hasError ? metadata.error_information : null;
   const isClassifier =
     metadata.internal_call_origin === AUTOROUTER_CLASSIFIER_ORIGIN &&
@@ -96,6 +97,9 @@ export function LogDetailContent({ logEntry, isLoadingDetails = false, accessTok
   const hasVectorStoreData = checkHasVectorStoreData(metadata);
 
   const getFormattedResponse = () => {
+    // 错误响应包含供应商扩展诊断字段，必须完整保留，不能被兼容摘要或流式成功解析覆盖。
+    if (hasResponse) return hasError ? formatData(logEntry.response) : loggedResponse(formatData(logEntry.response));
+    if (logEntry.error?.trim()) return formatData(logEntry.error);
     if (hasError && errorInfo) {
       return {
         error: {
@@ -111,8 +115,34 @@ export function LogDetailContent({ logEntry, isLoadingDetails = false, accessTok
 
   return (
     <div style={{ padding: `${DRAWER_CONTENT_PADDING} ${DRAWER_CONTENT_PADDING} 0` }}>
+      {metadata.upstream_response && (
+        <section aria-label={t("Upstream Response")} className="mb-6 rounded-lg border p-4">
+          {/* 以请求 ID 隔离展开状态，避免查看下一条日志时继承上一条的展开状态。 */}
+          <Collapsible key={logEntry.request_id} defaultOpen={false}>
+            <div className="flex items-center justify-between gap-3">
+              <CollapsibleTrigger className="group flex flex-1 items-center gap-2 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground group-aria-expanded:hidden" />
+                <ChevronDown aria-hidden="true" className="hidden size-4 shrink-0 text-muted-foreground group-aria-expanded:block" />
+                <h3 className="font-semibold">{t("Upstream Response")}</h3>
+              </CollapsibleTrigger>
+              <CopyButton getText={() => JSON.stringify(metadata.upstream_response, null, 2)} label={t("Copy upstream response")} />
+            </div>
+            <CollapsibleContent className="pt-3">
+              <p>{t("HTTP Status")}: {metadata.upstream_response.status_code}</p>
+              {metadata.upstream_response.usage_parse_error && <p role="alert">{metadata.upstream_response.usage_parse_error}</p>}
+              <h4>{t("Upstream Response Headers")}</h4>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(metadata.upstream_response.headers, null, 2)}</pre>
+              {metadata.upstream_response.trailers && <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(metadata.upstream_response.trailers, null, 2)}</pre>}
+              <h4>{t("Upstream Usage")}</h4>
+              {metadata.upstream_response.usage_reported ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(metadata.upstream_response.usage, null, 2)}</pre> : <p>{t("Not reported")}</p>}
+              <h4>{t("Billing Usage")}</h4>
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(metadata.upstream_response.billing_usage ?? {}, null, 2)}</pre>
+            </CollapsibleContent>
+          </Collapsible>
+        </section>
+      )}
       {/* Error Alert */}
-      {hasError && errorInfo && (
+      {hasError && (
         <div
           role="alert"
           className="mb-6 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
@@ -120,9 +150,19 @@ export function LogDetailContent({ logEntry, isLoadingDetails = false, accessTok
           <CircleAlert className="size-4 shrink-0 text-destructive" />
           <div>
             <div className="font-medium text-destructive">{t("Request Failed")}</div>
-            <ErrorDescription errorInfo={errorInfo} />
+            {metadata.http_status != null && <div>{t("HTTP Status")}: {metadata.http_status}</div>}
+            {errorInfo && <ErrorDescription errorInfo={errorInfo} />}
           </div>
         </div>
+      )}
+      {hasError && errorDetails && !isLoadingDetails && (
+        <section aria-label={t("Full Error Details")} className="mb-6 rounded-lg border border-destructive/30">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <h3 className="text-sm font-semibold">{t("Full Error Details")}</h3>
+            <CopyButton getText={() => errorDetails} label={t("Copy error details")} />
+          </div>
+          <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all p-3 text-xs">{errorDetails}</pre>
+        </section>
       )}
 
       {/* Tags */}
@@ -431,6 +471,7 @@ function BatchResultsSection({ logEntry, metadata }: { logEntry: LogEntry; metad
   );
 }
 
+/** 展示实测指标；参数为日志和元数据，返回指标视图。由详情组件调用，缓存统计缺失保留未知状态。 */
 function MetricsSection({ logEntry, metadata }: { logEntry: LogEntry; metadata: Record<string, any> }) {
   const completionStartTime = logEntry.completionStartTime;
   const ttftMs =
@@ -442,8 +483,7 @@ function MetricsSection({ logEntry, metadata }: { logEntry: LogEntry; metadata: 
   const responseCacheKey = logEntry.cache_key && logEntry.cache_key !== "Cache OFF" ? logEntry.cache_key : undefined;
   const isResponseCacheHit = responseCacheValue === "true";
   const showResponseCache = isResponseCacheHit || responseCacheValue === "false" || responseCacheKey != null;
-  const promptCacheReadTokens = Number(metadata?.additional_usage_values?.cache_read_input_tokens) || 0;
-  const promptCacheCreationTokens = Number(metadata?.additional_usage_values?.cache_creation_input_tokens) || 0;
+  const { read: promptCacheReadTokens, creation: promptCacheCreationTokens } = logPromptCacheTokens(logEntry, metadata);
 
   const uncachedInputTokens = getUncachedInputTextTokens(metadata);
   const showAnthropicMessagesInputOutput =
@@ -506,7 +546,7 @@ function MetricsSection({ logEntry, metadata }: { logEntry: LogEntry; metadata: 
                 <TruncatedValue value={responseCacheKey} />
               </DescriptionItem>
             )}
-            {promptCacheReadTokens > 0 && (
+            {(promptCacheReadTokens != null || !isResponseCacheHit) && (
               <DescriptionItem
                 label={
                   <MetricLabel
@@ -515,10 +555,10 @@ function MetricsSection({ logEntry, metadata }: { logEntry: LogEntry; metadata: 
                   />
                 }
               >
-                {formatNumberWithCommas(promptCacheReadTokens)}
+                {promptCacheReadTokens != null ? formatNumberWithCommas(promptCacheReadTokens) : t("Not reported")}
               </DescriptionItem>
             )}
-            {promptCacheCreationTokens > 0 && (
+            {promptCacheCreationTokens != null && promptCacheCreationTokens > 0 && (
               <DescriptionItem
                 label={
                   <MetricLabel
@@ -659,6 +699,7 @@ function RequestResponseSection({
                 <PrettyMessagesView
                   request={getRawRequest()}
                   response={getFormattedResponse()}
+                  model={logEntry.model}
                   metrics={{
                     prompt_tokens: promptTokens,
                     completion_tokens: completionTokens,

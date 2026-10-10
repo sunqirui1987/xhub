@@ -39,12 +39,23 @@ export interface UseChatHistoryReturn {
   clearMCPEvents: () => void;
 }
 
+/** 管理调试对话与响应 ID；参数 simplified 禁用持久化，返回历史和更新动作；页面及密钥调试调用。
+ * 恢复缓存时检查数据形状，损坏历史或模式回退默认值，避免旧缓存导致页面崩溃。 */
 export function useChatHistory({ simplified }: { simplified: boolean }): UseChatHistoryReturn {
   const [chatHistory, setChatHistory] = useState<MessageType[]>(() => {
     if (simplified) return [];
     try {
       const saved = sessionStorage.getItem("chatHistory");
-      return saved ? JSON.parse(saved) : [];
+      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) &&
+        parsed.every(
+          (message) =>
+            message &&
+            typeof message.role === "string" &&
+            (typeof message.content === "string" || Array.isArray(message.content)),
+        )
+        ? parsed
+        : [];
     } catch (error) {
       console.error("Error parsing chatHistory from sessionStorage", error);
       return [];
@@ -63,8 +74,13 @@ export function useChatHistory({ simplified }: { simplified: boolean }): UseChat
 
   const [useApiSessionManagement, setUseApiSessionManagement] = useState<boolean>(() => {
     if (simplified) return true;
-    const saved = sessionStorage.getItem("useApiSessionManagement");
-    return saved ? JSON.parse(saved) : true; // Default to API session management
+    try {
+      const saved = sessionStorage.getItem("useApiSessionManagement");
+      const parsed: unknown = saved ? JSON.parse(saved) : true;
+      return typeof parsed === "boolean" ? parsed : true;
+    } catch {
+      return true;
+    }
   });
 
   const persistDebouncer = useDebouncer(
@@ -77,6 +93,7 @@ export function useChatHistory({ simplified }: { simplified: boolean }): UseChat
   useEffect(() => {
     if (simplified || chatHistory.length === 0) {
       persistDebouncer.cancel();
+      if (!simplified) sessionStorage.removeItem("chatHistory");
       return;
     }
     persistDebouncer.maybeExecute(chatHistory);

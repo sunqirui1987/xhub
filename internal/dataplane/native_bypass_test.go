@@ -139,7 +139,7 @@ func TestNativeImageEditMultipart(t *testing.T) {
 				t.Fatal(rec.Code, rec.Body.String())
 			}
 			u := catalog.NormalizeUsage(h.spend[0].usage)
-			if u.Images != 1 || u.ImageVariant != "high_1024x1024" || u.OutputVariant != "" || u.CompletionTokens != 3 {
+			if u.Images != 1 || u.ImageVariant != "high_1024x1024" || u.OutputVariant != "image" || u.CompletionTokens != 3 {
 				t.Fatal(u)
 			}
 		})

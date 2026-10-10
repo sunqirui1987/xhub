@@ -16,8 +16,7 @@ import (
 	"github.com/sunqirui1987/xhub/internal/logx"
 )
 
-// Key is a virtual key. A personal key belongs to a user inside a team; a
-// service key belongs to the team (or one of its projects) with no owner.
+// Key 是虚拟密钥；个人密钥属于用户且可选绑定团队，服务密钥必须属于团队或其项目。
 type Key struct {
 	ID        string   `xorm:"pk 'id'" json:"id"`
 	TokenHash string   `xorm:"'token_hash'" json:"-"`
@@ -117,7 +116,7 @@ type KeyInput struct {
 	RouteTemplateID **string
 }
 
-// CreateKey stores a key and returns it with the plaintext, which is shown once.
+// CreateKey 持久化密钥并返回仅展示一次的明文；个人密钥可无团队，绑定团队时仍校验成员、状态和模型范围。
 // 参数 ctx（context.Context）：上下文，取消时停止；by（Actor）：执行这次修改的操作者。审计日志记这个人的 id 和角色；in（KeyInput）：创建或修改密钥的输入，含团队、名称、允许的模型和限额。
 // 返回 *Key（*Key）：写入后的密钥行，含哈希、限额和归属。失败时为 nil；string（string）：只展示这一次的明文密钥。失败时为空串，库里只存哈希；error（error）：失败原因。nil 表示创建成功。
 // 调用：gateway/keys/admin.go、gateway/keys/generate.go
@@ -126,22 +125,41 @@ func (db *DB) CreateKey(ctx context.Context, by Actor, in KeyInput) (*Key, strin
 	plain := NewPlainKey()
 	var out *Key
 	err := db.tx(ctx, func(s *xorm.Session) error {
-		if err := lockTeam(ctx, s, in.TeamID); err != nil {
-			return err
+		if in.OwnerType != OwnerPersonal && in.OwnerType != OwnerService {
+			return ErrInvalid
 		}
-		team, err := getTeam(ctx, s, in.TeamID)
-		if err != nil {
-			return err
-		}
-		if team.Status != StatusActive {
-			return ErrInactive
+		if in.TeamID == "" {
+			if in.OwnerType != OwnerPersonal || in.ProjectID != "" {
+				return ErrInvalid
+			}
+		} else {
+			if err := lockTeam(ctx, s, in.TeamID); err != nil {
+				return err
+			}
+			team, err := getTeam(ctx, s, in.TeamID)
+			if err != nil {
+				return err
+			}
+			if team.Status != StatusActive {
+				return ErrInactive
+			}
 		}
 		if in.OwnerType == OwnerPersonal {
 			if in.UserID == "" {
 				return ErrInvalid
 			}
-			if _, err := membership(ctx, s, in.TeamID, in.UserID); err != nil {
-				return ErrInvalid
+			if in.TeamID != "" {
+				if _, err := membership(ctx, s, in.TeamID, in.UserID); err != nil {
+					return ErrInvalid
+				}
+			} else {
+				owner, err := getUser(ctx, s, in.UserID)
+				if err != nil {
+					return err
+				}
+				if !owner.Active() {
+					return ErrInactive
+				}
 			}
 		} else if in.UserID != "" {
 			return ErrInvalid
@@ -166,6 +184,10 @@ func (db *DB) CreateKey(ctx context.Context, by Actor, in KeyInput) (*Key, strin
 		// none and routed by its team's settings instead.
 		if in.RouteTemplateID != nil {
 			k.RouteTemplateID = *in.RouteTemplateID
+		}
+		// 未绑定团队时省略该列，写入 SQL NULL；空串会违反团队外键，不能虚构默认团队。
+		if in.TeamID == "" {
+			s.Omit("team_id")
 		}
 		if _, err := s.Insert(&k); err != nil {
 			return err
@@ -560,17 +582,20 @@ func (db *DB) AllowedModelsForKey(ctx context.Context, k *Key) ([]string, error)
 	return sortedKeys(set), nil
 }
 
-// budgetCeiling is the tightest budget above a scope: the team's, the project's, and the key's.
+// budgetCeiling 计算团队、项目和密钥中最紧的额度；个人密钥无团队时跳过团队层，仍检查明确指定的父级。
 // 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；teamID（string）：团队 id。空串表示没有指定团队；projectID（string）：项目 id。空串表示不按项目过滤；keyID（string）：密钥 id。空串表示没有指定密钥。
 // 返回 *float64（*float64）：团队、项目和密钥里最紧的预算上限。某一层没有上限时不参与比较。三层都没有时为 nil；error（error）：团队、项目或密钥查不到。nil 表示比较完成。
-// 调用：iam/teams.go
-// 测试：无直接单测
+// 调用：checkWithinTeam、iam/teams.go；只读查询，不修改额度。
+// 测试：keys_personal_test.go、gateway/limits_personal_test.go、regression/teamless_keys_test.go。
 func budgetCeiling(s *xorm.Session, teamID, projectID, keyID string) (*float64, error) {
-	var team Team
-	if err := get(s.Where("id = ?", teamID), &team); err != nil {
-		return nil, err
+	var ceiling *float64
+	if teamID != "" {
+		var team Team
+		if err := get(s.Where("id = ?", teamID), &team); err != nil {
+			return nil, err
+		}
+		ceiling = team.MaxBudget
 	}
-	ceiling := team.MaxBudget
 	if projectID != "" {
 		var p Project
 		if err := get(s.Where("id = ?", projectID), &p); err != nil {

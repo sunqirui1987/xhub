@@ -194,6 +194,36 @@ describe("useKeys", () => {
   const wrapper = ({ children }: { children: ReactNode }) =>
     React.createElement(QueryClientProvider, { client: queryClient }, children);
 
+  /** 验证本人范围参数与认证头；前置有效会话和分页响应，断言真实请求契约；缓存随测试销毁，无持久数据。 */
+  it("requests personal scope with the authenticated session", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockKeysResponse });
+    const { result } = renderHook(() => useKeys(1, 10, { scope: "personal" }), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockFetch.mock.calls[0][0]).toContain("scope=personal");
+    expect(mockFetch.mock.calls[0][1].headers.Authorization).toBe("Bearer test-access-token");
+  });
+
+  /** 验证身份尚未加载时不请求本人列表；前置空用户 ID，断言无网络与无旧数据；无持久数据需要清理。 */
+  it("does not request personal keys before the user identity is available", () => {
+    mockUseAuthorized.mockReturnValue({ accessToken: "session", userId: null });
+    const { result } = renderHook(() => useKeys(1, 10, { scope: "personal" }), { wrapper });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result.current.data).toBeUndefined();
+  });
+
+  /** 验证切换会话时不沿用上一人的列表；前置共享查询缓存，第二请求未完成，断言旧数据立即消失；框架销毁缓存与 DOM。 */
+  it("clears previous personal rows immediately when the session changes", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => mockKeysResponse });
+    const { result, rerender } = renderHook(() => useKeys(1, 10, { scope: "personal" }), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    mockUseAuthorized.mockReturnValue({ accessToken: "another-session", userId: "another-user" });
+    mockFetch.mockReturnValueOnce(new Promise(() => {}));
+    rerender();
+    expect(result.current.data).toBeUndefined();
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    expect(mockFetch.mock.calls[1][1].headers.Authorization).toBe("Bearer another-session");
+  });
+
   it("should return keys data when query is successful", async () => {
     // Mock successful API call
     mockFetch.mockResolvedValueOnce({

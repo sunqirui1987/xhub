@@ -52,6 +52,7 @@ const defaultProps = {
 
 const ORG_ADMIN_MEMBERSHIPS = [{ organization_id: "org-1", members: [{ user_id: "user-1", user_role: "org_admin" }] }];
 
+/** 构造指定角色及组织成员的日志页；返回测试渲染句柄，不访问真实服务，由测试框架卸载并清理缓存。 */
 const renderAs = (sessionRole: string, organizations: unknown[] = []) => {
   useAuthorizedMock.mockReturnValue({
     accessToken: "sk-test",
@@ -80,6 +81,7 @@ describe("SpendLogsTable network access by role", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
+  /** 前置普通用户或组织管理员会话；验证两种日志入口可见且不请求审计资源，测试缓存由 beforeEach 清理。 */
   it.each([
     ["Internal User", []],
     ["Internal Viewer", []],
@@ -87,13 +89,14 @@ describe("SpendLogsTable network access by role", () => {
   ])("does not request audit or deleted resources for %s", async (role, organizations) => {
     renderAs(role as string, organizations as unknown[]);
     expect(screen.getByTestId("request-logs-panel")).toBeInTheDocument();
-    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Error Logs" })).toBeInTheDocument();
     expect(requestedUrls()).toEqual([]);
   });
 
+  /** 前置平台管理员会话；验证错误日志入口不引入审计接口请求，模拟网络及组件由测试框架清理。 */
   it("does not request audit logs from the request logs page even for an admin", () => {
     renderAs("Admin");
-    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Error Logs" })).toBeInTheDocument();
     expect(requestedUrls()).toEqual([]);
   });
 });

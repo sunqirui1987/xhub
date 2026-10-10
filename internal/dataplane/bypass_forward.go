@@ -11,15 +11,16 @@ import (
 )
 
 // ForwardResponse 保存一次上游转发结果，流式正文已发送时不再写入 Body。
-// StatusCode 保留上游状态；Header 在返回时按白名单过滤；Streamed 防止重复发送。
+// StatusCode 保留上游状态；Header 保留完整响应头，向客户端发送时按白名单过滤；Streamed 防止重复发送。
 // Usage 只保存协议实测事实；缺失事实或价格维度用 pricing_blocked 表示。
 type ForwardResponse struct {
-	StatusCode int
-	Header     http.Header
-	Body       []byte
-	Streamed   bool
-	Usage      map[string]any
-	ResponseID string // 成功原生流的存储响应归属，非流由正文读取。
+	Diagnostics *UpstreamDiagnostics // 原生转发的完整响应事实。
+	StatusCode  int
+	Header      http.Header
+	Body        []byte
+	Streamed    bool
+	Usage       map[string]any
+	ResponseID  string // 成功原生流的存储响应归属，非流由正文读取。
 }
 
 // forwardOfficial 向登记的供应商地址发送一次原生请求并观察响应事实。
@@ -67,6 +68,7 @@ func forwardOfficial(h Bypass, r *http.Request, method, address, key string, bod
 	if err != nil {
 		return result, err
 	}
+	result.Diagnostics = observeUpstream(resp)
 	defer resp.Body.Close()
 	result.StatusCode = resp.StatusCode
 	result.Header = resp.Header.Clone()

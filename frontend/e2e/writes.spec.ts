@@ -9,6 +9,9 @@ async function sessionFrom(page: Page): Promise<string> {
   return JSON.parse(Buffer.from(token!.split(".")[1], "base64url").toString()).key as string;
 }
 
+/** 验证独立个人密钥完整生命周期；前置管理员会话、隔离数据库和本地上游，参数 page 为真实浏览器。
+ * 断言创建不绑定团队、编辑、轮换、禁用、恢复与删除的接口和推理结果；失败抛出，脚本退出清理专属 schema。
+ */
 test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   test.setTimeout(120_000);
   const guard = watchGateway(page);
@@ -23,8 +26,8 @@ test("virtual key update, regenerate, block, and delete", async ({ page }) => {
   );
   await page.getByRole("button", { name: t("pages.apiKeys.createSubmit"), exact: true }).click();
   const createdKey = await generated;
-  expect(createdKey.status(), "UI key generation accepts the selected team").toBe(200);
-  expect(createdKey.request().postDataJSON().team_id, "UI submits a team for the new key").toBeTruthy();
+  expect(createdKey.status(), "无需团队也能创建个人密钥").toBe(200);
+  expect(createdKey.request().postDataJSON().team_id, "个人密钥不自动绑定已有团队").toBeNull();
   await expect(page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ })).toBeVisible({ timeout: 15_000 });
   const oldSecret = (await page.getByRole("dialog").locator("pre").filter({ hasText: /sk-/ }).innerText()).trim();
   const invoke = (key: string) =>

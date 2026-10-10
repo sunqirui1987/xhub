@@ -16,7 +16,7 @@ for (const stream of [true, false]) {
         .getByRole("option")
         .filter({ hasText: protocol === "v1/messages" ? /\/v1\/messages$/ : /\/v1\/chat\/completions$/ })
         .click();
-      await page.getByPlaceholder("Type your message... (Shift+Enter for new line)").fill("transport-check");
+      await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("transport-check");
       const pending = page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname.endsWith("/" + protocol) && response.request().method() === "POST",

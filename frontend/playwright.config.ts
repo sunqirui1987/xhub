@@ -13,7 +13,7 @@ export default defineConfig({
   testDir: "./e2e", globalSetup: "./e2e/global-setup.ts", globalTeardown: "./e2e/global-teardown.ts",
   timeout: 60_000, expect: { timeout: 15_000 },
   fullyParallel: false, workers: 1, retries: 0, forbidOnly: !!process.env.CI,
-  reporter: [["list"], ["html", { open: "never" }],
+  reporter: [["./e2e/checklist-reporter.cjs"], ["html", { open: "never" }],
     ["json", { outputFile: path.join(runDir, "results.json") }],
     ["junit", { outputFile: path.join(runDir, "junit.xml") }]],
   use: { baseURL: "http://127.0.0.1:" + uiPort, screenshot: "only-on-failure",

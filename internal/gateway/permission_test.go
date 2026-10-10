@@ -10,9 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
-	"github.com/sunqirui1987/xhub/internal/store"
 )
 
 // actor is one caller a permission test can sign in as.
@@ -442,28 +440,17 @@ func mustJSONBytes(t *testing.T, v any) []byte {
 	return b
 }
 
-// bootGatewayWithMaster starts the shipped handler with an emergency credential
-// configured, and returns it.
-//
-// bootGateway leaves master_key empty, which is the right default for a
-// deployment but means the master principal can never be reached in a test. The
-// credential is the one that reaches /bootstrap, so the tests that assert what
-// it may NOT do need it to exist.
+// bootGatewayWithMaster 在隔离存储上启动携带临时紧急凭据的真实网关。
+// 参数 t：测试上下文；返回服务器、根 URL、身份库和仅本次测试有效的紧急凭据。
+// 调用：权限测试验证 bootstrap 与推理权限边界；连接失败终止测试。
+// 清理：连接池和私有 schema 自动清理，调用方关闭服务器；不连接开发 Redis 或写入开发配置。
 func bootGatewayWithMaster(t *testing.T) (*httptest.Server, string, *iam.DB, string) {
 	t.Helper()
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg, st, db := testGatewayStores(t)
 	// A per-test key, so a leaked one cannot be replayed against a real server.
 	masterKey := "sk-test-master-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	cfg.GeneralSettings.MasterKey = masterKey
 
-	st, err := store.Open(cfg.GeneralSettings.DatabaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := testIdentityStore(t)
 	gw := New(cfg, st, db)
 	srv := httptest.NewServer(gw.Handler())
 	return srv, srv.URL, db, masterKey

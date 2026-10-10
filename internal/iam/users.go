@@ -480,17 +480,18 @@ func (db *DB) SetPassword(ctx context.Context, by Actor, id, password string) er
 	})
 }
 
-// UserUpdate is a platform-administrator change to someone else's account.
+// UserUpdate 是管理员修改账户时的增量字段；nil 保留原值，Name 的空字符串用于清空显示名称。
 type UserUpdate struct {
+	Name      *string
 	Role      *string
 	Status    *string
 	MaxBudget **float64
 	Email     *string
 }
 
-// AdminUpdateUser changes role, status, email or budget in one transaction. A role or status change ends the user's sessions; disabling also revokes every personal key.
+// AdminUpdateUser 在同一事务中修改名称、角色、状态、邮箱和预算；供用户更新接口调用。
 // 参数 ctx（context.Context）：上下文，取消时停止；by（Actor）：执行这次修改的操作者。审计日志记这个人的 id 和角色；id（string）：用户 id。空串表示没有指定用户；in（UserUpdate）：调用方提交的UserUpdate。字段为空表示这项不改。
-// 返回 *User（*User）：改完角色、状态、邮箱或预算后的账户。角色或状态变化会使会话失效，停用也会停掉密钥；error（error）：账户不存在或事务失败。nil 表示已经改完。
+// 返回 *User（*User）：修改后的账户；error 表示账户不存在、字段非法或事务失败，失败不会留下部分更新。角色或状态变化使会话失效，停用也撤销个人密钥。
 // 调用：gateway/identity/handlers.go
 // 测试：authz_test.go
 func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserUpdate) (*User, error) {
@@ -501,6 +502,9 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 			return err
 		}
 		next := *cur
+		if in.Name != nil {
+			next.Name = *in.Name
+		}
 		if in.Role != nil {
 			next.Role = *in.Role
 		}
@@ -513,6 +517,12 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 		if in.Email != nil {
 			next.Email = normEmail(*in.Email)
 		}
+		// 提前校验管理员可编辑字段，数据库约束不应变成页面上的内部错误；所有字段一起拒绝，避免部分保存。
+		if (next.Role != RoleAdmin && next.Role != RoleUser) ||
+			(next.Status != StatusActive && next.Status != StatusDisabled) || next.Email == "" ||
+			(next.MaxBudget != nil && *next.MaxBudget < 0) {
+			return ErrInvalid
+		}
 		if cur.Admin() && !(next.Role == RoleAdmin && next.Status == StatusActive) {
 			if err := keepPlatformAdmin(ctx, s, id); err != nil {
 				return err
@@ -521,7 +531,7 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 		if next.Role != cur.Role || next.Status != cur.Status {
 			next.SessionVersion = cur.SessionVersion + 1
 		}
-		if _, err := s.ID(id).Cols("role", "status", "max_budget", "email", "session_version").Update(&next); err != nil {
+		if _, err := s.ID(id).Cols("name", "role", "status", "max_budget", "email", "session_version").Update(&next); err != nil {
 			return err
 		}
 		if next.Status != StatusActive && cur.Status == StatusActive {

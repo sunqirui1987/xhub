@@ -33,3 +33,5 @@ frontend/.next-real-dataset/
 .artifacts
 frontend/.next-acceptance-surfaces
 regression-report-20261009.md
+artifacts
+regression-report-live-20261009.md

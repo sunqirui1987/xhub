@@ -183,10 +183,12 @@ func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 		KeyID:     raw.Get("api_key"),
 		Model:     raw.Get("model"),
 		SessionID: raw.Get("session_id"),
+		RequestID: raw.Get("request_id"),
+		Search:    raw.Get("search"),
 	}
 	switch raw.Get("status_filter") {
-	case "success":
-		q.Status = "success"
+	case "success", "completed", "executing", "polling", "non_error":
+		q.Status = raw.Get("status_filter")
 	case "failed", "error":
 		q.Status = "error"
 	}
@@ -231,6 +233,9 @@ func eventRows(events []iam.UsageEvent) []map[string]any {
 		}
 		if e.CachedTokens != nil {
 			meta["cached_tokens"] = *e.CachedTokens
+		}
+		if e.HTTPStatus > 0 {
+			meta["http_status"] = e.HTTPStatus
 		}
 		if info := guardrailInformation(e.Guardrail); info != nil {
 			meta["guardrail_information"] = info
@@ -552,8 +557,14 @@ func LogByID(s Host, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	row := eventRows([]iam.UsageEvent{*event})[0]
+	// 诊断仅进入鉴权后的详情，列表不暴露上游响应头。
+	if body.UpstreamResponse != "" {
+		metadata := row["metadata"].(map[string]any)
+		metadata["upstream_response"] = jsonOrEmpty(body.UpstreamResponse)
+	}
 	row["messages"] = jsonOrEmpty(body.RequestBody)
-	row["response"] = jsonOrEmpty(body.ResponseBody)
+	row["response"] = jsonOrText(body.ResponseBody)
+	row["error"] = body.Error
 	if strings.TrimSpace(body.ProxyRequest) != "" {
 		row["proxy_server_request"] = jsonOrEmpty(body.ProxyRequest)
 	}
@@ -572,6 +583,21 @@ func jsonOrEmpty(raw string) any {
 	var out any
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return map[string]any{}
+	}
+	return out
+}
+
+// jsonOrText 为日志详情解码响应；JSON 返回原结构，非 JSON 返回未经改写的原始文本。
+// 参数 raw：数据库中保存的响应正文；空白表示没有响应。
+// 返回：JSON 值、原始字符串或空对象。调用场景是详情页 response 字段，无副作用。
+// 测试：reports_test.go 覆盖 JSON、纯文本和空输入。
+func jsonOrText(raw string) any {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}
+	}
+	var out any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return raw
 	}
 	return out
 }

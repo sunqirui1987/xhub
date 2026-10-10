@@ -1,26 +1,29 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { t } from "@/i18n";
 import { LogDetailsDrawer } from "./LogDetailsDrawer";
 import { sessionSpendLogsCall } from "../../networking";
 import { LogEntry } from "../columns";
 import { AutoRouterModelGroupsProvider } from "@/components/shared/table_cells";
+
+const detailCapture = vi.hoisted(() => ({ data: null as Record<string, unknown> | null, render: vi.fn(), header: vi.fn() }));
 
 vi.mock("../../networking", () => ({
   sessionSpendLogsCall: vi.fn(),
 }));
 
 vi.mock("@/app/(dashboard)/hooks/logDetails/useLogDetails", () => ({
-  useLogDetails: () => ({ data: null, isLoading: false }),
+  useLogDetails: () => ({ data: detailCapture.data, isLoading: false }),
 }));
 
 vi.mock("./LogDetailContent", () => ({
-  LogDetailContent: () => null,
+  LogDetailContent: (props: unknown) => { detailCapture.render(props); return null; },
   GuardrailJumpLink: () => null,
 }));
 
 vi.mock("./DrawerHeader", () => ({
-  DrawerHeader: () => null,
+  DrawerHeader: (props: unknown) => { detailCapture.header(props); return null; },
 }));
 
 vi.mock("@/app/(dashboard)/hooks/models/useModels", () => ({
@@ -75,8 +78,9 @@ const sessionLogs = [
   }),
 ];
 
-const renderSessionDrawer = () => {
-  vi.mocked(sessionSpendLogsCall).mockResolvedValue({ data: sessionLogs, total: 4, total_pages: 1 });
+/** 渲染隔离会话抽屉；参数 logs 为列表夹具，返回重渲染入口；供侧栏测试调用，DOM 由框架清理。 */
+const renderSessionDrawer = (logs = sessionLogs) => {
+  vi.mocked(sessionSpendLogsCall).mockResolvedValue({ data: logs, total: logs.length, total_pages: 1 });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const drawer = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
@@ -98,7 +102,27 @@ const renderSessionDrawer = () => {
 const sidebarEventNames = () =>
   screen.queryAllByText(/^(llm-early|llm-late|tool-early|tool-late)$/).map((el) => el.textContent);
 
+/** 前置列表中只有 error 状态、详情接口含诊断；验证懒加载正文和 HTTP 元数据传递给详情组件，finally 还原模拟数据。 */
+it("merges complete lazy-loaded error diagnostics", async () => {
+  detailCapture.data = { error: "full upstream diagnostic", metadata: { http_status: 502 }, response: { error: { trace: "upstream-123" } } };
+  detailCapture.render.mockClear();
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  try {
+    render(<QueryClientProvider client={queryClient}><LogDetailsDrawer open onClose={() => {}} logEntry={makeLog({ status: "error", metadata: { model_group: "keep-existing" } })} accessToken="token" /></QueryClientProvider>);
+    await waitFor(() => expect(detailCapture.render).toHaveBeenCalledWith(expect.objectContaining({ logEntry: expect.objectContaining({ error: "full upstream diagnostic", metadata: { model_group: "keep-existing", http_status: 502 }, response: { error: { trace: "upstream-123" } } }) })));
+  } finally {
+    detailCapture.data = null;
+    queryClient.clear();
+  }
+});
+
 describe("LogDetailsDrawer session sidebar sorting", () => {
+  /** 前置四条会话日志含提示词缓存，验证侧栏明确统计响应缓存且不混算；渲染由测试框架自动清理。 */
+  it("labels response cache separately from provider prompt cache", async () => {
+    renderSessionDrawer(sessionLogs.map(log => ({ ...log, metadata: { cached_tokens: 4 } })));
+    expect(await screen.findByText(t("Response cache hits") + ": 0/4")).toBeVisible();
+  });
+
   it("loads only the clicked caller's session", async () => {
     renderSessionDrawer();
 
@@ -223,4 +247,14 @@ describe("LogDetailsDrawer session sidebar auto-router icon", () => {
     expect(directRow.querySelector(".lucide-sparkles")).not.toBeNull();
     expect(directRow.querySelector(".lucide-waypoints")).toBeNull();
   });
+});
+
+/** 前置列表仍是执行中、详情已完成；验证抽屉使用最新详情状态，错误状态优先；finally 清除详情夹具，DOM 自动卸载。 */
+it("uses the latest task lifecycle status from detail in the header", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  detailCapture.data = { status: "completed" };
+  try {
+    render(<QueryClientProvider client={client}><LogDetailsDrawer open onClose={() => {}} logEntry={makeLog({ status: "executing" })} accessToken="token" /></QueryClientProvider>);
+    await waitFor(() => expect(detailCapture.header).toHaveBeenLastCalledWith(expect.objectContaining({ statusLabel: t("Completed") })));
+  } finally { detailCapture.data = null; client.clear(); }
 });

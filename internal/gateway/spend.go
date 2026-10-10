@@ -210,7 +210,8 @@ func floatParam(params map[string]any, key string) (float64, bool) {
 	}
 }
 
-// recordSpend records this call's spend. With Redis it updates the hot path and queues a log instead of writing PostgreSQL inside the request.
+// recordSpend 计算费用响应头并记录用量；Redis 可用时排队写入，否则直接持久化。
+// 异步轮询消费临时元数据后更新原请求，只有创建增加请求计数，首次结算增加费用。
 // 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；alias（string）：对外模型名；op（string）：操作名，例如 chat；usage（map[string]any）：用量对象。字段可能是 prompt_tokens，也可能是 input_tokens；start（time.Time）：时间范围的起点。零值表示不限制开始；cacheHit（bool）：为真时走缓存命中这一支。为假时保持原来的路径；status（int）：HTTP 状态码；depID（string）：部署 id。空串表示当前没有钉住的部署。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/wire.go
@@ -299,6 +300,7 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		tokens = 0
 	}
 	note := s.takeNote(callID)
+	guardrail := s.takeGuardrail(callID)
 	if !cacheHit && tokens > 0 && !note.SkipRouteUsage {
 		s.noteUsage(depID, tokens)
 	}
@@ -311,13 +313,19 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		KeyID:  keyID,
 		Prompt: pt, Completion: ct, Spend: spend, SpendValid: true,
 		Start: start.UTC().Format(time.RFC3339Nano), End: end.UTC().Format(time.RFC3339Nano),
-		CacheHit: cacheHit || note.CacheHit, Status: rowStatus, OwnerType: ownerType,
+		CacheHit: cacheHit || note.CacheHit, Status: rowStatus, HTTPStatus: status, OwnerType: ownerType,
 		TeamID: teamID, UserID: userID, OrgID: orgID, ProjectID: projectID,
 		Messages: ex.messages, Response: ex.response, ProxyRequest: ex.proxy,
-		TTFTMs: note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
+		UpstreamResponse: upstreamDiagnosticJSON(note.Upstream, usage),
+		TTFTMs:           note.TTFTMs, Provider: note.Provider, CacheKey: note.CacheKey,
 		SessionID: note.SessionID, CachedTokens: cachedColumn(usage),
-		Guardrail:     s.takeGuardrail(callID),
+		Guardrail:     guardrail,
 		PriceSnapshot: catalog.SnapshotUsage(charge, billed, okc),
+	}
+	if status >= 400 {
+		// 失败正文是排障证据，不能受提示词保存开关影响。请求正文仍按原开关处理。
+		row.Error = ex.rawResponse
+		row.Response = ex.rawResponse
 	}
 	if note.SettlementID != "" {
 		row.RequestID = note.SettlementID
@@ -330,6 +338,24 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		if team, err := s.IAM.GetTeam(context.Background(), teamID); err == nil && team != nil {
 			row.TeamAlias = team.Name
 		}
+	}
+	if note.TaskRequestID != "" {
+		// 生命周期直接事务持久化，避免 Redis 首个不可变事件吞掉后续状态和结算。
+		// 原请求的归属是更新授权边界，费用仅在数据库锁内首次成功结算时累加。
+		row.RequestID, row.Status = note.TaskRequestID, note.TaskStatus
+		// 任务失败可能由 HTTP 200 的查询响应表达，不能只按 HTTP 状态判断。
+		// 原始正文独立于提示词开关保存，供详情 error 和 response 回溯供应商结果。
+		if row.Status == "failed" {
+			row.Error = ex.rawResponse
+			row.Response = ex.rawResponse
+		}
+		rec := usageFromSpend(row, spend, ex.messages, row.Response, ex.proxy, start, end)
+		if s.IAM != nil {
+			if err := s.IAM.RecordTaskUsage(context.Background(), rec, note.TaskInitial, note.TaskSettlement); err != nil {
+				logx.Error("task usage persistence failed request=%s err=%v", row.RequestID, err)
+			}
+		}
+		return
 	}
 	if s.Live != nil && s.Live.EnqueueSpend(row) == nil {
 		return
@@ -391,14 +417,20 @@ func reportsCachedTokens(usage map[string]any) bool {
 // 参数 row（live.SpendLog）：从用量或目录读出的SpendLog；spend（float64）：这一行要累加的费用，单位是美元；ex（promptExchange）：persist花费使用的promptExchange；start（time.Time）：时间范围的起点。零值表示不限制开始；end（time.Time）：时间范围的终点。零值表示直到现在。
 // 返回：无。这条花费已写入 PostgreSQL。没配库时直接返回，不写。
 // 调用：仅在 spend.go 内使用
-// 测试：log_completeness_test.go
+// 测试：log_completeness_test.go、TestPersistSpendKeepsFailureResponseWithoutPrompts。
 func (s *Server) persistSpend(row live.SpendLog, spend float64, ex promptExchange, start, end time.Time) {
 	if s.IAM == nil {
 		return
 	}
 	// The event, its stored bodies, the daily roll-up and all five billing scopes
 	// commit together and deduplicate by request_id.
-	rec := usageFromSpend(row, spend, ex.messages, ex.response, ex.proxy, start, end)
+	// 失败正文已经由 recordSpend 放入 row.Response，不能再用受提示词开关控制的
+	// ex.response 覆盖，否则直写数据库和 Redis 队列会保存不同的排障信息。
+	response := ex.response
+	if row.Status == "error" || row.Status == "failed" || row.Status == "failure" || row.HTTPStatus >= 400 {
+		response = row.Response
+	}
+	rec := usageFromSpend(row, spend, ex.messages, response, ex.proxy, start, end)
 	if err := s.IAM.RecordUsage(context.Background(), []iam.UsageRecord{rec}); err != nil {
 		logx.Error("persist spend failed: %v", err)
 	}
@@ -451,11 +483,12 @@ func usageFromSpend(row live.SpendLog, spend float64, messages, response, proxy 
 	return iam.UsageRecord{
 		RequestID: row.RequestID, TS: start, KeyID: row.KeyID, OwnerType: row.OwnerType,
 		UserID: row.UserID, TeamID: row.TeamID, ProjectID: row.ProjectID, OrganizationID: row.OrgID,
-		Model: row.Model, CallType: row.CallType, Status: row.Status,
+		Model: row.Model, CallType: row.CallType, Status: row.Status, HTTPStatus: row.HTTPStatus,
 		PromptTokens: row.Prompt, CompletionTokens: row.Completion, Cost: spend,
 		DurationMS:  int(end.Sub(start).Milliseconds()),
-		RequestBody: messages, ResponseBody: response, ProxyRequest: proxy,
-		EndedAt: end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
+		RequestBody: messages, ResponseBody: response, Error: row.Error, ProxyRequest: proxy,
+		UpstreamResponse: row.UpstreamResponse,
+		EndedAt:          end, TTFTMs: row.TTFTMs, CacheHit: row.CacheHit,
 		KeyHash: row.KeyHash, KeyAlias: row.KeyAlias, TeamAlias: row.TeamAlias,
 		Provider: row.Provider, CachedTokens: row.CachedTokens,
 		SessionID: row.SessionID, CacheKey: row.CacheKey, Guardrail: row.Guardrail,
@@ -480,6 +513,8 @@ type promptExchange struct {
 	messages string
 	response string
 	proxy    string
+	// rawResponse 暂存上游原始响应；仅失败请求会持久化，因此不受提示词开关控制。
+	rawResponse string
 }
 
 // promptsEnabled reports whether new spend logs should keep the request and response. The YAML flag wins when it is set. A database override can turn the same key on later.
@@ -509,19 +544,22 @@ func (s *Server) promptsEnabled() bool {
 
 // rememberExchange keeps one call's headers and bodies until recordSpend writes the row.
 // 参数 callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文；reqBody（[]byte）：remember交换要读的原始字节；respBody（[]byte）：remember交换要读的原始字节。
-// 返回：无。这次调用的头和正文已留到写用量行时再用。没开提示词记录或 callID 为空时不留。
+// 返回：无。请求与成功响应受提示词开关控制；失败候选响应始终暂存到 RecordSpend 判定状态。
 // 调用：gateway/wire.go
 // 测试：无直接单测
 func (s *Server) rememberExchange(callID string, r *http.Request, reqBody, respBody []byte) {
-	if s == nil || callID == "" || !s.promptsEnabled() {
+	if s == nil || callID == "" {
 		return
 	}
-	messages, response, proxy := promptJSON(r, reqBody, respBody)
+	ex := promptExchange{rawResponse: string(respBody)}
+	if s.promptsEnabled() {
+		ex.messages, ex.response, ex.proxy = promptJSON(r, reqBody, respBody)
+	}
 	s.mu.Lock()
 	if s.exchanges == nil {
 		s.exchanges = map[string]promptExchange{}
 	}
-	s.exchanges[callID] = promptExchange{messages: messages, response: response, proxy: proxy}
+	s.exchanges[callID] = ex
 	s.mu.Unlock()
 }
 

@@ -36,13 +36,27 @@ describe("fetchAvailableModelsForTeam", () => {
 describe("fetchAvailableModels", () => {
   /** 前置网络返回有效绑定或校验错误；验证原样投影，不猜测旧分类，mock 随 beforeEach 清理。 */
   it("preserves declared paths and explains invalid configurations", async () => {
-    const binding = { endpoint_id: "gemini", transport: "gemini_generate_content", kind: "bypass", protocol: "gemini", family: "chat", method: "POST", path: "/v1beta/models/valid:generateContent" };
-    availableMock.mockResolvedValue({ data: [
-      { id: "valid", endpoints: [binding] },
-      { id: "invalid", endpoints: [], unavailable_reason: "model_info.transport must select a registered transport" },
-    ] });
+    const binding = {
+      endpoint_id: "gemini",
+      transport: "gemini_generate_content",
+      kind: "bypass",
+      protocol: "gemini",
+      family: "chat",
+      method: "POST",
+      path: "/v1beta/models/valid:generateContent",
+    };
+    availableMock.mockResolvedValue({
+      data: [
+        { id: "valid", endpoints: [binding] },
+        { id: "invalid", endpoints: [], unavailable_reason: "model_info.transport must select a registered transport" },
+      ],
+    });
     expect(await fetchAvailableModels("token")).toEqual([
-      { model_group: "invalid", endpoints: [], unavailable_reason: "model_info.transport must select a registered transport" },
+      {
+        model_group: "invalid",
+        endpoints: [],
+        unavailable_reason: "model_info.transport must select a registered transport",
+      },
       { model_group: "valid", endpoints: [binding] },
     ]);
   });
@@ -90,4 +104,11 @@ describe("fetchAvailableModels", () => {
     availableMock.mockResolvedValue(response);
     expect(await fetchAvailableModels("token")).toEqual([]);
   });
+});
+
+/** 前置可用模型接口失败；验证调试台严格模式保留真实失败，旧调用方仍获得空列表，mock 自动恢复。 */
+it("严格模式区别模型加载失败与空目录", async () => {
+  availableMock.mockRejectedValue(new Error("invalid virtual key"));
+  await expect(fetchAvailableModels("bad", true)).rejects.toThrow("invalid virtual key");
+  expect(await fetchAvailableModels("bad")).toEqual([]);
 });

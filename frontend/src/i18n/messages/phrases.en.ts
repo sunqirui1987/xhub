@@ -1,4 +1,15 @@
 export const enPhrases: Record<string, string> = {
+  "Response cache hits": "Response cache hits",
+  "Not reported": "Not reported",
+  "Upstream Response": "Upstream Response",
+  "Copy upstream response": "Copy upstream response",
+  "Upstream Response Headers": "Upstream Response Headers",
+  "Upstream Usage": "Upstream Usage",
+  "Billing Usage": "Billing Usage",
+
+  "Error Logs": "Error Logs",
+  "Copy error details": "Copy error details",
+  "HTTP Status": "HTTP Status",
   "Configured price feed": "Configured price feed",
   "Catalog generated:": "Catalog generated:",
   "Edit model provider": "Edit model provider",

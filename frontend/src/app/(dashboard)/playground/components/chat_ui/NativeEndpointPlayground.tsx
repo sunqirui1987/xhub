@@ -4,6 +4,8 @@ import type { ModelEndpoint } from "@/components/llm_calls/fetch_models";
 import { endpointURL } from "@/components/llm_calls/model_endpoints";
 import { getProxyBaseUrl } from "@/components/networking";
 import { ArrowUpRight, Loader2, Terminal } from "lucide-react";
+import { diagnoseRequest, RequestDiagnostic, type RequestFailure } from "../RequestDiagnostic";
+import { nativeRequestTemplate } from "./nativeRequestTemplate";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -26,7 +28,7 @@ export default function NativeEndpointPlayground({
 }) {
   const [input, setInput] = useState('{\n  "prompt": ""\n}');
   const [output, setOutput] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<RequestFailure | null>(null);
   const [taskId, setTaskId] = useState("");
   const [busy, setBusy] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -36,28 +38,24 @@ export default function NativeEndpointPlayground({
     controller.current = null;
     setBusy(false);
     setOutput("");
-    setError("");
+    setError(null);
     setTaskId("");
     setFile(null);
-    setInput(
-      endpoint.protocol === "gemini" || endpoint.protocol === "vertex"
-        ? '{"contents":[{"role":"user","parts":[{"text":""}]}]}'
-        : endpoint.protocol === "openai-responses"
-        ? '{\n  "input": "",\n  "stream": false\n}'
-        : endpoint.protocol === "anthropic-messages"
-          ? '{\n  "messages": [{"role": "user", "content": ""}],\n  "max_tokens": 1024\n}'
-          : '{\n  "prompt": ""\n}',
-    );
-    return () => controller.current?.abort();
-  }, [model, endpoint.path, endpoint.protocol]);
+    setInput(nativeRequestTemplate(endpoint));
+    return () => {
+      controller.current?.abort();
+      controller.current = null;
+    };
+  }, [model, endpoint.path, endpoint.protocol, apiKey, base]);
   /** run 执行登记的创建或任务操作。
    * 参数 path/method：公开路径和方法；query：可选任务参数名。返回：Promise<void>，结果写入界面。
    * 只允许当前请求更新状态，防止模型切换后旧响应覆盖新界面。
    */
   const run = async (path: string, method: string, query?: string) => {
+    if (controller.current) return;
     setBusy(true);
     setOutput("");
-    setError("");
+    setError(null);
     const abort = new AbortController();
     controller.current = abort;
     try {
@@ -89,7 +87,7 @@ export default function NativeEndpointPlayground({
         url = u.toString();
       }
       const response = await fetch(url, { method, headers, body, signal: abort.signal });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw Object.assign(new Error(await response.text()), { status: response.status });
       if (response.headers.get("content-type")?.includes("text/event-stream")) {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -97,7 +95,7 @@ export default function NativeEndpointPlayground({
           while (true) {
             const { value, done } = await reader.read();
             const text = decoder.decode(value, { stream: !done });
-            if (controller.current !== abort) return;
+            if (controller.current !== abort || abort.signal.aborted) return;
             setOutput((previous) => (previous + text).slice(-8 * 1024 * 1024));
             if (done) break;
           }
@@ -106,7 +104,7 @@ export default function NativeEndpointPlayground({
         }
       } else {
         const text = await response.text();
-        if (controller.current !== abort) return;
+        if (controller.current !== abort || abort.signal.aborted) return;
         let doc;
         try {
           doc = JSON.parse(text);
@@ -120,9 +118,12 @@ export default function NativeEndpointPlayground({
       }
     } catch (error) {
       if (controller.current === abort)
-        setError(abort.signal.aborted ? "请求已停止" : error instanceof Error ? error.message : String(error));
+        setError(abort.signal.aborted ? diagnoseRequest(new Error("请求已停止")) : diagnoseRequest(error));
     } finally {
-      if (controller.current === abort) setBusy(false);
+      if (controller.current === abort) {
+        setBusy(false);
+        controller.current = null;
+      }
     }
   };
   const taskActions =
@@ -131,7 +132,7 @@ export default function NativeEndpointPlayground({
     ) ?? [];
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
         <h2 className="text-sm font-semibold">请求调试</h2>
         <details className="max-w-full text-xs text-muted-foreground">
           <summary className="cursor-pointer hover:text-foreground">接口详情</summary>
@@ -140,13 +141,44 @@ export default function NativeEndpointPlayground({
           </p>
         </details>
       </header>
-      <div className="grid min-h-0 flex-1 xl:grid-cols-2">
+      {/* 窄屏按内容高度滚动，避免两栏改为纵向后压缩标题和结果；桌面才填满剩余高度。 */}
+      <div className="grid shrink-0 xl:min-h-0 xl:flex-1 xl:grid-cols-2">
         <section aria-label="请求编辑" className="flex min-w-0 flex-col gap-4 p-5 xl:border-r xl:border-border">
           <div className="flex items-center justify-between">
             <label htmlFor="native-request" className="text-sm font-medium">
               请求参数
             </label>
-            <span className="text-xs text-muted-foreground">JSON</span>
+            <div className="flex gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  try {
+                    const doc = JSON.parse(input);
+                    if (!doc || typeof doc !== "object" || Array.isArray(doc))
+                      throw new Error("请求参数必须是 JSON 对象");
+                    setInput(JSON.stringify(doc, null, 2));
+                    setError(null);
+                  } catch (error) {
+                    setError(diagnoseRequest(error));
+                  }
+                }}
+              >
+                格式化
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setInput(nativeRequestTemplate(endpoint));
+                  setError(null);
+                }}
+              >
+                重置参数
+              </Button>
+            </div>
           </div>
           <textarea
             id="native-request"
@@ -160,6 +192,7 @@ export default function NativeEndpointPlayground({
             <label className="space-y-2 text-sm">
               <span className="block font-medium">编辑图片</span>
               <input
+                key={[model, endpoint.path, apiKey, base].join("|")}
                 type="file"
                 accept="image/*"
                 aria-label="编辑图片"
@@ -173,7 +206,16 @@ export default function NativeEndpointPlayground({
               {busy ? "请求中…" : "提交请求"}
             </Button>
             {busy && (
-              <Button variant="ghost" onClick={() => controller.current?.abort()}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  controller.current?.abort();
+                  controller.current = null;
+                  setBusy(false);
+                  setOutput("");
+                  setError(diagnoseRequest(new Error("请求已停止")));
+                }}
+              >
                 停止
               </Button>
             )}
@@ -227,14 +269,7 @@ export default function NativeEndpointPlayground({
               </div>
             </div>
           )}
-          {error && (
-            <p
-              role="alert"
-              className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive break-all"
-            >
-              {error}
-            </p>
-          )}
+          {error && <RequestDiagnostic failure={error} />}
           {output ? (
             <pre
               className="min-h-48 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted/30 p-4 font-mono text-xs leading-relaxed"
@@ -242,12 +277,12 @@ export default function NativeEndpointPlayground({
             >
               {output}
             </pre>
-          ) : (
+          ) : !error ? (
             <div className="flex min-h-48 flex-1 flex-col items-center justify-center gap-3 rounded-lg bg-muted/20 text-muted-foreground">
               <Terminal className="size-6 opacity-50" aria-hidden="true" />
               <p className="text-sm">{busy ? "正在处理请求…" : "提交请求后，结果显示在这里"}</p>
             </div>
-          )}
+          ) : null}
         </section>
       </div>
     </div>

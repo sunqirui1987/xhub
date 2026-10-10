@@ -39,9 +39,11 @@ interface RequestLogsPanelProps {
   userRole: string;
   userID: string;
   isActive: boolean;
+  errorsOnly?: boolean;
 }
 
-export default function RequestLogsPanel({ accessToken, token, userRole, userID, isActive }: RequestLogsPanelProps) {
+/** 查询并展示请求日志；普通面板排除失败，errorsOnly 固定失败筛选并逐条列出请求，避免会话聚合隐藏错误；参数为登录凭据和活跃状态，返回日志面板，后台负责权限和分页。 */
+export default function RequestLogsPanel({ accessToken, token, userRole, userID, isActive, errorsOnly = false }: RequestLogsPanelProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_LOGS_SORTING);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -106,6 +108,7 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     isCustomDate,
     sorting,
     sessionCursors,
+    errorsOnly,
   });
 
   // Follow the table's own last fetch so a live-tail refresh carries the filter
@@ -290,7 +293,7 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
   return (
     <AutoRouterModelGroupsProvider>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">{t("pages.logs.title")}</h1>
+        <h1 className="text-xl font-semibold">{errorsOnly ? t("Error Logs") : t("pages.logs.title")}</h1>
       </div>
 
       {isLiveTail && pagination.pageIndex === 0 && <LiveTailBanner onStop={() => setIsLiveTail(false)} />}
@@ -314,6 +317,7 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
         onSessionClick={handleSessionClick}
         teams={allTeams ?? []}
         logsWindow={logsWindow}
+        errorsOnly={errorsOnly}
         toolbarChildren={
           <LogsTableToolbar
             startTime={startTime}

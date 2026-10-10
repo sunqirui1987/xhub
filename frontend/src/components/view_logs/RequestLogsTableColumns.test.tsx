@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { t } from "@/i18n";
 import { DataTable } from "@/components/shared/DataTable";
 
 import type { LogEntry } from "./columns";
@@ -27,6 +28,13 @@ const logEntry = (overrides: Partial<LogEntry>): LogEntry => ({
 });
 
 const noopDeps = { onKeyHashClick: vi.fn(), onSessionClick: vi.fn() };
+
+/** 前置后台 error 状态而没有旧版 metadata；验证表格显示失败而非成功，自动卸载清理 DOM。 */
+it("labels backend error rows as failure", () => {
+  renderRows([logEntry({ status: "error" })]);
+  expect(screen.getByText("Failure")).toBeInTheDocument();
+  expect(screen.queryByText("Success")).not.toBeInTheDocument();
+});
 
 function renderRows(rows: LogEntry[], deps = noopDeps) {
   render(
@@ -302,4 +310,10 @@ describe("TTFT column", () => {
 
     expect(screen.getByText("1.00")).toBeInTheDocument();
   });
+});
+
+/** 前置真实表格组件和任务日志；验证三个阶段及失败均可观察，组件测试自动卸载 DOM。 */
+it("renders task lifecycle badges", () => {
+  renderRows(["executing", "polling", "completed", "failed"].map(status => logEntry({ request_id: status, status })));
+  for (const label of ["Executing", "Polling", "Completed", "Failure"]) expect(screen.getByText(t(label))).toBeInTheDocument();
 });

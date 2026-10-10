@@ -62,7 +62,8 @@ func TestFalSettlementUsesOutputSecondsAndDeduplicates(t *testing.T) {
 	const want = 5.5 * 0.07246377
 	for i := 0; i < 3; i++ {
 		path := result
-		if i == 0 {
+		// 首次直接取产物不携带 status，也应完成原日志；再查状态和结果均不得重复结算。
+		if i == 1 {
 			response.Store(map[string]any{"status": "COMPLETED", "result": video})
 			path += "/status"
 		} else {
@@ -77,7 +78,10 @@ func TestFalSettlementUsesOutputSecondsAndDeduplicates(t *testing.T) {
 		}
 	}
 	var paid []map[string]any
-	for _, row := range h.successRows(t, admin, model) {
+	for _, row := range h.spendLogs(t, admin) {
+		if stringField(row, "model") != model {
+			continue
+		}
 		if numberOrZero(row["spend"]) > 0 {
 			paid = append(paid, row)
 		}
@@ -89,7 +93,7 @@ func TestFalSettlementUsesOutputSecondsAndDeduplicates(t *testing.T) {
 	if id == "" {
 		id = stringField(paid[0], "id")
 	}
-	if !strings.HasPrefix(id, "official-settlement:") {
+	if strings.HasPrefix(id, "official-settlement:") || stringField(paid[0], "status") != "completed" {
 		t.Fatal(id)
 	}
 	bill := breakdownOf(t, h, admin, id)

@@ -11,8 +11,27 @@ import (
 
 	"xorm.io/builder"
 
+	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
 )
+
+// TestRememberExchangeKeepsFailureCandidateWhenPromptStorageOff 验证关闭提示词保存仍暂存失败响应。
+// 前置条件是开关关闭；请求正文不得保存，原始响应必须保留到 RecordSpend；内存项由 takeExchange 清理。
+func TestRememberExchangeKeepsFailureCandidateWhenPromptStorageOff(t *testing.T) {
+	s := &Server{Cfg: &config.Config{}, exchanges: map[string]promptExchange{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	s.rememberExchange("failure-off", req, []byte("{\"messages\":[{\"content\":\"secret\"}]}"), []byte("upstream raw error"))
+	ex := s.takeExchange("failure-off")
+	if ex.messages != "" || ex.proxy != "" || ex.response != "" {
+		t.Fatalf("关闭开关后保存了请求或成功响应: %+v", ex)
+	}
+	if ex.rawResponse != "upstream raw error" {
+		t.Fatalf("失败候选正文丢失: %q", ex.rawResponse)
+	}
+	if _, exists := s.exchanges["failure-off"]; exists {
+		t.Fatal("takeExchange 未清理临时数据")
+	}
+}
 
 func TestPromptJSONKeepsHeadersBodyAndResponse(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

@@ -4,14 +4,16 @@
  * Detects realtime API responses and renders a specialized view.
  */
 
-import { parseMessages, requestBody, requestHeaders, requestLine } from "./prettyMessagesUtils";
+import { parseMediaPayload, parseMessages, requestBody, requestHeaders, requestLine } from "./prettyMessagesUtils";
 import { InputCard } from "./InputCard";
 import { OutputCard } from "./OutputCard";
 import { isRealtimeResponse, RealtimePrettyView } from "./RealtimePrettyView";
+import { MediaRequestResponseView } from "./MediaRequestResponseView";
 
 interface PrettyMessagesViewProps {
   request: any;
   response: any;
+  model?: string;
   metrics?: {
     prompt_tokens?: number;
     completion_tokens?: number;
@@ -20,10 +22,19 @@ interface PrettyMessagesViewProps {
   };
 }
 
-export function PrettyMessagesView({ request, response, metrics }: PrettyMessagesViewProps) {
+/**
+ * 用途：把请求日志中的聊天、Responses、实时和媒体协议转换为可读详情。
+ * 参数：request 和 response 是持久化原文，model 是日志记录的真实模型 ID，metrics 是计量与费用。
+ * 返回值：与协议匹配的 React 详情视图。
+ * 调用场景：请求日志抽屉的 Pretty 页签。
+ * 边界：媒体请求正文未携带 model 时使用日志模型 ID；未知结构仍回退到普通输入输出卡片。
+ */
+export function PrettyMessagesView({ request, response, model, metrics }: PrettyMessagesViewProps) {
   if (isRealtimeResponse(response)) {
     return <RealtimePrettyView response={response} metrics={metrics} />;
   }
+  const media = parseMediaPayload(request, response, model);
+  if (media) return <MediaRequestResponseView request={request} media={media} />;
 
   const headers = requestHeaders(request);
   const body = requestBody(request);

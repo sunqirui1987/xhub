@@ -29,13 +29,12 @@ interface VirtualKeysTableProps {
   headerActions?: React.ReactNode;
 }
 
-const FILTER_COLUMNS = ["team_id", "org_id", "user_id", "key_hash"] as const;
+const FILTER_COLUMNS = ["team_id", "org_id", "key_hash"] as const;
 type FilterColumn = (typeof FILTER_COLUMNS)[number];
 
 const FILTER_LABELS: Record<FilterColumn, string> = {
   team_id: "Team",
   org_id: "Organization",
-  user_id: "User ID",
   key_hash: "Key ID",
 };
 
@@ -75,6 +74,7 @@ const filterValue = (filters: ColumnFiltersState, column: FilterColumn): string 
   return (typeof value === "string" ? value.trim() : "") || null;
 };
 
+/** 渲染我的虚拟密钥；headerActions 为创建操作，返回列表或详情。个人路由的查询强制本人范围，URL 筛选不能改变归属；分页及详情导航会更新 URL。 */
 export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
   const { data: fetchedOrganizations } = useOrganizations();
   const organizations = useMemo(() => fetchedOrganizations ?? [], [fetchedOrganizations]);
@@ -97,15 +97,14 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
     () => ({ pageIndex: tableState.page - 1, pageSize: tableState.page_size }),
     [tableState.page, tableState.page_size],
   );
-  const { filter_team, filter_org, filter_user, filter_key_id } = tableState;
+  const { filter_team, filter_org, filter_key_id } = tableState;
   const appliedFilters = useMemo(
     () => ({
       team_id: filter_team.trim(),
       org_id: filter_org.trim(),
-      user_id: filter_user.trim(),
       key_hash: filter_key_id.trim(),
     }),
-    [filter_team, filter_org, filter_user, filter_key_id],
+    [filter_team, filter_org, filter_key_id],
   );
   const columnFilters = useMemo<ColumnFiltersState>(
     () =>
@@ -117,10 +116,11 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
   );
 
   const keyListOptions = {
+    scope: "personal" as const,
     teamID: appliedFilters.team_id || undefined,
     organizationID: appliedFilters.org_id || undefined,
     search: searchQuery.trim() || undefined,
-    userID: appliedFilters.user_id || undefined,
+    // 忽略旧链接中的 filter_user，归属只由后台会话决定。
     keyHash: appliedFilters.key_hash || undefined,
     sortBy,
     sortOrder: tableState.sort_order,
@@ -163,7 +163,7 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
       const nextFilters = {
         filter_team: filterValue(next, "team_id"),
         filter_org: filterValue(next, "org_id"),
-        filter_user: filterValue(next, "user_id"),
+        filter_user: null,
         filter_key_id: filterValue(next, "key_hash"),
         page: null,
       };
@@ -191,6 +191,7 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
   );
   const { data: fetchedSelectedKey, isError: selectedKeyLoadFailed } = useKeyInfo(selectedKeyId, {
     enabled: !selectedKeyFromList,
+    scope: "personal",
   });
   const selectedKey = selectedKeyFromList ?? fetchedSelectedKey;
 
@@ -215,9 +216,12 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
     [organizations],
   );
 
+  /** 合并详情更新后的导航标识；参数 updated 为接口返回字段，返回无，供编辑和轮换回调使用。
+   * 优先使用稳定 token_id，避免把响应中的遮罩前缀当作详情 ID；缺标识保持当前页面，切换标识时刷新列表。
+   */
   const handleSelectedKeyDataUpdate = useCallback(
     (updated: Partial<KeyResponse>) => {
-      const rotatedToken = updated.token ?? updated.token_id;
+      const rotatedToken = updated.token_id ?? updated.token;
       if (!rotatedToken || rotatedToken === selectedKeyId) return;
       void setSelectedKeyId(rotatedToken, { history: "replace" });
       void refetch();
@@ -325,13 +329,6 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
                       onValueChange={(value) => set("org_id", value ?? undefined)}
                       placeholder={t("Select an organization…")}
                       emptyText={t("No organizations found")}
-                    />
-                  </DataTableFilterField>
-                  <DataTableFilterField label={t("User ID")}>
-                    <Input
-                      value={(get("user_id") as string) ?? ""}
-                      onChange={(event) => set("user_id", event.target.value)}
-                      placeholder={t("Enter User ID…")}
                     />
                   </DataTableFilterField>
                   <DataTableFilterField label={t("Key ID")}>

@@ -44,7 +44,7 @@ function callType(info: Record<string, unknown>): string {
 }
 
 /** 展示完整部署表，多部署在原行编辑权重；参数为模型组、价格与保存回调。
- * 保存刷新目录，失败保留草稿；单部署隐藏所有分配操作，不调用供应商。
+ * 保存刷新目录，失败保留草稿；单部署仍有已保存分配时展示并允许修复，不调用供应商。
  */
 function GroupDeployments({
   group,
@@ -61,7 +61,8 @@ function GroupDeployments({
 }) {
   const [draft, setDraft] = useState<AllocationPolicy | null>(null);
   const [busy, setBusy] = useState(false);
-  const multiple = group.deployments.length > 1;
+  // 单部署可能残留零权重或已删除部署的分配，隐藏会让后台筛选与页面状态不一致。
+  const showWeights = group.deployments.length > 1 || !!group.default_weights?.allocations?.length;
   /** 按规范部署 ID 读取草稿或目录权重，返回相对权重供展示与编辑初始化；
    * 缺失默认配置或分配项时返回 1，保留明确配置的 0，无写入副作用。
    */
@@ -95,7 +96,7 @@ function GroupDeployments({
   };
   return (
     <>
-      {multiple && (
+      {showWeights && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
             默认权重为 1，相同权重随机分配；3 和 7 约为 30% 和 70%，0 不参与。客户路由模板可覆盖。
@@ -129,7 +130,7 @@ function GroupDeployments({
               <th className="p-2">上游协议 / 用户入口</th>
               <th className="p-2">计价</th>
               <th className="p-2">状态</th>
-              {multiple && <th className="p-2">默认权重</th>}
+              {showWeights && <th className="p-2">默认权重</th>}
               <th className="p-2">操作</th>
             </tr>
           </thead>
@@ -158,7 +159,7 @@ function GroupDeployments({
                   <td className="p-2">
                     <ModelStatusToggle model={dep} />
                   </td>
-                  {multiple && (
+                  {showWeights && (
                     <td className="p-2">
                       {draft ? (
                         <Input

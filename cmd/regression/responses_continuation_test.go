@@ -73,14 +73,23 @@ func TestResponsesIncrementalContinuation(t *testing.T) {
 				t.Fatal("拒绝续接仍调用上游")
 			}
 			rows := h.spendLogs(t, admin)
-			if len(rows) != 3 {
-				t.Fatalf("三轮续接账单数量错误: %v", rows)
-			}
+			successes := 0
 			for _, row := range rows {
 				amount, _ := floatField(row, "spend")
+				// 拒绝请求也会保留诊断日志；只统计成功三轮，并验证失败金额始终为零。
+				if row["status"] != "success" {
+					if amount != 0 {
+						t.Fatalf("拒绝续接不应收费: %v", row)
+					}
+					continue
+				}
+				successes++
 				if amount != expectedCost() {
 					t.Fatalf("续接计费错误: %v", row)
 				}
+			}
+			if successes != 3 {
+				t.Fatalf("三轮成功续接账单数量错误: %d", successes)
 			}
 			stranger := h.provision(t, admin, "continuation-stranger")
 			cross := h.do("POST", "/responses", stranger.key, map[string]any{"model": "continuation-model", "input": "next", "previous_response_id": prev})

@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 	"github.com/sunqirui1987/xhub/internal/auth"
 	"github.com/sunqirui1987/xhub/internal/store"
-	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 // savedHost is the process surface the guardrail tests need: a real key-value
@@ -229,6 +229,7 @@ func TestEvaluateReportsEachDefaultRule(t *testing.T) {
 	}
 }
 
+// TestPreCallOnlyStopsOnADefaultPreCallBlock 验证请求前规则只执行已启用规则，并把拦截原因写入可持久化结果；测试使用临时存储且由测试框架清理。
 func TestPreCallOnlyStopsOnADefaultPreCallBlock(t *testing.T) {
 	st := openGuardStore(t)
 	h := &savedHost{store: st, allow: true}
@@ -253,9 +254,12 @@ func TestPreCallOnlyStopsOnADefaultPreCallBlock(t *testing.T) {
 	if blocked, msg := PreCall(h, map[string]any{"messages": []any{map[string]any{"content": "a secret later mask"}}}); blocked {
 		t.Fatalf("words from skipped rules blocked the call: %s", msg)
 	}
-	blocked, msg := PreCall(h, map[string]any{"prompt": "drop the bomb"})
+	blocked, msg, findings := Evaluate(h, map[string]any{"prompt": "drop the bomb"})
 	if !blocked || msg != "Guardrail blocked the request: no-bombs" {
 		t.Fatalf("default rule: blocked=%v msg=%q", blocked, msg)
+	}
+	if len(findings) != 2 || findings[1]["reason"] != msg {
+		t.Fatalf("blocked finding must persist the caller-visible reason: %#v", findings)
 	}
 	if blocked, _ := PreCall(nil, map[string]any{"text": "bomb"}); blocked {
 		t.Fatal("a missing host must not block")

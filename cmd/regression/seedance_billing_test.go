@@ -30,10 +30,31 @@ func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 	admin := h.adminSession()
 	owner := h.openScope(t, admin, "seedance-billing")
 	before := h.moneyOf(t, owner)
-	h.ok(http.MethodPost, "/api/v3/contents/generations/tasks", owner.key, map[string]any{"model": model, "resolution": "480p", "content": []any{map[string]any{"type": "text", "text": "apple"}}})
+	created := h.ok(http.MethodPost, "/api/v3/contents/generations/tasks", owner.key, map[string]any{"model": model, "resolution": "480p", "content": []any{map[string]any{"type": "text", "text": "apple"}}})
+	originalID := created.header("x-litellm-call-id")
+	rowsAtCreate := h.spendLogs(t, admin)
+	if len(rowsAtCreate) != 1 || stringField(rowsAtCreate[0], "status") != "executing" {
+		t.Fatalf("create lifecycle: %+v", rowsAtCreate)
+	}
 	for _, status := range []string{"queued", "creating_assets", "running", "failed", "expired", "unknown", ""} {
 		response.Store(map[string]any{"status": status, "usage": map[string]any{"completion_tokens": 40594}})
 		h.ok(http.MethodGet, "/api/v3/contents/generations/tasks/billing-task", owner.key, nil)
+		rows := h.spendLogs(t, admin)
+		if len(rows) != 1 || stringField(rows[0], "request_id") != originalID {
+			t.Fatalf("poll created a second log: %+v", rows)
+		}
+		if status == "queued" && stringField(rows[0], "status") != "polling" {
+			t.Fatalf("missing polling status: %+v", rows)
+		}
+		if status == "failed" && stringField(rows[0], "status") != "failed" {
+			t.Fatalf("missing failure status: %+v", rows)
+		}
+		if status == "failed" {
+			errors := h.ok(http.MethodGet, "/spend/logs/ui?status_filter=error", admin, nil)
+			if len(rowsOf(errors, "data", "logs")) != 1 {
+				t.Fatal("task failure missing from error tab", errors.describe())
+			}
+		}
 		if !h.moneyOf(t, owner).same(before) {
 			t.Fatalf("charged status %q", status)
 		}
@@ -50,20 +71,24 @@ func TestSeedanceSettlementUsesMeasuredBandAndDeduplicates(t *testing.T) {
 		}
 	}
 	var settled []map[string]any
-	for _, row := range h.successRows(t, admin, model) {
+	rows := h.spendLogs(t, admin)
+	for _, row := range rows {
+		if stringField(row, "model") != model {
+			continue
+		}
 		if numberOrZero(row["spend"]) > 0 {
 			settled = append(settled, row)
 		}
 	}
-	if len(settled) != 1 {
+	if len(settled) != 1 || len(rows) != 1 || stringField(settled[0], "request_id") != originalID {
 		t.Fatalf("expected one paid event: %+v", settled)
 	}
 	id := stringField(settled[0], "request_id")
 	if id == "" {
 		id = stringField(settled[0], "id")
 	}
-	if !strings.HasPrefix(id, "official-settlement:") {
-		t.Fatal("missing durable settlement id", settled[0])
+	if strings.HasPrefix(id, "official-settlement:") || stringField(settled[0], "status") != "completed" {
+		t.Fatal("settlement must update the original completed task", settled[0])
 	}
 	bill := breakdownOf(t, h, admin, id)
 	raw, _ := json.Marshal(bill)

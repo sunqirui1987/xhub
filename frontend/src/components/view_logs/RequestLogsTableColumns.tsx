@@ -1,6 +1,9 @@
 "use client";
 
+import { requestLogStatus } from "./taskStatus";
+
 import type { ColumnDef } from "@tanstack/react-table";
+import { isRequestFailure } from "./logErrors";
 
 import { DataTableSortHeader } from "@/components/shared/DataTable";
 import { CellTooltip, DateCell, IdCell, MoneyCell, StatusBadge } from "@/components/shared/table_cells";
@@ -38,6 +41,7 @@ function TruncatedText({ value }: { value: string | undefined }) {
   return <CellTooltip content={display} trigger={<span className="max-w-[15ch] truncate block">{display}</span>} />;
 }
 
+/** 返回日志表格列定义；接收密钥/会话点击回调，兼容失败状态与批次部分失败，供日志和错误日志共用。 */
 export const getRequestLogsTableColumns = ({
   onKeyHashClick,
   onSessionClick,
@@ -109,8 +113,11 @@ export const getRequestLogsTableColumns = ({
     enableSorting: false,
     meta: { skeleton: "badge" },
     cell: ({ row }) => {
-      const status = readMetaString(row.original.metadata, "status") ?? "Success";
-      const isSuccess = status.toLowerCase() !== "failure";
+      const state = requestLogStatus(row.original);
+      if (["executing", "polling", "completed"].includes(row.original.status || "")) {
+        return <StatusBadge tone={state.tone} label={t(state.label)} />;
+      }
+      const isSuccess = !isRequestFailure(row.original);
       const batchCounts = isSuccess ? getBatchRequestCounts(row.original.metadata) : undefined;
       if (batchCounts && batchCounts.failed > 0) {
         const total = batchCounts.successful + batchCounts.failed;

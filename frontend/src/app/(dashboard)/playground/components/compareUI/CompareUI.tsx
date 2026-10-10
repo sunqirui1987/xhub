@@ -1,5 +1,7 @@
 "use client";
 
+import { diagnoseRequest, RequestDiagnostic, type RequestFailure } from "../RequestDiagnostic";
+import { guardCallbacks } from "../../hooks/requestScope";
 import { toast } from "@/lib/toast";
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
 import { Eraser, FileText, Plus, Trash2 } from "lucide-react";
@@ -8,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import ChatImageUpload from "../chat_ui/ChatImageUpload";
 import { createChatDisplayMessage, createChatMultimodalMessage } from "../chat_ui/ChatImageUtils";
@@ -53,6 +55,7 @@ export interface ComparisonInstance {
   applyAcrossModels: boolean;
   useAdvancedParams: boolean;
   traceId?: string;
+  failure?: RequestFailure | null;
 }
 interface CompareUIProps {
   accessToken: string | null;
@@ -71,6 +74,40 @@ const DEFAULT_ENDPOINT = EndpointId.CHAT_COMPLETIONS;
  * 调用：Playground 对比标签。测试：CompareUI.test.tsx。
  */
 export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: CompareUIProps) {
+  const requests = useRef(new Map<string, AbortController>());
+  const preparing = useRef(false);
+  const requestHistories = useRef(new Map<string, MessageType[]>());
+  const generation = useRef(0);
+  // 同一草稿部分失败时记录已完成卡片，重试只补发失败卡；文本、附件或上下文改变后开始新一轮。
+  const retryRound = useRef<{ text: string; file: File | null; completed: Set<string> } | null>(null);
+  /** stopRequests 取消指定或全部卡片请求并解除身份；参数可选卡片 ID，返回无；清空和切换调用。 */
+  const stopRequests = (id?: string) => {
+    generation.current++;
+    retryRound.current = null;
+    for (const [key, controller] of requests.current) {
+      if (!id || key === id) {
+        controller.abort();
+        requests.current.delete(key);
+      }
+    }
+    // 停止恢复请求前历史，避免把未完成的用户轮次或半截回答带入重试。
+    const histories = new Map(requestHistories.current);
+    for (const key of histories.keys()) if (!id || key === id) requestHistories.current.delete(key);
+    setComparisons((previous) =>
+      previous.map((card) =>
+        !id || card.id === id ? { ...card, messages: histories.get(card.id) ?? card.messages, isLoading: false } : card,
+      ),
+    );
+  };
+  useEffect(
+    () => () => {
+      generation.current++;
+      for (const controller of requests.current.values()) controller.abort();
+      requests.current.clear();
+      requestHistories.current.clear();
+    },
+    [],
+  );
   const [comparisons, setComparisons] = useState<ComparisonInstance[]>([
     {
       id: "1",
@@ -103,6 +140,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       useAdvancedParams: false,
     },
   ]);
+  const [modelFailure, setModelFailure] = useState<RequestFailure | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelGroup[]>([]);
   const [modelOptions, setModelOptions] = useState<string[]>([]);
   const [agentOptions, setAgentOptions] = useState<Agent[]>([]);
@@ -137,6 +175,19 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
     () => (apiKeySource === "session" ? accessToken || "" : debouncedCustomApiKey.trim()),
     [apiKeySource, accessToken, debouncedCustomApiKey],
   );
+  const compareContext = [effectiveApiKey, selectedEndpoint, customProxyBaseUrl].join("\n");
+  const previousContext = useRef(compareContext);
+  useEffect(() => {
+    if (previousContext.current !== compareContext) {
+      previousContext.current = compareContext;
+      generation.current++;
+      for (const controller of requests.current.values()) controller.abort();
+      requests.current.clear();
+      setComparisons((cards) =>
+        cards.map((card) => ({ ...card, messages: [], traceId: undefined, failure: null, isLoading: false })),
+      );
+    }
+  }, [compareContext]);
   const haveAllResponses = useMemo(
     () =>
       comparisons.length > 0 &&
@@ -154,8 +205,9 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
         return;
       }
       setIsLoadingModels(true);
+      setModelFailure(null);
       try {
-        const uniqueModels = await fetchAvailableModels(effectiveApiKey);
+        const uniqueModels = await fetchAvailableModels(effectiveApiKey, true);
         if (!active) return;
         const nextOptions = Array.from(new Set(uniqueModels.map((model) => model.model_group)));
         setModelOptions(nextOptions);
@@ -163,6 +215,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       } catch (error) {
         console.error("CompareUI: failed to fetch models", error);
         if (active) {
+          setModelFailure(diagnoseRequest(error));
           setModelOptions([]);
           setModelInfo([]);
         }
@@ -267,6 +320,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
   /** removeComparison 删除指定卡片并保留至少一张。参数 id：卡片身份；返回：无。 */
   const removeComparison = (id: string) => {
     if (comparisons.length > 1) {
+      stopRequests(id);
       setComparisons((prev) => {
         const next = prev.filter((c) => c.id !== id);
         return next;
@@ -280,6 +334,10 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
   /** updateComparison 更新卡片状态，可显式共享指定生成设置。
    * 参数 id：卡片身份；updates：字段变更；options：共享范围；返回：无。模型和端点选择保持独立。 */
   const updateComparison = (id: string, updates: Partial<ComparisonInstance>, options?: UpdateOptions) => {
+    if (updates.model !== undefined || updates.endpoint !== undefined || updates.agent !== undefined) {
+      stopRequests(id);
+      updates = { ...updates, messages: [], traceId: undefined, failure: null, isLoading: false };
+    }
     setComparisons((prev) => {
       if (options?.applyToAll && options.keysToApply?.length) {
         const sharedUpdates: Partial<ComparisonInstance> = {};
@@ -335,9 +393,11 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
   };
   /** clearAllChats 清空所有卡片对话和指标，保留当前模型与端点设置。参数：无；返回：无。 */
   const clearAllChats = () => {
+    stopRequests();
     setComparisons((prev) =>
       prev.map((comparison) => ({
         ...comparison,
+        failure: null,
         messages: [],
         traceId: undefined,
         isLoading: false,
@@ -521,6 +581,7 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
    * 参数 input：用户输入；返回 Promise<void>；各请求独立更新文本、用量和错误状态。
    * adapted 聊天保留原有富交互；其他协议使用真实公开路径，原生协议不混入网关专属字段。 */
   const handleSendMessage = async (input: string) => {
+    if (preparing.current || requests.current.size > 0) return;
     const trimmed = input.trim();
     const hasAttachment = Boolean(uploadedFile);
     if (!trimmed && !hasAttachment) {
@@ -530,7 +591,12 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       toast.fromError(t("Please provide a Virtual Key or select Current UI Session"));
       return;
     }
-    const targetComparisons = comparisons;
+    const priorRound = retryRound.current;
+    const round =
+      priorRound?.text === trimmed && priorRound.file === uploadedFile
+        ? priorRound
+        : { text: trimmed, file: uploadedFile, completed: new Set<string>() };
+    const targetComparisons = comparisons.filter((card) => !round.completed.has(card.id));
     if (targetComparisons.length === 0) {
       return;
     }
@@ -552,9 +618,22 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
       toast.fromError("请先为每个模型选择支持的对话端点");
       return;
     }
-    const apiUserMessage = hasAttachment
-      ? await createChatMultimodalMessage(trimmed, uploadedFile as File)
-      : { role: "user", content: trimmed };
+    preparing.current = true;
+    const preparationGeneration = generation.current;
+    let apiUserMessage;
+    try {
+      apiUserMessage = hasAttachment
+        ? await createChatMultimodalMessage(trimmed, uploadedFile as File)
+        : { role: "user", content: trimmed };
+    } catch (error) {
+      toast.fromError(error);
+      return;
+    } finally {
+      preparing.current = false;
+    }
+    // 附件解析期间切换上下文或删除卡片，整批准备作废，不能向旧模型发起请求。
+    if (preparationGeneration !== generation.current) return;
+    retryRound.current = round;
     const displayUserMessage = createChatDisplayMessage(
       trimmed,
       hasAttachment,
@@ -617,136 +696,140 @@ export default function CompareUI({ accessToken, disabledPersonalKeyCreation }: 
           traceId: prepared.traceId,
           messages: prepared.displayMessages,
           isLoading: true,
+          failure: null,
         };
       }),
     );
-    setInputValue("");
-    handleRemoveFile();
+    const responseUpdates = {
+      appendAssistantChunk,
+      appendReasoningContent,
+      updateTimingDataForComparison,
+      updateUsageDataForComparison,
+      updateSearchResultsForComparison,
+      updateTotalLatencyForComparison,
+    };
+    const outcomes = await Promise.all(
+      Array.from(preparedTargets.values()).map(async (prepared) => {
+        const controller = new AbortController();
+        requests.current.set(prepared.id, controller);
+        requestHistories.current.set(prepared.id, comparisons.find((card) => card.id === prepared.id)?.messages ?? []);
+        const active = () => requests.current.get(prepared.id) === controller && !controller.signal.aborted;
+        const {
+          appendAssistantChunk,
+          appendReasoningContent,
+          updateTimingDataForComparison,
+          updateUsageDataForComparison,
+          updateSearchResultsForComparison,
+          updateTotalLatencyForComparison,
+        } = guardCallbacks(responseUpdates, active);
+        const tags = prepared.tags.length > 0 ? prepared.tags : undefined;
+        const vectorStoreIds = prepared.vectorStores.length > 0 ? prepared.vectorStores : undefined;
+        const guardrails = prepared.guardrails.length > 0 ? prepared.guardrails : undefined;
+        const comparison = comparisons.find((c) => c.id === prepared.id);
+        const useAdvancedParams = comparison?.useAdvancedParams ?? false;
 
-    preparedTargets.forEach((prepared) => {
-      const tags = prepared.tags.length > 0 ? prepared.tags : undefined;
-      const vectorStoreIds = prepared.vectorStores.length > 0 ? prepared.vectorStores : undefined;
-      const guardrails = prepared.guardrails.length > 0 ? prepared.guardrails : undefined;
-      const comparison = comparisons.find((c) => c.id === prepared.id);
-      const useAdvancedParams = comparison?.useAdvancedParams ?? false;
-
-      // Use A2A or chat completion based on endpoint
-      const requestPromise = isA2AMode
-        ? makeA2AStreamMessageRequest(
-            prepared.agent,
-            prepared.inputMessage,
-            (text, model) => {
-              // A2A sends full accumulated text, so replace instead of append
-              setComparisons((prev) =>
-                prev.map((c) => {
-                  if (c.id !== prepared.id) return c;
-                  const messages = [...c.messages];
-                  const last = messages[messages.length - 1];
-                  if (last && last.role === "assistant") {
-                    messages[messages.length - 1] = { ...last, content: text, model: last.model ?? model };
-                  } else {
-                    messages.push({ role: "assistant", content: text, model });
-                  }
-                  return { ...c, messages };
-                }),
-              );
-            },
-            effectiveApiKey,
-            undefined,
-            (time) => updateTimingDataForComparison(prepared.id, time),
-            (latency) => updateTotalLatencyForComparison(prepared.id, latency),
-            undefined, // onA2AMetadata
-            customProxyBaseUrl || undefined,
-          )
-        : comparison?.endpoint === "/v1/chat/completions"
-          ? makeOpenAIChatCompletionRequest(
-              prepared.apiChatHistory,
-              (chunk, model) => appendAssistantChunk(prepared.id, chunk, model),
-              prepared.model,
-              effectiveApiKey,
-              tags,
-              undefined,
-              (content) => appendReasoningContent(prepared.id, content),
-              (time) => updateTimingDataForComparison(prepared.id, time),
-              (usage) => updateUsageDataForComparison(prepared.id, usage),
-              prepared.traceId,
-              vectorStoreIds,
-              guardrails,
-              undefined,
-              undefined,
-              undefined,
-              (results) => updateSearchResultsForComparison(prepared.id, results),
-              useAdvancedParams ? prepared.temperature : undefined,
-              useAdvancedParams ? prepared.maxTokens : undefined,
-              (latency) => updateTotalLatencyForComparison(prepared.id, latency),
-              customProxyBaseUrl || undefined,
-            )
-          : callTextEndpoint({
-              endpoint: textEndpoints(modelInfo.find((model) => model.model_group === prepared.model)).find(
-                (endpoint) => endpoint.path === comparison?.endpoint,
-              )!,
-              base: customProxyBaseUrl || getProxyBaseUrl(),
-              key: effectiveApiKey,
-              model: prepared.model,
-              messages: prepared.apiChatHistory,
-              onText: (chunk) => appendAssistantChunk(prepared.id, chunk, prepared.model),
-              tags,
-              onUsage: (usage) => updateUsageDataForComparison(prepared.id, usage),
-              onTiming: (time) => updateTimingDataForComparison(prepared.id, time),
-              onLatency: (time) => updateTotalLatencyForComparison(prepared.id, time),
-              temperature: useAdvancedParams ? prepared.temperature : undefined,
-              maxTokens: useAdvancedParams ? prepared.maxTokens : undefined,
-            });
-
-      requestPromise
-        .catch((error) => {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error("CompareUI: failed to fetch response", error);
-          toast.fromError(errorMessage);
-          setComparisons((prev) =>
-            prev.map((comparison) => {
-              if (comparison.id !== prepared.id) {
-                return comparison;
-              }
-              const messages = [...comparison.messages];
-              const last = messages[messages.length - 1];
-              const assistantContent =
-                last && last.role === "assistant" && typeof last.content === "string" ? last.content : "";
-              if (last && last.role === "assistant") {
-                messages[messages.length - 1] = {
-                  ...last,
-                  content: assistantContent
-                    ? `${assistantContent}
-Error fetching response: ${errorMessage}`
-                    : `Error fetching response: ${errorMessage}`,
-                };
-              } else {
-                messages.push({
-                  role: "assistant",
-                  content: `Error fetching response: ${errorMessage}`,
+        // Use A2A or chat completion based on endpoint
+        try {
+          const requestPromise = isA2AMode
+            ? makeA2AStreamMessageRequest(
+                prepared.agent,
+                prepared.inputMessage,
+                (text, model) => {
+                  if (!active()) return;
+                  // A2A sends full accumulated text, so replace instead of append
+                  setComparisons((prev) =>
+                    prev.map((c) => {
+                      if (c.id !== prepared.id) return c;
+                      const messages = [...c.messages];
+                      const last = messages[messages.length - 1];
+                      if (last && last.role === "assistant") {
+                        messages[messages.length - 1] = { ...last, content: text, model: last.model ?? model };
+                      } else {
+                        messages.push({ role: "assistant", content: text, model });
+                      }
+                      return { ...c, messages };
+                    }),
+                  );
+                },
+                effectiveApiKey,
+                controller.signal,
+                (time) => updateTimingDataForComparison(prepared.id, time),
+                (latency) => updateTotalLatencyForComparison(prepared.id, latency),
+                undefined, // onA2AMetadata
+                customProxyBaseUrl || undefined,
+              )
+            : comparison?.endpoint === "/v1/chat/completions"
+              ? makeOpenAIChatCompletionRequest(
+                  prepared.apiChatHistory,
+                  (chunk, model) => appendAssistantChunk(prepared.id, chunk, model),
+                  prepared.model,
+                  effectiveApiKey,
+                  tags,
+                  controller.signal,
+                  (content) => appendReasoningContent(prepared.id, content),
+                  (time) => updateTimingDataForComparison(prepared.id, time),
+                  (usage) => updateUsageDataForComparison(prepared.id, usage),
+                  prepared.traceId,
+                  vectorStoreIds,
+                  guardrails,
+                  undefined,
+                  undefined,
+                  undefined,
+                  (results) => updateSearchResultsForComparison(prepared.id, results),
+                  useAdvancedParams ? prepared.temperature : undefined,
+                  useAdvancedParams ? prepared.maxTokens : undefined,
+                  (latency) => updateTotalLatencyForComparison(prepared.id, latency),
+                  customProxyBaseUrl || undefined,
+                )
+              : callTextEndpoint({
+                  endpoint: textEndpoints(modelInfo.find((model) => model.model_group === prepared.model)).find(
+                    (endpoint) => endpoint.path === comparison?.endpoint,
+                  )!,
+                  base: customProxyBaseUrl || getProxyBaseUrl(),
+                  signal: controller.signal,
+                  key: effectiveApiKey,
+                  model: prepared.model,
+                  messages: prepared.apiChatHistory,
+                  onText: (chunk) => appendAssistantChunk(prepared.id, chunk, prepared.model),
+                  tags,
+                  onUsage: (usage) => updateUsageDataForComparison(prepared.id, usage),
+                  onTiming: (time) => updateTimingDataForComparison(prepared.id, time),
+                  onLatency: (time) => updateTotalLatencyForComparison(prepared.id, time),
+                  temperature: useAdvancedParams ? prepared.temperature : undefined,
+                  maxTokens: useAdvancedParams ? prepared.maxTokens : undefined,
                 });
-              }
-              return {
-                ...comparison,
-                messages,
-              };
-            }),
-          );
-        })
-        .finally(() => {
-          setComparisons((prev) =>
-            prev.map((comparison) =>
-              comparison.id === prepared.id
-                ? {
-                    ...comparison,
-                    isLoading: false,
-                  }
-                : comparison,
-            ),
-          );
-        });
-    });
+
+          await requestPromise;
+          if (active()) round.completed.add(prepared.id);
+          return active();
+        } catch (error) {
+          if (active())
+            setComparisons((previous) =>
+              previous.map((card) =>
+                card.id === prepared.id
+                  ? { ...card, messages: comparison?.messages ?? [], failure: diagnoseRequest(error) }
+                  : card,
+              ),
+            );
+          return false;
+        } finally {
+          if (requests.current.get(prepared.id) === controller) {
+            requests.current.delete(prepared.id);
+            requestHistories.current.delete(prepared.id);
+            setComparisons((previous) =>
+              previous.map((card) => (card.id === prepared.id ? { ...card, isLoading: false } : card)),
+            );
+          }
+        }
+      }),
+    );
+    if (preparationGeneration === generation.current && outcomes.every(Boolean)) {
+      retryRound.current = null;
+      setInputValue("");
+      handleRemoveFile();
+    }
   };
+
   /** handleInputChange 更新公共输入。参数 value：文本；返回：无。 */
   const handleInputChange = (value: string) => {
     setInputValue(value);
@@ -765,11 +848,17 @@ Error fetching response: ${errorMessage}`
   const isUploadedFilePdf = Boolean(uploadedFile?.name.toLowerCase().endsWith(".pdf"));
   const showSuggestedPrompts = !hasMessages && !isAnyComparisonLoading && !hasAttachment;
   return (
-    <div className="w-full h-full p-4 bg-card">
-      <div className="rounded-2xl border border-border bg-card shadow-xs min-h-[calc(100vh-160px)] flex flex-col">
+    <div className="w-full h-full min-h-0 p-3 bg-card">
+      <div className="rounded-xl border border-border bg-card h-full min-h-0 overflow-hidden flex flex-col">
+        {modelFailure && <RequestDiagnostic failure={modelFailure} />}
         <div className="border-b px-4 py-2">
+          {isAnyComparisonLoading && (
+            <Button variant="outline" size="sm" onClick={() => stopRequests()}>
+              停止全部
+            </Button>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-muted-foreground">{t("Virtual Key Source")}</span>
               <Select
                 value={apiKeySource}
@@ -796,23 +885,27 @@ Error fetching response: ${errorMessage}`
                 />
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-muted-foreground">{t("Comparison mode")}</span>
               <Select value={selectedEndpoint} onValueChange={(value) => setSelectedEndpoint(value as EndpointIdType)}>
                 <SelectTrigger className="w-56" aria-label={t("Comparison mode")}>
-                  <SelectValue>{isA2AMode ? "Agents" : "Models"}</SelectValue>
+                  <SelectValue>{t(isA2AMode ? "Agents" : "Models")}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {getAvailableEndpoints().map((endpoint) => (
                     <SelectItem key={endpoint.value} value={endpoint.value}>
-                      {endpoint.value === EndpointId.A2A_AGENTS ? "Agents" : "Models"}
+                      {t(endpoint.value === EndpointId.A2A_AGENTS ? "Agents" : "Models")}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={clearAllChats} disabled={!hasMessages}>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={clearAllChats}
+                disabled={!hasMessages && !comparisons.some((card) => card.failure)}
+              >
                 <Eraser />
                 {t("Clear All Chats")}
               </Button>
@@ -834,10 +927,10 @@ Error fetching response: ${errorMessage}`
         </div>
 
         <div
-          className="grid flex-1 min-h-0 auto-rows-fr"
-          style={{
-            gridTemplateColumns: `repeat(${comparisons.length}, minmax(0, 1fr))`,
-          }}
+          className={
+            "grid flex-1 min-h-0 overflow-auto " +
+            (comparisons.length === 3 ? "xl:grid-cols-3" : comparisons.length === 2 ? "lg:grid-cols-2" : "grid-cols-1")
+          }
         >
           {comparisons.map((comparison) => (
             <ComparisonPanel
@@ -864,7 +957,7 @@ Error fetching response: ${errorMessage}`
             />
           ))}
         </div>
-        <div className="flex justify-center pb-4">
+        <div className="flex shrink-0 justify-center border-t bg-card py-3">
           <div className="w-full max-w-3xl px-4">
             <div className="border border-border shadow-lg rounded-xl bg-card p-4">
               <div className="flex items-center justify-between gap-4 mb-3 min-h-8">
@@ -876,10 +969,10 @@ Error fetching response: ${errorMessage}`
                       <button
                         key={prompt}
                         type="button"
-                        onClick={() => handleFollowUpSelect(prompt)}
+                        onClick={() => handleFollowUpSelect(t(prompt))}
                         className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent cursor-pointer"
                       >
-                        {prompt}
+                        {t(prompt)}
                       </button>
                     ))}
                   </div>
@@ -889,10 +982,10 @@ Error fetching response: ${errorMessage}`
                       <button
                         key={question}
                         type="button"
-                        onClick={() => handleFollowUpSelect(question)}
+                        onClick={() => handleFollowUpSelect(t(question))}
                         className="shrink-0 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent cursor-pointer"
                       >
-                        {question}
+                        {t(question)}
                       </button>
                     ))}
                   </div>
@@ -939,7 +1032,7 @@ Error fetching response: ${errorMessage}`
                 value={inputValue}
                 onChange={handleInputChange}
                 onSend={handleSubmit}
-                disabled={comparisons.length === 0 || comparisons.every((comparison) => comparison.isLoading)}
+                disabled={comparisons.length === 0 || comparisons.some((comparison) => comparison.isLoading)}
                 hasAttachment={hasAttachment}
                 uploadComponent={
                   <ChatImageUpload

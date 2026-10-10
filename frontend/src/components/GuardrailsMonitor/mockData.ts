@@ -14,4 +14,7 @@ export interface LogEntry {
   model?: string;
   reason?: string;
   latency_ms?: number;
+  guardrail_name?: string;
+  guardrail_provider?: string | null;
+  guardrail_mode?: string | null;
 }

@@ -3,6 +3,7 @@ package dataplane
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -25,11 +26,19 @@ import (
 
 // logHost is the gateway surface Serve needs. Failure paths return before spend and Redis are used.
 type logHost struct {
-	cfg    *config.Config
-	client *http.Client
-	cache  *cache.DualCache
-	hooks  *hooks.Engine
-	ext    *plugin.Registry
+	cfg       *config.Config
+	client    *http.Client
+	cache     *cache.DualCache
+	hooks     *hooks.Engine
+	ext       *plugin.Registry
+	spends    []capturedSpend
+	exchanges map[string][]byte
+}
+
+// capturedSpend 保存夹具观察到的最终状态；测试用它验证失败确实进入日志链，无外部副作用。
+type capturedSpend struct {
+	callID string
+	status int
 }
 
 func newLogHost(cfg *config.Config, client *http.Client) *logHost {
@@ -37,11 +46,12 @@ func newLogHost(cfg *config.Config, client *http.Client) *logHost {
 		client = http.DefaultClient
 	}
 	return &logHost{
-		cfg:    cfg,
-		client: client,
-		cache:  cache.New(),
-		hooks:  hooks.New(),
-		ext:    plugin.New(),
+		cfg:       cfg,
+		client:    client,
+		cache:     cache.New(),
+		hooks:     hooks.New(),
+		ext:       plugin.New(),
+		exchanges: map[string][]byte{},
 	}
 }
 
@@ -72,9 +82,12 @@ func (h *logHost) NoteFailure(string, prefs.RouteSettings)                      
 func (h *logHost) NoteLatency(string, float64)                                       {}
 func (h *logHost) SetChatHeaders(http.ResponseWriter, *auth.Principal, string, string) {
 }
-func (h *logHost) RecordSpend(http.ResponseWriter, *auth.Principal, string, string, string, map[string]any, time.Time, bool, int, string) {
+func (h *logHost) RecordSpend(_ http.ResponseWriter, _ *auth.Principal, callID, _ string, _ string, _ map[string]any, _ time.Time, _ bool, status int, _ string) {
+	h.spends = append(h.spends, capturedSpend{callID: callID, status: status})
 }
-func (h *logHost) RememberExchange(string, *http.Request, []byte, []byte) {}
+func (h *logHost) RememberExchange(callID string, _ *http.Request, _ []byte, response []byte) {
+	h.exchanges[callID] = append([]byte(nil), response...)
+}
 func (h *logHost) PlanRoute(*http.Request, string, map[string]any, *auth.Principal) RoutePlan {
 	return RoutePlan{}
 }
@@ -149,6 +162,51 @@ func assertNoSecrets(t *testing.T, line string) {
 		t.Fatalf("log leaked credentials: %s", line)
 	}
 }
+
+// TestServePersistsCompleteUpstreamFailure 验证重试耗尽后保留上游完整 500 正文。
+// 前置条件是本地假上游固定失败；结果应记录客户端 502 和原始 JSON；本地服务由 Cleanup 关闭。
+func TestServePersistsCompleteUpstreamFailure(t *testing.T) {
+	rawError := []byte("{\"error\":{\"message\":\"complete upstream failure\",\"detail\":\"原始正文\"}}")
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(rawError)
+	}))
+	t.Cleanup(up.Close)
+	h := newLogHost(chatConfig(config.ModelEntry{ModelName: "failed-model", LiteLLMParams: map[string]any{
+		"model": "openai/failed-model", "api_key": "test-key", "api_base": up.URL + "/v1",
+	}}), up.Client())
+	rec := httptest.NewRecorder()
+	Serve(h, rec, chatRequest(t, "failed-model", false), "chat")
+	if rec.Code != http.StatusBadGateway || len(h.spends) != 1 || h.spends[0].status != http.StatusBadGateway {
+		t.Fatalf("失败日志状态不完整: http=%d spends=%+v", rec.Code, h.spends)
+	}
+	if got := h.exchanges[h.spends[0].callID]; !bytes.Equal(got, rawError) {
+		t.Fatalf("上游错误正文被改写: got=%q want=%q", got, rawError)
+	}
+}
+
+// TestServePersistsNetworkFailure 验证普通数据面网络错误也写入 502 日志。
+// 前置条件是自定义 RoundTripper 返回固定错误；结果应保存安全错误文本；不访问外网且无需清理数据。
+func TestServePersistsNetworkFailure(t *testing.T) {
+	client := &http.Client{Transport: roundTripError{err: errors.New("dial tcp: connection refused")}}
+	h := newLogHost(chatConfig(config.ModelEntry{ModelName: "network-model", LiteLLMParams: map[string]any{
+		"model": "openai/network-model", "api_key": "test-key", "api_base": "https://example.invalid/v1",
+	}}), client)
+	rec := httptest.NewRecorder()
+	Serve(h, rec, chatRequest(t, "network-model", false), "chat")
+	if rec.Code != http.StatusBadGateway || len(h.spends) != 1 {
+		t.Fatalf("网络失败未形成一条日志: http=%d spends=%+v", rec.Code, h.spends)
+	}
+	if got := string(h.exchanges[h.spends[0].callID]); !strings.Contains(got, "connection refused") {
+		t.Fatalf("网络错误正文缺失: %q", got)
+	}
+}
+
+// roundTripError 是离线网络失败夹具；参数请求不读取，返回固定错误且无响应。
+type roundTripError struct{ err error }
+
+// RoundTrip 返回固定网络错误；参数请求仅用于满足接口，响应始终为空。
+func (r roundTripError) RoundTrip(*http.Request) (*http.Response, error) { return nil, r.err }
 
 // TestServeLogsBuildSkipAndTerminalAuth 验证任意供应商按显式协议调用且型号原样传递。
 // 参数 t：测试上下文；本地上游检查请求及日志，不依赖外网，服务和日志 writer 自动恢复。

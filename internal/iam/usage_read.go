@@ -30,6 +30,9 @@ type UsageQuery struct {
 	Model     string
 	Status    string
 	SessionID string
+	// RequestID 精确定位请求，Search 按请求 ID 子串检索；均在分页之前收窄授权范围。
+	RequestID string
+	Search    string
 	// TeamIDs, ExcludeTeamIDs and OrganizationIDs are caller filters. They only
 	// narrow a scope that was already decided; an empty slice adds no predicate,
 	// so it cannot turn into "every team".
@@ -72,10 +75,29 @@ func (q UsageQuery) scopedSession(db *DB, ctx context.Context, table string) *xo
 		s = s.And("model = ?", q.Model)
 	}
 	if q.Status != "" {
-		s = s.And("status = ?", q.Status)
+		// 旧成功/失败筛选同时覆盖异步任务终态，活动任务保持可单独筛选。
+		switch q.Status {
+		case "non_error":
+			// 普通日志保留执行中和轮询中的任务，只排除失败；必须在分页和会话聚合前过滤。
+			s = s.And("status NOT IN (?, ?, ?)", "error", "failed", "failure").And("http_status < ?", 400)
+		case "success":
+			s = s.And("status IN (?, ?)", "success", "completed").And("http_status < ?", 400)
+		case "error", "failed":
+			// 兼容历史状态未同步但 HTTP 已失败的记录，与普通日志使用互补条件。
+			s = s.And("(status IN (?, ?, ?) OR http_status >= ?)", "error", "failed", "failure", 400)
+		default:
+			s = s.And("status = ?", q.Status)
+		}
 	}
 	if q.SessionID != "" {
 		s = s.And("session_id = ?", q.SessionID)
+	}
+	if q.RequestID != "" {
+		s = s.And("request_id = ?", q.RequestID)
+	}
+	if q.Search != "" {
+		// 使用字面子串匹配，避免输入中的百分号或下划线变成 SQL 通配符。
+		s = s.And("position(? in request_id) > 0", q.Search)
 	}
 	return q.applyLists(s)
 }

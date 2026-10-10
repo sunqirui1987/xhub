@@ -99,6 +99,7 @@ export const getFilterValue = (columnFilters: ColumnFiltersState, columnId: stri
   return trimmed === "" ? undefined : trimmed;
 };
 
+/** 根据凭据、日期和分页查询日志；errorsOnly 强制失败状态并关闭会话合并，普通视图只允许非失败状态；缓存隔离两种视图，接口失败由查询状态返回调用面板。 */
 export function useLogFilterLogic({
   accessToken,
   token,
@@ -114,6 +115,7 @@ export function useLogFilterLogic({
   isCustomDate,
   sorting,
   sessionCursors = {},
+  errorsOnly = false,
 }: {
   accessToken: string | null;
   token: string | null;
@@ -129,12 +131,13 @@ export function useLogFilterLogic({
   isCustomDate: boolean;
   sorting: SortingState;
   sessionCursors?: Record<number, string>;
+  errorsOnly?: boolean;
 }) {
   const pageSize = pagination.pageSize || defaultPageSize;
   const activeSort = sorting[0] ?? DEFAULT_LOGS_SORTING[0];
   const sortBy: LogsSortField = isSortField(activeSort.id) ? activeSort.id : "startTime";
   const sortOrder: "asc" | "desc" = activeSort.desc ? "desc" : "asc";
-  const usesSessionCursor = sortBy === "startTime";
+  const usesSessionCursor = !errorsOnly && sortBy === "startTime";
   const sessionCursor = usesSessionCursor ? sessionCursors[pagination.pageIndex] : undefined;
 
   const logsQueryOptions: UseQueryOptions<PaginatedResponse> = {
@@ -151,6 +154,7 @@ export function useLogFilterLogic({
       sortOrder,
       excludeInternalHealthChecks,
       sessionCursor,
+      errorsOnly,
     ],
     queryFn: async () => {
       if (!accessToken || !token || !userRole || !userID) {
@@ -168,6 +172,11 @@ export function useLogFilterLogic({
       const userIdFilter = getFilterValue(columnFilters, LOG_FILTER_IDS.USER_ID);
       const pickedModel = getFilterValue(columnFilters, LOG_FILTER_IDS.MODEL_ID);
       const typedModel = getFilterValue(columnFilters, LOG_FILTER_IDS.PUBLIC_MODEL_OR_SEARCH_TOOL);
+      const selectedStatus = getFilterValue(columnFilters, LOG_FILTER_IDS.STATUS);
+      // 旧筛选值不能让普通日志重新请求失败数据；活动任务仍属于普通日志。
+      const ordinaryStatus = ["success", "completed", "executing", "polling"].includes(selectedStatus ?? "")
+        ? selectedStatus
+        : "non_error";
 
       return await uiSpendLogsCall({
         accessToken,
@@ -183,7 +192,8 @@ export function useLogFilterLogic({
           session_id: getFilterValue(columnFilters, LOG_FILTER_IDS.SESSION_ID),
           user_id: userIdFilter,
           end_user: getFilterValue(columnFilters, LOG_FILTER_IDS.END_USER),
-          status_filter: getFilterValue(columnFilters, LOG_FILTER_IDS.STATUS),
+          // 在后台过滤后再分页，防止失败行占用普通日志页或被会话合并隐藏。
+          status_filter: errorsOnly ? "error" : ordinaryStatus,
           cache_hit_filter: getFilterValue(columnFilters, LOG_FILTER_IDS.CACHE_STATUS),
           model_id: pickedModel,
           model: typedModel || pickedModel,
@@ -193,7 +203,7 @@ export function useLogFilterLogic({
           sort_by: sortBy,
           sort_order: sortOrder,
           exclude_internal_health_checks: excludeInternalHealthChecks,
-          group_by_session: true,
+          group_by_session: !errorsOnly,
           session_cursor: sessionCursor,
         },
       });

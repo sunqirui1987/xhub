@@ -203,9 +203,9 @@ func (s *Server) FindDeployment(id string) (config.ModelEntry, bool) {
 	return config.ModelEntry{}, false
 }
 
-// 记下这次调用的首字时间、供应商、缓存和部署，等记用量时取走。
+// 记下这次调用的首字时间、供应商、缓存、部署和原始上游诊断，等记用量时取走。
 // 参数 callID（string）：这一次调用的 id，用来把请求、响应和用量记在同一行；note（dataplane.CallNote）：这一次调用的附注，含首字时间、供应商、缓存和部署。
-// 返回：无。首字时间、供应商、缓存和部署已暂存，记用量时取走。callID 为空时不记。
+// 返回：无。业务附注保留已有诊断，重试新诊断替换旧响应；callID 为空时不记。
 // 调用：dataplane/host.go、dataplane/official.go、dataplane/serve.go
 // 测试：bypass_logic_test.go、failure_log_test.go
 func (s *Server) AnnotateCall(callID string, note dataplane.CallNote) {
@@ -216,6 +216,10 @@ func (s *Server) AnnotateCall(callID string, note dataplane.CallNote) {
 	defer s.mu.Unlock()
 	if s.callNotes == nil {
 		s.callNotes = map[string]dataplane.CallNote{}
+	}
+	// 业务附注不得覆盖传输诊断；重试的非空诊断替换旧响应。
+	if note.Upstream == nil {
+		note.Upstream = s.callNotes[callID].Upstream
 	}
 	s.callNotes[callID] = note
 }

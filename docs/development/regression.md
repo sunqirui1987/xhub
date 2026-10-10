@@ -84,6 +84,9 @@ E2E_CREDENTIAL_SOURCE=database make regression-live
 E2E_CREDENTIAL_SOURCE=database make e2e
 ```
 
+Fenno 与七牛的全量 live 回归、实时日志和运行目录见[真实供应商回归执行说明](regression-live.md)。入口是 `bash scripts/regression-live-log.sh`。
+
+
 真实供应商的地址、模型与协议默认来自根目录 `config_provider.yaml`，密钥来自配置的 `key_env`，或显式选择的数据库凭据。环境变量 `_BASE`、`_MODELS`、`_PROTOCOL` 可覆盖普通调用配置；媒体另需 `_BYPASS_MODEL`、`_BYPASS_BASE`。后端脚本默认总超时 1800s，可用 `XHUB_REGRESSION_TIMEOUT` 调整。数据库可用 `XHUB_TEST_DATABASE_URL` 指定；Redis 可用 `XHUB_REGRESSION_REDIS_URL` 指定，完整 E2E 入口自动创建隔离 Redis。每个同时运行的回归或 E2E runner 必须使用独立 Redis 实例，不能让多个进程共享同一花费队列和冷却 key。密钥不要写入文档或日志。只运行指定测试时使用 `go test ./cmd/regression -run '^TestName$' -count=1 -v`，避免把 skip 混入通过结果。
 
 `config_provider.yaml` 可以定义供应商和真实权重场景；`scripts/with-live-vendors.py` 读取它，按 `key_env` 从进程环境或显式选择的数据库凭据加载密钥，然后只在子进程注入测试变量。完整浏览器与后端验收运行 `bash scripts/e2e-all.sh`，结果及逐次权重证据位于 `.e2e/runs/`。真实供应商网络调用可能很慢；若中断，报告必须标明尚未完成，不能把已成功的单次响应算作整套通过。

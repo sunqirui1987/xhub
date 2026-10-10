@@ -74,6 +74,7 @@ const mockProps = {
   isLoadingOptions: false,
   endpointConfig: ENDPOINT_CONFIGS[EndpointId.CHAT_COMPLETIONS],
   apiKey: "test-api-key",
+  supportsGatewaySettings: true,
 };
 
 const buttonWithIcon = (icon: string): HTMLButtonElement => {

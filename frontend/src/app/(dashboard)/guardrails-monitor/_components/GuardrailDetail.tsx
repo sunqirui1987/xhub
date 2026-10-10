@@ -64,6 +64,10 @@ export function GuardrailDetail({ guardrailId, onBack, accessToken = null, start
       input_snippet: l.input_snippet as string | undefined,
       output_snippet: l.output_snippet as string | undefined,
       reason: l.reason as string | undefined,
+      latency_ms: l.latency_ms as number | undefined,
+      guardrail_name: l.guardrail_name as string | undefined,
+      guardrail_provider: l.guardrail_provider as string | null | undefined,
+      guardrail_mode: l.guardrail_mode as string | null | undefined,
     }));
   }, [logsData?.logs]);
 

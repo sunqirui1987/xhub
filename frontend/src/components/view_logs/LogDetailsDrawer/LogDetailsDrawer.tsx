@@ -1,8 +1,10 @@
+import { requestLogStatus } from "../taskStatus";
 import { useEffect, useMemo, useState } from "react";
 import { Bot, Check, Copy, Sparkles, Wrench } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LogEntry } from "../columns";
+import { isRequestFailure } from "../logErrors";
 import { AutoRouterIcon, useIsAutoRoutedModelGroup } from "@/components/shared/table_cells";
 import { AGENT_CALL_TYPES, MCP_CALL_TYPES } from "../constants";
 import { getEventDisplayName } from "../utils";
@@ -104,12 +106,13 @@ function TraceEventRow({ row, isSelected, onClick }: TraceEventRowProps) {
 }
 
 /**
- * Right-side drawer panel for displaying detailed log information.
+ * 日志详情抽屉：接收当前日志和导航回调，按需读取后台正文并合并错误字段和元数据；
+ * 返回单请求或会话详情，兼容 error/failure 状态且保留供应商完整诊断信息。
  * Features:
  * - Request ID prominently displayed with copy functionality
  * - Keyboard navigation (J/K for next/prev, Escape to close)
  * - Formatted and JSON view toggle for request/response
- * - Smart display of cache fields (hidden when zero)
+ * - 会话侧栏统计整段响应缓存，详情另行展示提示词缓存及未上报状态
  * - Error alerts for failed requests
  * - Collapsible sections for guardrails, vector store, metadata
  */
@@ -263,8 +266,11 @@ export function LogDetailsDrawer({
     if (!currentLog) return null;
     return {
       ...currentLog,
+      status: detailsData?.status || currentLog.status,
       messages: detailsData?.messages || currentLog.messages,
       response: detailsData?.response || currentLog.response,
+      error: detailsData?.error ?? currentLog.error,
+      metadata: { ...currentLog.metadata, ...detailsData?.metadata },
       proxy_server_request: detailsData?.proxy_server_request || currentLog.proxy_server_request,
     };
   }, [currentLog, detailsData]);
@@ -272,8 +278,9 @@ export function LogDetailsDrawer({
   const metadata = currentLog?.metadata || {};
 
   // Status display values
-  const statusLabel = metadata.status === "failure" ? "Failure" : "Success";
-  const statusColor = metadata.status === "failure" ? ("error" as const) : ("success" as const);
+  const hasError = enrichedLog ? isRequestFailure(enrichedLog) : false;
+  const statusLabel = t(requestLogStatus(enrichedLog || { status: "" }).label);
+  const statusColor = hasError ? ("error" as const) : ("success" as const);
   const environment = metadata?.user_api_key_team_alias || "default";
 
   const totalSessionCost = sessionLogs.reduce((sum, row) => sum + (row.spend || 0), 0);
@@ -386,7 +393,7 @@ export function LogDetailsDrawer({
                 </div>
                 {isSessionMode && (
                   <div className="text-[11px] text-muted-foreground font-mono whitespace-nowrap">
-                    {cacheHitCount}/{logsForList.length} cached
+                    {t("Response cache hits")}: {cacheHitCount}/{logsForList.length}
                   </div>
                 )}
                 {isSessionMode && sessionTruncated && (

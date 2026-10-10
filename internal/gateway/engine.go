@@ -89,6 +89,8 @@ func (s *Server) GinRoutes() gin.RoutesInfo { return s.engine.Routes() }
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		var raw []byte
+		var body map[string]any
 		lw := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
 		logx.Trace("process %s %s step=enter", r.Method, r.URL.Path)
 		defer func() {
@@ -103,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 			// Method, path, status, and elapsed time only. Headers and bodies stay off this line.
 			logx.Info("%s %s %d %s", r.Method, r.URL.Path, lw.code, time.Since(start))
 			if lw.code >= 400 {
+				s.recordEarlyError(lw, r, raw, body, start)
 				note := lw.note
 				if note == "" {
 					note = "request failed"
@@ -120,13 +123,13 @@ func (s *Server) Handler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		raw, readErr := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<20))
+		var readErr error
+		raw, readErr = io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<20))
 		if readErr != nil {
 			httpx.WriteTypedError(w, r.URL.Path, http.StatusRequestEntityTooLarge, "invalid_request", "request body exceeds limit or cannot be read")
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(raw))
-		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
 		if model := str(body["model"]); model != "" {
 			w.Header().Set("x-litellm-model-name", model)
@@ -407,6 +410,8 @@ type statusRecorder struct {
 	code int
 	set  bool
 	note string
+	// body 只收集失败响应，供统一早期错误日志保存客户端实际收到的完整正文。
+	body bytes.Buffer
 }
 
 // WriteHeader 记下第一次写出的状态码，并转给底层 ResponseWriter。之后的 WriteHeader 不再改状态。
@@ -432,7 +437,37 @@ func (s *statusRecorder) Write(p []byte) (int, error) {
 		s.code = http.StatusOK
 		s.set = true
 	}
+	if s.code >= 400 {
+		_, _ = s.body.Write(p)
+	}
 	return s.ResponseWriter.Write(p)
+}
+
+// recordEarlyError 为受支持的数据面尚未进入常规结算路径的失败补写日志。
+// 参数 lw：最终状态和客户端正文；r/raw/body：原请求及解析结果；start：请求开始时间。
+// 返回：无。已删除或退役接口仅保留进程访问日志；已有 RecordSpend 行依赖 request_id 幂等去重；鉴权失败无法认领身份时仅管理员可见。
+// 调用：Handler 的失败 defer，覆盖鉴权、限流、未认领模型和路由配置错误；测试见 early_error_log_test.go。
+func (s *Server) recordEarlyError(lw *statusRecorder, r *http.Request, raw []byte, body map[string]any, start time.Time) {
+	if s == nil || lw == nil || lw.code < 400 || !isDataPlanePath(r.URL.Path) {
+		return
+	}
+	// 兼容路由仍会返回 410，已删除路由会返回 404；它们不再提供模型服务，
+	// 不能因为历史数据面前缀而写入模型请求日志、用量统计或 Redis 花费队列。
+	if IsRemovedColumn(r.URL.Path) || IsRetiredPath(r.URL.Path) {
+		return
+	}
+	callID := strings.TrimSpace(lw.Header().Get("x-litellm-call-id"))
+	if callID == "" {
+		return
+	}
+	alias := strings.TrimSpace(lw.Header().Get("x-litellm-model-name"))
+	if alias == "" {
+		alias = strings.TrimSpace(str(body["model"]))
+	}
+	p, _ := s.resolve(r)
+	// 使用实际响应正文，而不是重新构造错误包络，确保日志与调用方看到的字节一致。
+	s.rememberExchange(callID, r, raw, lw.body.Bytes())
+	s.recordSpend(lw, p, callID, alias, "request", nil, start, false, lw.code, "")
 }
 
 // Flush 在底层支持刷新时，把已经缓冲的字节推给调用方。

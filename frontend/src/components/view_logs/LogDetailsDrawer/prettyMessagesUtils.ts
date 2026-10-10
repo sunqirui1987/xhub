@@ -6,6 +6,7 @@ import {
   MessageRole,
   ParsedMessage,
   ParsedMessages,
+  ParsedMediaPayload,
   RequestPayload,
   ResponsePayload,
   RoleStyle,
@@ -49,6 +50,106 @@ const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
+
+/**
+ * 用途：把图片和视频 bypass 的请求、创建回执与终态回执整理成日志抽屉可直接展示的数据。
+ * 参数：request 是已保存的代理请求或请求正文，response 是供应商原始响应，loggedModel 是日志模型名兜底。
+ * 返回值：识别到媒体调用时返回结构化媒体数据，否则返回 null。
+ * 调用场景：PrettyMessagesView 在聊天协议解析前调用；支持 OpenAI 图片、Ark 视频和 FAL 队列。
+ * 边界：只根据明确的媒体路径或媒体响应字段识别；通用 id/status 和空 data 均不能证明媒体类型。
+ */
+export const parseMediaPayload = (
+  request: unknown,
+  response: unknown,
+  loggedModel?: string,
+): ParsedMediaPayload | null => {
+  const body = requestBody(request);
+  const requestDoc = isRecord(body) ? body : {};
+  const responseDoc = loggedResponse(response);
+  const responseRecord = isRecord(responseDoc) ? responseDoc : {};
+  const requestURL = isRecord(request) ? asString(request.url) : "";
+  const imageRows = Array.isArray(responseRecord.data) ? responseRecord.data.filter(isRecord) : [];
+  const imageUrls = imageRows.map((row) => asString(row.url)).filter(Boolean);
+  const imageDataUrls = imageRows
+    .map((row) => asString(row.b64_json))
+    .filter(Boolean)
+    .map((value) => `data:${imageMime(value)};base64,${value}`);
+  const result = isRecord(responseRecord.result) ? responseRecord.result : {};
+  const content = isRecord(responseRecord.content) ? responseRecord.content : {};
+  const video = isRecord(responseRecord.video)
+    ? responseRecord.video
+    : isRecord(result.video)
+      ? result.video
+      : {};
+  const videoUrl = asString(content.video_url) || asString(video.url);
+  const responseUrl = asString(responseRecord.response_url);
+  const statusUrl = asString(responseRecord.status_url);
+  const taskId = asString(responseRecord.id) || asString(responseRecord.request_id);
+  const status = asString(responseRecord.status);
+  const image = requestURL.includes("/images/") || imageUrls.length > 0 || imageDataUrls.length > 0;
+  const videoRequest =
+    requestURL.includes("/contents/generations/tasks") ||
+    requestURL.includes("/queue/") ||
+    requestURL.includes("/videos/");
+  // Responses 文本回执也有 id 和 status=completed；只有视频内容或队列地址才能作为响应侧的媒体证据。
+  // 尚未生成 URL 的视频创建、查询和失败回执由明确的视频请求路径识别。
+  const videoResponse = Boolean(videoUrl || responseUrl || statusUrl);
+  if (!image && !videoRequest && !videoResponse) return null;
+
+  const kind = image ? "image" : "video";
+  const prompt =
+    asString(requestDoc.prompt) ||
+    (Array.isArray(requestDoc.content)
+      ? requestDoc.content
+          .filter(isRecord)
+          .map((item) => asString(item.text))
+          .filter(Boolean)
+          .join("\n")
+      : "");
+  return {
+    request: {
+      kind,
+      model: asString(requestDoc.model) || asString(responseRecord.model) || loggedModel || undefined,
+      prompt: prompt || undefined,
+      content: requestDoc.content,
+      duration: typeof requestDoc.duration === "string" || typeof requestDoc.duration === "number" ? requestDoc.duration : undefined,
+      resolution: asString(requestDoc.resolution) || undefined,
+      ratio: asString(requestDoc.ratio) || undefined,
+      aspectRatio: asString(requestDoc.aspect_ratio) || undefined,
+    },
+    response: {
+      kind,
+      imageUrls,
+      imageDataUrls,
+      taskId: taskId || undefined,
+      status: status || undefined,
+      videoUrl: videoUrl || undefined,
+      responseUrl: responseUrl || undefined,
+      statusUrl: statusUrl || undefined,
+      duration:
+        typeof video.duration === "string" || typeof video.duration === "number"
+          ? video.duration
+          : typeof responseRecord.duration === "string" || typeof responseRecord.duration === "number"
+            ? responseRecord.duration
+            : undefined,
+      usage: responseRecord.usage ?? result.usage,
+    },
+  };
+};
+
+/**
+ * 用途：根据 base64 文件头选择浏览器 data URL 的图片类型。
+ * 参数：value 是不含 data URL 前缀的 base64 内容。
+ * 返回值：可供 img 使用的 MIME 类型。
+ * 调用场景：图片供应商返回 b64_json 时由 parseMediaPayload 调用。
+ * 边界：识别 PNG、GIF 和 WebP，其他格式按最常见的 JPEG 展示。
+ */
+const imageMime = (value: string): string => {
+  if (value.startsWith("iVBOR")) return "image/png";
+  if (value.startsWith("R0lGOD")) return "image/gif";
+  if (value.startsWith("UklGR")) return "image/webp";
+  return "image/jpeg";
+};
 
 const ROLES: readonly MessageRole[] = ["system", "user", "assistant", "tool"];
 

@@ -1,4 +1,7 @@
 "use client";
+import { diagnoseRequest, RequestDiagnostic, type RequestFailure } from "../RequestDiagnostic";
+import { guardCallbacks } from "../../hooks/requestScope";
+import { supportsCodeInterpreter } from "./CodeInterpreterTool";
 import { UnavailableEndpoint } from "@/components/llm_calls/UnavailableEndpoint";
 
 import {
@@ -150,6 +153,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
     messageTraceId,
     setMessageTraceId,
     responsesSessionId,
+    setResponsesSessionId,
     useApiSessionManagement,
     updateTextUI,
     updateReasoningContent,
@@ -185,7 +189,10 @@ const ChatUI: React.FC<ChatUIProps> = ({
     () => sessionStorage.getItem("customProxyBaseUrl") || "",
   );
   const [inputMessage, setInputMessage] = useState("");
-  const [selectedModel, setSelectedModel] = useState<string | null | undefined>(simplified ? fixedModel : null);
+  // 恢复模型与路径必须和历史同时完成，避免初始化选择被当作跨模型切换而清空续接会话。
+  const [selectedModel, setSelectedModel] = useState<string | null | undefined>(() =>
+    simplified ? fixedModel : sessionStorage.getItem("selectedModel"),
+  );
   const [showCustomModelInput, setShowCustomModelInput] = useState<boolean>(false);
   const [modelInfo, setModelInfo] = useState<ModelGroup[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -196,14 +203,28 @@ const ChatUI: React.FC<ChatUIProps> = ({
     wait: CUSTOM_MODEL_DEBOUNCE_WAIT_MS,
   });
   // 选择状态使用真实公开路径；同一表单协议可以对应 adapted 和 bypass 两个入口。
-  const [endpointPath, setEndpointPath] = useState<string | null>(null);
+  const [endpointPath, setEndpointPath] = useState<string | null>(() => {
+    if (simplified) return null;
+    const saved = sessionStorage.getItem("endpointPath");
+    if (saved) return saved;
+    // 兼容旧会话仅保存协议的格式；取得模型目录后仍校验路径是否属于该模型。
+    const legacy = sessionStorage.getItem("endpointType");
+    return legacy === EndpointType.RESPONSES
+      ? "/v1/responses"
+      : legacy === EndpointType.CHAT
+        ? "/v1/chat/completions"
+        : null;
+  });
   const selectedModelInfo = modelInfo.find((model) => model.model_group === selectedModel);
   const supportedEndpoints = modelEndpoints(selectedModelInfo);
   const selectedBinding = supportedEndpoints.find((endpoint) => endpoint.path === endpointPath);
-  const endpointType = selectedBinding ? (endpointUIType(selectedBinding) ?? selectedBinding.path) : null;
+  const endpointType = selectedBinding ? endpointUIType(selectedBinding) ?? selectedBinding.path : null;
   const isNativeBinding = selectedBinding?.kind === "bypass";
+  const [requestFailure, setRequestFailure] = useState<RequestFailure | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const requestHistory = useRef(chatHistory);
+  const requestSession = useRef(responsesSessionId);
   const [selectedTags, setSelectedTags] = useState<string[]>(() => {
     const saved = sessionStorage.getItem("selectedTags");
     try {
@@ -340,8 +361,12 @@ const ChatUI: React.FC<ChatUIProps> = ({
     } catch {
       // Storage full or unavailable — non-critical, skip persisting.
     }
-    if (endpointType === null) sessionStorage.removeItem("endpointType");
-    else sessionStorage.setItem("endpointType", endpointType);
+    if (endpointType !== null) sessionStorage.setItem("endpointType", endpointType);
+    else if (!selectedModel) sessionStorage.removeItem("endpointType");
+    if (!simplified) {
+      if (endpointPath) sessionStorage.setItem("endpointPath", endpointPath);
+      else sessionStorage.removeItem("endpointPath");
+    }
     sessionStorage.setItem("selectedTags", JSON.stringify(selectedTags));
     sessionStorage.removeItem("selectedVectorStores");
     sessionStorage.setItem("selectedGuardrails", JSON.stringify(selectedGuardrails));
@@ -356,6 +381,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
       if (selectedModel) {
         sessionStorage.setItem("selectedModel", selectedModel);
       } else {
+        sessionStorage.removeItem("selectedModel");
       }
     }
     // Note: codeInterpreterEnabled and selectedContainerId are persisted by useCodeInterpreter hook
@@ -365,6 +391,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
     apiKey,
     selectedModel,
     endpointType,
+    endpointPath,
     selectedTags,
     selectedVectorStores,
     selectedGuardrails,
@@ -390,7 +417,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
       setIsLoadingModels(true);
       setModelLoadError(false);
       try {
-        const uniqueModels = await fetchAvailableModels(userApiKey);
+        const uniqueModels = await fetchAvailableModels(userApiKey, true);
         if (cancelled) {
           return;
         }
@@ -465,23 +492,19 @@ const ChatUI: React.FC<ChatUIProps> = ({
     loadAgents();
   }, [accessToken, apiKeySource, apiKey, endpointType, customProxyBaseUrl, selectedAgent]);
 
+  // 合并流式滚动帧并在卸载时清理，避免旧定时器拉动新工作区。
   useEffect(() => {
-    // Scroll to the bottom of the chat whenever chatHistory updates
-    if (chatEndRef.current) {
-      // Add a small delay to ensure content is rendered
-      setTimeout(() => {
-        chatEndRef.current?.scrollIntoView({
-          behavior: "smooth",
-          block: "end", // Keep the scroll position at the end
-        });
-      }, 100);
-    }
+    const frame = requestAnimationFrame(() => chatEndRef.current?.scrollIntoView({ block: "end" }));
+    return () => cancelAnimationFrame(frame);
   }, [chatHistory]);
 
+  /** 中止当前请求并恢复发送前上下文；无参数/返回值，保留草稿，迟到回调失效。 */
   const handleCancelRequest = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+      setChatHistory(requestHistory.current);
+      setResponsesSessionId(requestSession.current);
       setIsLoading(false);
       toast.info(t("Request cancelled"));
     }
@@ -619,7 +642,23 @@ const ChatUI: React.FC<ChatUIProps> = ({
    * 参数：无，读取当前表单状态。返回 Promise<void>；错误在界面展示，取消由 AbortController 控制。
    * 原生文本调用真实 bypass 路径；适配协议使用对应协议客户端。测试：ChatUI.integration.test.tsx。
    */
+  const responseUpdates = {
+    updateTextUI,
+    updateReasoningContent,
+    updateTimingData,
+    updateUsageData,
+    updateA2AMetadata,
+    updateTotalLatency,
+    updateSearchResults,
+    handleResponseId,
+    handleMCPEvent,
+    updateImageUI,
+    updateEmbeddingsUI,
+    updateAudioUI,
+    updateChatImageUI,
+  };
   const handleSendMessage = async () => {
+    if (abortControllerRef.current) return;
     if (
       endpointType === null ||
       !modelInfo.some(
@@ -720,8 +759,29 @@ const ChatUI: React.FC<ChatUIProps> = ({
     }
 
     // Create new abort controller for this request
-    abortControllerRef.current = new AbortController();
-    const signal = abortControllerRef.current.signal;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    requestHistory.current = chatHistory;
+    requestSession.current = responsesSessionId;
+    const signal = controller.signal;
+    const active = () => abortControllerRef.current === controller && !signal.aborted;
+    const {
+      updateTextUI,
+      updateReasoningContent,
+      updateTimingData,
+      updateUsageData,
+      updateA2AMetadata,
+      updateTotalLatency,
+      updateSearchResults,
+      handleResponseId,
+      handleMCPEvent,
+      updateImageUI,
+      updateEmbeddingsUI,
+      updateAudioUI,
+      updateChatImageUI,
+    } = guardCallbacks(responseUpdates, active);
+    setRequestFailure(null);
+    setIsLoading(true);
 
     // Create message object without model field for API call
     let newUserMessage: { role: string; content: string | any[] };
@@ -731,7 +791,11 @@ const ChatUI: React.FC<ChatUIProps> = ({
       try {
         newUserMessage = await createMultimodalMessage(inputMessage, responsesUploadedImage);
       } catch (error) {
-        toast.fromError(t("Failed to process image. Please try again."));
+        if (active()) {
+          setIsLoading(false);
+          abortControllerRef.current = null;
+          toast.fromError(t("Failed to process image. Please try again."));
+        }
         return;
       }
     }
@@ -740,13 +804,18 @@ const ChatUI: React.FC<ChatUIProps> = ({
       try {
         newUserMessage = await createChatMultimodalMessage(inputMessage, chatUploadedImage);
       } catch (error) {
-        toast.fromError(t("Failed to process image. Please try again."));
+        if (active()) {
+          setIsLoading(false);
+          abortControllerRef.current = null;
+          toast.fromError(t("Failed to process image. Please try again."));
+        }
         return;
       }
     } else {
       newUserMessage = { role: "user", content: inputMessage };
     }
 
+    if (!active()) return;
     // Generate new trace ID for a new conversation or use existing one
     const traceId = messageTraceId || uuidv4();
     if (!messageTraceId) {
@@ -825,7 +894,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
           const requestProxyBaseUrl =
             simplified && proxySettings
-              ? (proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined)
+              ? proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined
               : customProxyBaseUrl || undefined;
           await makeOpenAIChatCompletionRequest(
             apiChatHistory,
@@ -930,7 +999,9 @@ const ChatUI: React.FC<ChatUIProps> = ({
             handleResponseId, // Pass callback to capture new response ID
             handleMCPEvent, // Pass MCP event handler
             codeInterpreter.enabled, // Enable Code Interpreter tool
-            codeInterpreter.setResult, // Handle code interpreter output
+            (result) => {
+              if (active()) codeInterpreter.setResult(result);
+            }, // 仅当前请求写入工具结果
             customProxyBaseUrl || undefined,
             mcpServers,
             mcpServerToolRestrictions,
@@ -1053,37 +1124,32 @@ const ChatUI: React.FC<ChatUIProps> = ({
           selectedGuardrails.length > 0 ? selectedGuardrails : undefined,
         );
       }
-    } catch (error) {
-      if (signal.aborted) {
-      } else {
-        console.error("Error fetching response", error);
-        updateTextUI("assistant", "Error fetching response:" + error);
-      }
-    } finally {
-      setIsLoading(false);
-      abortControllerRef.current = null;
-      // Clear image after successful request for image edits
-      if (endpointType === EndpointType.IMAGE_EDITS) {
+      if (active()) {
+        setInputMessage("");
         handleRemoveAllImages();
-      }
-      // Clear image after successful request for responses API
-      if (endpointType === EndpointType.RESPONSES && responsesUploadedImage) {
         handleRemoveResponsesImage();
-      }
-      // Clear image after successful request for chat completions API
-      if (endpointType === EndpointType.CHAT && chatUploadedImage) {
         handleRemoveChatImage();
-      }
-      // Clear audio after successful request for transcription
-      if (endpointType === EndpointType.TRANSCRIPTION && uploadedAudio) {
         handleRemoveAudio();
       }
+    } catch (error) {
+      if (active()) {
+        setRequestFailure(diagnoseRequest(error));
+        // 失败轮次不进入下一次上下文；保留草稿和附件以便修复配置后重试。
+        setChatHistory(chatHistory);
+        setResponsesSessionId(requestSession.current);
+      }
+    } finally {
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
+      }
     }
-
-    setInputMessage("");
   };
 
+  /** 清空工作区前取消当前请求；返回无，迟到回调不能重新写入对话。 */
   const clearChatHistory = () => {
+    handleCancelRequest();
+    setRequestFailure(null);
     clearChatHistoryHook();
     handleRemoveAllImages();
     handleRemoveResponsesImage();
@@ -1092,10 +1158,42 @@ const ChatUI: React.FC<ChatUIProps> = ({
     toast.success(t("Chat history cleared."));
   };
 
+  /** 切换公开模型别名；参数为选择值，返回无，后续上下文效果负责隔离旧请求。 */
   const onModelChange = (value: string | null) => {
     setSelectedModel(value);
     setShowCustomModelInput(value === "custom");
   };
+
+  const requestContext = [
+    selectedModel,
+    endpointPath,
+    apiKeySource,
+    apiKeySource === "session" ? accessToken : apiKey,
+    customProxyBaseUrl,
+  ].join("\n");
+  const previousContext = useRef(requestContext);
+  useEffect(() => {
+    if (previousContext.current !== requestContext) {
+      previousContext.current = requestContext;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      setIsLoading(false);
+      setRequestFailure(null);
+      clearChatHistoryHook();
+    }
+  }, [requestContext, clearChatHistoryHook]);
+  useEffect(
+    () => () => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    },
+    [],
+  );
+  const canInterpret =
+    !isNativeBinding && endpointType === EndpointType.RESPONSES && supportsCodeInterpreter(selectedModel || "");
+  useEffect(() => {
+    if (!canInterpret && codeInterpreter.enabled) codeInterpreter.setEnabled(false);
+  }, [canInterpret, codeInterpreter.enabled, codeInterpreter.setEnabled]);
 
   // 根据实际选择的端点决定对话设置，不再从价格目录中的 mode 推断协议能力。
   const isChatModel = () =>
@@ -1106,12 +1204,16 @@ const ChatUI: React.FC<ChatUIProps> = ({
     endpointType === EndpointType.RESPONSES ||
     endpointType === EndpointType.ANTHROPIC_MESSAGES;
   const modelsForEndpoint = modelInfo;
-  const endpointOptions = supportedEndpoints.map((endpoint) => ({ value: endpoint.path, label: endpointLabel(endpoint) }));
+  const endpointOptions = supportedEndpoints.map((endpoint) => ({
+    value: endpoint.path,
+    label: endpointLabel(endpoint),
+  }));
   // 切换模型仅保留仍受支持的路径，不能因两个端点使用同一表单而混淆它们。
   useEffect(() => {
+    if (!modelInfo.length) return;
     const options = modelEndpoints(modelInfo.find((model) => model.model_group === selectedModel));
     setEndpointPath((previous) =>
-      options.some((item) => item.path === previous) ? previous : (options[0]?.path ?? null),
+      options.some((item) => item.path === previous) ? previous : options[0]?.path ?? null,
     );
   }, [selectedModel, modelInfo]);
   let modelEmptyText = "No models available for this key";
@@ -1124,22 +1226,23 @@ const ChatUI: React.FC<ChatUIProps> = ({
   }
 
   const inputPlaceholder =
-    endpointType === null ? "请先选择模型和有效端点" :
-    endpointType === EndpointType.CHAT ||
-    endpointType === EndpointType.EMBEDDINGS ||
-    endpointType === EndpointType.RESPONSES ||
-    endpointType === EndpointType.ANTHROPIC_MESSAGES ||
-    endpointType === EndpointType.INTERACTIONS
-      ? "Type your message... (Shift+Enter for new line)"
-      : endpointType === EndpointType.A2A_AGENTS
-        ? "Send a message to the A2A agent..."
-        : endpointType === EndpointType.IMAGE_EDITS
-          ? "Describe how you want to edit the image..."
-          : endpointType === EndpointType.SPEECH
-            ? "Enter text to convert to speech..."
-            : endpointType === EndpointType.TRANSCRIPTION
-              ? "Optional: Add context or prompt for transcription..."
-              : "Describe the image you want to generate...";
+    endpointType === null
+      ? "请先选择模型和有效端点"
+      : endpointType === EndpointType.CHAT ||
+          endpointType === EndpointType.EMBEDDINGS ||
+          endpointType === EndpointType.RESPONSES ||
+          endpointType === EndpointType.ANTHROPIC_MESSAGES ||
+          endpointType === EndpointType.INTERACTIONS
+        ? "Type your message... (Shift+Enter for new line)"
+        : endpointType === EndpointType.A2A_AGENTS
+          ? "Send a message to the A2A agent..."
+          : endpointType === EndpointType.IMAGE_EDITS
+            ? "Describe how you want to edit the image..."
+            : endpointType === EndpointType.SPEECH
+              ? "Enter text to convert to speech..."
+              : endpointType === EndpointType.TRANSCRIPTION
+                ? "Optional: Add context or prompt for transcription..."
+                : "Describe the image you want to generate...";
 
   const sendDisabled =
     endpointType === null ||
@@ -1155,7 +1258,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
       <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden rounded-xl bg-card ring-1 ring-border">
         <div className="flex h-full min-h-0 min-w-0 w-full flex-col lg:flex-row">
           {!simplified && (
-            <div className="max-h-[42%] w-full shrink-0 overflow-y-auto border-b border-border bg-card p-4 lg:max-h-none lg:w-64 lg:border-r lg:border-b-0 xl:w-72">
+            <div className="max-h-[42%] w-full shrink-0 overflow-y-auto border-b border-border bg-sidebar p-4 lg:max-h-none lg:w-64 lg:border-r lg:border-b-0 xl:w-72">
               <h2 className="mb-4 text-sm font-semibold">模型与端点</h2>
               <div className="space-y-4">
                 {endpointType !== EndpointType.A2A_AGENTS && endpointType !== EndpointType.MCP && (
@@ -1320,7 +1423,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                   </div>
                 )}
 
-                {!isNativeBinding && endpointType === EndpointType.RESPONSES && (
+                {canInterpret && (
                   <div>
                     <CodeInterpreterTool
                       accessToken={apiKeySource === "session" ? accessToken || "" : apiKey}
@@ -1334,7 +1437,9 @@ const ChatUI: React.FC<ChatUIProps> = ({
                 )}
                 {/* 低频连接配置放在模型之后；保留挂载以避免展开动作触发重复目录请求。 */}
                 <details className="border-t border-border pt-4">
-                  <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">连接设置</summary>
+                  <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+                    连接设置
+                  </summary>
                   <div className="mt-4 space-y-4">
                     <div>
                       <label className="mb-2 flex items-center text-sm font-medium text-foreground">
@@ -1384,7 +1489,10 @@ const ChatUI: React.FC<ChatUIProps> = ({
                             className="h-auto p-0 text-muted-foreground hover:text-foreground"
                             onClick={() => {
                               setCustomProxyBaseUrl(proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
-                              sessionStorage.setItem("customProxyBaseUrl", proxySettings.LITELLM_UI_API_DOC_BASE_URL || "");
+                              sessionStorage.setItem(
+                                "customProxyBaseUrl",
+                                proxySettings.LITELLM_UI_API_DOC_BASE_URL || "",
+                              );
                             }}
                           >
                             <Link2 className="size-3" />
@@ -1425,12 +1533,13 @@ const ChatUI: React.FC<ChatUIProps> = ({
                         </p>
                       )}
                     </div>
-
                   </div>
                 </details>
                 {!isNativeBinding && (
                   <details className="border-t border-border pt-4">
-                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">{t("Tags")}</summary>
+                    <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
+                      {t("Tags")}
+                    </summary>
                     <div className="mt-4">
                       <div>
                         <label className="mb-2 flex items-center text-sm font-medium text-foreground">
@@ -1443,7 +1552,6 @@ const ChatUI: React.FC<ChatUIProps> = ({
                           accessToken={accessToken || ""}
                         />
                       </div>
-
                     </div>
                   </details>
                 )}
@@ -1471,7 +1579,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
             ) : (
               <>
                 <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border p-3 sm:p-4">
-                  <h2 className="mb-0 text-xl font-semibold">{simplified ? t("Chat") : t("Test Key")}</h2>
+                  <h2 className="mb-0 text-xl font-semibold">{simplified ? t("Chat") : t("Chat")}</h2>
                   <div className="flex flex-wrap justify-end gap-2">
                     <Button type="button" variant="outline" size="sm" onClick={clearChatHistory}>
                       <Eraser className="size-3.5" />
@@ -1486,7 +1594,8 @@ const ChatUI: React.FC<ChatUIProps> = ({
                   </div>
                 </div>
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3 pb-0 sm:p-4 sm:pb-0">
-                  {chatHistory.length === 0 && (
+                  {requestFailure && <RequestDiagnostic failure={requestFailure} />}
+                  {chatHistory.length === 0 && !requestFailure && (
                     <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                       <Bot className="mb-4 size-12" aria-hidden="true" />
                       <p className="text-sm">{t("Start a conversation, generate an image, or handle audio")}</p>
@@ -1710,9 +1819,9 @@ const ChatUI: React.FC<ChatUIProps> = ({
                               key={idx}
                               type="button"
                               className="rounded-full border border-border bg-card px-3 py-1.5 text-xs transition-colors hover:border-info/30 hover:bg-info/10 hover:text-info"
-                              onClick={() => setInputMessage(prompt)} // lgtm[js/xss-through-dom]
+                              onClick={() => setInputMessage(t(prompt))} // lgtm[js/xss-through-dom]
                             >
-                              {prompt}
+                              {t(prompt)}
                             </button>
                           ))}
                         </div>
@@ -1725,7 +1834,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                     onChange={setInputMessage}
                     onSubmit={handleSendMessage}
                     onCancel={handleCancelRequest}
-                    placeholder={inputPlaceholder}
+                    placeholder={t(inputPlaceholder)}
                     disabled={isLoading}
                     isLoading={isLoading}
                     submitDisabled={sendDisabled}
@@ -1762,7 +1871,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                             onRemoveImage={handleRemoveChatImage}
                           />
                         )}
-                        {!isNativeBinding && endpointType === EndpointType.RESPONSES && (
+                        {canInterpret && (
                           <CodeInterpreterToggle
                             enabled={codeInterpreter.enabled}
                             onToggle={() => {

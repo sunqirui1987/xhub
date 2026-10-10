@@ -1,5 +1,88 @@
 # E2E 回归流程与维护
 
+## 保留真实数据集入口
+
+`make testdata` 是唯一的数据生成入口，不提供 `test_data` 别名。配置清单为
+`docs/testdata/real-acceptance/dataset.json`。启动前先校验供应商配置地址；构建阶段会清空指定的
+PostgreSQL `xhub/public` 和 Redis DB 1，再生成并保留 3 个组织、9 个团队、
+27 名成员、9 个项目、81 把成员个人密钥及 1 把管理员个人密钥（共 82 把），以及供应商、模型、路由和护栏配置。
+管理员密钥归属于当前管理员本人，不绑定团队，单独保存在 `access.json` 的 `admin_key` 中。
+该命令仅通过管理 API 构造数据，不查询供应商目录、不探测或运行模型，
+不生成 Codex 会话、图片或视频，也不需要供应商密钥。凭据配置保留环境变量引用。
+
+`make e2e` 从 `FENNO_AI_API_KEY` 和 `QINIU_API_KEY` 读取供应商密钥，
+在上述基线上执行真实模型调用、浏览器、数据库计量核对及后台回归，会产生供应商费用。
+模型阶段严格依次执行：GPT-5.6-sol → 七牛 `z-ai/glm-5` → `gpt-image-2` →
+Ark Seedance → FAL Seedance → FAL Kling。前阶段失败立即停止后续付费模型调用。
+已有基线缺少 GLM 时，验收只补充 GLM 部署及相关白名单。
+
+GPT 和 GLM 均声明 Chat 与 Responses 入口，使用 Codex 类型的请求模拟器：
+固定 `codex_cli_rs` 客户端标识和会话头，调用 `/v1/responses`，每轮只提交当前
+用户输入，通过 `previous_response_id` 续接，显式 `store=false`。第一轮提供随机
+项目标记，后两轮不再提供标记，必须从历史中正确回复。81 把成员密钥保留作数据基线；
+共享验收按组织继承、团队继承、Fenno 单供应商、七牛单供应商各选一把代表，
+GPT 共 4 个三轮会话（12 次请求）；GLM 另验证一个三轮会话。逐轮核对上游完整历史、
+供应商粘滞、响应 ID、五级归属、usage、价格快照及金额。此模拟器验证请求协议，
+没有启动 Codex CLI 或执行本地代码工具。
+
+编排由 `verify_acceptance_models` 统一负责；会话请求与核账由
+`codex_conversation` 负责；浏览器详情由 `codex_browser.cjs` 统一负责。完整会话
+成功后保存检查点，复验仍会重新读取每轮真实账单，失效证据不会算通过。
+网关日志记录恢复历史及护栏处理后的正文，客户端原始增量正文另存于检查点。
+媒体阶段复验已保存的图片、任务及结算证据，避免无条件重复创建付费任务。
+视频创建与终态使用同一个请求日志 ID：后台在原创建事件上更新 `completed`、
+`task_settled`、响应和费用，保留原始 prompt。续跑按模型、协议及响应中的精确
+Task ID 恢复该日志，同时兼容历史独立 `official-settlement:` 日志。
+计量对账同时汇总 `success` 和 `completed`，浏览器按恢复 ID 核对输入与终态产物。
+后续作用域、权限、护栏、缓存、权重及回退链继续进行独立业务回归。
+
+默认验收按业务类型去重，同类型只选一个完整用例。Chat 按上述 4 种路由各测一次，
+图片和三种视频协议各测一次；四种角色、五级预算、RPM/TPM、拦截/脱敏/放行、
+缓存/权重/回退属于不同业务行为，继续保留。新增浏览器业务阶段使用独立临时库和
+本地供应商夹具，选择 15 个完整流程：密钥、模型、成员、回退配置、管理设置、
+用户编辑、正则护栏、XGo、聊天恢复、对比隔离、取消与移动端、错误详情、异步任务、
+路由诊断、层级可见性。该阶段不会额外调用付费供应商。
+
+运行前打印完整待测清单，每项显示编号、业务内容、开始与结果。例如先显示
+「待测 001/026 entities 实体基线及团队成员」，随后显示该项的「开始」和「结果：通过」。
+会话内部还打印「第 1/3 轮：建立上下文」及「第 2/3 轮：续接历史、核对上下文与独立账单」。
+
+cases.md 是本轮人工核对表，cases.json 保存结构化结果；通过、失败、执行中、
+未执行、检查点已复验分别统计。历史业务成功不会自动算成本轮通过；模型检查点
+必须重新核对持久化证据才显示“检查点已复验”。失败后尚未执行的项目保留在清单中。
+浏览器子用例也逐项打印编号、标题和结果，其独立报告是 business-browser-results.json。
+
+产物位于 `.e2e/real-acceptance-current/`：`report.json` 保存会话与逐轮证据，
+`browser-report.json` 和截图保存浏览器结果，`testdata.log` / `e2e.log` 保存阶段
+输出（包含后台 regression 输出）。`access.json` 包含测试访问凭据，不分享。
+保留基线用于人工查看；临时业务资源及本次服务结束时清理。
+
+以下离线专项使用真实网关、数据库与浏览器，以及本地供应商夹具验证三轮上下文、
+失败响应和日志页面，不证明外部 GPT、GLM、图片或视频供应商当前可用：
+
+```bash
+PYTHONPATH=e2e python3 -m unittest e2e/test_real_dataset.py e2e/test_codex_agent.py e2e/test_fake_upstream.py
+bash scripts/regression.sh -v 'TestCodexAgentConversation|TestResponsesIncrementalContinuation|TestResponsesNativeToolContinuation'
+bash scripts/e2e.sh codex-agent.spec.ts responses-continuation.spec.ts
+```
+
+视频日志恢复专项使用随机私有 schema 验证三类协议、旧格式、精确 Task ID、
+非法正文、未结算及重复结算；浏览器验证按原创建 ID 重新打开完成结果与失败详情：
+
+```bash
+XHUB_MEDIA_RECOVERY_DATABASE_TEST=1 PYTHONPATH=e2e python3 -m unittest -v e2e/test_media_log_recovery.py
+bash scripts/regression.sh -v 'TestSeedanceSettlementUsesMeasuredBandAndDeduplicates|TestFalSettlementUsesOutputSecondsAndDeduplicates'
+bash scripts/e2e.sh task-request-logs.spec.ts
+```
+
+建数边界另由以下专项验证：真实管理接口创建完整层级，管理员登录后从组织及模型
+页面读取数据、在个人虚拟密钥页面查看管理员密钥，并核对数据面日志为空。该浏览器用例需要空租户 schema，因此单独运行：
+
+```bash
+bash scripts/regression.sh -v TestTestdataSeedWithoutModelCalls
+E2E_TESTDATA_SEED=1 bash scripts/e2e.sh testdata-seed.spec.ts
+```
+
 ## 目标与验收标准
 
 
@@ -38,7 +121,7 @@
 
 ### 模型与端点专项回归
 
-运行 `make e2e-model-endpoints` 可重复验证本次模型列表及编辑问题。使用真实生产构建控制台、真实网关、PostgreSQL 和临时 Redis，供应商目录与推理响应使用本地模拟服务。这个入口不读取真实供应商密钥，不触发真实视频生成。默认 `make e2e` 仍按 `config_provider.yaml` 执行真实供应商验收，两者的报告范围分别记录。
+运行 `make e2e-model-endpoints` 可重复验证本次模型列表及编辑问题。使用真实生产构建控制台、真实网关、PostgreSQL 和临时 Redis，供应商目录与推理响应使用本地模拟服务。这个入口不读取真实供应商密钥，不触发真实视频生成。默认 `make e2e` 按上文的保留真实数据集清单验收，两者的报告范围分别记录。
 
 专项按以下顺序验证，浏览器失败后仍执行完整确定性后端回归：
 
@@ -79,15 +162,15 @@ bash scripts/e2e.sh model-endpoints.spec.ts xgo-guardrails.spec.ts
 
 测试产物写入忽略目录，不提交截图、trace、运行日志或会话凭据。稳定的运行命令和故障排查写在本文，执行结果由报告提供。
 
-## 统一入口与供应商配置
+## 隔离完整入口与供应商配置
 
 执行顺序：加载并校验供应商 YAML → 创建独立 Redis → 构建控制台和 Go 程序 → 浏览器逐页点击与真实供应商推理 → 后端业务、协议及权重回归 → 生成报告 → 清理本次服务。每个阶段实时打印输出；编译或外部调用等待期间每 30 秒打印时间和日志位置。浏览器失败后仍执行后端并汇总失败证据。
 
 ```bash
 # 环境中提供 config_provider.yaml 的 key_env 对应密钥后
-make e2e
+make e2e-all
 # 显式选择数据库中已保存的凭据，只读取配置指定的供应商
-E2E_CREDENTIAL_SOURCE=database make e2e
+E2E_CREDENTIAL_SOURCE=database make e2e-all
 # 免费确定性回归
 make e2e-offline
 # 只运行后端（仍按同一 YAML 选择真实供应商）

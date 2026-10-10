@@ -386,6 +386,20 @@ func (h *harness) serveUpstream(w http.ResponseWriter, r *http.Request) {
 			"data":  []any{map[string]any{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2}}},
 			"usage": map[string]any{"prompt_tokens": 4, "total_tokens": 4},
 		})
+	case strings.Contains(r.URL.Path, "/images/generations"):
+		// OpenAI Images 的结果与聊天响应不同，且输入 token 按文本/图片拆桶。
+		// rule.usage 让回归用例可以复刻真实供应商报告的精确数量。
+		usage := rule.usage
+		if usage == nil {
+			usage = map[string]any{
+				"input_tokens": 8, "output_tokens": 7024, "total_tokens": 7032,
+				"input_tokens_details": map[string]any{"text_tokens": 8, "image_tokens": 0},
+			}
+		}
+		writeJSON(w, map[string]any{
+			"created": 1, "size": "1024x1024", "usage": usage,
+			"data": []any{map[string]any{"b64_json": "AAAA"}},
+		})
 	case strings.Contains(r.URL.Path, "contents/generations"):
 		// Seedance 的形状：先给一个任务 id，还没有用量。用量要等查询那一次。
 		writeJSON(w, map[string]any{"id": "regression-task-1", "status": "queued"})
@@ -1258,7 +1272,7 @@ func (h *harness) provision(t *testing.T, admin, name string) provisionedTenant 
 }
 
 // keyFor 给会话的主人发一把个人密钥，返回密钥明文。
-// 每一个密钥都必须带团队，个人密钥也一样，所以团队是传进来的而不是推出来的。
+// 此夹具显式绑定团队，用于验证团队额度与权限链；个人密钥也支持不传团队。
 // 参数 t（*testing.T）：当前测试；session（string）：会话令牌；teamID（string）：归属团队；
 // alias（string）：密钥别名。返回 string（string）：密钥明文。
 func (h *harness) keyFor(t *testing.T, session, teamID, alias string) string {

@@ -184,17 +184,13 @@ func (s *Server) resolveSessionRouteTemplate(ctx context.Context, p *auth.Princi
 	p.RouteTemplateSource = "organization"
 }
 
-// keyBudgetOK walks the key's ownership chain and returns the first scope that is over budget. The key row is re-read so a spend or status change is visible immediately, and every ceiling above it is the live database value. A missing parent scope is an error rather than a skip: it means the row was deleted while the key still pointed at it.
-//
-// It also records the two things the rest of the request needs and would
-// otherwise have to fetch again: the organization above the team, and the router
-// settings template the first scope that selects one names. The template walk is
-// key, then team, then organization - the same order this function already visits
-// them in for the budget chain, so resolving it costs no extra read.
+// keyBudgetOK 沿密钥归属链检查实时额度；独立个人密钥检查用户与密钥额度，团队密钥继续检查项目、团队和组织。
+// 无团队时保留密钥选择的路由模板，否则使用平台默认；指定的父级丢失仍返回错误，不能跳过额度。
+// 同时记录团队所属组织及路由模板；按密钥、团队、组织顺序选择第一个明确配置，复用额度查询避免重复读取。
 // 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：仅在 limits.go 内使用
-// 测试：无直接单测
+// 测试：limits_personal_test.go、regression/teamless_keys_test.go。
 func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	k, err := s.IAM.GetKey(ctx, p.KeyID)
 	if err != nil {
@@ -236,6 +232,12 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 		if overBudget(project.MaxBudget, project.Spend, s.hotSpendRef("project", project.ID)) {
 			return errBudget{scope: "Project"}
 		}
+	}
+	if k.TeamID == "" {
+		if k.OwnerType != iam.OwnerPersonal || k.UserID == nil || k.ProjectID != nil {
+			return errKeyUnusable
+		}
+		return nil
 	}
 	team, err := s.IAM.GetTeam(ctx, k.TeamID)
 	if err != nil {

@@ -26,20 +26,20 @@ import { useIsPlatformAdmin, useIsTeamAdminForAnyTeam } from "@/app/(dashboard)/
 import type { Team } from "../key_team_helpers/key_list";
 import { ERROR_CODE_OPTIONS } from "./constants";
 import { LOG_FILTER_IDS, type LogsWindow } from "./log_filter_logic";
-import { t } from "@/i18n";
+import { getActiveLocale, t } from "@/i18n";
+import { translate } from "@/i18n/translate";
 
 const ALL_VALUE = "all";
 
-const STATUS_FILTER_ITEMS = [
-  { value: ALL_VALUE, label: t("All Statuses") },
-  { value: "success", label: t("Success") },
-  { value: "failure", label: t("Failure") },
+const STATUS_FILTER_KEYS = [
+  { value: ALL_VALUE, label: "All Statuses" },
+  { value: "success", label: "Success" },
 ] as const;
 
-const CACHE_FILTER_ITEMS = [
-  { value: ALL_VALUE, label: t("All Requests") },
-  { value: "hit", label: t("Cache Hit") },
-  { value: "miss", label: t("Cache Miss") },
+const CACHE_FILTER_KEYS = [
+  { value: ALL_VALUE, label: "All Requests" },
+  { value: "hit", label: "Cache Hit" },
+  { value: "miss", label: "Cache Miss" },
 ] as const;
 const PAGE_SIZE = 50;
 
@@ -125,6 +125,7 @@ function KeyAliasFilterField({
   );
 }
 
+/** 模型筛选：接收当前模型和查询回调，按登录凭据异步读取可用模型；退出登录立即隐藏选项，卸载时忽略迟到响应。 */
 function ModelFilterField({ value, onChange }: { value: string; onChange: (value: string | undefined) => void }) {
   const { accessToken } = useAuthorized();
   const [options, setOptions] = useState<SearchSelectOption[]>([]);
@@ -133,10 +134,7 @@ function ModelFilterField({ value, onChange }: { value: string; onChange: (value
   // may call. The log row's model is the public model name, and /model/available
   // already returns that name to every signed-in account.
   useEffect(() => {
-    if (!accessToken) {
-      setOptions([]);
-      return;
-    }
+    if (!accessToken) return;
     let cancelled = false;
     userAvailableModelsCall(accessToken)
       .then((response) => {
@@ -163,7 +161,7 @@ function ModelFilterField({ value, onChange }: { value: string; onChange: (value
   return (
     <DataTableFilterField label={t("Model")}>
       <SearchSelect
-        options={options}
+        options={accessToken ? options : []}
         value={value}
         onValueChange={(next) => onChange(next ?? undefined)}
         placeholder={t("Search a model")}
@@ -263,24 +261,27 @@ function EndUserFilterField({
   );
 }
 
+/** 错误码筛选：接收当前 HTTP 码及变更回调，按页面语言显示已知码且支持自定义码；仅变更查询，不写入后台。 */
 function ErrorCodeFilterField({ value, onChange }: { value: string; onChange: (value: string | undefined) => void }) {
   const [query, setQuery] = useState("");
+  const locale = getActiveLocale();
+  const errorCodeOptions = useMemo(() => ERROR_CODE_OPTIONS.map((option) => ({ ...option, label: translate(locale, option.label) })), [locale]);
 
   const options = useMemo<SearchSelectOption[]>(() => {
     const trimmed = query.trim();
     const lowered = trimmed.toLowerCase();
-    const matches = ERROR_CODE_OPTIONS.filter((option) => option.label.toLowerCase().includes(lowered));
-    const isKnownCode = ERROR_CODE_OPTIONS.some(
+    const matches = errorCodeOptions.filter((option) => option.label.toLowerCase().includes(lowered));
+    const isKnownCode = errorCodeOptions.some(
       (option) => option.value === trimmed || option.label.toLowerCase() === lowered,
     );
     if (trimmed === "" || isKnownCode) return matches;
     return [...matches, { label: t("Use custom code: {trimmed}", { trimmed }), value: trimmed }];
-  }, [query]);
+  }, [query, errorCodeOptions]);
 
   const selected = useMemo<SearchSelectOption | null>(() => {
     if (value === "") return null;
-    return ERROR_CODE_OPTIONS.find((option) => option.value === value) ?? { label: value, value };
-  }, [value]);
+    return errorCodeOptions.find((option) => option.value === value) ?? { label: value, value };
+  }, [value, errorCodeOptions]);
 
   const items = useMemo<SearchSelectOption[]>(() => {
     if (selected === null) return options;
@@ -328,12 +329,21 @@ interface RequestLogsFiltersProps {
   set: (columnId: string, value: unknown) => void;
   teams: Team[];
   logsWindow: LogsWindow;
+  errorsOnly?: boolean;
 }
 
-export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsFiltersProps) {
+/** 渲染日志筛选项；接收表格读写回调和授权范围，普通视图不提供失败选项，错误视图隐藏状态选择；返回筛选表单，无数据写入副作用。 */
+export function RequestLogsFilters({ get, set, teams, logsWindow, errorsOnly = false }: RequestLogsFiltersProps) {
+  // 标签随当前页面语言翻译，不能在模块加载时固定为默认语言。
+  const STATUS_FILTER_ITEMS = STATUS_FILTER_KEYS.map((item) => ({ ...item, label: t(item.label) }));
+  const CACHE_FILTER_ITEMS = CACHE_FILTER_KEYS.map((item) => ({ ...item, label: t(item.label) }));
   const valueOf = (id: string): string => asString(get(id));
   const setter = (id: string) => (next: string | undefined) => set(id, next);
-  const canChooseScope = useIsPlatformAdmin() || useIsOrgAdmin() || useIsTeamAdminForAnyTeam();
+  // 三种权限 Hook 必须每次都执行，避免角色变化导致 Hook 调用顺序改变。
+  const platformAdmin = useIsPlatformAdmin();
+  const orgAdmin = useIsOrgAdmin();
+  const teamAdmin = useIsTeamAdminForAnyTeam();
+  const canChooseScope = platformAdmin || orgAdmin || teamAdmin;
 
   return (
     <>
@@ -345,10 +355,11 @@ export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsF
         />
       ) : null}
 
-      <DataTableFilterField label={t("Status")}>
+      {!errorsOnly && <DataTableFilterField label={t("Status")}>
         <Select
           items={STATUS_FILTER_ITEMS}
-          value={valueOf(LOG_FILTER_IDS.STATUS) === "" ? ALL_VALUE : valueOf(LOG_FILTER_IDS.STATUS)}
+          // 兼容旧页面保存的失败筛选，普通日志只允许成功或全部非失败状态。
+          value={valueOf(LOG_FILTER_IDS.STATUS) === "success" ? "success" : ALL_VALUE}
           onValueChange={(next) => set(LOG_FILTER_IDS.STATUS, next === null || next === ALL_VALUE ? undefined : next)}
         >
           <SelectTrigger className="w-full">
@@ -362,7 +373,7 @@ export function RequestLogsFilters({ get, set, teams, logsWindow }: RequestLogsF
             ))}
           </SelectContent>
         </Select>
-      </DataTableFilterField>
+      </DataTableFilterField>}
 
       <DataTableFilterField label={t("Cache")}>
         <Select

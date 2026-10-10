@@ -87,11 +87,12 @@ export const fetchAvailableModelsForTeam = async (accessToken: string, teamId: s
 
 /**
  * fetchAvailableModels 读取当前调用方有权使用的模型及明确端点绑定。
- * 参数 accessToken：会话或虚拟密钥；返回：去重排序的公开模型，读取失败返回空列表。
+ * 参数 accessToken：会话或虚拟密钥；strict：调试台需要区分读取失败时传 true；返回公开模型列表。
+ * 默认读取失败返回空列表；strict 模式向调用方抛出原始异常。
  * 使用 /model/available，管理目录与价格目录不作为调用权限或能力来源。
  * 调用：ChatUI、CompareUI。测试：fetch_models.test.tsx。
  */
-export const fetchAvailableModels = async (accessToken: string): Promise<ModelGroup[]> => {
+export const fetchAvailableModels = async (accessToken: string, strict = false): Promise<ModelGroup[]> => {
   try {
     const fetchedModels = await userAvailableModelsCall(accessToken);
     const fetchedData: unknown = fetchedModels?.data;
@@ -108,7 +109,8 @@ export const fetchAvailableModels = async (accessToken: string): Promise<ModelGr
       .filter((model: ModelGroup) => model.model_group !== "")
       .sort((a: ModelGroup, b: ModelGroup) => a.model_group.localeCompare(b.model_group));
     return Array.from(new Map(models.map((model) => [model.model_group, model])).values());
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 };

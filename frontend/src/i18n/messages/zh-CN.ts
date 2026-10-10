@@ -1,3 +1,4 @@
+import { playgroundZhCN } from "./playground.zh-CN";
 import { zhPhrases } from "./phrases.zh-CN";
 import { pageDescriptionsZhCN } from "./pageDescriptions.zh-CN";
 import { routeTemplatesZhCN } from "./routeTemplates.zh-CN";
@@ -450,7 +451,7 @@ export const zhCN = {
   pages: {
     apiKeys: {
       title: "虚拟密钥",
-      subtitle: "用于向网关发起请求的全部密钥。",
+      subtitle: "仅显示你自己用于向网关发起请求的个人密钥。",
       create: "创建新密钥",
       createSubmit: "创建密钥",
       saveKey: "保存你的密钥",
@@ -841,5 +842,5 @@ export const zhCN = {
     expiredOn: "你的 LiteLLM Enterprise 许可证已于 {date} 到期",
     active: "你的 LiteLLM Enterprise 许可证{when}（{date}）",
   },
-  phrases: zhPhrases,
+  phrases: { ...zhPhrases, ...playgroundZhCN },
 };

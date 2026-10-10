@@ -8,19 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
 )
 
-// TestDailyActivityHTTPReadsRecordedUsage records one call through the usage
-// write path and then reads the usage page's own endpoints, so the roll-up the
-// console renders is checked against the rows the gateway actually stores.
+// TestDailyActivityHTTPReadsRecordedUsage 验证真实用量写入后控制台聚合接口返回一致的请求数与费用。
+// 参数 t 为测试上下文；前置隔离配置库和身份库、关闭共享 Redis，使用真实登录和 HTTP 查询。
+// 返回：无；用户、密钥、用量和配置随私有 schema 清理，服务器与连接池在结束时关闭。
 func TestDailyActivityHTTPReadsRecordedUsage(t *testing.T) {
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := testIdentityStore(t)
+	cfg, st, db := testGatewayStores(t)
 	ctx := context.Background()
 
 	admin, err := db.CreateUser(ctx, testActor, iam.UserInput{
@@ -48,7 +43,7 @@ func TestDailyActivityHTTPReadsRecordedUsage(t *testing.T) {
 		t.Fatalf("record usage: %v", err)
 	}
 
-	gw := New(cfg, nil, db)
+	gw := New(cfg, st, db)
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 

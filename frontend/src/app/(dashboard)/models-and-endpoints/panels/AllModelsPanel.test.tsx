@@ -101,6 +101,27 @@ describe("公开模型默认权重", () => {
     await user.click(within(group).getByRole("button", { name: "详情" }));
     expect(mocks.openModel).toHaveBeenCalledWith("record-a");
   });
+  /** 前置单部署保留零权重及已删除部署分配；验证可见性、全零拒绝和修复保存仅包含现存部署。
+   * 隔离内存目录及查询缓存，RTL 自动卸载，无业务数据写入或清理。 */
+  it("单部署残留权重可见并可修复", async () => {
+    mocks.get.mockResolvedValue({
+      data: [{ model_name: "shared", deployments: [deployment("a")], default_weights: { allocations: [
+        { deployment_id: "a", weight: 0 }, { deployment_id: "deleted", weight: 100 },
+      ] } }], total_count: 1, total_pages: 1,
+    });
+    const user = mount();
+    const group = await screen.findByRole("region", { name: "公开模型 shared" });
+    expect(within(group).getByRole("cell", { name: "0", exact: true })).toBeVisible();
+    await user.click(within(group).getByRole("button", { name: "编辑权重" }));
+    expect(within(group).getByRole("button", { name: "保存权重" })).toBeDisabled();
+    const input = within(group).getByRole("spinbutton", { name: "部署 a 权重" });
+    await user.clear(input);
+    await user.type(input, "1");
+    await user.click(within(group).getByRole("button", { name: "保存权重" }));
+    await waitFor(() => expect(mocks.put).toHaveBeenCalledWith("/model/default", {
+      accessToken: "admin", body: { model_name: "shared", weights: { allocations: [{ deployment_id: "a", weight: 1 }] } },
+    }));
+  });
   /** 多部署编辑任意相对权重并回读，验证规范 ID、零值和无百分比限制；查询缓存隔离。 */
   it("部署行编辑 3:7，保存刷新后回读", async () => {
     const group = {

@@ -26,6 +26,7 @@
 | [HTTP 接口参考](development/api-reference.md) | 实际登记的入口、处理器和源码 |
 | [配置与存储](development/configuration.md) | 设置优先级、模型字段、持久化与运行默认值 |
 | [全链路回归方案](development/regression.md) | 后端逐文件覆盖、真实模型、模板专项及执行流程 |
+| [真实供应商回归执行](development/regression-live.md) | Fenno 与七牛的一条命令、实时日志和运行目录 |
 | [浏览器回归](development/e2e-regression.md) | 控制台业务矩阵、环境、断言与维护 |
 | [运行排查](development/operations.md) | 按调用 ID、日志、状态与费用证据定位故障 |
 

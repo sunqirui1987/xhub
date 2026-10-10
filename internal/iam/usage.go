@@ -18,18 +18,22 @@ var logTraceOnceUsage sync.Once
 // Nothing here is a foreign key: a member who leaves a team does not move the
 // spend they already produced, and deleting a team does not erase history.
 type UsageEvent struct {
-	ID               int64      `xorm:"pk autoincr 'id'" json:"-"`
-	RequestID        string     `xorm:"'request_id'" json:"request_id"`
-	TS               time.Time  `xorm:"'ts'" json:"ts"`
-	KeyID            string     `xorm:"'key_id'" json:"key_id"`
-	OwnerType        string     `xorm:"'owner_type'" json:"owner_type"`
-	UserID           string     `xorm:"'user_id'" json:"user_id"`
-	TeamID           string     `xorm:"'team_id'" json:"team_id"`
-	ProjectID        string     `xorm:"'project_id'" json:"project_id"`
-	OrganizationID   string     `xorm:"'organization_id'" json:"organization_id"`
-	Model            string     `xorm:"'model'" json:"model"`
-	CallType         string     `xorm:"'call_type'" json:"call_type"`
-	Status           string     `xorm:"'status'" json:"status"`
+	// TaskSettled 是原异步请求的持久化结算标记；防止重复或并发轮询二次扣费。
+	TaskSettled    bool      `xorm:"'task_settled'" json:"-"`
+	ID             int64     `xorm:"pk autoincr 'id'" json:"-"`
+	RequestID      string    `xorm:"'request_id'" json:"request_id"`
+	TS             time.Time `xorm:"'ts'" json:"ts"`
+	KeyID          string    `xorm:"'key_id'" json:"key_id"`
+	OwnerType      string    `xorm:"'owner_type'" json:"owner_type"`
+	UserID         string    `xorm:"'user_id'" json:"user_id"`
+	TeamID         string    `xorm:"'team_id'" json:"team_id"`
+	ProjectID      string    `xorm:"'project_id'" json:"project_id"`
+	OrganizationID string    `xorm:"'organization_id'" json:"organization_id"`
+	Model          string    `xorm:"'model'" json:"model"`
+	CallType       string    `xorm:"'call_type'" json:"call_type"`
+	Status         string    `xorm:"'status'" json:"status"`
+	// HTTPStatus 保存网关最终返回给调用方的 HTTP 状态，供日志列表和详情展示。
+	HTTPStatus       int        `xorm:"'http_status'" json:"http_status,omitempty"`
 	PromptTokens     int        `xorm:"'prompt_tokens'" json:"prompt_tokens"`
 	CompletionTokens int        `xorm:"'completion_tokens'" json:"completion_tokens"`
 	Cost             float64    `xorm:"'cost'" json:"cost"`
@@ -69,7 +73,9 @@ type RequestLog struct {
 	RequestBody  string `xorm:"'request_body'" json:"request_body"`
 	ResponseBody string `xorm:"'response_body'" json:"response_body"`
 	Error        string `xorm:"'error'" json:"error"`
-	ProxyRequest string `xorm:"'proxy_request'" json:"proxy_request"`
+	// UpstreamResponse 独立保存诊断，不受提示词存储开关控制。
+	UpstreamResponse string `xorm:"'upstream_response'"`
+	ProxyRequest     string `xorm:"'proxy_request'" json:"proxy_request"`
 }
 
 // 告诉 xorm 这个结构体对应数据库表 request_logs。
@@ -120,6 +126,7 @@ type UsageRecord struct {
 	Model            string
 	CallType         string
 	Status           string
+	HTTPStatus       int
 	PromptTokens     int
 	CompletionTokens int
 	Cost             float64
@@ -127,6 +134,8 @@ type UsageRecord struct {
 	RequestBody      string
 	ResponseBody     string
 	Error            string
+	// UpstreamResponse 是已脱敏的传输事实 JSON，随请求日志持久化。
+	UpstreamResponse string
 	ProxyRequest     string
 	EndedAt          time.Time
 	TTFTMs           *int
@@ -203,13 +212,13 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
 	}
 	res, err := s.Exec(`INSERT INTO usage_events
         (request_id, ts, key_id, owner_type, user_id, team_id, project_id, organization_id,
-         model, call_type, status, prompt_tokens, completion_tokens, cost, duration_ms,
+		 model, call_type, status, http_status, prompt_tokens, completion_tokens, cost, duration_ms,
          ended_at, ttft_ms, cache_hit, key_hash, key_alias, team_alias, provider,
          cached_tokens, session_id, cache_key, guardrail, price_snapshot)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (request_id) DO NOTHING`,
 		r.RequestID, stamp(r.TS), r.KeyID, ownerType(r), r.UserID, r.TeamID, r.ProjectID,
-		r.OrganizationID, r.Model, r.CallType, status(r),
+		r.OrganizationID, r.Model, r.CallType, status(r), r.HTTPStatus,
 		r.PromptTokens, r.CompletionTokens, r.Cost, r.DurationMS,
 		ended, r.TTFTMs, r.CacheHit, r.KeyHash, r.KeyAlias, r.TeamAlias, r.Provider,
 		r.CachedTokens, r.SessionID, r.CacheKey, r.Guardrail, r.PriceSnapshot)
@@ -223,14 +232,14 @@ func insertEvent(s *xorm.Session, r UsageRecord) (bool, error) {
 	return n > 0, nil
 }
 
-// putRequestLog stores the bodies for one event. An empty pair is still stored, so "prompt storage was off" stays distinguishable from "the row is gone".
+// putRequestLog 保存调用正文及已脱敏的上游诊断；即使正文关闭存储仍保留日志行和独立诊断。
 // 参数 s（*xorm.Session）：当前事务里的数据库会话。调用方负责提交，这里不关闭它；r（UsageRecord）：一次调用的用量，含 token、费用、密钥和团队，准备写入用量表。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
-// 调用：仅在 usage.go 内使用
-// 测试：无直接单测
+// 调用：普通用量与异步任务创建事务；失败由调用方回滚。
+// 测试：task_usage_test.go、cmd/regression/upstream_diagnostics_test.go 验证真实落库。
 func putRequestLog(s *xorm.Session, r UsageRecord) error {
 	row := RequestLog{RequestID: r.RequestID, RequestBody: r.RequestBody,
-		ResponseBody: r.ResponseBody, Error: r.Error, ProxyRequest: r.ProxyRequest}
+		ResponseBody: r.ResponseBody, Error: r.Error, ProxyRequest: r.ProxyRequest, UpstreamResponse: r.UpstreamResponse}
 	if _, err := s.Insert(&row); err != nil {
 		return mapErr(err)
 	}

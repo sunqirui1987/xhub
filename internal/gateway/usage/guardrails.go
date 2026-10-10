@@ -123,7 +123,13 @@ func GuardrailLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	logs := make([]any, 0, end-start)
 	for _, finding := range filtered[start:end] {
-		logs = append(logs, map[string]any{"id": finding.RequestID, "timestamp": finding.Timestamp.UTC().Format(time.RFC3339Nano), "action": finding.Action, "score": nil, "model": nullableString(finding.Model), "input_snippet": nil, "output_snippet": nil, "reason": nullableString(finding.Reason), "latency_ms": finding.LatencyMS})
+		logs = append(logs, map[string]any{
+			"id": finding.RequestID, "timestamp": finding.Timestamp.UTC().Format(time.RFC3339Nano),
+			"action": finding.Action, "score": nil, "model": nullableString(finding.Model),
+			"input_snippet": nil, "output_snippet": nil, "reason": nullableString(finding.Reason),
+			"guardrail_name": finding.Name, "guardrail_provider": nullableString(finding.Provider),
+			"guardrail_mode": nullableString(finding.Mode), "latency_ms": finding.LatencyMS,
+		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"logs": logs, "page": page, "page_size": pageSize, "total": len(filtered)})
 }

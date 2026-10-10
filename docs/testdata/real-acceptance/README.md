@@ -18,7 +18,7 @@ scripts/e2e-real-dataset.py
   └─ psql：事件、日报和五级实体累计金额一致性
 ```
 
-manifest 是 `dataset.json`。它声明 3 个组织、9 个团队、27 个成员、81 把个人密钥、9 个项目、两套真实供应商、路由模板、护栏、预算、RPM/TPM、模型白名单和角色预期。manifest 中的 `frontend_workflows` 只表示资源与验收意图；只有 `browser-report.json` 中的检查才算真实浏览器覆盖。当前浏览器实际访问组织、Playground、日志、护栏和团队页面，并用四个独立浏览器上下文验证角色。
+manifest 是 `dataset.json`。它声明 3 个组织、9 个团队、27 个成员、81 把成员个人密钥、9 个项目、两套真实供应商、路由模板、护栏、预算、RPM/TPM、模型白名单和角色预期。建数还额外创建 1 把当前管理员本人的个人密钥，共 82 把；该密钥不绑定团队，单独保存在 `access.json` 的 `admin_key` 中，不参与 81 把成员密钥的会话矩阵。manifest 中的 `frontend_workflows` 只表示资源与验收意图；只有 `browser-report.json` 中的检查才算真实浏览器覆盖。当前浏览器实际访问组织、Playground、日志、护栏和团队页面，并用四个独立浏览器上下文验证角色。
 
 runtime 由 runner 每次生成：随机端口、管理员密码、master key、schema 名、Redis 容器名和私有配置。网关只连接本次 schema 与 Redis。管理 API 创建资源；个人密钥调用 `/v1/chat/completions`；API 验证真实响应 token、固定验收费率、五级账单归属、预算/RPM/TPM 拒绝、拒绝时零外发与恢复、模型白名单、回退以及资源生命周期。
 
@@ -30,12 +30,28 @@ runtime 由 runner 每次生成：随机端口、管理员密码、master key、
 
 ### 共享真实环境：先构建，后验收
 
-`make testdata` 是共享真实数据入口。它会先验证 Fenno AI 和七牛凭据，然后删除并重建 PostgreSQL `xhub` 数据库、清空 Redis DB 1，再把 `dataset.json` 的 3 个组织、9 个团队、27 个成员、9 个项目和 81 把个人密钥写入 `public`。凭据验证先于清库，目标 URL 也有精确白名单，防止误清其他数据库或 Redis DB。
+数据生成仅使用 `make testdata`，没有别名。清单包含七牛 `z-ai/glm-5`，
+公开名、供应商上游型号和保存型号均使用该精确 ID，支持 Chat 与 Responses。
+`make testdata` 只构造资源和配置，不调用供应商或模型。Codex 三轮会话及媒体
+生成由 `make e2e` 的有序模型编排执行：GPT-5.6-sol → GLM → 图片 →
+Ark Seedance → FAL Seedance → Kling，前阶段失败后不会继续创建后续付费任务。
+
+GPT 按组织继承、团队继承、Fenno 单供应商、七牛单供应商各选一把代表，
+共 4 个 Codex 类型三轮会话（12 次请求）；81 把成员密钥保留作数据基线。GLM
+另有一个三轮会话。两者使用 `/v1/responses`、Codex 客户端头和固定会话 ID，
+只发送当前输入并通过 `previous_response_id` 续接；后两轮必须记住第一轮的
+随机项目标记。逐轮检查完整上游历史、路由粘滞、usage、五级账单归属和金额。
+`report.json` 的 `agent_conversations` 保存原始增量请求和三轮回执；复验时
+重新读取持久化日志。浏览器按同样顺序逐轮打开 GPT 与 GLM 精确日志，再检查
+图片和视频。此模拟器验证 Codex 请求协议，不启动 Codex CLI 或本地工具。
+
+`make testdata` 是共享数据构造入口。它会先验证供应商配置地址，然后删除并重建 PostgreSQL `xhub` 数据库、清空 Redis DB 1，再把 `dataset.json` 的 3 个组织、9 个团队、27 个成员、9 个项目、81 把成员个人密钥及 1 把管理员个人密钥（共 82 把）写入 `public`，并保存供应商、模型、路由和护栏配置。它不需要供应商密钥，不查询真实目录、不探测模型，也不创建模型调用记录。供应商凭据仅保存环境变量引用，供后续 `make e2e` 使用。目标 URL 有精确白名单，防止误清其他数据库或 Redis DB。
 
 ```bash
+make testdata
+# 以下验收调用真实供应商并产生费用
 export FENNO_AI_API_KEY='…'
 export QINIU_API_KEY='…'
-make testdata
 make e2e
 ```
 
@@ -46,7 +62,7 @@ postgres://xhub:xhub_dev_password@127.0.0.1:5433/xhub?sslmode=disable
 redis://127.0.0.1:6379/1
 ```
 
-`make e2e` 读取 `.e2e/real-acceptance-current` 中由 `make testdata` 保存的状态，使用同一份 `public` 数据完成 81 把密钥的真实请求、权限/预算/限流/模型/护栏/回退验收，随后执行真实 Playwright 页面流程、PostgreSQL 事件/日报/token/五级 spend 核对，以及 `bash scripts/regression.sh -v` 后台回归。过程直接输出到终端，主报告是 `.e2e/real-acceptance-current/report.json`，浏览器报告是同目录的 `browser-report.json`，网关和前端日志分别是 `gateway.log` 与 `console.log`。两个命令都会保留共享数据，下一次 `make testdata` 才会再次全部清空。
+`make e2e` 读取 `.e2e/real-acceptance-current` 中由 `make testdata` 保存的状态，使用同一份 `public` 数据，按 4 种路由各选一把密钥完成真实请求及权限/预算/限流/模型/护栏/回退验收，随后执行真实 Playwright 页面流程、PostgreSQL 事件/日报/token/五级 spend 核对，以及 `bash scripts/regression.sh -v` 后台回归。同时追加 15 个按业务类型去重的浏览器完整流程（独立临时库、本地供应商夹具）。每项先打印待测内容，再打印开始和结果；cases.md / cases.json 区分本轮通过、失败、未执行和检查点复验，business-browser-results.json 保存去重浏览器结果。过程直接输出到终端，主报告是 `.e2e/real-acceptance-current/report.json`，浏览器报告是同目录的 `browser-report.json`，网关和前端日志分别是 `gateway.log` 与 `console.log`。两个命令都会保留共享数据，下一次 `make testdata` 才会再次全部清空。
 
 ### 隔离的一次性入口
 

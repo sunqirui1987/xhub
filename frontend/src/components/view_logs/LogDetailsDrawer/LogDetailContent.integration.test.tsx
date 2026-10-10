@@ -34,6 +34,57 @@ const createLogEntry = (overrides: Partial<LogEntry> = {}): LogEntry =>
   }) as LogEntry;
 
 describe("LogDetailContent", () => {
+  /** 前置后台实际cached_tokens字段，验证提示词缓存展示独立于响应缓存，自动卸载清理。 */
+  it("reads persisted provider cache tokens", () => {
+    render(<LogDetailContent logEntry={createLogEntry({ cache_hit: "false", metadata: { cached_tokens: 1234 } })} />);
+    expect(screen.getByText("1,234")).toBeInTheDocument();
+    expect(screen.getByText("Miss")).toBeInTheDocument();
+  });
+  /** 前置未上报或明确零值，验证未知与零分别展示，自动卸载清理。 */
+  it.each([undefined, 0])("distinguishes missing cache statistics from zero %s", (cached) => {
+    render(<LogDetailContent logEntry={createLogEntry({ metadata: { cached_tokens: cached } })} />);
+    expect(screen.getByText(cached === undefined ? "Not reported" : "0")).toBeInTheDocument();
+  });
+  /** 前置上游诊断扩展字段，验证折叠及展开时完整复制、复制不触发展开及统计对照，自动卸载和清理剪贴板模拟。 */
+  it("copies upstream headers and original usage", async () => {
+    const user = userEvent.setup();
+    const upstream = { status_code: 200, headers: { "X-Trace": ["first", "second"] }, usage_reported: true, usage: { prompt_tokens_details: { cached_tokens: 4 }, custom: "retained" }, billing_usage: { prompt_tokens: 8 } };
+    render(<LogDetailContent logEntry={createLogEntry({ metadata: { upstream_response: upstream } })} />);
+    const region = screen.getByRole("region", { name: "Upstream Response" });
+    await user.click(within(region).getByRole("button", { name: "Copy upstream response" }));
+    expect(await navigator.clipboard.readText()).toBe(JSON.stringify(upstream, null, 2));
+    expect(within(region).getByRole("button", { name: "Upstream Response", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await user.click(within(region).getByRole("button", { name: "Upstream Response", exact: true }));
+    expect(region).toHaveTextContent("second");
+    await user.click(within(region).getByRole("button", { name: /Copy upstream response|Copied!/ }));
+    expect(await navigator.clipboard.readText()).toBe(JSON.stringify(upstream, null, 2));
+  });
+
+  /** 前置后台失败日志、完整长正文和简化摘要；验证全部字段可见及复制无截断，自动卸载并清理剪贴板模拟。 */
+  it("shows and copies complete upstream error and preserves JSON response", async () => {
+    const user = userEvent.setup();
+    const response = { error: { message: "upstream unavailable", details: { trace: "upstream-debug-123", diagnostic: "x".repeat(2048) } } };
+    const error = JSON.stringify(response);
+    render(<LogDetailContent logEntry={createLogEntry({ status: "error", error, response, metadata: { http_status: 502, error_information: { error_message: "short summary" } } })} />);
+    const region = screen.getByRole("region", { name: "Full Error Details" });
+    expect(within(region).getByText(error)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("502");
+    await user.click(within(region).getByRole("button", { name: "Copy error details" }));
+    expect(await navigator.clipboard.readText()).toBe(error);
+    await user.click(screen.getByRole("tab", { name: "JSON", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Copy response", exact: true }));
+    expect(await navigator.clipboard.readText()).toBe(JSON.stringify(response, null, 2));
+  });
+
+  /** 前置无正文捕获的新失败日志或旧版纯文本响应；验证错误诊断仍完整可读，自动卸载清理。 */
+  it.each([
+    { error: "dial tcp: connection refused\nlast diagnostic", response: {} },
+    { response: "proxy returned HTML\nlast diagnostic" },
+  ])("shows plain text diagnostics with %j", (overrides) => {
+    render(<LogDetailContent logEntry={createLogEntry({ status: "error", metadata: {}, messages: [], ...overrides })} />);
+    expect(screen.getByRole("region", { name: "Full Error Details" })).toHaveTextContent("last diagnostic");
+    expect(screen.queryByText("Request/Response Data Not Available")).not.toBeInTheDocument();
+  });
   it("should render the component successfully", () => {
     render(<LogDetailContent logEntry={createLogEntry()} />);
 

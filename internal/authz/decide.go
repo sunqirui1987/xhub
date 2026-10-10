@@ -155,11 +155,11 @@ func (g *Guard) masterOnly(action Action, obj Object) error {
 	}
 }
 
-// keyOnly is a virtual key's matrix. A key may infer through itself and read itself; it never carries management authority, whoever owns it.
+// keyOnly 限定虚拟密钥只能推理、读取自身及自身用量；无团队的个人密钥也可推理，任何密钥均无管理权限。
 // 参数 ctx（context.Context）：上下文，取消时停止；action（Action）：要判定的动作，例如读日志、管理密钥或发起推理；obj（Object）：要判定的对象，含类型、团队、组织和归属用户。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：仅在 decide.go 内使用
-// 测试：无直接单测
+// 测试：personal_keys_test.go。
 func (g *Guard) keyOnly(ctx context.Context, action Action, obj Object) error {
 	a := g.actor
 	if a.KeyID == "" {
@@ -173,7 +173,7 @@ func (g *Guard) keyOnly(ctx context.Context, action Action, obj Object) error {
 	}
 	switch action {
 	case ActionInfer:
-		if a.KeyTeamID == "" {
+		if a.KeyTeamID == "" && (a.OwnerType != iam.OwnerPersonal || a.UserID == "") {
 			return ErrForbidden
 		}
 		return nil
@@ -192,11 +192,11 @@ func (g *Guard) keyOnly(ctx context.Context, action Action, obj Object) error {
 	}
 }
 
-// CheckKey re-reads the live state behind a virtual key: the key row itself, the team and project it is bound to, and, for a personal key, that its owner is still an active account and still a member of the team. Authentication calls this too so there is exactly one definition of "this key still works".
+// CheckKey 每次请求重读密钥及属主状态；绑定团队时还校验团队、组织、项目和成员关系，无团队个人密钥只依赖有效属主。
 // 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：gateway/session.go
-// 测试：无直接单测
+// 测试：personal_keys_test.go。
 func (g *Guard) CheckKey(ctx context.Context) error {
 	db := g.z.db
 	if db == nil || g.actor.KeyID == "" {
@@ -208,6 +208,20 @@ func (g *Guard) CheckKey(ctx context.Context) error {
 	}
 	if !k.ActiveKey() {
 		return ErrForbidden
+	}
+	// 独立个人密钥没有团队父级，但仍必须在下一次请求立即响应用户停用。
+	if k.TeamID == "" {
+		if k.OwnerType != iam.OwnerPersonal || k.UserID == nil || *k.UserID == "" || k.ProjectID != nil {
+			return ErrForbidden
+		}
+		u, err := db.GetUser(ctx, *k.UserID)
+		if err != nil {
+			return notFoundOrInternal(err)
+		}
+		if !u.Active() {
+			return ErrForbidden
+		}
+		return nil
 	}
 	t, err := db.GetTeam(ctx, k.TeamID)
 	if err != nil {
@@ -670,12 +684,19 @@ func (g *Guard) decideTeamRead(obj Object, admin bool) error {
 	return ErrNotFound
 }
 
-// decideKeyCreate governs minting a key. A create has no row yet, so the only trustworthy inputs are the actor's memberships and the team it hints at. A member may only mint a key for themselves insidea team they belong to; a service key requires team administration.
+// decideKeyCreate 判定创建权限；用户可创建本人无团队个人密钥，指定团队时必须是成员，服务密钥要求团队管理权限。
 // 参数 ctx（context.Context）：上下文，取消时停止；obj（Object）：要判定的对象，含类型、团队、组织和归属用户；admin（bool）：为真时操作者按管理员处理，可以越过普通成员的限制。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：仅在 decide.go 内使用
-// 测试：无直接单测
+// 测试：personal_keys_test.go。
 func (g *Guard) decideKeyCreate(ctx context.Context, obj Object, admin bool) error {
+	if obj.TeamID == "" {
+		if obj.OwnerType == iam.OwnerPersonal && obj.OwnerUserID != "" && obj.ProjectID == "" &&
+			(admin || obj.OwnerUserID == g.actor.UserID) {
+			return nil
+		}
+		return ErrForbidden
+	}
 	if obj.OwnerUserID != "" && obj.OwnerUserID != g.actor.UserID && !admin {
 		return ErrForbidden
 	}

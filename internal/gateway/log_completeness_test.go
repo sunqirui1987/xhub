@@ -9,21 +9,15 @@ import (
 	"time"
 
 	"github.com/sunqirui1987/xhub/internal/auth"
-	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/live"
 )
 
-// TestLogRecordRoundTripKeepsTheFactsTheConsoleReads writes one call the way
-// the spend path does, then reads it back through the log list and the log
-// detail the console opens. A missing header, body, TTFT, team name, or key
-// snapshot fails here instead of showing up as a blank cell.
+// TestLogRecordRoundTripKeepsTheFactsTheConsoleReads 验证真实结算写入后的列表与详情保留完整日志字段。
+// 参数 t 为测试上下文；前置隔离配置与身份库、无共享 Redis，核对正文、头、TTFT 和身份快照。
+// 返回：无；服务器、连接池和私有 schema 自动清理，测试不读写开发环境配置。
 func TestLogRecordRoundTripKeepsTheFactsTheConsoleReads(t *testing.T) {
-	cfg, err := config.Load(configPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := testIdentityStore(t)
+	cfg, st, db := testGatewayStores(t)
 	ctx := context.Background()
 	admin, err := db.CreateUser(ctx, iam.Actor{Kind: "system"}, iam.UserInput{
 		Email: "log-admin@example.com", Name: "Log Admin", Password: "password123", Role: iam.RoleAdmin,
@@ -63,7 +57,7 @@ func TestLogRecordRoundTripKeepsTheFactsTheConsoleReads(t *testing.T) {
 		}, 0.000384, promptExchange{messages: messages, response: response, proxy: proxy}, start, end)
 	}
 
-	srv := httptest.NewServer(New(cfg, nil, db).Handler())
+	srv := httptest.NewServer(New(cfg, st, db).Handler())
 	t.Cleanup(srv.Close)
 	sess := loginAs(t, srv.URL, admin.Email, "password123")
 

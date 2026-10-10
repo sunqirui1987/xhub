@@ -126,6 +126,11 @@ func Evaluate(s Host, body map[string]any) (blocked bool, message string, findin
 			finding = findingJSON(g, action, false)
 			finding["error"] = err.Error()
 		}
+		// 本地关键词规则只返回 block 动作，没有独立原因。先补齐稳定且不泄露正文的说明，
+		// 再把同一说明写入持久化结果，确保调用方错误响应与监控日志一致。
+		if action == "block" && reason == "" {
+			reason = "Guardrail blocked the request: " + findingName(g)
+		}
 		if reason != "" {
 			finding["reason"] = reason
 		}
@@ -137,9 +142,6 @@ func Evaluate(s Host, body map[string]any) (blocked bool, message string, findin
 		finding["duration"] = time.Since(started).Seconds()
 		findings = append(findings, finding)
 		if action == "block" {
-			if reason == "" {
-				reason = "Guardrail blocked the request: " + findingName(g)
-			}
 			return true, reason, findings
 		}
 

@@ -48,6 +48,13 @@ interface LogViewerProps {
   endDate?: string;
 }
 
+/**
+ * 用途：展示护栏执行日志的动作、原因和关键运行信息，并允许打开对应请求详情。
+ * 参数：LogViewerProps 提供已筛选日志、时间范围、访问令牌及加载状态。
+ * 返回：带筛选控件的日志列表；日志不含原因时展示明确占位说明。
+ * 调用：护栏监控详情页及测试；点击日志后按请求 ID 查询并打开请求抽屉。
+ * 异常与边界：无日志、无令牌、可选元数据缺失时仍可显示动作和说明，不展示空内容破折号。
+ */
 export function LogViewer({
   guardrailName,
   filterAction = "all",
@@ -191,7 +198,15 @@ export function LogViewer({
                       <span className="min-w-0 text-xs break-words text-muted-foreground">{log.model}</span>
                     )}
                   </div>
-                  <p className="text-sm text-foreground truncate">{log.input_snippet ?? log.input ?? "—"}</p>
+                  <p className="text-sm text-foreground">
+                    {log.reason || t("No reason was recorded for this evaluation.")}
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {log.guardrail_provider && <span>{t("Provider: {value0}", { value0: log.guardrail_provider })}</span>}
+                    {log.guardrail_mode && <span>{t("Stage: {value0}", { value0: log.guardrail_mode.replace(/_/g, "-") })}</span>}
+                    {log.latency_ms != null && <span>{t("Latency: {value0}ms", { value0: Math.round(log.latency_ms) })}</span>}
+                    {log.guardrail_name && <span>{log.guardrail_name}</span>}
+                  </div>
                 </div>
                 <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
               </button>

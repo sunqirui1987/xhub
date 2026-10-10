@@ -460,7 +460,7 @@ export const en = {
   pages: {
     apiKeys: {
       title: "Virtual Keys",
-      subtitle: "Every key that authenticates requests to the gateway.",
+      subtitle: "Your personal keys for authenticating requests to the gateway.",
       create: "Create New Key",
       createSubmit: "Create Key",
       saveKey: "Save your Key",

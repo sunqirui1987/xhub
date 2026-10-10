@@ -1,3 +1,4 @@
+import { RequestDiagnostic } from "../../RequestDiagnostic";
 import { UnavailableEndpoint } from "@/components/llm_calls/UnavailableEndpoint";
 import { Settings, X } from "lucide-react";
 import { useId, useState } from "react";
@@ -150,14 +151,16 @@ export function ComparisonPanel({
                 accessToken={apiKey}
               />
             </div>
-            {supportsGatewaySettings && <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">{t("Guardrails")}</label>
-              <GuardrailSelector
-                value={comparison.guardrails}
-                onChange={(value) => handleSettingChange("guardrails", value)}
-                accessToken={apiKey}
-              />
-            </div>}
+            {supportsGatewaySettings && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-0.5">{t("Guardrails")}</label>
+                <GuardrailSelector
+                  value={comparison.guardrails}
+                  onChange={(value) => handleSettingChange("guardrails", value)}
+                  accessToken={apiKey}
+                />
+              </div>
+            )}
           </div>
         </div>
         {/* Advanced Settings */}
@@ -222,10 +225,16 @@ export function ComparisonPanel({
   );
 
   return (
-    <div className="bg-card first:border-l-0 border-l border-border flex flex-col min-h-0">
-      {!isA2AMode && comparison.model && !endpointOptions.length && <UnavailableEndpoint reason={unavailableReason} compare />}
+    <div
+      role="region"
+      aria-label={"对比卡片 " + comparison.id}
+      className="bg-card first:border-l-0 border-l border-border flex flex-col min-h-80 min-w-0"
+    >
+      {!isA2AMode && comparison.model && !endpointOptions.length && (
+        <UnavailableEndpoint reason={unavailableReason} compare />
+      )}
       <div className="border-b flex items-center justify-between gap-3 px-4 py-3">
-        <div className="flex items-center gap-3 flex-1">
+        <div className="flex flex-wrap min-w-0 items-center gap-3 flex-1">
           <UnifiedSelector
             value={currentSelection}
             options={selectorOptions}
@@ -253,6 +262,7 @@ export function ComparisonPanel({
               <PopoverTrigger
                 render={
                   <button
+                    aria-label={t("Model Settings")}
                     onClick={(event) => {
                       event.stopPropagation();
                       handleTogglePopover();
@@ -273,6 +283,7 @@ export function ComparisonPanel({
         </div>
         {canRemove && (
           <button
+            aria-label={t("Remove Comparison")}
             onClick={(event) => {
               event.stopPropagation();
               onRemove();
@@ -284,7 +295,8 @@ export function ComparisonPanel({
         )}
       </div>
       <div className="relative flex-1 flex flex-col min-h-0">
-        <div className="flex-1 max-h-[calc(100vh-385px)] overflow-auto rounded-b-2xl">
+        <div className="flex-1 min-h-0 overflow-auto p-3">
+          {comparison.failure && <RequestDiagnostic failure={comparison.failure} />}
           <MessageDisplay messages={comparison.messages} isLoading={comparison.isLoading} />
         </div>
       </div>

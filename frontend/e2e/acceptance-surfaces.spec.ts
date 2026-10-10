@@ -107,9 +107,16 @@ test.describe("真实监控与模型生命周期验收", () => {
     await expect(requestsCard.locator(".text-3xl")).toHaveText(/[1-9][0-9,]*/);
     await page.getByRole("tab", { name: t("Logs"), exact: true }).click();
     await expect(page.getByText(t("Blocked"), { exact: true }).first()).toBeVisible();
+    const blockedLog = page.getByRole("button", { name: new RegExp(`Guardrail blocked the request: ${guardrailNames[0]}`) });
+    await expect(blockedLog).toContainText("执行器：blocked_words");
+    await expect(blockedLog).toContainText("阶段：pre-call");
+    await expect(blockedLog).toContainText(/耗时：\d+ms/);
 
     const redactLogs = await page.request.get(GATEWAY + "/guardrails/usage/logs?guardrail_id=" + encodeURIComponent(redactId), { headers: await adminHeaders(page) });
-    expect((await redactLogs.json()).logs[0].action).toBe("flagged");
+    const redactLog = (await redactLogs.json()).logs[0];
+    expect(redactLog.action).toBe("flagged");
+    expect(redactLog.guardrail_name).toBe(guardrailNames[1]);
+    expect(redactLog.guardrail_mode).toBe("pre_call");
     const flagLogs = await page.request.get(GATEWAY + "/guardrails/usage/logs?guardrail_id=" + encodeURIComponent(flagId), { headers: await adminHeaders(page) });
     expect((await flagLogs.json()).logs[0].action).toBe("flagged");
     expect(blockId).toBeTruthy();

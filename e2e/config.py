@@ -16,6 +16,9 @@ if env.get("E2E_RESPONSES_CONTINUATION") == "1":
         "input_cost_per_token": 0.000001, "output_cost_per_token": 0.000002,
         "api_base": "http://127.0.0.1:" + env["E2E_UP_PORT"]},
         "model_info": {"transport": "bypass_openai_chat", "endpoint_types": ["chat", "responses"]}})
+    # Codex 模拟器使用独立模型，供应商必须验证其真实收到的三轮项目上下文。
+    models.append({**models[-1], "model_name": "e2e-codex-agent",
+                   "litellm_params": {**models[-1]["litellm_params"], "model": "e2e-codex-agent"}})
 # 隔离测试专用无效声明：验证旧配置不会推断聊天能力，浏览器必须解释不可调用原因。
 if env.get("E2E_ENDPOINT_UNBOUND") == "1":
     models.append({"model_name": "e2e-unbound", "litellm_params": {

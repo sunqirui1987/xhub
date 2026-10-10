@@ -391,32 +391,38 @@ type SpendLog struct {
 	APIKey    string `json:"api_key"`
 	// KeyID is the api_keys row id, which is what usage_events keys ownership
 	// by. APIKey stays the token hash, because that is the live-spend reference.
-	KeyID        string  `json:"key_id,omitempty"`
-	Prompt       int     `json:"prompt_tokens"`
-	Completion   int     `json:"completion_tokens"`
-	Spend        float64 `json:"spend"`
-	SpendValid   bool    `json:"spend_valid"`
-	Start        string  `json:"start"`
-	End          string  `json:"end"`
-	CacheHit     bool    `json:"cache_hit"`
-	Status       string  `json:"status"`
-	OwnerType    string  `json:"owner_type,omitempty"`
-	TeamID       string  `json:"team_id"`
-	UserID       string  `json:"user_id"`
-	OrgID        string  `json:"org_id"`
-	ProjectID    string  `json:"project_id,omitempty"`
-	Messages     string  `json:"messages,omitempty"`
-	Response     string  `json:"response,omitempty"`
-	ProxyRequest string  `json:"proxy_server_request,omitempty"`
-	TTFTMs       *int    `json:"ttft_ms,omitempty"`
-	KeyHash      string  `json:"key_hash,omitempty"`
-	KeyAlias     string  `json:"key_alias,omitempty"`
-	TeamAlias    string  `json:"team_alias,omitempty"`
-	Provider     string  `json:"provider,omitempty"`
-	CachedTokens *int    `json:"cached_tokens,omitempty"`
-	SessionID    string  `json:"session_id,omitempty"`
-	CacheKey     string  `json:"cache_key,omitempty"`
-	Guardrail    string  `json:"guardrail,omitempty"`
+	KeyID      string  `json:"key_id,omitempty"`
+	Prompt     int     `json:"prompt_tokens"`
+	Completion int     `json:"completion_tokens"`
+	Spend      float64 `json:"spend"`
+	SpendValid bool    `json:"spend_valid"`
+	Start      string  `json:"start"`
+	End        string  `json:"end"`
+	CacheHit   bool    `json:"cache_hit"`
+	Status     string  `json:"status"`
+	// HTTPStatus 是网关最终返回给调用方的状态码；Error 是失败时保留的完整原始正文。
+	// 两项随 Redis 队列一起传递，避免异步刷库丢失错误诊断信息。
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Error      string `json:"error,omitempty"`
+	OwnerType  string `json:"owner_type,omitempty"`
+	TeamID     string `json:"team_id"`
+	UserID     string `json:"user_id"`
+	OrgID      string `json:"org_id"`
+	ProjectID  string `json:"project_id,omitempty"`
+	Messages   string `json:"messages,omitempty"`
+	Response   string `json:"response,omitempty"`
+	// UpstreamResponse 保存已脱敏的上游响应头和原始统计 JSON。
+	UpstreamResponse string `json:"upstream_response,omitempty"`
+	ProxyRequest     string `json:"proxy_server_request,omitempty"`
+	TTFTMs           *int   `json:"ttft_ms,omitempty"`
+	KeyHash          string `json:"key_hash,omitempty"`
+	KeyAlias         string `json:"key_alias,omitempty"`
+	TeamAlias        string `json:"team_alias,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	CachedTokens     *int   `json:"cached_tokens,omitempty"`
+	SessionID        string `json:"session_id,omitempty"`
+	CacheKey         string `json:"cache_key,omitempty"`
+	Guardrail        string `json:"guardrail,omitempty"`
 	// PriceSnapshot is the JSON of the rates this call was actually billed at,
 	// with the quantities they applied to. Without it a log row can only be
 	// explained by recomputing from the price table of the day it is read, so

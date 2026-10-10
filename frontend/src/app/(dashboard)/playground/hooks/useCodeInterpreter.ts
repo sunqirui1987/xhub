@@ -18,11 +18,18 @@ export interface UseCodeInterpreterReturn {
   toggle: () => void;
 }
 
+/** 管理代码解释器开关和当前结果；无参数，返回操作与状态，供调试对话调用。
+ * 损坏或非布尔缓存回退关闭；显式开关操作同步会话存储，不创建外部容器。 */
 export function useCodeInterpreter(): UseCodeInterpreterReturn {
   const [enabled, setEnabledState] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
-    const saved = sessionStorage.getItem("codeInterpreterEnabled");
-    return saved ? JSON.parse(saved) : false;
+    try {
+      const saved = sessionStorage.getItem("codeInterpreterEnabled");
+      const parsed: unknown = saved ? JSON.parse(saved) : false;
+      return typeof parsed === "boolean" ? parsed : false;
+    } catch {
+      return false;
+    }
   });
 
   const [result, setResult] = useState<CodeInterpreterResult | null>(null);

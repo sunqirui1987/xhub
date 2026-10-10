@@ -25,6 +25,9 @@ func TestDecodeAndAggregateGuardrailEvents(t *testing.T) {
 	if len(aggs) != 1 || aggs[0].Total != 4 || aggs[0].Blocked != 1 || aggs[0].Flagged != 2 || aggs[0].Passed != 1 {
 		t.Fatalf("聚合错误: %#v", aggs)
 	}
+	if findings[0].Reason != "matched" || findings[0].Name != "secrets" || findings[0].Provider != "xhub" || findings[0].Mode != "pre_call" {
+		t.Fatalf("关键护栏信息未从真实事件解出: %#v", findings[0])
+	}
 	row := guardrailOverviewRow(aggs[0])
 	if row["requestsEvaluated"] != 4 || row["failRate"] != float64(75) || row["avgLatency"].(float64) <= 0 {
 		t.Fatalf("总览不是非空真实统计: %#v", row)

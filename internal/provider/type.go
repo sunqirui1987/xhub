@@ -97,6 +97,8 @@ type Transport struct {
 // Known=false 表示上下文不完整；PricingBlocked 保留无法自动计价的明确原因。
 // 请求时长不代表实际生成量，实际用量必须从成功结果提取。
 type TaskContext struct {
+	// RequestID 关联创建日志；随任务钉保存，不包含正文或凭据。
+	RequestID      string    `json:"request_id,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 	Model          string    `json:"model"`
 	Resolution     string    `json:"resolution"`

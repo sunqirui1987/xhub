@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CompareUI from "./CompareUI";
@@ -72,6 +72,10 @@ vi.mock("../chat_ui/ChatImageUtils", () => ({
 vi.mock("./components/ComparisonPanel", () => ({
   ComparisonPanel: ({ comparison, onRemove }: { comparison: any; onRemove: () => void }) => (
     <div data-testid={`comparison-panel-${comparison.id}`}>
+      {comparison.failure && <span role="alert">{comparison.failure.title}</span>}
+      <span>{comparison.messages.map((m: any) => m.content).join("|")}</span>
+
+      <span data-testid={`endpoint-${comparison.id}`}>{comparison.endpoint}</span>
       <button data-testid={`remove-${comparison.id}`} onClick={onRemove}>
         Remove
       </button>
@@ -115,6 +119,7 @@ beforeEach(() => {
   global.URL.revokeObjectURL = vi.fn();
   capturedOnImageUpload = null;
   vi.clearAllMocks();
+  vi.mocked(makeOpenAIChatCompletionRequest).mockResolvedValue(undefined);
 });
 
 describe("CompareUI", () => {
@@ -177,4 +182,54 @@ describe("CompareUI", () => {
       expect(makeOpenAIChatCompletionRequest).toHaveBeenCalled();
     });
   });
+});
+
+/** 前置独立请求回调；验证失败卡回滚、成功卡保留结果及公共草稿；自动卸载，无后台写入。 */
+it("失败卡片独立保留诊断和公共草稿", async () => {
+  vi.mocked(makeOpenAIChatCompletionRequest).mockImplementation(async (_history, update, model) => {
+    if (model === "gpt-4") throw new Error("This model has no upstream API key configured.");
+    update("local-ok", model);
+  });
+  render(<CompareUI accessToken="test-token" disabledPersonalKeyCreation={false} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add Comparison" })).toBeEnabled());
+  fireEvent.change(screen.getByTestId("message-textarea"), { target: { value: "keep-draft" } });
+  fireEvent.click(screen.getByTestId("send-button"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Upstream key is missing");
+  expect(screen.getByText(/local-ok/)).toBeInTheDocument();
+  expect(screen.getByTestId("message-textarea")).toHaveValue("keep-draft");
+  await waitFor(() => expect(screen.getByTestId("send-button")).toBeEnabled());
+  const count = vi.mocked(makeOpenAIChatCompletionRequest).mock.calls.length;
+  vi.mocked(makeOpenAIChatCompletionRequest).mockImplementation(async (_history, update, model) => {
+    update("recovered", model);
+  });
+  fireEvent.click(screen.getByTestId("send-button"));
+  await waitFor(() => expect(screen.getByTestId("message-textarea")).toHaveValue(""));
+  expect(vi.mocked(makeOpenAIChatCompletionRequest).mock.calls.length).toBe(count + 1);
+  expect(vi.mocked(makeOpenAIChatCompletionRequest).mock.calls.at(-1)?.[2]).toBe("gpt-4");
+});
+/** 前置挂起请求并捕获回调；验证停止中止信号、阻止迟到内容及恢复入口；自动卸载，无外部数据。 */
+it("停止全部阻止迟到回调", async () => {
+  const callbacks: Array<() => void> = [];
+  const signals: AbortSignal[] = [];
+  vi.mocked(makeOpenAIChatCompletionRequest).mockImplementation(
+    (_history, update, _model, _key, _tags, signal) =>
+      new Promise((resolve) => {
+        signals.push(signal!);
+        callbacks.push(() => {
+          update("late-result");
+          resolve();
+        });
+      }),
+  );
+  render(<CompareUI accessToken="test-token" disabledPersonalKeyCreation={false} />);
+  await waitFor(() => expect(screen.getByTestId("endpoint-1")).toHaveTextContent("/v1/chat/completions"));
+  fireEvent.change(screen.getByTestId("message-textarea"), { target: { value: "stop-draft" } });
+  fireEvent.click(screen.getByTestId("send-button"));
+  await waitFor(() => expect(signals).toHaveLength(2));
+  fireEvent.click(screen.getByRole("button", { name: "停止全部" }));
+  expect(signals.every((signal) => signal.aborted)).toBe(true);
+  await act(async () => callbacks.forEach((callback) => callback()));
+  expect(screen.queryByText(/late-result/)).not.toBeInTheDocument();
+  expect(screen.getByTestId("send-button")).toBeEnabled();
+  expect(screen.getByTestId("comparison-panel-1")).not.toHaveTextContent("stop-draft");
 });

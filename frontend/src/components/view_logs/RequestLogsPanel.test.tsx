@@ -148,6 +148,14 @@ describe("RequestLogsPanel", () => {
     debounce.settled = null;
   });
 
+  /** 前置隔离查询缓存和错误面板；验证请求真实查询封装携带错误筛选和逐条模式，beforeEach 清理会话缓存。 */
+  it("queries only failed requests for the error panel", async () => {
+    renderWithProviders(<RequestLogsPanel {...defaultProps} errorsOnly />);
+    await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalled());
+    expect(lastCall()?.params).toMatchObject({ status_filter: "error", group_by_session: false });
+    expect(screen.getByRole("heading", { name: "Error Logs" })).toBeInTheDocument();
+  });
+
   describe("server-grouped session pagination (#38060)", () => {
     it("requests session-grouped pages of 25 rows by default without a cursor", async () => {
       renderPanel();

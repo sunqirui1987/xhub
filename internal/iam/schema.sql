@@ -142,6 +142,17 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys (user_id);
 CREATE INDEX IF NOT EXISTS api_keys_team ON api_keys (team_id);
 
+-- 个人密钥可独立于团队；保留已有外键以及团队/项目密钥的归属约束。
+-- 重复启动可安全应用；已有团队密钥的数据和删除级联规则保持不变。
+ALTER TABLE api_keys ALTER COLUMN team_id DROP NOT NULL;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'api_keys'::regclass
+                   AND conname = 'api_keys_team_binding') THEN
+        ALTER TABLE api_keys ADD CONSTRAINT api_keys_team_binding
+            CHECK (team_id IS NOT NULL OR (owner_type = 'personal' AND project_id IS NULL));
+    END IF;
+END $$;
+
 -- Ownership is snapshotted at write time and has no foreign keys, so later
 -- membership changes or deletions never re-attribute historical spend.
 CREATE TABLE IF NOT EXISTS usage_events (
@@ -157,6 +168,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     model             TEXT NOT NULL DEFAULT '',
     call_type         TEXT NOT NULL DEFAULT '',
     status            TEXT NOT NULL DEFAULT '',
+    http_status       INT NOT NULL DEFAULT 0,
     prompt_tokens     INT NOT NULL DEFAULT 0,
     completion_tokens INT NOT NULL DEFAULT 0,
     cost              NUMERIC NOT NULL DEFAULT 0,
@@ -189,6 +201,8 @@ ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cached_tokens INT;
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS cache_key TEXT NOT NULL DEFAULT '';
+-- http_status 是网关最终对调用方返回的状态码；0 仅表示历史行尚未记录该字段。
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS http_status INT NOT NULL DEFAULT 0;
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS guardrail TEXT NOT NULL DEFAULT '';
 -- price_snapshot holds the rates this call was actually billed at, as the JSON
 -- catalog.Snapshot writes. TEXT rather than JSONB, matching how guardrail keeps
@@ -248,6 +262,8 @@ CREATE TABLE IF NOT EXISTS request_logs (
     proxy_request TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS proxy_request TEXT NOT NULL DEFAULT '';
+-- 完整上游响应头及转换前统计，旧日志保持空值表示未捕获。
+ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS upstream_response TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS usage_daily (
     day               DATE NOT NULL,
@@ -279,3 +295,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail      JSONB NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS audit_logs_ts ON audit_logs (ts);
+
+-- 异步任务原日志结算标记，零费用完成同样只认领一次。
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS task_settled boolean NOT NULL DEFAULT false;

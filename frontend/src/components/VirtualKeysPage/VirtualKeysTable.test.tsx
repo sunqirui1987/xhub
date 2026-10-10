@@ -9,7 +9,7 @@ import { KeyResponse, Team } from "../key_team_helpers/key_list";
 import { useKeyInfo } from "@/app/(dashboard)/hooks/keys/useKeyInfo";
 import { KeysResponse, useKeys } from "@/app/(dashboard)/hooks/keys/useKeys";
 import useTeams from "@/app/(dashboard)/hooks/useTeams";
-import { regenerateKeyCall } from "../networking";
+import { keyUpdateCall, regenerateKeyCall } from "../networking";
 
 // Resolve debounced values synchronously so an applied filter lands in the useKeys query within the test tick.
 vi.mock("@tanstack/react-pacer/debouncer", async () => {
@@ -30,6 +30,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../networking", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../networking")>()),
   regenerateKeyCall: vi.fn(),
+  keyUpdateCall: vi.fn(),
 }));
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
@@ -208,11 +209,12 @@ it("shows the Budget Reset column by default", async () => {
   });
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("left-anchors the create-key CTA below the title, between the header and the table toolbar", () => {
   renderWithProviders(<VirtualKeysTable headerActions={<button>Create New Key</button>} />);
 
   const heading = screen.getByRole("heading", { name: "Virtual Keys" });
-  expect(screen.getByText("Every key that authenticates requests to the gateway.")).toBeInTheDocument();
+  expect(screen.getByText("Your personal keys for authenticating requests to the gateway.")).toBeInTheDocument();
   expect(document.querySelector(".lucide-key-round")).not.toBeNull();
   const ctas = screen.getAllByRole("button", { name: "Create New Key" });
   expect(ctas).toHaveLength(1);
@@ -316,14 +318,15 @@ it("collapses models beyond the visible limit into a '+N more' badge", () => {
   expect(screen.getByText("+2 more")).toBeInTheDocument();
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("should render the redesigned table headers", () => {
   renderWithProviders(<VirtualKeysTable />);
 
   expect(screen.getByText("Key")).toBeInTheDocument();
   expect(screen.getByText("Team")).toBeInTheDocument();
   expect(screen.getByText("Models")).toBeInTheDocument();
-  expect(screen.getByText("Spend", { selector: "[data-sort-field='spend']" })).toBeInTheDocument();
-  expect(screen.getByText("Budget", { selector: "[data-sort-field='max_budget']" })).toBeInTheDocument();
+  expect(screen.getByText(/^(Spend|消费)$/, { selector: "[data-sort-field='spend']" })).toBeInTheDocument();
+  expect(screen.getByText(/^(Budget|预算)$/, { selector: "[data-sort-field='max_budget']" })).toBeInTheDocument();
 });
 
 it("sorts by the backend key_alias field (not the column label) when the Key header is clicked", async () => {
@@ -337,11 +340,12 @@ it("sorts by the backend key_alias field (not the column label) when the Key hea
   });
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("sorts by the backend max_budget field when 'Budget descending' is chosen from the Spend / Budget menu", async () => {
   const user = userEvent.setup();
   renderWithProviders(<VirtualKeysTable />);
 
-  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), "Budget descending", "menuitem");
+  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), /(Budget|预算) descending/, "menuitem");
 
   await waitFor(() => {
     expect(mockUseKeys).toHaveBeenLastCalledWith(
@@ -352,23 +356,25 @@ it("sorts by the backend max_budget field when 'Budget descending' is chosen fro
   });
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("emphasizes the active field in the Spend / Budget header so the sorted column reads without opening the menu", async () => {
   const user = userEvent.setup();
   renderWithProviders(<VirtualKeysTable />);
 
-  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), "Budget descending", "menuitem");
+  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), /(Budget|预算) descending/, "menuitem");
 
   await waitFor(() => {
-    expect(screen.getByText("Budget", { selector: "[data-sort-field='max_budget']" })).toHaveClass("font-semibold");
+    expect(screen.getByText(/^(Budget|预算)$/, { selector: "[data-sort-field='max_budget']" })).toHaveClass("font-semibold");
   });
-  expect(screen.getByText("Spend", { selector: "[data-sort-field='spend']" })).toHaveClass("text-muted-foreground");
+  expect(screen.getByText(/^(Spend|消费)$/, { selector: "[data-sort-field='spend']" })).toHaveClass("text-muted-foreground");
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("sorts by spend ascending when 'Spend ascending' is chosen from the Spend / Budget menu", async () => {
   const user = userEvent.setup();
   renderWithProviders(<VirtualKeysTable />);
 
-  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), "Spend ascending", "menuitem");
+  await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), /(Spend|消费) ascending/, "menuitem");
 
   await waitFor(() => {
     expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ sortBy: "spend", sortOrder: "asc" }));
@@ -391,6 +397,7 @@ it("clicking the key cell deep-links via ?key=", async () => {
   expect(lastHistoryMode(onUrlUpdate)).toBe("push");
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("renders KeyInfoView when the URL has ?key= for a key on the current page, without refetching it", async () => {
   const onUrlUpdate = vi.fn<OnUrlUpdateFunction>();
   renderWithProviders(<VirtualKeysTable />, { searchParams: { key: mockKey.token }, onUrlUpdate });
@@ -399,7 +406,7 @@ it("renders KeyInfoView when the URL has ?key= for a key on the current page, wi
     expect(screen.getByText("Back to Keys")).toBeInTheDocument();
   });
   expect(screen.queryByTestId("pagination-range")).not.toBeInTheDocument();
-  expect(mockUseKeyInfo).toHaveBeenLastCalledWith(mockKey.token, { enabled: false });
+  expect(mockUseKeyInfo).toHaveBeenLastCalledWith(mockKey.token, { enabled: false, scope: "personal" });
 
   fireEvent.click(screen.getByText("Back to Keys"));
 
@@ -409,6 +416,25 @@ it("renders KeyInfoView when the URL has ?key= for a key on the current page, wi
   expect(screen.getByTestId("pagination-range")).toBeInTheDocument();
 });
 
+/** 验证编辑响应含遮罩前缀时详情导航保持稳定 ID；前置模拟有效个人密钥和真实编辑组件。
+ * 断言改名可见且不切换 URL，失败抛出；框架清理 DOM 和模拟，无持久数据。
+ */
+it("keeps the personal key detail id after an update returns a masked token", async () => {
+  const key = { ...mockKey, token: mockKey.token_id, api_key: mockKey.token_id };
+  mockUseKeys.mockReturnValue(keysResult([key]));
+  vi.mocked(keyUpdateCall).mockResolvedValue({ token_id: key.token_id, token: "sk-masked...", key_alias: "Updated Personal Key" });
+  const onUrlUpdate = vi.fn<OnUrlUpdateFunction>();
+  renderWithProviders(<VirtualKeysTable />, { searchParams: { key: key.token }, onUrlUpdate });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name: "Settings" }));
+  await user.click(screen.getByRole("button", { name: "Edit Settings" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Key Alias" }), { target: { value: "Updated Personal Key" } });
+  await user.click(screen.getByRole("button", { name: "Save Changes" }));
+  expect(await screen.findByRole("heading", { name: "Updated Personal Key" })).toBeInTheDocument();
+  expect(onUrlUpdate).not.toHaveBeenCalled();
+});
+
+/** 验证轮换缺省 token 时回退 token_id；前置真实详情组件和成功响应，关闭弹窗后替换导航；框架清理 DOM。 */
 it("repoints ?key= to the rotated hash once the regenerate dialog is dismissed", async () => {
   const user = userEvent.setup();
   vi.mocked(regenerateKeyCall).mockResolvedValue({
@@ -432,6 +458,7 @@ it("repoints ?key= to the rotated hash once the regenerate dialog is dismissed",
   expect(lastHistoryMode(onUrlUpdate)).toBe("replace");
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("fetches the key by id when the URL has ?key= for a key not in the loaded page", async () => {
   mockUseKeyInfo.mockReturnValue(
     keyInfoResult({ ...mockKey, token: "other-key-hash", key_alias: "Fetched Key Alias" }),
@@ -442,7 +469,7 @@ it("fetches the key by id when the URL has ?key= for a key not in the loaded pag
   await waitFor(() => {
     expect(screen.getByText("Back to Keys")).toBeInTheDocument();
   });
-  expect(mockUseKeyInfo).toHaveBeenLastCalledWith("other-key-hash", { enabled: true });
+  expect(mockUseKeyInfo).toHaveBeenLastCalledWith("other-key-hash", { enabled: true, scope: "personal" });
   expect(screen.getAllByText("Fetched Key Alias").length).toBeGreaterThan(0);
 });
 
@@ -579,6 +606,7 @@ it("should render table without crashing when models is null", async () => {
   });
 });
 
+/** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
 it("should display 'Unknown' for last_active when value is null", async () => {
   mockUseKeys.mockReturnValue(keysResult([{ ...mockKey, last_active: null }]));
 
@@ -590,52 +618,13 @@ it("should display 'Unknown' for last_active when value is null", async () => {
 });
 
 describe("server-side filtering – the LIT-4080 regression guard", () => {
-  it("threads an applied User ID filter into the useKeys query so any refetch keeps it", async () => {
-    renderWithProviders(<VirtualKeysTable />);
-
+  /** 验证个人列表始终声明本人范围；前置无筛选或带他人用户 URL，确认用户筛选控件消失且查询不会改归属；无持久数据。 */
+  it("always requests personal scope and ignores another user in the URL", () => {
+    renderWithProviders(<VirtualKeysTable />, { searchParams: "?filter_user=other" });
+    expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ scope: "personal" }));
+    expect(mockUseKeys.mock.calls.at(-1)?.[2]?.userID).toBeUndefined();
     openFilters();
-
-    const userIdInput = await screen.findByPlaceholderText(/Enter User ID/);
-    fireEvent.change(userIdInput, { target: { value: "user-42" } });
-    fireEvent.click(screen.getByTestId("filter-drawer-apply"));
-
-    await waitFor(() => {
-      expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ userID: "user-42" }));
-    });
-  });
-
-  it("does not send filter params to useKeys when no filter is active", () => {
-    renderWithProviders(<VirtualKeysTable />);
-
-    const lastCall = mockUseKeys.mock.calls[mockUseKeys.mock.calls.length - 1];
-    expect(lastCall[2] ?? {}).toMatchObject({ userID: undefined, teamID: undefined, keyHash: undefined });
-  });
-
-  it("drops the filter from the useKeys query when it is cleared", async () => {
-    const onUrlUpdate = vi.fn<OnUrlUpdateFunction>();
-    renderWithProviders(<VirtualKeysTable />, { onUrlUpdate });
-
-    openFilters();
-    const userIdInput = await screen.findByPlaceholderText(/Enter User ID/);
-    fireEvent.change(userIdInput, { target: { value: "user-42" } });
-    fireEvent.click(screen.getByTestId("filter-drawer-apply"));
-
-    await waitFor(() => {
-      expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ userID: "user-42" }));
-    });
-    // Let the filter reach the URL before clearing it: NuqsTestingAdapter runs
-    // resetUrlUpdateQueueOnMount on every render, so a still-queued write can be
-    // aborted by the re-render its own predecessor triggers.
-    await waitFor(() => {
-      expect(lastSearchParam(onUrlUpdate, "filter_user")).toBe("user-42");
-    });
-
-    fireEvent.click(screen.getByTestId("datatable-clear-filters"));
-
-    await waitFor(() => {
-      const lastCall = mockUseKeys.mock.calls[mockUseKeys.mock.calls.length - 1];
-      expect((lastCall[2] ?? {}).userID).toBeUndefined();
-    });
+    expect(screen.queryByPlaceholderText(/Enter User ID/)).not.toBeInTheDocument();
   });
 
   it("sends the search box as the combined alias-or-ID search rather than the key-alias filter", async () => {
@@ -777,6 +766,7 @@ describe("table state lives in the URL so it survives leaving and returning to t
     expect(screen.getByPlaceholderText(/Search by key alias/)).toHaveValue("prod");
   });
 
+  /** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
   it("restores the drawer filters from the URL on mount", async () => {
     renderWithProviders(<VirtualKeysTable />, { searchParams: { filter_team: "team-1", filter_user: "user-42" } });
 
@@ -784,7 +774,7 @@ describe("table state lives in the URL so it survives leaving and returning to t
       expect(mockUseKeys).toHaveBeenLastCalledWith(
         1,
         50,
-        expect.objectContaining({ teamID: "team-1", userID: "user-42" }),
+        expect.objectContaining({ teamID: "team-1", scope: "personal" }),
       );
     });
     expect(screen.getByTestId("filter-chip-team_id")).toHaveTextContent("Test Team");
@@ -813,24 +803,25 @@ describe("table state lives in the URL so it survives leaving and returning to t
     expect(lastSearchParam(onUrlUpdate, "sort_order")).toBe("asc");
   });
 
+  /** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
   it("writes an applied drawer filter to the URL and clears it again", async () => {
     const onUrlUpdate = vi.fn<OnUrlUpdateFunction>();
     renderWithProviders(<VirtualKeysTable />, { onUrlUpdate });
 
     openFilters();
-    fireEvent.change(await screen.findByPlaceholderText(/Enter User ID/), { target: { value: "user-42" } });
+    fireEvent.change(await screen.findByPlaceholderText(/Enter Key ID/), { target: { value: "user-42" } });
     fireEvent.click(screen.getByTestId("filter-drawer-apply"));
 
     await waitFor(() => {
-      expect(lastSearchParam(onUrlUpdate, "filter_user")).toBe("user-42");
+      expect(lastSearchParam(onUrlUpdate, "filter_key_id")).toBe("user-42");
     });
 
     fireEvent.click(screen.getByTestId("datatable-clear-filters"));
 
     await waitFor(() => {
-      expect(lastSearchParam(onUrlUpdate, "filter_user")).toBeNull();
+      expect(lastSearchParam(onUrlUpdate, "filter_key_id")).toBeNull();
     });
-    expect(screen.queryByTestId("filter-chip-user_id")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("filter-chip-key_hash")).not.toBeInTheDocument();
   });
 
   it("returns to page 1 when the search term changes", async () => {
@@ -882,11 +873,12 @@ describe("table state lives in the URL so it survives leaving and returning to t
     });
   });
 
+  /** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
   it("trims whitespace off a filter that arrived from the URL", async () => {
-    renderWithProviders(<VirtualKeysTable />, { searchParams: { filter_user: "  user-42  " } });
+    renderWithProviders(<VirtualKeysTable />, { searchParams: { filter_key_id: "  user-42  " } });
 
     await waitFor(() => {
-      expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ userID: "user-42" }));
+      expect(mockUseKeys).toHaveBeenLastCalledWith(1, 50, expect.objectContaining({ keyHash: "user-42" }));
     });
   });
 
@@ -911,12 +903,13 @@ describe("table state lives in the URL so it survives leaving and returning to t
     });
   });
 
+  /** 验证个人密钥页面查询和交互；前置模拟身份与接口，断言范围、URL 或界面结果；框架清理 DOM，无持久数据。 */
   it("clears sort_by from the URL when the Spend / Budget sort is reset", async () => {
     const user = userEvent.setup();
     const onUrlUpdate = vi.fn<OnUrlUpdateFunction>();
     renderWithProviders(<VirtualKeysTable />, { onUrlUpdate });
 
-    await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), "Spend ascending", "menuitem");
+    await chooseSelectOption(user, screen.getByTestId("sort-trigger-spend"), /(Spend|消费) ascending/, "menuitem");
     await waitFor(() => {
       expect(lastSearchParam(onUrlUpdate, "sort_by")).toBe("spend");
     });

@@ -75,6 +75,24 @@ describe("useLogFilterLogic", () => {
     return renderHook(() => useLogFilterLogic({ ...defaultProps, ...overrides }), { wrapper });
   }
 
+  /** 前置错误视图和冲突的成功筛选；验证强制 error、关闭会话合并，查询客户端由 beforeEach 隔离。 */
+  it("forces error requests and disables session grouping for error logs", async () => {
+    const { result } = renderFilterHook({ errorsOnly: true, columnFilters: [{ id: LOG_FILTER_IDS.STATUS, value: "success" }] });
+    await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalled());
+    expect(lastCallParams()?.params).toMatchObject({ status_filter: "error", group_by_session: false });
+    expect(result.current.usesSessionCursor).toBe(false);
+  });
+
+  /** 前置同一查询客户端；验证切换 tab 后重新查询而不复用全部日志缓存，客户端自动隔离清理。 */
+  it("isolates error log query cache from all logs", async () => {
+    const { rerender } = renderHook((errorsOnly: boolean) => useLogFilterLogic({ ...defaultProps, errorsOnly }), { wrapper, initialProps: false });
+    await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalledTimes(1));
+    expect(lastCallParams()?.params?.status_filter).toBe("non_error");
+    rerender(true);
+    await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalledTimes(2));
+    expect(lastCallParams()?.params?.status_filter).toBe("error");
+  });
+
   describe("column filters map onto backend query params", () => {
     const cases: ReadonlyArray<{ id: string; value: string; param: string }> = [
       { id: LOG_FILTER_IDS.KEY_HASH, value: "sk-hash-1", param: "api_key" },
@@ -82,7 +100,7 @@ describe("useLogFilterLogic", () => {
       { id: LOG_FILTER_IDS.REQUEST_ID, value: "req-1", param: "request_id" },
       { id: LOG_FILTER_IDS.SESSION_ID, value: "sess-1", param: "session_id" },
       { id: LOG_FILTER_IDS.END_USER, value: "end-user-1", param: "end_user" },
-      { id: LOG_FILTER_IDS.STATUS, value: "failure", param: "status_filter" },
+      { id: LOG_FILTER_IDS.STATUS, value: "success", param: "status_filter" },
       { id: LOG_FILTER_IDS.CACHE_STATUS, value: "hit", param: "cache_hit_filter" },
       { id: LOG_FILTER_IDS.CACHE_STATUS, value: "miss", param: "cache_hit_filter" },
       { id: LOG_FILTER_IDS.MODEL_ID, value: "model-uuid-1", param: "model_id" },
@@ -115,6 +133,13 @@ describe("useLogFilterLogic", () => {
       expect(params?.api_key).toBeUndefined();
       expect(params?.error_code).toBeUndefined();
     });
+  });
+
+  /** 前置普通日志和旧版残留失败筛选；验证始终发送非失败条件，避免用户切换筛选后混入错误，查询缓存自动清理。 */
+  it.each([undefined, "failure", "error", "failed", "all", "unknown"])("excludes failures from ordinary logs with status %s", async (status) => {
+    renderFilterHook({ columnFilters: status ? [{ id: LOG_FILTER_IDS.STATUS, value: status }] : [] });
+    await waitFor(() => expect(uiSpendLogsCall).toHaveBeenCalled());
+    expect(lastCallParams()?.params?.status_filter).toBe("non_error");
   });
 
   describe("paging, dates, and sort", () => {

@@ -125,14 +125,18 @@ describe("UserInfoView add-to-team form", () => {
     await user.click(await screen.findByTitle(alias));
   };
 
-  // handleUserUpdate refreshes the local copy field by field rather than refetching,
-  // so a field it forgets reads back stale the next time the form is opened and the
-  // operator sees the save they just made apparently undone.
-  it("does not offer an editor for the account", async () => {
+  /** 验证管理员详情编辑及保存后刷新；前置已加载账户，断言真实表单提交参数和刷新后的名称，卸载清理。 */
+  it("edits the account and reloads saved data", async () => {
     const user = setup();
     render(<UserInfoView {...defaultProps} userRole="Admin" initialTab={1} />);
     await user.click(await screen.findByRole("tab", { name: "Details" }));
-    expect(screen.queryByRole("button", { name: /edit settings/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit user" }));
+    await user.clear(screen.getByLabelText("User Alias"));
+    await user.type(screen.getByLabelText("User Alias"), "Updated Alias");
+    mockUserGetInfoV2.mockResolvedValue({ ...MOCK_USER_DATA, user_alias: "Updated Alias" });
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(mockUserUpdateUserCall).toHaveBeenCalledWith("test-token", expect.objectContaining({ user_id: "user-123", user_alias: "Updated Alias" }), null));
+    expect(await screen.findByText("Updated Alias")).toBeInTheDocument();
   });
 
   it("offers only the teams the user is not already a member of", async () => {

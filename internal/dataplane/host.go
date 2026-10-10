@@ -394,6 +394,13 @@ type RoutePlan struct {
 // CacheKey 是响应缓存键。CacheHit 为 true 时扣费金额为 0。
 // SessionID 与 RoutePlan.SessionID 相同。部署身份由 RecordSpend 的 depID 参数传递。
 type CallNote struct {
+	// Upstream 保存转换前的响应头与原始统计，由转发观察器填充。
+	Upstream *UpstreamDiagnostics
+	// TaskRequestID、TaskStatus 关联原始异步请求及生命周期；TaskInitial 区分创建，TaskSettlement 表示成功实测结算。
+	TaskRequestID  string
+	TaskStatus     string
+	TaskInitial    bool
+	TaskSettlement bool
 	// SettlementID overrides persisted RequestID, never the metadata callID.
 	SettlementID string
 	// SkipRouteUsage excludes async task queries from synchronous route TPM.

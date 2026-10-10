@@ -137,23 +137,12 @@ export async function ensureFixtureTeam(page: Page) {
   }
 }
 
+/** 验证个人密钥表单无需团队；参数 page 为已打开弹窗的浏览器，返回异步完成状态。
+ * 兼容现有 E2E 调用名称；等待名称输入可见并确认没有团队选择器，无创建或清理副作用。
+ */
 export async function chooseKeyTeam(page: Page) {
-  // The selector mounts only after both membership and team queries resolve.
-  // A one-shot count() can see zero controls and submit an empty team_id.
-  const identity = await page.request.get(GATEWAY + "/auth/me", {
-    headers: { Authorization: "Bearer " + await sessionBearer(page) },
-  });
-  expect(identity.ok(), "read team memberships before choosing a key team").toBeTruthy();
-  const { teams } = await identity.json();
-  expect(Array.isArray(teams), "session membership list").toBeTruthy();
-  expect(teams.length, "key fixture has at least one team membership").toBeGreaterThan(0);
-  const control = page.getByRole("dialog").getByRole("combobox", { name: t("Team"), exact: true });
-  if (teams.length > 1) {
-    await expect(control).toBeVisible();
-    await control.click();
-    await page.getByRole("option", { name: /e2e-fixture-team/ }).click();
-    await expect(control).toContainText("e2e-fixture-team");
-  }
+  await expect(page.getByRole("dialog").getByLabel(t("Key Name"))).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("combobox", { name: t("Team"), exact: true })).toHaveCount(0);
 }
 
 export async function chooseOrganization(page: Page) {

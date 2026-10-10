@@ -214,7 +214,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	// 权重仅取自解析后的模板，旧部署权重不会参与任何策略。
 	models := cfg.ModelList
-	models, disabled := dropDisabled(models)
+	models, _ = dropDisabled(models)
 	// 实际请求与预览使用同一兼容性判断，策略只处理已经兼容的候选。
 	if callerProtocol(op) != "" {
 		models, _ = provider.Candidates(models, provider.EndpointForOp(op), &dialogue)
@@ -223,6 +223,9 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	state := h.RouteState()
 	state.Allocations = routeCfg.Policy.Shares()
+	// 诊断保留匹配、兼容与可用三个阶段；只读计算不推进调度状态，不改变既有回退顺序。
+	diagnosis := diagnoseRoute(cfg.ModelList, models, alias, provider.EndpointForOp(op), routeCfg, state, &dialogue, callerProtocol(op) != "")
+	diagnosis.log(r.URL.Path, callID, alias, routeCfg)
 	pool := routeCfg.Schedule(models, alias, state, plan.Pinned)
 	if plan.Required && (state.Cooldown[plan.Pinned] || len(pool) == 0 || router.CooldownID(pool[0]) != plan.Pinned) {
 		httpx.WriteTypedError(w, r.URL.Path, 409, "continuation_unavailable", "original deployment is unavailable")
@@ -235,20 +238,27 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	fallbacks := newFallbackQueue(baseRouteCfg, alias, plan.Required || disableFallbacks)
 	if len(pool) == 0 {
 		pool, routeCfg = fallbacks.next("general", models, state)
+		for target := range fallbacks.seen {
+			if target == alias {
+				continue
+			}
+			settings := baseRouteCfg.ForModel(target)
+			if settings.Err == nil {
+				targetState := state
+				targetState.Allocations = settings.Policy.Shares()
+				diagnoseRoute(cfg.ModelList, models, target, provider.EndpointForOp(op), settings, targetState, &dialogue, callerProtocol(op) != "").log(r.URL.Path, callID, target, settings)
+			}
+		}
 	}
 	if routeCfg.Err != nil {
 		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "fallback route unavailable")
 		return
 	}
-	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t", r.URL.Path, alias, len(pool), stream)
+	logx.Debug("process path=%s step=route model=%s deployments=%d stream=%t call_id=%q endpoint=%q resolved_model=%q fallback_visited=%d", r.URL.Path, alias, len(pool), stream, callID, provider.EndpointForOp(op), fallbacks.poolAlias, len(fallbacks.seen)-1)
 	if len(pool) == 0 {
-		if disabled > 0 {
-			logx.Error("process path=%s step=route model=%s reason=disabled", r.URL.Path, alias)
-			httpx.WriteTypedError(w, r.URL.Path, 400, "model_disabled", "model is disabled")
-			return
-		}
-		logx.Error("model %s %s model not found: %s", r.Method, r.URL.Path, alias)
-		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "model not found: "+alias)
+		status, kind, message := diagnosis.failure(alias)
+		logx.Error("process path=%s step=route call_id=%q model=%q reason=%q message=%q fallback_visited=%d", r.URL.Path, callID, alias, kind, message, len(fallbacks.seen)-1)
+		httpx.WriteTypedError(w, r.URL.Path, status, kind, message)
 		return
 	}
 	// Retries already clamps to at least one, so a template that leaves the key
@@ -256,6 +266,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 
 	var lastErr error
 	var lastStatus int
+	var lastResponse []byte
 	var lastProvider string
 	triedHTTP := false
 	missingCredential := false
@@ -375,8 +386,11 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 					logx.Error("upstream dial path=%s provider=%s model=%s base_host=%s err=%s", r.URL.Path, supplier, realModel, baseHost(apiBase), safeErr(err))
 					continue
 				}
+				// 先观察原始响应，再执行错误重试和协议转换。
+				h.AnnotateCall(callID, CallNote{Upstream: observeUpstream(resp)})
 				if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-					_, _ = io.ReadAll(resp.Body)
+					// 重试前保存完整错误正文；若所有候选都失败，最终日志必须能还原最后一次上游响应。
+					lastResponse, _ = io.ReadAll(resp.Body)
 					resp.Body.Close()
 					cancelAttempt()
 					h.DecBusy(did)
@@ -526,6 +540,7 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 		switch {
 		case missingCredential:
 			logx.Error("dataplane path=%s status=401 code=authentication_error provider=%s", r.URL.Path, lastProvider)
+			h.RememberExchange(callID, r, raw, []byte("This model has no upstream API key configured."))
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusUnauthorized, "")
 			httpx.WriteTypedError(w, r.URL.Path, 401, "authentication_error", "This model has no upstream API key configured.")
 		case lastErr != nil:
@@ -534,13 +549,15 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 			// encode error is the only thing that says what to fix.
 			logx.Error("dataplane path=%s status=400 code=provider_not_implemented provider=%s err=%s",
 				r.URL.Path, lastProvider, safeErr(lastErr))
-			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			detail := safeErr(lastErr)
-
+			h.RememberExchange(callID, r, raw, []byte("The request could not be encoded for "+lastProvider+": "+detail))
+			// RecordSpend 必须在写响应前执行，确保失败行携带最终 HTTP 状态和错误正文。
+			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			httpx.WriteTypedError(w, r.URL.Path, 400, "execution_error",
 				"The request could not be encoded for "+lastProvider+": "+detail)
 		default:
 			logx.Error("dataplane path=%s status=400 code=provider_not_implemented", r.URL.Path)
+			h.RememberExchange(callID, r, raw, []byte("execution_error"))
 			h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadRequest, "")
 			httpx.WriteTypedError(w, r.URL.Path, 400, "execution_error", "execution_error")
 		}
@@ -548,17 +565,24 @@ func Serve(h Adapted, w http.ResponseWriter, r *http.Request, op string) {
 	}
 	if lastStatus > 0 {
 		logx.Error("dataplane path=%s status=502 code=upstream_error detail=upstream %d", r.URL.Path, lastStatus)
+		if len(lastResponse) == 0 {
+			lastResponse = []byte("upstream " + strconv.Itoa(lastStatus))
+		}
+		h.RememberExchange(callID, r, raw, lastResponse)
 		h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
 		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "upstream "+strconv.Itoa(lastStatus))
 		return
 	}
 	if lastErr != nil {
-		logx.Error("dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, safeErr(lastErr))
+		detail := safeErr(lastErr)
+		logx.Error("dataplane path=%s status=502 code=upstream_error detail=%s", r.URL.Path, detail)
+		h.RememberExchange(callID, r, raw, []byte(detail))
 		h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
-		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", safeErr(lastErr))
+		httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", detail)
 		return
 	}
 	logx.Error("dataplane path=%s status=502 code=upstream_error detail=all deployments failed", r.URL.Path)
+	h.RememberExchange(callID, r, raw, []byte("all deployments failed"))
 	h.RecordSpend(w, p, callID, alias, op, nil, start, false, http.StatusBadGateway, "")
 	httpx.WriteTypedError(w, r.URL.Path, 502, "upstream_error", "all deployments failed")
 }

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 	"github.com/sunqirui1987/xhub/internal/authz"
 	"github.com/sunqirui1987/xhub/internal/cache"
 	"github.com/sunqirui1987/xhub/internal/config"
@@ -16,7 +17,6 @@ import (
 	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/internal/plugin"
 	"github.com/sunqirui1987/xhub/internal/store"
-	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
 )
 
 // TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks is the data-plane
@@ -151,7 +151,7 @@ func TestChatStopsBeforeUpstreamWhenADefaultGuardrailBlocks(t *testing.T) {
 	for _, event := range events {
 		switch event.Status {
 		case "error":
-			if !bytes.Contains([]byte(event.Guardrail), []byte(`"guardrail_name":"no-bombs"`)) || !bytes.Contains([]byte(event.Guardrail), []byte(`"guardrail_status":"blocked"`)) {
+			if !bytes.Contains([]byte(event.Guardrail), []byte(`"guardrail_name":"no-bombs"`)) || !bytes.Contains([]byte(event.Guardrail), []byte(`"guardrail_status":"blocked"`)) || !bytes.Contains([]byte(event.Guardrail), []byte(`"reason":"Guardrail blocked the request: no-bombs"`)) {
 				t.Fatalf("blocked log: %s", event.Guardrail)
 			}
 			sawBlock = true

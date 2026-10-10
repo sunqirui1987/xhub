@@ -79,6 +79,9 @@ func TestAcceptanceGuardrailMonitor(t *testing.T) {
 		if logRows[0]["input_snippet"] != nil || logRows[0]["output_snippet"] != nil {
 			t.Fatalf("监控日志泄漏了请求正文: %#v", logRows[0])
 		}
+		if stringField(logRows[0], "guardrail_name") == "" || stringField(logRows[0], "guardrail_mode") != "pre_call" {
+			t.Fatalf("监控日志缺少护栏名称或执行阶段: %#v", logRows[0])
+		}
 	}
 	protectedPaths := []string{
 		"/guardrails/usage/overview",

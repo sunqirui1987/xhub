@@ -11,6 +11,7 @@ import {
   teamListCall,
   teamMemberAddCall,
   teamMemberDeleteCall,
+  teamMemberUpdateCall,
   organizationListCall,
   Member,
 } from "@/components/networking";
@@ -30,7 +31,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { teamDetailHref } from "@/utils/entityLinks";
 import { BadgeLink } from "@/components/shared/BadgeLink";
 import { formatNumberWithCommas, copyToClipboard as utilCopyToClipboard } from "@/utils/dataUtils";
-import { ArrowLeft, CheckIcon, CopyIcon, KeyRound, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckIcon, CopyIcon, KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
+import UserAccountEditor from "./UserAccountEditor";
 import SetPasswordModal from "@/components/SetPasswordModal";
 import { toast } from "@/lib/toast";
 import { getBudgetDurationLabel } from "@/components/common_components/budget_duration_dropdown";
@@ -161,6 +163,9 @@ const memberRoleOptions = () => [
   { value: "admin", label: t("Team admin"), hint: t("Can create team keys, add members, and manage settings") },
 ];
 
+/** 用户详情与管理员编辑入口；参数包含目标账户、当前会话、关闭回调和初始编辑模式。返回详情及团队操作。
+ * 保存后重新读取后台状态；普通用户仅查看，管理员可编辑账户、增删团队及调整团队角色，失败保留操作上下文。
+ */
 export default function UserInfoView({
   userId,
   onClose,
@@ -168,7 +173,10 @@ export default function UserInfoView({
   userRole,
   onDelete,
   initialTab = 0,
+  startInEditMode = false,
 }: UserInfoViewProps) {
+  const [isEditing, setIsEditing] = useState(startInEditMode);
+  const [updatingTeam, setUpdatingTeam] = useState<string | null>(null);
   const [userData, setUserData] = useState<UserInfoV2Response | null>(null);
   const [teamDetails, setTeamDetails] = useState<TeamDisplayInfo[]>([]);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -208,6 +216,30 @@ export default function UserInfoView({
   }, [accessToken, userId, userRole]);
 
   const isProxyAdmin = userRole === "proxy_admin" || userRole === "Admin";
+
+  /** 重新加载账户及团队；无需参数，返回完成状态，供账户/团队保存调用，失败向调用方传播。 */
+  const refreshUser = async () => {
+    if (!accessToken) return;
+    const data = unwrapUserInfo(await userGetInfoV2(accessToken, userId));
+    const teams = await loadUserTeams(accessToken, userId, data?.teams);
+    setUserData(data);
+    setTeamDetails(teams);
+  };
+
+  /** 接收目标团队和新角色，更新真实成员关系并刷新；返回完成状态，失败提示且保留旧角色，期间禁止重复提交。 */
+  const updateTeamRole = async (team: TeamDisplayInfo, role: string) => {
+    if (!accessToken || updatingTeam) return;
+    setUpdatingTeam(team.team_id);
+    try {
+      await teamMemberUpdateCall(accessToken, team.team_id, { user_id: userId, role });
+      await refreshUser();
+      toast.success(t("User updated successfully"));
+    } catch (error) {
+      toast.fromError(error);
+    } finally {
+      setUpdatingTeam(null);
+    }
+  };
 
   const fetchAllTeams = async () => {
     if (!accessToken) return;
@@ -378,6 +410,9 @@ export default function UserInfoView({
           </div>
         </div>
         <div className="flex items-center space-x-2">
+          {isProxyAdmin && <Button variant="secondary" onClick={() => { setActiveTab("details"); setIsEditing(true); }}>
+            <Pencil />{t("pages.users.editUser")}
+          </Button>}
           <Button variant="secondary" onClick={() => setIsSetPasswordOpen(true)}>
             <KeyRound />
             {t("pages.users.resetPassword")}
@@ -481,7 +516,13 @@ export default function UserInfoView({
                               </BadgeLink>
                             </TableCell>
                             <TableCell>{team.organization_alias || "—"}</TableCell>
-                            <TableCell>{membershipRoleLabel(team.user_role)}</TableCell>
+                            <TableCell>{isProxyAdmin ? (
+                              <Select items={memberRoleOptions()} value={isTeamAdminMembership(team.user_role) ? "admin" : "user"}
+                                disabled={updatingTeam !== null} onValueChange={(value) => value && void updateTeamRole(team, value)}>
+                                <SelectTrigger aria-label={`${t("pages.users.memberRole")} — ${team.team_alias || team.team_id}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>{memberRoleOptions().map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                              </Select>
+                            ) : membershipRoleLabel(team.user_role)}</TableCell>
                             {isProxyAdmin && (
                               <TableCell className="text-right">
                                 <Button
@@ -536,7 +577,8 @@ export default function UserInfoView({
               <h3 className="text-lg font-medium">{t("pages.users.userSettings")}</h3>
             </div>
 
-            <div className="space-y-4">
+            {isEditing && isProxyAdmin && accessToken ? <UserAccountEditor key={userId} user={userData} accessToken={accessToken}
+              onCancel={() => setIsEditing(false)} onSaved={async () => { await refreshUser(); setIsEditing(false); }} /> : <div className="space-y-4">
                 <div>
                   <p className="font-medium">{t("pages.users.userId")}</p>
                   <div className="flex items-center cursor-pointer">
@@ -616,7 +658,7 @@ export default function UserInfoView({
                     {JSON.stringify(userData.metadata || {}, null, 2)}
                   </pre>
                 </div>
-            </div>
+            </div>}
           </Card>
         </TabsContent>
       </Tabs>

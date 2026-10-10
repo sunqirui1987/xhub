@@ -688,6 +688,82 @@ func TestNormalizeUsageOfNothingIsZero(t *testing.T) {
 	}
 }
 
+// TestImageTokenModalitiesUseTheirCatalogVariants 验证图片模型按文本输入、图片输入和图片输出三个 token 桶计费。
+// 参数 t：测试上下文。前置条件为内存费率与本地 usage；返回无。
+// 验证结果：每个正数量只命中同名变体且总费用准确；不创建外部数据，无需清理。
+func TestImageTokenModalitiesUseTheirCatalogVariants(t *testing.T) {
+	rates := []Rate{
+		{Measure: "token", Side: "input", Variant: "text", Window: "all", SourceKey: "t_input", USD: 0.000005},
+		{Measure: "token", Side: "input", Variant: "image", Window: "all", SourceKey: "i_input", USD: 0.000008},
+		{Measure: "token", Side: "output", Variant: "image", Window: "all", SourceKey: "i_output", USD: 0.00003},
+	}
+	u := NormalizeUsage(map[string]any{
+		"input_tokens": 11, "output_tokens": 2, "output_variant": "image",
+		"input_tokens_details": map[string]any{"text_tokens": 3, "image_tokens": 8},
+	})
+	charge, ok := CostFromRates(rates, u, offpeakInstant())
+	want := 3*0.000005 + 8*0.000008 + 2*0.00003
+	if !ok {
+		t.Fatal("图片多模态 token 未计价")
+	}
+	assertClose(t, "图片多模态 token", charge.Total, want)
+	if len(charge.Applied) != 3 {
+		t.Fatalf("应用费率数=%d，期望 3：%+v", len(charge.Applied), charge.Applied)
+	}
+}
+
+// TestGPTImage2RealUsageGetsCatalogSnapshot 验证真实 gpt-image-2 用量样例可由内置目录完整计价。
+// 参数 t：测试上下文。前置条件为随程序嵌入的价格目录；返回无。
+// 验证结果：8 个文本输入与 7024 个图片输出得到 0.21076 美元和非空快照；不创建外部数据。
+func TestGPTImage2RealUsageGetsCatalogSnapshot(t *testing.T) {
+	u := NormalizeUsage(map[string]any{
+		"input_tokens": 8, "output_tokens": 7024, "images": 1,
+		"image_variant": "1024x1024", "output_variant": "image",
+		"input_tokens_details": map[string]any{"text_tokens": 8, "image_tokens": 0},
+	})
+	charge, ok := CostAt("openai/gpt-image-2", u, offpeakInstant())
+	if !ok {
+		t.Fatal("gpt-image-2 真实用量未命中目录价格")
+	}
+	assertClose(t, "gpt-image-2 真实样例", charge.Total, 0.21076)
+	if snapshot := SnapshotUsage(charge, u, ok); snapshot == "" {
+		t.Fatal("gpt-image-2 计价后未生成价格快照")
+	}
+}
+
+// TestImageUsageWithoutModalDetailsKeepsDocumentedFallback 验证缺少输入模态明细时沿用目录的可审计最低价回退。
+// 参数 t：测试上下文。前置条件为仅含变体的图片 token 费率；返回无。
+// 验证结果：输入按最低变体计费并在快照项标记 fallback；无外部资源，无需清理。
+func TestImageUsageWithoutModalDetailsKeepsDocumentedFallback(t *testing.T) {
+	rates := []Rate{
+		{Measure: "token", Side: "input", Variant: "text", Window: "all", USD: 0.000005},
+		{Measure: "token", Side: "input", Variant: "image", Window: "all", USD: 0.000008},
+		{Measure: "token", Side: "output", Variant: "image", Window: "all", USD: 0.00003},
+	}
+	u := NormalizeUsage(map[string]any{"input_tokens": 8, "output_tokens": 2, "output_variant": "image"})
+	charge, ok := CostFromRates(rates, u, offpeakInstant())
+	if !ok || len(charge.Applied) != 2 || !charge.Applied[0].Fallback {
+		t.Fatalf("缺少模态明细时回退结果错误：charge=%+v ok=%v", charge, ok)
+	}
+	assertClose(t, "缺少图片输入明细", charge.Total, 8*0.000005+2*0.00003)
+}
+
+// TestContradictoryImageTokenDetailsBlockPricing 验证分桶总数超过输入总数时不会产生猜测账单。
+// 参数 t：测试上下文。前置条件为相互矛盾的本地 usage；返回无。
+// 验证结果：归一化记录阻断原因且计价失败；无外部资源，无需清理。
+func TestContradictoryImageTokenDetailsBlockPricing(t *testing.T) {
+	u := NormalizeUsage(map[string]any{
+		"input_tokens": 8, "output_tokens": 2, "output_variant": "image",
+		"input_tokens_details": map[string]any{"text_tokens": 8, "image_tokens": 1},
+	})
+	if u.PricingBlocked != "input_token_details_exceed_total" {
+		t.Fatalf("矛盾用量未阻断：%+v", u)
+	}
+	if charge, ok := CostFromRates([]Rate{{Measure: "token", Side: "output", Variant: "image", Window: "all", USD: 1}}, u, offpeakInstant()); ok {
+		t.Fatalf("矛盾用量被计价：%+v", charge)
+	}
+}
+
 // TestRatesFromFlatKeepsEveryMeasure 覆盖扁平字段到费率表的转换。
 //
 // 控制台的单价表单存的是一条条扁平字段，不是一个费率表。这一段是两者之间的桥：

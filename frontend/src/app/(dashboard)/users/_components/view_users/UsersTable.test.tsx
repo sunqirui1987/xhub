@@ -168,13 +168,22 @@ describe("UsersTable", () => {
     expect(onUserClick).toHaveBeenCalledWith("user-1", false);
   });
 
-  it("does not offer an edit action, and resets the password from the row menu", async () => {
+  /** 验证目录编辑入口；前置单个账户，点击编辑必须传入目标 ID 和编辑模式，组件卸载自动清理。 */
+  it("opens edit mode from the row menu", async () => {
+    const user = userEvent.setup();
+    const onUserClick = vi.fn();
+    render(<Harness onUserClick={onUserClick} />);
+    await openRowMenu(user, "user-1");
+    await user.click(await screen.findByTestId("user-action-edit"));
+    expect(onUserClick).toHaveBeenCalledWith("user-1", true);
+  });
+
+  it("resets the password from the row menu", async () => {
     const user = userEvent.setup();
     const onResetPassword = vi.fn();
     render(<Harness onResetPassword={onResetPassword} />);
 
     await openRowMenu(user, "user-1");
-    expect(screen.queryByTestId("user-action-edit")).not.toBeInTheDocument();
     await user.click(await screen.findByTestId("user-action-reset-password"));
     expect(onResetPassword).toHaveBeenCalledWith(expect.objectContaining({ user_id: "user-1" }));
   });

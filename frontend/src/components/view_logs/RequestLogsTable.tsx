@@ -33,6 +33,7 @@ interface RequestLogsTableProps {
   teams: Team[];
   logsWindow: LogsWindow;
   toolbarChildren?: ReactNode;
+  errorsOnly?: boolean;
 }
 
 function RequestLogsEmptyState({ filtered }: { filtered: boolean }) {
@@ -51,6 +52,7 @@ function RequestLogsEmptyState({ filtered }: { filtered: boolean }) {
   );
 }
 
+/** 渲染后台分页日志及筛选抽屉；errorsOnly 隐藏可冲突的状态选项，其余筛选和点击事件交给调用面板处理。 */
 export function RequestLogsTable({
   data,
   rowCount,
@@ -71,6 +73,7 @@ export function RequestLogsTable({
   teams,
   logsWindow,
   toolbarChildren,
+  errorsOnly = false,
 }: RequestLogsTableProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -124,7 +127,7 @@ export function RequestLogsTable({
             title={t("Filters")}
             description={t("Narrow down request logs")}
           >
-            {({ get, set }) => <RequestLogsFilters get={get} set={set} teams={teams} logsWindow={logsWindow} />}
+            {({ get, set }) => <RequestLogsFilters get={get} set={set} teams={teams} logsWindow={logsWindow} errorsOnly={errorsOnly} />}
           </DataTableFilterDrawer>
         </>
       )}

@@ -6,6 +6,7 @@ import { extractMcpEntitlement } from "@/components/mcp_server_management/mcpEnt
 
 const mockTeamMemberAddCall = vi.fn();
 const mockTeamMemberDeleteCall = vi.fn();
+const mockTeamMemberUpdateCall = vi.fn();
 const mockTeamListCall = vi.fn();
 const mockUserGetInfoV2 = vi.fn();
 const mockTeamInfoCall = vi.fn();
@@ -59,6 +60,7 @@ vi.mock("@/components/networking", () => {
     teamListCall: (...args: any[]) => mockTeamListCall(...args),
     teamMemberAddCall: (...args: any[]) => mockTeamMemberAddCall(...args),
     teamMemberDeleteCall: (...args: any[]) => mockTeamMemberDeleteCall(...args),
+    teamMemberUpdateCall: (...args: any[]) => mockTeamMemberUpdateCall(...args),
     getProxyBaseUrl: () => "https://litellm.test",
     fetchMCPServers: (...args: unknown[]) => mockFetchMCPServers(...args),
     fetchMCPToolsets: vi.fn().mockResolvedValue([]),
@@ -106,9 +108,43 @@ describe("UserInfoView", () => {
     });
     mockTeamMemberAddCall.mockResolvedValue({});
     mockTeamMemberDeleteCall.mockResolvedValue({});
+    mockTeamMemberUpdateCall.mockResolvedValue({});
     mockUserUpdateUserCall.mockResolvedValue({});
     mockFetchMCPServers.mockResolvedValue([MCP_SERVER]);
     mockListMCPTools.mockResolvedValue({ tools: [{ name: "list_issues", description: "List issues" }] });
+  });
+
+  /** 权限边界：前置普通用户并请求初始编辑模式，仍不出现管理员编辑入口；卸载清理，无后台写入。 */
+  it("does not allow a regular user to enter administrative editing", async () => {
+    render(<UserInfoView {...defaultProps} userRole="internal_user" startInEditMode initialTab={1} />);
+    await screen.findByRole("heading", { name: "test@example.com" });
+    expect(screen.queryByRole("button", { name: "Edit user" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Changes" })).not.toBeInTheDocument();
+  });
+
+  /** 正常角色修改：前置管理员及真实成员列表形状，修改团队角色后重新加载；卸载清理 mock 数据。 */
+  it("updates the team role and refreshes the membership", async () => {
+    const user = userEvent.setup();
+    mockTeamListCall.mockResolvedValue([{ team_id: "team-1", team_alias: "Alpha Team", user_role: "member" }]);
+    render(<UserInfoView {...defaultProps} userRole="Admin" />);
+    await user.click(await screen.findByRole("combobox", { name: "Member Role — Alpha Team" }));
+    mockTeamListCall.mockResolvedValue([{ team_id: "team-1", team_alias: "Alpha Team", user_role: "team_admin" }]);
+    await user.click(await screen.findByRole("option", { name: "Team admin", exact: true }));
+    await waitFor(() => expect(mockTeamMemberUpdateCall).toHaveBeenCalledWith("test-token", "team-1", { user_id: "user-123", role: "admin" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Member Role — Alpha Team" })).toHaveTextContent("Team admin"));
+  });
+
+  /** 失败角色修改：前置最后管理员保护导致请求失败，旧角色保留并恢复选择器；卸载清理 mock 数据。 */
+  it("retains the team role after a rejected change", async () => {
+    const user = userEvent.setup();
+    mockTeamListCall.mockResolvedValue([{ team_id: "team-1", team_alias: "Alpha Team", user_role: "team_admin" }]);
+    mockTeamMemberUpdateCall.mockRejectedValue(new Error("last team administrator"));
+    render(<UserInfoView {...defaultProps} userRole="Admin" />);
+    await user.click(await screen.findByRole("combobox", { name: "Member Role — Alpha Team" }));
+    await user.click(await screen.findByRole("option", { name: "Team member", exact: true }));
+    await waitFor(() => expect(mockTeamMemberUpdateCall).toHaveBeenCalledOnce());
+    expect(screen.getByRole("combobox", { name: "Member Role — Alpha Team" })).toHaveTextContent("Team admin");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Member Role — Alpha Team" })).toBeEnabled());
   });
 
   it("should render the loading state", () => {

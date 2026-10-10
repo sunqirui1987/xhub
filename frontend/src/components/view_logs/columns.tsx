@@ -39,6 +39,8 @@ export type LogEntry = {
   proxy_server_request?: string | any[] | Record<string, any>;
   session_id?: string;
   status?: string;
+  /** 完整错误正文；即使关闭提示词存储也可用于请求失败诊断。 */
+  error?: string | null;
   completionStartTime?: string;
   request_duration_ms?: number;
   session_total_count?: number;

@@ -1,6 +1,5 @@
 "use client";
 import { keyKeys } from "@/app/(dashboard)/hooks/keys/useKeys";
-import { useSessionIdentity } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -126,16 +125,13 @@ export const fetchUserModels = async (
   }
 };
 
-/**
- * ─────────────────────────────────────────────────────────────────────────
- * @deprecated
- * This component is being DEPRECATED in favor of src/app/(dashboard)/virtual-keys/components/CreateKey.tsx
- * Please contribute to the new refactor.
- * ─────────────────────────────────────────────────────────────────────────
+/** 创建个人 API Key 弹窗，供个人密钥页面使用，默认只绑定当前用户。
+ * 参数包含显式团队上下文 team、已有密钥 data、新增回调 addKey 及预填配置；返回表单与明文展示。
+ * 用户成员关系不自动绑定团队，个人入口忽略预填团队；显式团队上下文保留团队模型和额度约束。
+ * 创建失败展示错误，成功刷新列表，关闭后重置表单；明文不持久化到浏览器。
  */
 const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOpenCreate, prefillData }) => {
   const { accessToken, userId: userID, userRole } = useAuthorized();
-  const { data: identity } = useSessionIdentity();
   const queryClient = useQueryClient();
   const [formDefaults] = useState<MountedFormValues>(() => ({
     team_id: team ? team.team_id : null,
@@ -155,7 +151,7 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
   const keyOwner = "you";
   const [hasPrefilled, setHasPrefilled] = useState(false);
   const [pendingPrefillModels, setPendingPrefillModels] = useState<string[] | null>(null);
-  const [selectedCreateKeyTeam, setSelectedCreateKeyTeam] = useState<Team | null>(team);
+  const selectedCreateKeyTeam = team;
   const [keyType, setKeyType] = useState<string>("llm_api");
   const [autoRotationEnabled, setAutoRotationEnabled] = useState<boolean>(false);
   const [rotationInterval, setRotationInterval] = useState<string>("30d");
@@ -164,30 +160,12 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
   const handleCancel = () => {
     setIsModalVisible(false);
     setApiKey(null);
-    setSelectedCreateKeyTeam(null);
     form.reset(formDefaults);
     setKeyType("llm_api");
     setAutoRotationEnabled(false);
     setRotationInterval("30d");
     setRouteTemplateId("");
   };
-
-  // A key belongs to the signed-in user and one team they already belong to.
-  // The account is not asked to pick an owner, an organization, or any team
-  // outside that membership.
-  const memberTeams = useMemo(() => {
-    if (!teams?.length || !identity) return [];
-    const membershipIds = new Set(identity.teams?.map((item) => item.team_id) ?? []);
-    return teams.filter((item) => membershipIds.has(item.team_id));
-  }, [teams, identity]);
-
-  useEffect(() => {
-    if (memberTeams.length !== 1) return;
-    const only = memberTeams[0];
-    if (selectedCreateKeyTeam?.team_id === only.team_id) return;
-    setSelectedCreateKeyTeam(only);
-    form.setValue("team_id", only.team_id);
-  }, [memberTeams, selectedCreateKeyTeam, form]);
 
   // Auto-open modal and prefill form from URL params (deep link).
   // Guarded by write access so we don't open for read-only users.
@@ -199,15 +177,7 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
 
       // Apply prefill data if provided
       if (prefillData) {
-        // Set team - find the team by ID and set it (only if team exists in user's teams)
-        if (prefillData.team_id) {
-          const selectedTeam = teams?.find((t) => t.team_id === prefillData.team_id) || null;
-          if (selectedTeam) {
-            setSelectedCreateKeyTeam(selectedTeam);
-            form.setValue("team_id", prefillData.team_id);
-          }
-          // Silently ignore invalid team_id - don't prefill with a team user doesn't have access to
-        }
+        // 个人入口不能因旧链接的 team_id 再次要求选团队；归属只由显式页面上下文决定。
 
         // Set key alias
         if (prefillData.key_alias) {
@@ -228,16 +198,13 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
     }
   }, [autoOpenCreate, prefillData, teams, hasPrefilled, form, userRole]);
 
-  // Check if team selection is required
-  const isTeamSelectionRequired = modelsToPick.includes("no-default-models");
-  const isFormDisabled = isTeamSelectionRequired && !selectedCreateKeyTeam;
-
+  /** 提交已挂载字段；参数为表单值，返回异步完成状态；归属取当前用户及显式团队上下文，失败展示错误。 */
   const handleCreate = async (formValues: MountedFormValues) => {
     try {
       const input: KeyCreateInput = {
         formValues: {
           ...formValues,
-          team_id: selectedCreateKeyTeam?.team_id ?? formValues.team_id ?? null,
+          team_id: selectedCreateKeyTeam?.team_id ?? null,
         },
         existingKeys: data,
         keyOwner,
@@ -296,7 +263,8 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
     if (userID && userRole && accessToken) {
       fetchTeamModels(userID, userRole, accessToken, selectedCreateKeyTeam?.team_id ?? null).then((models) => {
         const allModels = excludeProxyWideSentinel(
-          Array.from(new Set([...(selectedCreateKeyTeam?.models ?? []), ...models])),
+          // no-default-models 是旧控制台提示，不是真实模型，也不能阻止个人密钥创建。
+          Array.from(new Set([...(selectedCreateKeyTeam?.models ?? []), ...models])).filter((model) => model !== "no-default-models"),
         );
         setModelsToPick(allModels);
       });
@@ -323,12 +291,6 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
     }
     setPendingPrefillModels(null);
   }, [pendingPrefillModels, modelsToPick, form]);
-
-  const chooseMemberTeam = (teamId: string) => {
-    const chosen = memberTeams.find((item) => item.team_id === teamId) ?? null;
-    setSelectedCreateKeyTeam(chosen);
-    form.setValue("team_id", teamId);
-  };
 
   const modelOptions: MultiSelectOption[] = [
     ...(selectedCreateKeyTeam
@@ -367,42 +329,8 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
           </DialogHeader>
           <MountedFormProvider value={mountedForm}>
             <form onSubmit={handleSubmit}>
-              {memberTeams.length > 1 && (
-                <div className="mb-8">
-                  <MountedFormField label={t("Team")} name="team_id">
-                    {(control) => (
-                      <Select
-                        items={memberTeams.map((item) => ({ value: item.team_id, label: item.team_alias || item.team_id }))}
-                        value={typeof control.value === "string" ? control.value : ""}
-                        onValueChange={(value) => chooseMemberTeam(String(value))}
-                      >
-                        <SelectTrigger id={control.id} aria-label={t("Team")}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {memberTeams.map((item) => (
-                            <SelectItem key={item.team_id} value={item.team_id}>
-                              {item.team_alias || item.team_id}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </MountedFormField>
-                </div>
-              )}
-
-              {/* Show message when team selection is required */}
-              {isFormDisabled && (
-                <div className="mb-8 p-4 bg-info/10 border border-info/20 rounded-md">
-                  <p className="text-info text-sm">
-                    {t("Please select a team to continue configuring your Virtual Key. If you do not see any teams, please contact your Proxy Admin to either provide you with access to models or to add you to a team.")}
-                  </p>
-                </div>
-              )}
-
               {/* Section 2: Key Details */}
-              {!isFormDisabled && (
+              {
                 <div className="mb-8">
                   <h3 className="text-lg font-medium text-foreground mb-4">{t("Key Details")}</h3>
                   <MountedFormField
@@ -503,10 +431,10 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                     )}
                   </MountedFormField>
                 </div>
-              )}
+              }
 
               {/* Key controls */}
-              {!isFormDisabled && (
+              {
                 <div className="mb-8 space-y-6">
                   <div>
                     <h3 className="mb-4 text-lg font-medium text-foreground">{t("Budget and Routing")}</h3>
@@ -525,13 +453,13 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                           </span>
                         }
                         name="max_budget"
-                        help={t("Budget cannot exceed team max budget: ${value0}", {
+                        help={selectedCreateKeyTeam ? t("Budget cannot exceed team max budget: ${value0}", {
                           value0:
                             selectedCreateKeyTeam?.max_budget !== null &&
                             selectedCreateKeyTeam?.max_budget !== undefined
                               ? selectedCreateKeyTeam.max_budget
                               : t("unlimited"),
-                        })}
+                        }) : undefined}
                         rules={ceilingRule(selectedCreateKeyTeam?.max_budget, (limit) =>
                           t("Budget cannot exceed team max budget: ${value0}", {
                             value0: formatNumberWithCommas(limit, 4),
@@ -614,10 +542,10 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                     </div>
                   </div>
                 </div>
-              )}
+              }
 
               <div style={{ textAlign: "right", marginTop: "10px" }}>
-                <Button type="submit" disabled={isFormDisabled}>
+                <Button type="submit">
                   {t("pages.apiKeys.createSubmit")}
                 </Button>
               </div>

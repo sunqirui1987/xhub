@@ -242,11 +242,12 @@ func UserInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, roles[u.ID])})
 }
 
-// UserUpdate changes a role, a status, a budget or an email. Only a platform administrator may, and only their own name and password are reachable through the profile routes.
+// UserUpdate 修改账户名称、角色、状态、预算和邮箱；管理员可修改任意账户，普通用户仅可修改自己的名称和密码。
 // 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/identity/mount.go
-// 测试：无直接单测
+// 异常与副作用：管理员账户字段在同一事务保存；非法字段或数据库约束失败时整体回滚，角色/状态变化使目标会话失效。
+// 测试：users_test.go、user_edit_test.go
 func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -266,12 +267,9 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
-	if self {
-		// A person edits their own profile and password. This branch runs for
-		// everybody, including a platform administrator: their own name and
-		// password are not an administrative change, and routing them past it
-		// left the deployment's own administrator unable to change their
-		// password at all.
+	if self && (!p.PlatformAdmin() || str(body["password"]) != "") {
+		// 普通用户走个人资料权限；管理员提交密码时也走这里。管理员的账户字段统一在下方事务保存，
+		// 避免邮箱冲突等失败后名称先行写入。密码仍沿用独立的个人密码更新流程。
 		if err := updateProfile(g, r, p, target, body); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
@@ -283,12 +281,13 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	// because a name and a password alone are a complete request for them too.
 	if !self || p.PlatformAdmin() {
 		in := iam.UserUpdate{
+			Name:      stringPtr(body, "user_alias"),
 			Role:      storedRolePtr(body),
 			Status:    statusPtr(body),
 			Email:     stringPtr(body, "user_email"),
 			MaxBudget: optionalFloat(body, "max_budget"),
 		}
-		if in.Role == nil && in.Status == nil && in.Email == nil && in.MaxBudget == nil {
+		if in.Name == nil && in.Role == nil && in.Status == nil && in.Email == nil && in.MaxBudget == nil {
 			if !self {
 				httpx.WriteError(w, 400, "invalid_request", "no supported field to update")
 				return

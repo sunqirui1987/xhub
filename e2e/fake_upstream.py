@@ -4,11 +4,51 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import uuid
 from email.parser import BytesParser
 from email.policy import default
 from urllib.parse import urlsplit
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+ERROR_LOG_JSON_DIAGNOSTIC = (
+    "E2E upstream JSON diagnostic begin | "
+    + "0123456789abcdef" * 128
+    + " | E2E upstream JSON diagnostic end"
+)
+ERROR_LOG_TEXT_DIAGNOSTIC = (
+    "E2E upstream plain-text diagnostic begin | "
+    + "fedcba9876543210" * 128
+    + " | E2E upstream plain-text diagnostic end"
+)
+
+
+def codex_answer(req: dict) -> str:
+    """用途：校验隔离 Codex 模拟器真实外发的历史；参数为 Chat 上游正文，返回项目标记。
+
+    浏览器 E2E 专属模型调用；三轮必须依次包含 system、用户和助手历史，缺轮、乱序或泄漏代理字段抛 ValueError，无持久化副作用。
+    """
+    messages = req.get("messages", [])
+    if "previous_response_id" in req or "store" in req or len(messages) not in (2, 4, 6):
+        raise ValueError("Codex history or proxy fields invalid")
+    first = messages[1].get("content", "")
+    prefix, suffix = "Remember the project marker ", ". Reply with only that marker."
+    if not first.startswith(prefix) or not first.endswith(suffix):
+        raise ValueError("Codex initial project marker missing")
+    marker = first[len(prefix):-len(suffix)]
+    if not marker or messages[0].get("role") != "system":
+        raise ValueError("Codex instructions or marker missing")
+    prompts = [first, "What project marker did I give you? Reply with only the marker.",
+               "Confirm the same project marker once more. Reply with only the marker."]
+    expected = [messages[0]]
+    for index in range(len(messages) // 2):
+        expected.append({"role": "user", "content": prompts[index]})
+        if index < len(messages) // 2 - 1:
+            expected.append({"role": "assistant", "content": marker})
+    if messages != expected:
+        raise ValueError("Codex upstream did not receive full conversation")
+    return marker
 
 
 def continuation_answer(req: dict) -> str:
@@ -28,6 +68,17 @@ def continuation_answer(req: dict) -> str:
     if messages != expected:
         raise ValueError("upstream did not receive full conversation")
     return f"history-ok-{turn}"
+
+
+def continuation_usage(req: dict) -> dict:
+    """返回续接夹具的原始统计；参数为上游请求，返回含供应商扩展字段的 usage。
+
+    供本地三轮浏览器测试调用，首轮零缓存、后续读4个token；无外部服务或持久化副作用。
+    """
+    turn = (len(req.get("messages", [])) + 1) // 2
+    return {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10,
+            "prompt_tokens_details": {"cached_tokens": 0 if turn == 1 else 4},
+            "provider_statistics": {"turn": turn, "cache_source": "local-fixture"}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,7 +107,14 @@ class Handler(BaseHTTPRequestHandler):
             return True
         task = self.path.removeprefix(root + "/")
         if req is None and task in self.ark_tasks:
-            self._json({"id": task, "status": "succeeded", "content": {"video_url": "https://example.invalid/ark-e2e.mp4"}, "usage": {"completion_tokens": 100}})
+            # 特定生命周期夹具第一次查询保持运行，下一次完成；其他既有调用保持立即完成。
+            facts = self.ark_tasks[task]
+            controlled = any(item.get("text") in ("e2e-task-lifecycle", "e2e-task-failure") for item in facts.get("content", []))
+            failed = any(item.get("text") == "e2e-task-failure" for item in facts.get("content", []))
+            polls = facts.get("_test_polls", 0)
+            facts["_test_polls"] = polls + 1
+            state = "running" if controlled and polls == 0 else ("failed" if failed else "succeeded")
+            self._json({"id": task, "status": state, "content": {"video_url": "https://example.invalid/ark-e2e.mp4"}, "usage": {"completion_tokens": 100}})
         else:
             self.send_error(404)
         return True
@@ -145,14 +203,18 @@ class Handler(BaseHTTPRequestHandler):
         if self._ark(req) or self._fal(req):
             return
         model = req.get("model") or "gpt-4o-mini"
-        if model == "e2e-responses-history":
+        if self._error_log_response(str(model)):
+            return
+        # 兼容层允许保留 openai/ 前缀；只对这两个专属夹具规范化，避免影响其他模型行为。
+        history_model = str(model).removeprefix("openai/")
+        if history_model in ("e2e-responses-history", "e2e-codex-agent"):
             try:
-                text = continuation_answer(req)
+                text = codex_answer(req) if history_model == "e2e-codex-agent" else continuation_answer(req)
             except ValueError as error:
                 self.send_error(400, str(error))
                 return
             response_id = "chatcmpl-" + uuid.uuid4().hex
-            usage = {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}
+            usage = continuation_usage(req) if history_model == "e2e-responses-history" else {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}
             if req.get("stream") is True:
                 chunks = [
                     {"id": response_id, "choices": [{"index": 0, "delta": {"content": text}}]},
@@ -161,15 +223,17 @@ class Handler(BaseHTTPRequestHandler):
                 body = ("".join("data: " + json.dumps(chunk) + "\n\n" for chunk in chunks) + "data: [DONE]\n\n").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
+                self._diagnostic_headers(history_model)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
             else:
                 self._json({"id": response_id, "object": "chat.completion", "model": model,
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}], "usage": usage})
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}], "usage": usage}, diagnostic_model=history_model)
             return
         # 仅测试自建型号前缀触发回退错误，不影响其他浏览器用例或已有模型。
         for prefix, status, code in (("e2e-fallback-500-", 500, "api_error"),
+                                     ("e2e-fallback-429-", 429, "rate_limit_exceeded"),
                                      ("e2e-fallback-context-", 400, "context_length_exceeded"),
                                      ("e2e-fallback-content-", 400, "content_policy_violation"),
                                      ("e2e-fallback-normal-", 400, "invalid_request")):
@@ -331,6 +395,52 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _error_log_response(self, model: str) -> bool:
+        """为错误日志 E2E 返回可辨识的上游失败；参数为请求模型，返回是否已处理。
+
+        调用场景：数据面转发到本地上游后，在页面验证 JSON 长正文、纯文本正文或断网失败。
+        副作用与边界：只匹配 e2e-error-log-* 测试模型；断网分支主动关闭当前连接，服务仍可处理后续请求。
+        """
+        if model.startswith("e2e-error-log-json-"):
+            payload = {
+                "error": {
+                    "type": "upstream_gateway_error",
+                    "code": "E2E_UPSTREAM_502",
+                    "message": ERROR_LOG_JSON_DIAGNOSTIC,
+                    "details": {
+                        "upstream_request_id": "e2e-upstream-json-request",
+                        "retryable": False,
+                        "terminal_cause": "e2e-json-terminal-cause",
+                    },
+                }
+            }
+            self._response(502, json.dumps(payload).encode(), "application/json")
+            return True
+        if model.startswith("e2e-error-log-text-"):
+            self._response(502, ERROR_LOG_TEXT_DIAGNOSTIC.encode(), "text/plain; charset=utf-8")
+            return True
+        if model.startswith("e2e-error-log-network-"):
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
+            return True
+        return False
+
+    def _response(self, status: int, body: bytes, content_type: str) -> None:
+        """写出指定 HTTP 响应；参数为状态码、完整正文和类型，无返回值。
+
+        调用场景：错误日志测试需要保留非 200 上游的原始正文和 Content-Type。
+        异常与副作用：直接写当前连接；调用方必须在写出后结束请求处理。
+        """
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _sse(self, events: list[dict]) -> None:
         """输出本地原厂协议事件；参数为完整事件列表，无返回值，E2E 数据面转换调用，进程结束清理。"""
         body = "".join("data: " + json.dumps(event) + "\n\n" for event in events).encode()
@@ -340,10 +450,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, payload: dict) -> None:
+    def _diagnostic_headers(self, model: str) -> None:
+        """为续接模型加入多值响应头；参数为模型，无返回，供本地 JSON/SSE 验证完整记录及脱敏。"""
+        if model == "e2e-responses-history":
+            self.send_header("X-Upstream-Trace", "trace-first")
+            self.send_header("X-Upstream-Trace", "trace-second")
+            self.send_header("Set-Cookie", "upstream-session=fixture-secret")
+
+    def _json(self, payload: dict, diagnostic_model: str = "") -> None:
+        """发送本地 JSON 响应；参数为正文和可选诊断模型，无返回，写入头及正文后结束响应。"""
         body = json.dumps(payload).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self._diagnostic_headers(diagnostic_model)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

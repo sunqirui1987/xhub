@@ -180,13 +180,23 @@ describe("CreateKey", () => {
       expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     });
 
-    it("carries the alias and sole member team onto the wire", async () => {
-      state.teams = [{ team_id: "team-1", team_alias: "Team One", models: [] } as Team];
+    /** 验证单团队和多团队用户均无需选择团队；前置真实表单及成员列表，提交只绑定用户；自动卸载清理。 */
+    it.each([1, 2])("creates a personal key without selecting from %i member teams", async (count) => {
+      state.teams = Array.from({ length: count }, (_, i) => ({ team_id: `team-${i}`, team_alias: `Team ${i}`, models: [] } as Team));
       await openModal({ teams: state.teams });
+      expect(screen.queryByLabelText("Team")).not.toBeInTheDocument();
       await nameTheKey("wire-alias");
       await submit();
+      expect(await createdPayload()).toMatchObject({ key_alias: "wire-alias", user_id: "test-user-id", team_id: null });
+    });
 
-      expect(await createdPayload()).toMatchObject({ key_alias: "wire-alias", team_id: "team-1" });
+    /** 验证旧预填链接不会绑定团队；前置自动打开个人表单和 team_id，提交为 null；自动卸载清理。 */
+    it("ignores team prefill in the personal key form", async () => {
+      state.teams = [{ team_id: "team-1", models: [] } as Team];
+      renderCreateKey({ teams: state.teams, autoOpenCreate: true, prefillData: { team_id: "team-1", key_alias: "contract-key" } });
+      await screen.findByRole("button", { name: /^create key$/i });
+      await submit();
+      expect((await createdPayload()).team_id).toBeNull();
     });
   });
 
@@ -246,9 +256,10 @@ describe("CreateKey", () => {
       expect(screen.queryByRole("option", { name: "All Team Models" })).not.toBeInTheDocument();
     });
 
-    it("offers team models for a member team", async () => {
+    /** 验证显式团队上下文继承团队模型；前置 team 参数，模型全选仅为团队范围；自动卸载清理。 */
+    it("offers team models for an explicit team context", async () => {
       state.teams = [{ team_id: "team-1", team_alias: "Team One", models: ["team-model-1"] } as Team];
-      await openModal({ teams: state.teams });
+      await openModal({ team: state.teams[0], teams: state.teams });
       await userEvent.click(await screen.findByLabelText("Models"));
 
       expect(await screen.findByRole("option", { name: "All Team Models" })).toBeInTheDocument();
@@ -281,13 +292,19 @@ describe("CreateKey", () => {
     });
   });
 
-  it("waits for a team when the user has no default models", async () => {
+  /** 验证缺省模型提示不阻止个人密钥创建；前置旧接口提示标识，表单可用且不展示伪模型；自动卸载清理。 */
+  it("allows personal key creation when the user has no default models", async () => {
     vi.mocked(modelAvailableCall).mockResolvedValue({ data: [{ id: "no-default-models" }] });
     renderCreateKey();
     await userEvent.click(screen.getByTestId("create-key-button"));
 
-    expect(await screen.findByText(/Please select a team to continue/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Key Name/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/Max Budget/)).not.toBeInTheDocument();
+    await nameTheKey();
+    expect(screen.queryByText(/Please select a team to continue/)).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByLabelText("Models"));
+    expect(await screen.findByRole("option", { name: "All Proxy Models" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "no-default-models" })).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await submit();
+    expect((await createdPayload()).team_id).toBeNull();
   });
 });

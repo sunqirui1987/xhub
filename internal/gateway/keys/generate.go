@@ -19,11 +19,11 @@ import (
 
 var logTraceOnceGenerate sync.Once
 
-// Generate creates a virtual key and returns the plaintext only in this response. A member may mint a personal key for themselves inside a team they belong to; a service key needs the team's administration, and the decision is made by Authorize rather than here.
+// Generate 创建虚拟密钥，明文仅在本次响应返回；个人密钥可不绑定团队，指定团队时仍校验成员关系，服务密钥要求团队管理权限。
 // 参数 s（Host）：Generate使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/keys/mount.go
-// 测试：无直接单测
+// 测试：key_input_test.go、regression/personal_keys_test.go。
 func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceGenerate.Do(func() { logx.Trace("enter keys.Generate") })
 
@@ -63,11 +63,11 @@ func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Response(*k, plain, true))
 }
 
-// List lists the keys the caller may see and never returns plaintext. The rows are narrowed in SQL by the scope, so a handler bug cannot widen the listing.
+// List 列出授权范围内的密钥；scope=personal 时仅查询登录用户本人名下的个人密钥，管理员也不例外。
 // 参数 s（Host）：列出使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/keys/mount.go、gateway/models/list.go、gateway/models/mount.go、gateway/prefs/mount.go
-// 测试：无直接单测
+// 测试：personal_test.go、regression/personal_keys_test.go。个人查询在 SQL 收窄后再筛选、分页，不返回明文。
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -79,9 +79,31 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 		s.WriteAuthz(w, r, err)
 		return
 	}
-	rows, err := s.Identity().ListKeys(r.Context(), keyFilter(sc))
+	filter := keyFilter(sc)
+	personal := r.URL.Query().Get("scope") == "personal"
+	if personal {
+		// 用户范围取自已认证身份，不能相信 user_id、创建者或团队筛选来决定归属。
+		filter = personalFilter(filter, p)
+	}
+	rows, err := s.Identity().ListKeys(r.Context(), filter)
 	if err != nil {
 		s.WriteIAMError(w, r, err)
+		return
+	}
+	if personal {
+		rows, total, page, size, pages, err := personalPage(rows, r.URL.Query())
+		if err != nil {
+			httpx.WriteError(w, 400, "invalid_request", err.Error())
+			return
+		}
+		out := make([]map[string]any, 0, len(rows))
+		for _, k := range rows {
+			item := Response(k, "", false)
+			// 个人列表用公开记录 ID 导航详情，遮罩前缀不是有效查询标识。
+			item["token"] = k.ID
+			out = append(out, item)
+		}
+		httpx.WriteJSON(w, 200, map[string]any{"keys": out, "total_count": total, "current_page": page, "total_pages": pages, "size": size})
 		return
 	}
 	out := make([]map[string]any, 0, len(rows))
@@ -97,11 +119,11 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Info reads one virtual key.
+// Info 读取单个虚拟密钥；个人页面的 scope=personal 额外验证归属，拒绝其他用户及服务密钥。
 // 参数 s（Host）：信息使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：dataplane/log.go、dataplane/serve.go、gateway/engine.go、gateway/keys/mount.go
-// 测试：files_test.go
+// 测试：personal_test.go、regression/personal_keys_test.go；越界详情返回 404，不泄露密钥存在性。
 func Info(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -123,6 +145,10 @@ func Info(s Host, w http.ResponseWriter, r *http.Request) {
 	k, err := lookupKey(s, r, token)
 	if err != nil {
 		s.WriteIAMError(w, r, err)
+		return
+	}
+	if r.URL.Query().Get("scope") == "personal" && !personalKeyVisible(p, k) {
+		s.WriteAuthz(w, r, authz.ErrNotFound)
 		return
 	}
 	// The guard re-reads the row, so a key the caller may not see is not found
@@ -388,11 +414,11 @@ func keyFilter(sc *authz.Scope) iam.KeyFilter {
 	}
 }
 
-// keyInputFrom reads a new key from a request body. The owner default is a personal key for the caller, which is what a member minting their own key means; a service key must be asked for by name.
+// keyInputFrom 解析创建请求，默认创建调用方个人密钥；个人密钥可省略团队，服务密钥和项目密钥必须指定团队。
 // 参数 body（map[string]any）：已经解析的 JSON 对象。缺字段表示上游或调用方没有给这项；defaultUserID（string）：密钥输入来源使用的default用户标识。空串表示调用方没有提供这项。
 // 返回 KeyInput（iam.KeyInput）：从正文读出的新密钥。属主没写时默认是调用方的个人密钥；error（error）：属主或必填项不合法。nil 表示可以创建。
-// 调用：gateway/keys/admin.go
-// 测试：无直接单测
+// 调用：Generate、gateway/keys/admin.go；不产生持久化副作用，非法归属或期限返回错误。
+// 测试：key_input_test.go。
 func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, error) {
 	in := iam.KeyInput{
 		OwnerType: str(body["owner_type"]),
@@ -400,7 +426,7 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 		TeamID:    str(body["team_id"]),
 		ProjectID: str(body["project_id"]),
 		Name:      str(body["key_alias"]),
-		Models:    stringList(body["models"]),
+		Models:    keyModels(body["models"]),
 		MaxBudget: parseFloat(body["max_budget"]),
 		TPMLimit:  parseInt(body["tpm_limit"]),
 		RPMLimit:  parseInt(body["rpm_limit"]),
@@ -425,7 +451,10 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 	if in.OwnerType == iam.OwnerService {
 		in.UserID = ""
 	}
-	if in.TeamID == "" {
+	if in.OwnerType != iam.OwnerPersonal && in.OwnerType != iam.OwnerService {
+		return in, errString("invalid owner_type")
+	}
+	if in.TeamID == "" && (in.OwnerType == iam.OwnerService || in.ProjectID != "") {
 		return in, errTeamRequired
 	}
 	exp, err := iam.ParseExpiry(str(body["duration"]))
@@ -436,11 +465,24 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 	return in, nil
 }
 
-// patchFrom applies a partial body onto the stored key, so a field the caller left out keeps its value instead of being written as empty.
+// keyModels 将控制台“全部模型”选项转成继承范围，不把选项标识误存为模型名称。
+// 参数 raw 为请求 models；返回具体模型名单，全选返回空名单；供创建和更新解析使用，无副作用。
+// 团队密钥仍由 IAM 与团队/项目模型范围取交集，因此全选不会扩大团队授权。
+func keyModels(raw any) []string {
+	models := stringList(raw)
+	for _, model := range models {
+		if model == "all-proxy-models" || model == "all-team-models" {
+			return []string{}
+		}
+	}
+	return models
+}
+
+// patchFrom 将部分请求合并到已有密钥；缺字段保留原值，“全部模型”转成继承当前授权范围。
 // 参数 cur（*iam.Key）：密钥行，含哈希、限额和归属，不含明文；body（map[string]any）：已解析或原始的 JSON。
 // 返回 KeyInput（iam.KeyInput）：在已存密钥上套用正文里出现的字段。正文没写的字段保持原值，不会被写成空。
 // 调用：gateway/keys/admin.go
-// 测试：无直接单测
+// 测试：key_input_test.go。
 func patchFrom(cur *iam.Key, body map[string]any) iam.KeyInput {
 	in := iam.KeyInput{Name: cur.Name, Models: cur.Models,
 		MaxBudget: cur.MaxBudget, TPMLimit: cur.TPMLimit, RPMLimit: cur.RPMLimit}
@@ -449,7 +491,7 @@ func patchFrom(cur *iam.Key, body map[string]any) iam.KeyInput {
 		in.Name = v
 	}
 	if _, ok := body["models"]; ok {
-		in.Models = stringList(body["models"])
+		in.Models = keyModels(body["models"])
 	}
 	if _, ok := body["max_budget"]; ok {
 		in.MaxBudget = parseFloat(body["max_budget"])

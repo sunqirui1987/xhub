@@ -5,7 +5,7 @@ import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { t } from "@/i18n";
+import { getActiveLocale, t } from "@/i18n";
 
 interface SessionManagementProps {
   endpointType: string | null;
@@ -14,6 +14,8 @@ interface SessionManagementProps {
   onToggleSessionManagement: (useApi: boolean) => void;
 }
 
+/** 展示当前上下文续接方式；参数为协议、响应 ID 和切换回调；返回 Responses 会话设置。
+ * 未取得响应 ID 时只表示新会话，不能声称上游已就绪；复制失败在界面提示，无后台写入。 */
 const SessionManagement: React.FC<SessionManagementProps> = ({
   endpointType,
   responsesSessionId,
@@ -24,6 +26,7 @@ const SessionManagement: React.FC<SessionManagementProps> = ({
     return null;
   }
 
+  /** 复制当前响应 ID；无参数，返回异步结果；浏览器拒绝剪贴板时展示失败提示。 */
   const handleCopySessionId = async () => {
     if (responsesSessionId) {
       try {
@@ -35,27 +38,23 @@ const SessionManagement: React.FC<SessionManagementProps> = ({
     }
   };
 
-  const getSessionDisplay = () => {
-    if (!responsesSessionId) {
-      return useApiSessionManagement ? "API Session: Ready" : "UI Session: Ready";
-    }
-
-    const sessionPrefix = useApiSessionManagement ? "Response ID" : "UI Session";
-    const truncatedId = responsesSessionId.slice(0, 10);
-    return `${sessionPrefix}: ${truncatedId}...`;
-  };
-
-  const getSessionDescription = () => {
-    if (!responsesSessionId) {
-      return useApiSessionManagement
-        ? "XHub will manage session using previous_response_id"
-        : "UI will manage session using chat history";
-    }
-
-    return useApiSessionManagement
-      ? "XHub API session active - context maintained server-side"
-      : "UI session active - context maintained client-side";
-  };
+  const zh = getActiveLocale() === "zh-CN";
+  /** 返回当前会话状态文本；无参数，无副作用；仅本组件调用。 */
+  const getSessionDisplay = () =>
+    responsesSessionId
+      ? "Response ID: " + responsesSessionId.slice(0, 10) + "…"
+      : zh
+        ? "新会话 · 首次请求后建立上下文"
+        : "New session · context starts after the first response";
+  /** 返回上下文发送方式说明；无参数，无副作用；仅本组件调用。 */
+  const getSessionDescription = () =>
+    useApiSessionManagement
+      ? zh
+        ? "使用上一条响应 ID 续接对话。"
+        : "Continue with the previous response ID."
+      : zh
+        ? "每次请求发送完整对话历史。"
+        : "Send the full conversation with each request.";
 
   return (
     <div className="mb-4">
@@ -68,7 +67,9 @@ const SessionManagement: React.FC<SessionManagementProps> = ({
               <Info className="size-3 text-muted-foreground" />
             </TooltipTrigger>
             <TooltipContent>
-              {t("Choose between LiteLLM API session management (using previous_response_id) or UI-based session management (using chat history)")}
+              {t(
+                "Choose between LiteLLM API session management (using previous_response_id) or UI-based session management (using chat history)",
+              )}
             </TooltipContent>
           </Tooltip>
         </div>

@@ -38,3 +38,32 @@ export interface RoleStyle {
   label: string;
   labelColor: string;
 }
+
+export interface MediaRequestPayload {
+  kind: "image" | "video";
+  model?: string;
+  prompt?: string;
+  content?: unknown;
+  duration?: string | number;
+  resolution?: string;
+  ratio?: string;
+  aspectRatio?: string;
+}
+
+export interface MediaResponsePayload {
+  kind: "image" | "video";
+  imageUrls: string[];
+  imageDataUrls: string[];
+  taskId?: string;
+  status?: string;
+  videoUrl?: string;
+  responseUrl?: string;
+  statusUrl?: string;
+  duration?: string | number;
+  usage?: unknown;
+}
+
+export interface ParsedMediaPayload {
+  request: MediaRequestPayload;
+  response: MediaResponsePayload;
+}
