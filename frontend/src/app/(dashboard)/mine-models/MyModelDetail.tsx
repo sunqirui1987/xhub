@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { uiHref } from "@/utils/uiHref";
 import type { MyModelCard } from "./grantedModelCards";
-import { invocationCurl, invocationURL } from "./modelInvocation";
+import { invocationCurl } from "./modelInvocation";
 
 export type ModelDetailTab = "pricing" | "access" | "api" | "docs";
 
@@ -51,7 +51,8 @@ function CopyValue({ value, label }: { value: string; label: string }) {
 
 /** 我的模型调用详情；参数为授权模型、首次打开的标签及关闭回调，返回四标签弹窗。
  * 仅使用 /model/available 的公开绑定和参考费率，无额外管理接口请求；无绑定或错误配置不生成示例。
- * 专用媒体协议展示真实方法、路径和任务动作，已知 JSON 协议提供可复制 curl；关闭后由列表恢复焦点。 */
+ * 专用媒体协议展示真实方法、路径和任务动作，已知 JSON 协议提供可复制 curl；关闭后由列表恢复焦点。
+ * 接入信息直接来自模型绑定，不请求公共接口定义，也不提供不存在的文档入口。 */
 export function MyModelDetail({
   model,
   initialTab,
@@ -69,7 +70,6 @@ export function MyModelDetail({
   const base =
     typeof window === "undefined" ? rawBase : new URL(rawBase || "/", window.location.origin).href.replace(/\/$/, "");
   const example = endpoint ? invocationCurl(model.id, endpoint, base) : null;
-  const schema = invocationURL(base, "/openapi.json");
   const unavailable = !endpoints.length;
   return (
     <Dialog
@@ -226,16 +226,6 @@ export function MyModelDetail({
               <Link href={uiHref("api-keys")} className={buttonVariants({ variant: "outline", size: "sm" })}>
                 {t("myModels.keys")}
               </Link>
-              {schema && (
-                <a
-                  href={schema}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: "ghost", size: "sm" })}
-                >
-                  {t("myModels.apiSchema")}
-                </a>
-              )}
             </div>
           </TabsContent>
           <TabsContent value="docs" className="space-y-4">

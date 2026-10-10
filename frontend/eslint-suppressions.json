@@ -1443,11 +1443,6 @@
       "count": 1
     }
   },
-  "src/components/common_components/check_openapi_schema.tsx": {
-    "local/filename-pascal-case": {
-      "count": 1
-    }
-  },
   "src/components/common_components/simple_table.tsx": {
     "local/filename-pascal-case": {
       "count": 1

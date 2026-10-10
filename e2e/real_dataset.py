@@ -37,6 +37,33 @@ def temporary_retry_delay(summary, default_delay, rate_limit_delay, attempt=1):
     return min(default_delay * (2 ** max(attempt - 1, 0)), rate_limit_delay)
 
 
+def chat_probe_result(status, reply):
+    """用途：为供应商探测生成不含正文的判定证据；参数为 HTTP 状态和任意 JSON 响应，返回通过标记及结构诊断；供候选选择调用，只有非空文本回答和有限正数计量可通过，异常结构按失败返回且无副作用。"""
+    reply = reply if isinstance(reply, dict) else {}
+    choices = reply.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    message = choice.get("message")
+    message = message if isinstance(message, dict) else {}
+    usage = reply.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
+    content, reasoning = message.get("content"), message.get("reasoning_content")
+    finish = choice.get("finish_reason")
+    # 仅保留协议枚举和长度，不能把供应商正文、错误文本或凭据写入探测报告。
+    finish = finish if isinstance(finish, str) and finish in ("stop", "length", "tool_calls", "content_filter", "function_call") else "unknown"
+    prompt, completion = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+    valid_usage = all(type(value) in (int, float) and value > 0 and math.isfinite(value)
+                      for value in (prompt, completion))
+    content_chars = len(content.strip()) if isinstance(content, str) else 0
+    return {
+        "passed": status == 200 and content_chars > 0 and valid_usage and not reply.get("error"),
+        "prompt_tokens": prompt if type(prompt) in (int, float) and math.isfinite(prompt) else 0,
+        "completion_tokens": completion if type(completion) in (int, float) and math.isfinite(completion) else 0,
+        "finish_reason": finish, "content_chars": content_chars,
+        "reasoning_chars": len(reasoning.strip()) if isinstance(reasoning, str) else 0,
+        "response_error": bool(reply.get("error")),
+    }
+
+
 def fallback_acceptance_deployments(deployments, model, fallback_model, fallback_provider):
     """用途：从基线部署选择跨模型验收目标；参数为部署列表、主备公开模型和备用供应商，返回主模型全部健康部署 ID 与备用 ID；供回退验收调用，同名模型、缺失或含糊目标抛 ValueError，不修改数据。"""
     if model == fallback_model:
@@ -642,42 +669,49 @@ class Dataset:
 
     def probe_chat_candidate(self, provider, upstream, probe_index, probe_total, attempts=1, delay=3,
                              action="真实模型候选探测", timeout=180):
-        """用途：直接调用供应商探测一个真实聊天模型；参数为供应商、模型 ID、候选进度、重试次数、间隔、日志动作和超时，返回是否取得含非零 usage 的真实回答；每次尝试写入 probe_attempts 诊断区，候选失败不会污染正式验收 checks，有限重试耗尽后淘汰候选。"""
+        """用途：直接调用供应商探测一个真实聊天模型；参数为供应商、模型 ID、候选进度、重试次数、间隔、日志动作和超时，返回是否取得非空回答和非零 usage；正文为空且因长度截断时下一次提高输出上限至 1024，每次尝试保存无正文诊断，有限重试耗尽后淘汰候选且不污染正式验收 checks。"""
         protocol = "bypass_openai_chat"
         base = os.environ.get(provider["base_env"], provider["base"]).rstrip("/")
         label = f"{action} {probe_index}/{probe_total}"
+        max_tokens = 32
         for attempt in range(1, attempts + 1):
             attempt_label = label if attempts == 1 else f"{label}，尝试 {attempt}/{attempts}"
             self.action_start(upstream, protocol, attempt_label,
-                              f"供应商={provider['id']}，直接调用供应商聊天端点，超时={timeout}秒")
+                              f"供应商={provider['id']}，直接调用供应商聊天端点，超时={timeout}秒，max_tokens={max_tokens}")
             try:
                 status, reply, _ = curl_json(
                     base, "/chat/completions" if base.endswith("/v1") else "/v1/chat/completions",
                     {"model": upstream, "messages": [{"role": "user",
-                     "content": "Reply only OK. probe " + self.run}], "max_tokens": 32},
+                     "content": "Reply only OK. probe " + self.run}], "max_tokens": max_tokens},
                     os.environ[provider["key_env"]], timeout=timeout)
             except Exception as error:
                 self.report.setdefault("probe_attempts", []).append({"name": "real-model-probe", "provider": provider["id"],
                     "model": upstream, "attempt": attempt, "attempts": attempts, "status": None,
-                    "error": type(error).__name__, "passed": False})
+                    "error": type(error).__name__, "max_tokens": max_tokens, "passed": False})
                 self.action_fail(upstream, protocol, attempt_label, error)
                 if attempt < attempts:
                     self.action_wait(upstream, protocol, label,
                                      f"{delay} 秒后重试当前真实模型，随后仍失败则继续下一候选")
                     time.sleep(delay)
                 continue
-            usage = reply.get("usage", {}) if isinstance(reply, dict) else {}
-            passed = status == 200 and bool(reply.get("choices")) and bool(reply["choices"][0].get("message", {}).get("content")) \
-                and usage.get("prompt_tokens", 0) > 0 and usage.get("completion_tokens", 0) > 0
+            result = chat_probe_result(status, reply)
             self.report.setdefault("probe_attempts", []).append({"name": "real-model-probe", "provider": provider["id"],
-                "model": upstream, "attempt": attempt, "attempts": attempts, "status": status, "passed": passed})
-            detail = f"HTTP={status}，输入={usage.get('prompt_tokens', 0)}，输出={usage.get('completion_tokens', 0)}"
-            if passed:
+                "model": upstream, "attempt": attempt, "attempts": attempts, "status": status,
+                "max_tokens": max_tokens, **result})
+            detail = (f"HTTP={status}，输入={result['prompt_tokens']}，输出={result['completion_tokens']}，"
+                      f"结束原因={result['finish_reason']}，正文字符数={result['content_chars']}，"
+                      f"推理字符数={result['reasoning_chars']}，响应错误={result['response_error']}")
+            if result["passed"]:
                 self.action_ok(upstream, protocol, attempt_label, detail, record=False)
                 return True
             self.action_fail(upstream, protocol, attempt_label, RuntimeError(detail))
             if attempt < attempts:
+                # 推理模型的输出预算可能先被思考耗尽；仅在上游明确截断时扩容，仍要求最终回答，不能把已计费当作成功。
+                truncated = status == 200 and result["finish_reason"] == "length" and result["content_chars"] == 0 and not result["response_error"]
+                if truncated:
+                    max_tokens = 1024
                 self.action_wait(upstream, protocol, label,
+                                 ("正文为空且输出被长度限制截断，提高 max_tokens 至 1024；" if truncated else "") +
                                  f"{delay} 秒后重试当前真实模型，随后仍失败则继续下一候选")
                 time.sleep(delay)
         return False
@@ -1856,7 +1890,7 @@ class Dataset:
             raise RuntimeError("真实目录中没有未部署的额外聊天模型可用于生命周期验收")
         model = self.select_lifecycle_model(provider, candidates)
         self.action_ok(model, "bypass_openai_chat", "生命周期探测",
-                       "真实供应商响应包含 choices 和非零 usage，允许进入创建、下架、恢复和删除流程")
+                       "真实供应商响应包含非空回答和非零 usage，允许进入创建、下架、恢复和删除流程")
         self.progress(f"    [模型生命周期] 真实模型={model} 创建、调用、下架、恢复、删除")
         definition = next(row for row in self.data["models"] if row["id"] == "qiniu-chat")
         ident = self.deployment(definition, provider, model, temporary=True)

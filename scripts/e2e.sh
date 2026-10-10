@@ -15,10 +15,8 @@ export XHUB_GATEWAY_ORIGIN="$E2E_GATEWAY"
 export NEXT_PUBLIC_BASE_URL="$E2E_GATEWAY"
 LOCK="$ROOT/.e2e/browser.lock"
 mkdir -p "$ROOT/.e2e"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "Another browser run owns $LOCK. If interrupted, confirm it stopped before removing this directory." >&2
-  exit 1
-fi
+source "$ROOT/scripts/browser-lock.sh"
+acquire_browser_lock "$LOCK"
 cleanup() {
   local exit_code=$?
   # Playwright may terminate its whole server process group before the gateway
@@ -39,6 +37,16 @@ PYCLEAN
         docker exec xhub-postgres psql -X -U xhub -d xhub -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA IF EXISTS $schema CASCADE" >"$E2E_RUN_DIR/cleanup.log" 2>&1 || true
       fi
     fi
+  fi
+  # 在释放共享锁前保存调用方的专属证据，防止下一个排队运行清空或覆盖本轮结果。
+  if [[ -n "${E2E_BROWSER_REPORT_DIR:-}" ]]; then
+    mkdir -p "$E2E_BROWSER_REPORT_DIR"
+    local artifact
+    for artifact in results.json junit.xml; do
+      if [[ -f "$E2E_RUN_DIR/$artifact" ]]; then
+        cp "$E2E_RUN_DIR/$artifact" "$E2E_BROWSER_REPORT_DIR/$artifact" || exit_code=1
+      fi
+    done
   fi
   rmdir "$LOCK"
   return "$exit_code"

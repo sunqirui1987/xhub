@@ -30,7 +30,6 @@ import type { SkillRegisterRequest } from "./claude_code_plugins/types";
 import type { ModelBudgetUsage, ModelMaxBudget } from "./key_team_helpers/ModelMaxBudgetEditor";
 import type { ObjectPermission } from "./object_permission_types";
 import type { components } from "@/lib/http/schema";
-import { jsonFields } from "./common_components/check_openapi_schema";
 import type { MCPUserEnvVarsStatus } from "./mcp_tools/types";
 import type {
   CoordinationRedisSettings,
@@ -57,6 +56,9 @@ import { serverRootPath, setServerRootPath } from "@/lib/serverRootPath";
 import { t } from "@/i18n";
 
 export { serverRootPath };
+
+// 密钥表单的 JSON 文本字段在提交前解析；字段契约固定，不依赖运行时接口定义。
+const jsonFields = ["metadata", "config", "enforced_params", "aliases"];
 
 export { deriveErrorMessage };
 export { ApiError } from "@/lib/http/client";
@@ -432,13 +434,6 @@ export const getPublicModelHubInfo = async () => {
   const url = proxyBaseUrl ? `${proxyBaseUrl}/public/model_hub/info` : `/public/model_hub/info`;
   const response = await fetch(url);
   const jsonData: PublicModelHubInfo = await response.json();
-  return jsonData;
-};
-
-export const getOpenAPISchema = async () => {
-  const url = proxyBaseUrl ? `${proxyBaseUrl}/openapi.json` : `/openapi.json`;
-  const response = await fetch(url);
-  const jsonData = await response.json();
   return jsonData;
 };
 

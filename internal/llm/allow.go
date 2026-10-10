@@ -106,7 +106,6 @@ var pathPrefixes = []string{
 var exactPaths = map[string]struct{}{
 	"/":                     {},
 	"/routes":               {},
-	"/openapi.json":         {},
 	"/docs":                 {},
 	"/docs/oauth2-redirect": {},
 	"/redoc":                {},

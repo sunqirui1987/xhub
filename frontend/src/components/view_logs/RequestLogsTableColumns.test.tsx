@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -27,7 +27,7 @@ const logEntry = (overrides: Partial<LogEntry>): LogEntry => ({
   ...overrides,
 });
 
-const noopDeps = { onKeyHashClick: vi.fn(), onSessionClick: vi.fn() };
+const noopDeps = { onSessionClick: vi.fn() };
 
 /** 前置后台 error 状态而没有旧版 metadata；验证表格显示失败而非成功，自动卸载清理 DOM。 */
 it("labels backend error rows as failure", () => {
@@ -36,6 +36,7 @@ it("labels backend error rows as failure", () => {
   expect(screen.queryByText("Success")).not.toBeInTheDocument();
 });
 
+/** 将参数日志与会话回调渲染为真实表格，供列行为测试使用；返回 void，测试框架自动卸载 DOM，无外部数据。 */
 function renderRows(rows: LogEntry[], deps = noopDeps) {
   render(
     <DataTable
@@ -247,18 +248,35 @@ describe("Model column", () => {
 });
 
 describe("row action cells", () => {
-  it("reports the key hash through the injected dependency rather than a row field", async () => {
+  /** 前置正常 Hash 元数据；验证标识仅为文本且点击不调用会话动作，测试框架自动清理 DOM 与 mock。 */
+  it("displays the key hash as plain text without a key action", async () => {
     const user = userEvent.setup();
-    const deps = { onKeyHashClick: vi.fn(), onSessionClick: vi.fn() };
+    const deps = { onSessionClick: vi.fn() };
     renderRows([logEntry({ request_id: "req-key", metadata: { user_api_key: "sk-hash-9" } })], deps);
 
+    const cell = screen.getByRole("cell", { name: "sk-hash-9" });
+    expect(within(cell).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(cell).queryByRole("link")).not.toBeInTheDocument();
     await user.click(screen.getByText("sk-hash-9"));
-    expect(deps.onKeyHashClick).toHaveBeenCalledWith("sk-hash-9");
+    expect(deps.onSessionClick).not.toHaveBeenCalled();
   });
 
+  /** 前置缺失、空值或非法类型 Hash；验证占位符与非交互行为，测试框架自动卸载 DOM，无外部数据清理。 */
+  it.each([undefined, "", 42])("shows a plain placeholder for unavailable key hash %s", (hash) => {
+    renderRows([logEntry({ metadata: { user_api_key: hash } })]);
+    const headers = screen.getAllByRole("columnheader");
+    const keyIndex = headers.findIndex((header) => header.textContent === t("Key Hash"));
+    expect(keyIndex, "日志列必须包含密钥 Hash").toBeGreaterThanOrEqual(0);
+    const cell = screen.getAllByRole("cell")[keyIndex];
+    expect(cell).toHaveTextContent("-");
+    expect(within(cell).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(cell).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  /** 前置两行共享会话 ID；验证点击回调仍传递目标日志，测试框架自动清理 DOM 与 mock。 */
   it("reports the clicked row from the session cell, so two rows sharing a session id stay distinguishable", async () => {
     const user = userEvent.setup();
-    const deps = { onKeyHashClick: vi.fn(), onSessionClick: vi.fn() };
+    const deps = { onSessionClick: vi.fn() };
     renderRows(
       [
         logEntry({ request_id: "req-key-a", session_id: "sess-42", api_key: "key-a" }),

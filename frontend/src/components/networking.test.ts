@@ -3,6 +3,64 @@ import { clearTokenCookies } from "@/utils/cookieUtils";
 import * as Networking from "./networking";
 import { uiHref } from "@/utils/uiHref";
 
+describe("密钥创建使用固定 JSON 字段契约", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  for (const serviceAccount of [false, true]) {
+    /** 前置两类密钥提交入口和本地 fetch 替身；验证 JSON 字段保持原契约且不读取公共定义。
+     * 参数为普通/服务账号用例闭包，无持久数据，afterEach 恢复 fetch。 */
+    it("解析 JSON 字段且只提交创建请求：" + serviceAccount, async () => {
+      const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: "test-key" }) });
+      global.fetch = fetcher;
+      const values = {
+        metadata: '{"source":"test"}',
+        config: "{}",
+        enforced_params: '{"temperature":0}',
+        aliases: '{"a":"b"}',
+      };
+      const result = serviceAccount
+        ? await Networking.keyCreateServiceAccountCall("token", values)
+        : await Networking.keyCreateCall("token", "user", values);
+      expect(result).toEqual({ key: "test-key" });
+      expect(fetcher).toHaveBeenCalledOnce();
+      const [url, init] = fetcher.mock.calls[0];
+      expect(new URL(url, "http://test.local").pathname).toBe(
+        serviceAccount ? "/key/service-account/generate" : "/key/generate",
+      );
+      expect(JSON.parse(init.body)).toMatchObject({
+        metadata: { source: "test" },
+        config: {},
+        enforced_params: { temperature: 0 },
+        aliases: { a: "b" },
+      });
+    });
+
+    /** 前置空表单与创建接口成功；验证缺省字段可提交，无定义请求；afterEach 恢复 fetch，无持久数据。 */
+    it("空 JSON 字段保持可提交：" + serviceAccount, async () => {
+      const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: "test-key" }) });
+      global.fetch = fetcher;
+      if (serviceAccount) await Networking.keyCreateServiceAccountCall("token", {});
+      else await Networking.keyCreateCall("token", "user", {});
+      expect(fetcher).toHaveBeenCalledOnce();
+    });
+
+    /** 前置非法 JSON 文本；验证提交前报错且不请求后台，afterEach 恢复 fetch，无持久数据。 */
+    it("非法 JSON 阻止密钥创建：" + serviceAccount, async () => {
+      const fetcher = vi.fn();
+      global.fetch = fetcher;
+      const values = { metadata: "{" };
+      const submitted = serviceAccount
+        ? Networking.keyCreateServiceAccountCall("token", values)
+        : Networking.keyCreateCall("token", "user", values);
+      await expect(submitted).rejects.toThrow(/metadata/);
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+  }
+});
+
 vi.mock("@/utils/cookieUtils", () => ({
   clearTokenCookies: vi.fn(),
   getCookie: vi.fn(),

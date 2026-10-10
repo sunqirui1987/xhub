@@ -28,7 +28,6 @@ interface RequestLogsTableProps {
   onSearchChange: (value: string) => void;
   onRefresh: () => void;
   onRowClick: (log: LogEntry) => void;
-  onKeyHashClick: (keyHash: string) => void;
   onSessionClick: (log: LogEntry) => void;
   teams: Team[];
   logsWindow: LogsWindow;
@@ -52,7 +51,8 @@ function RequestLogsEmptyState({ filtered }: { filtered: boolean }) {
   );
 }
 
-/** 渲染后台分页日志及筛选抽屉；errorsOnly 隐藏可冲突的状态选项，其余筛选和点击事件交给调用面板处理。 */
+/** 渲染后台分页日志及筛选抽屉；参数为日志、分页、筛选与行/会话回调，返回表格。
+ * 供 RequestLogsPanel 使用；errorsOnly 隐藏冲突状态筛选，密钥 Hash 仅展示，行与会话点击交给面板处理。 */
 export function RequestLogsTable({
   data,
   rowCount,
@@ -68,7 +68,6 @@ export function RequestLogsTable({
   onSearchChange,
   onRefresh,
   onRowClick,
-  onKeyHashClick,
   onSessionClick,
   teams,
   logsWindow,
@@ -78,9 +77,9 @@ export function RequestLogsTable({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const columns = useMemo(() => {
-    const deps = { onKeyHashClick, onSessionClick };
+    const deps = { onSessionClick };
     return getRequestLogsTableColumns(deps);
-  }, [onKeyHashClick, onSessionClick]);
+  }, [onSessionClick]);
 
   const isFiltered = columnFilters.length > 0 || searchValue !== "";
 

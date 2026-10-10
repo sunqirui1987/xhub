@@ -9,9 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_PAGE_SIZE_OPTIONS } from "@/components/shared/DataTable";
 import { AutoRouterModelGroupsProvider } from "@/components/shared/table_cells";
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
-import type { KeyResponse } from "../key_team_helpers/key_list";
-import { keyInfoV1Call, uiSpendLogsCall } from "../networking";
-import KeyInfoView from "../templates/key_info_view";
+import { uiSpendLogsCall } from "../networking";
 import type { LogEntry } from "./columns";
 import { t } from "@/i18n";
 import {
@@ -42,7 +40,9 @@ interface RequestLogsPanelProps {
   errorsOnly?: boolean;
 }
 
-/** 查询并展示请求日志；普通面板排除失败，errorsOnly 固定失败筛选并逐条列出请求，避免会话聚合隐藏错误；参数为登录凭据和活跃状态，返回日志面板，后台负责权限和分页。 */
+/** 查询并展示请求日志；普通面板排除失败，errorsOnly 固定失败筛选并逐条列出请求，避免会话聚合隐藏错误。
+ * 参数为登录凭据和活跃状态，返回日志面板，供日志页使用；后台负责权限和分页。
+ * 密钥 Hash 仅展示，行点击打开日志详情；面板不再查询或切换到密钥详情，避免历史 Hash 触发 404。 */
 export default function RequestLogsPanel({ accessToken, token, userRole, userID, isActive, errorsOnly = false }: RequestLogsPanelProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_LOGS_SORTING);
@@ -54,7 +54,6 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
   const [isCustomDate, setIsCustomDate] = useState(false);
   const [selectedTimeInterval, setSelectedTimeInterval] = useState<{ value: number; unit: string }>(DEFAULT_INTERVAL);
 
-  const [selectedKeyIdInfoView, setSelectedKeyIdInfoView] = useState<string | null>(null);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
 
   const {
@@ -118,22 +117,6 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     () => formatLogsWindow(startTime, endTime, isCustomDate, windowEndBound),
     [startTime, endTime, isCustomDate, windowEndBound],
   );
-
-  const keyInfoQueryOptions: UseQueryOptions<KeyResponse | null> = {
-    queryKey: ["requestLogsKeyInfo", selectedKeyIdInfoView, accessToken],
-    queryFn: async () => {
-      if (selectedKeyIdInfoView === null) return null;
-      const keyData = await keyInfoV1Call(accessToken, selectedKeyIdInfoView);
-      return {
-        ...keyData["info"],
-        token: selectedKeyIdInfoView,
-        api_key: selectedKeyIdInfoView,
-      };
-    },
-    enabled: selectedKeyIdInfoView !== null,
-  };
-
-  const { data: selectedKeyInfo } = useQuery(keyInfoQueryOptions);
 
   const urlLogQueryOptions: UseQueryOptions<LogEntry | null> = {
     queryKey: ["logs", "byId", urlLogId, accessToken],
@@ -274,22 +257,6 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     [selectLog, displaySessionId],
   );
 
-  const handleKeyHashClick = useCallback((keyHash: string) => {
-    setSelectedKeyIdInfoView(keyHash);
-  }, []);
-
-  if (selectedKeyInfo && selectedKeyIdInfoView && selectedKeyInfo.api_key === selectedKeyIdInfoView) {
-    return (
-      <KeyInfoView
-        keyId={selectedKeyIdInfoView}
-        keyData={selectedKeyInfo}
-        teams={allTeams ?? []}
-        onClose={() => setSelectedKeyIdInfoView(null)}
-        backButtonText="Back to Logs"
-      />
-    );
-  }
-
   return (
     <AutoRouterModelGroupsProvider>
       <div className="flex items-center justify-between mb-4">
@@ -313,7 +280,6 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
         onSearchChange={handleSearchChange}
         onRefresh={() => void logsQuery.refetch()}
         onRowClick={handleRowClick}
-        onKeyHashClick={handleKeyHashClick}
         onSessionClick={handleSessionClick}
         teams={allTeams ?? []}
         logsWindow={logsWindow}

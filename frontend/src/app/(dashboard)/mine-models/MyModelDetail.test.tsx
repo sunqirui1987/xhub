@@ -51,6 +51,8 @@ it("从卡片直接打开四标签详情并复制实际接口示例", async () =
   await user.click(trigger);
   const dialog = screen.getByRole("dialog", { name: "my-chat" });
   expect(within(dialog).getByRole("tab", { name: "API 接入" })).toHaveAttribute("aria-selected", "true");
+  expect(within(dialog).queryByRole("link", { name: "查看 API 接口定义" })).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("link", { name: "管理虚拟密钥" })).toHaveAttribute("href", expect.stringContaining("api-keys"));
   await user.selectOptions(screen.getByRole("combobox", { name: "选择调用接口" }), "/v1/responses");
   const code = screen.getByLabelText("复制调用示例", { selector: "pre" });
   expect(code).toHaveTextContent('"input": "你好"');
@@ -98,11 +100,12 @@ it.each([undefined, [], model.endpoints])("未开放或配置失败时保留说�
     />,
   );
   expect(screen.getByRole("alert")).toHaveTextContent("暂未提供可调用接口");
+  expect(screen.queryByRole("link", { name: "查看 API 接口定义" })).not.toBeInTheDocument();
   expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "复制调用示例" })).not.toBeInTheDocument();
 });
 
-/** 前置专用视频绑定与轮询契约；验证真实创建/查询路径和专用格式提示，无虚构请求，DOM自动清理。 */
+/** 前置专用视频绑定与轮询契约；验证真实创建/查询路径、供应商文档提示及不存在的公共定义入口已移除，无虚构请求，DOM自动清理。 */
 it("视频协议展示任务动作与专用格式降级", () => {
   render(
     <MyModelDetail
@@ -124,9 +127,6 @@ it("视频协议展示任务动作与专用格式降级", () => {
   );
   expect(screen.getByText(/该接口使用专用请求格式/)).toBeInTheDocument();
   expect(screen.getByText("status · GET /queue/requests/{request_id}/status")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "查看 API 接口定义" })).toHaveAttribute(
-    "href",
-    "https://gateway.test/openapi.json",
-  );
+  expect(screen.queryByRole("link", { name: "查看 API 接口定义" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "复制调用示例" })).not.toBeInTheDocument();
 });

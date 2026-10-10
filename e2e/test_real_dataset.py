@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import random
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 import importlib.util
-from real_dataset import Dataset, Observer, acceptance_run_id, bill_check, cache_bill_check, chat_candidates, curl_json, fallback_acceptance_deployments, fallback_acceptance_route, forward_supplier_chat, header_value, hierarchy, http, load_manifest, response_cache_hit, temporary_retry_delay, weighted_acceptance_route, write_private, resolve_document
+from real_dataset import Dataset, Observer, acceptance_run_id, bill_check, cache_bill_check, chat_candidates, chat_probe_result, curl_json, fallback_acceptance_deployments, fallback_acceptance_route, forward_supplier_chat, header_value, hierarchy, http, load_manifest, response_cache_hit, temporary_retry_delay, weighted_acceptance_route, write_private, resolve_document
 
 RUNNER_SPEC = importlib.util.spec_from_file_location("e2e_real_dataset_runner", Path(__file__).parents[1] / "scripts/e2e-real-dataset.py")
 RUNNER = importlib.util.module_from_spec(RUNNER_SPEC)
@@ -31,6 +33,31 @@ class DatasetTests(unittest.TestCase):
         for org in data["organizations"]:
             for team in data["teams"]:
                 self.assertEqual(sum(r["organization"] == org and r["team"] == team for r in rows), 3)
+
+    def test_business_browser_reads_private_report_and_rejects_missing_or_failed_results(self):
+        """目的：排队浏览器必须读取锁内保存的专属报告；前置模拟编排返回成功、失败或缺报告，验证路径和错误响应；临时目录清理，不启动外部服务。"""
+        for mode in ["passed", "failed", "missing"]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                report_dir = Path(directory)
+
+                def command(command, logger, env):
+                    """用途：模拟浏览器退出前保存专属报告；参数为命令、日志器和环境，无返回；供编排测试调用，仅写临时证据。"""
+                    path = Path(env["E2E_BROWSER_REPORT_DIR"])
+                    self.assertEqual(path, (report_dir / "business-browser").resolve())
+                    if mode != "missing":
+                        path.mkdir()
+                        (path / "results.json").write_text(json.dumps({"stats": {
+                            "expected": 15 if mode == "passed" else 14,
+                            "unexpected": 0 if mode == "passed" else 1, "flaky": 0, "skipped": 0}}))
+
+                with mock.patch.object(RUNNER, "command_stream", side_effect=command):
+                    if mode == "passed":
+                        result = RUNNER.run_business_browser(report_dir, mock.Mock())
+                        self.assertEqual(result["cases"], 15)
+                    else:
+                        with self.assertRaisesRegex(AssertionError, "缺少本轮浏览器报告" if mode == "missing" else "未全部执行通过"):
+                            RUNNER.run_business_browser(report_dir, mock.Mock())
+                self.assertEqual((report_dir / "business-browser-results.json").exists(), mode != "missing")
 
     def test_acceptance_run_id_cannot_be_redacted_as_phone_number(self):
         """目的：运行标记不能被默认手机号护栏改写；前置固定长度，验证仅含小写字母且长度准确，无外部数据需要清理。"""
@@ -788,6 +815,115 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(selected, "second-real")
             self.assertEqual([call.args[1] for call in probe.call_args_list], ["first-real", "second-real"])
             self.assertEqual(probe.call_args_list[0].kwargs["action"], "生命周期探测")
+
+    def test_chat_probe_result_handles_success_boundaries_and_malformed_responses(self):
+        """目的：探测判定不能把计费、推理或畸形结构当作回答；前置正常、空白、错误和计量边界响应，验证安全失败及无正文证据；纯内存测试无需清理。"""
+        good = {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 19, "completion_tokens": 1}}
+        self.assertTrue(chat_probe_result(200, good)["passed"])
+        for status, reply in [(502, good), (200, None), (200, []), (200, {"choices": [None]}),
+                              (200, {"choices": "invalid"}), (200, {**good, "error": {"message": "secret"}})]:
+            with self.subTest(status=status, reply=reply):
+                self.assertFalse(chat_probe_result(status, reply)["passed"])
+        for content in [None, "", " \n", ["OK"], {"text": "OK"}]:
+            with self.subTest(content=content):
+                reply = copy.deepcopy(good)
+                reply["choices"][0]["message"] = {"content": content, "reasoning_content": "private reasoning"}
+                result = chat_probe_result(200, reply)
+                self.assertFalse(result["passed"])
+                self.assertNotIn("private reasoning", json.dumps(result))
+                self.assertEqual(result["reasoning_chars"], 17)
+        for usage in [None, [], {"prompt_tokens": 19, "completion_tokens": 0},
+                      {"prompt_tokens": -1, "completion_tokens": 1},
+                      {"prompt_tokens": True, "completion_tokens": 1},
+                      {"prompt_tokens": "secret", "completion_tokens": 1},
+                      {"prompt_tokens": float("nan"), "completion_tokens": 1}]:
+            with self.subTest(usage=usage):
+                result = chat_probe_result(200, {**good, "usage": usage})
+                self.assertFalse(result["passed"])
+                json.dumps(result, allow_nan=False)
+                self.assertNotIn("secret", json.dumps(result))
+
+    def test_chat_probe_retries_truncated_reasoning_with_larger_budget(self):
+        """目的：推理耗尽32 token后应自适应重试而非重复相同请求；前置首轮仅有推理且 length、次轮有回答，验证预算32→1024和结构诊断；临时目录自动清理且不访问外网。"""
+        with tempfile.TemporaryDirectory() as directory:
+            lines = []
+            dataset = Dataset("http://127.0.0.1:1", directory, load_manifest(), logger=lines.append)
+            provider = dataset.data["providers"][1]
+            truncated = {"choices": [{"message": {"content": None, "reasoning_content": "private reasoning"},
+                                      "finish_reason": "length"}],
+                         "usage": {"prompt_tokens": 19, "completion_tokens": 32}}
+            good = {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 19, "completion_tokens": 60}}
+            with mock.patch.dict("os.environ", {provider["key_env"]: "secret"}), \
+                    mock.patch("real_dataset.curl_json", side_effect=[(200, truncated, {}), (200, good, {})]) as request:
+                self.assertTrue(dataset.probe_chat_candidate(provider, "moonshotai/kimi-k2.6", 1, 2, attempts=2, delay=0))
+            self.assertEqual([call.args[2]["max_tokens"] for call in request.call_args_list], [32, 1024])
+            probes = dataset.report["probe_attempts"]
+            self.assertEqual([row["passed"] for row in probes], [False, True])
+            self.assertEqual(probes[0]["finish_reason"], "length")
+            self.assertEqual(probes[0]["content_chars"], 0)
+            self.assertIn("提高 max_tokens 至 1024", "\n".join(lines))
+            self.assertNotIn("private reasoning", json.dumps(probes) + "\n".join(lines))
+
+    def test_chat_probe_does_not_expand_budget_for_unrelated_failures(self):
+        """目的：网络失败、非截断空回答和错误响应不能触发预算增加；前置失败响应及两次重试，验证始终32 token且失败单列；临时目录清理，无外部调用。"""
+        for status, reply in [(502, {}), (200, {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]}),
+                              (200, {"error": "private", "choices": [{"message": {}, "finish_reason": "length"}]})]:
+            with self.subTest(status=status, reply=reply), tempfile.TemporaryDirectory() as directory:
+                dataset = Dataset("http://127.0.0.1:1", directory, load_manifest(), logger=lambda line: None)
+                provider = dataset.data["providers"][1]
+                with mock.patch.dict("os.environ", {provider["key_env"]: "secret"}), \
+                        mock.patch("real_dataset.curl_json", return_value=(status, reply, {})) as request:
+                    self.assertFalse(dataset.probe_chat_candidate(provider, "candidate", 1, 1, attempts=2, delay=0))
+                self.assertEqual([call.args[2]["max_tokens"] for call in request.call_args_list], [32, 32])
+                self.assertFalse(dataset.report["checks"])
+
+    def test_lifecycle_probe_uses_real_http_and_continues_after_truncation_limit(self):
+        """目的：真实HTTP探测扩容后仍无正文必须继续候选；前置本地供应商端点，验证curl载荷、32→1024预算上限和最终选中可用模型；服务、线程及临时目录均自动清理。"""
+        requests = []
+
+        class Supplier(BaseHTTPRequestHandler):
+            """为探测提供本地协议边界；请求记录留在内存，服务由测试finally关闭。"""
+
+            def do_POST(self):
+                """用途：按候选返回截断推理或最终回答；无参数或返回值，供HTTP服务调用，读取请求并写JSON，正文和凭据不落盘。"""
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                requests.append((self.path, body))
+                truncated = body["model"] == "truncated-model"
+                reply = {"choices": [{"message": {"content": None if truncated else "OK",
+                                                     "reasoning_content": "thinking" if truncated else None},
+                                       "finish_reason": "length" if truncated else "stop"}],
+                         "usage": {"prompt_tokens": 19, "completion_tokens": body["max_tokens"] if truncated else 1}}
+                raw = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, format, *args):
+                """用途：关闭服务默认日志以保持测试报告干净；参数为格式及值，无返回，无副作用。"""
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Supplier)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                dataset = Dataset("http://127.0.0.1:1", directory, load_manifest(), logger=lambda line: None)
+                provider = dataset.data["providers"][1]
+                with mock.patch.dict("os.environ", {provider["key_env"]: "local-only",
+                                                     provider["base_env"]: f"http://127.0.0.1:{server.server_port}/v1"}):
+                    selected = dataset.select_lifecycle_model(provider, ["truncated-model", "working-model"], delay=0)
+                self.assertEqual(selected, "working-model")
+                self.assertEqual([body["max_tokens"] for path, body in requests], [32, 1024, 32])
+                self.assertTrue(all(path == "/v1/chat/completions" for path, body in requests))
+                self.assertEqual([row["passed"] for row in dataset.report["probe_attempts"]], [False, False, True])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_lifecycle_model_selection_fails_when_all_candidates_fail(self):
         """目的：模型生命周期不得把全部供应商失败误报为通过；前置两个候选均失败，验证明确异常和每个候选均已探测，模拟调用无需清理。"""

@@ -63,7 +63,7 @@ vi.mock("@tanstack/react-pacer/debouncer", () => ({
 
 import { useDebouncedValue } from "@tanstack/react-pacer/debouncer";
 import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
-import { uiSpendLogsCall } from "../networking";
+import { keyInfoV1Call, uiSpendLogsCall } from "../networking";
 
 const logEntry = (overrides: Partial<LogEntry>): LogEntry => ({
   request_id: "req-1",
@@ -146,6 +146,23 @@ describe("RequestLogsPanel", () => {
     testQueryClient.clear();
     respondWith([]);
     debounce.settled = null;
+  });
+
+  /** 前置正常/错误日志包含历史 Hash 且密钥接口会失败；验证文本不请求密钥、行点击仍打开日志详情。
+   * 参数 errorsOnly 控制面板种类；测试框架卸载组件，beforeEach 清理查询缓存、会话状态与 mock。 */
+  it.each([false, true])("never fetches key info when clicking a hash in errorsOnly=%s", async (errorsOnly) => {
+    const user = userEvent.setup();
+    vi.mocked(keyInfoV1Call).mockRejectedValue(new Error("Not found"));
+    respondWith([logEntry({ request_id: "req-historical-key", metadata: { user_api_key: "deleted-key-hash" } })]);
+    renderWithProviders(<RequestLogsPanel {...defaultProps} errorsOnly={errorsOnly} />, { onUrlUpdate });
+
+    const hash = await screen.findByText("deleted-key-hash");
+    expect(screen.queryByRole("button", { name: "deleted-key-hash" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "deleted-key-hash" })).not.toBeInTheDocument();
+    await user.click(hash);
+    await waitFor(() => expect(screen.getByTestId("log-details-drawer")).toHaveAttribute("data-log-id", "req-historical-key"));
+    expect(keyInfoV1Call).not.toHaveBeenCalled();
+    expect(urlParams().get("log_id")).toBe("req-historical-key");
   });
 
   /** 前置隔离查询缓存和错误面板；验证请求真实查询封装携带错误筛选和逐条模式，beforeEach 清理会话缓存。 */

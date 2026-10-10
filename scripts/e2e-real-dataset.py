@@ -316,7 +316,7 @@ def run_browser(directory, env, gateway, ui_port, processes, handles, logger):
 
 
 def run_business_browser(directory, logger):
-    """用途：补齐去重浏览器业务；参数为报告目录和日志器，返回本轮统计；每种流程选择一个已有完整用例，隔离库和模拟供应商由 e2e.sh 清理，失败或缺报告抛异常。"""
+    """用途：补齐去重浏览器业务；参数为报告目录和日志器，返回本轮统计；等待共享浏览器锁并在释放前保存专属证据，隔离库和模拟供应商由 e2e.sh 清理，失败或缺报告抛异常。"""
     titles = [
         "virtual key update, regenerate, block, and delete",
         "model update, test connection, and delete",
@@ -342,7 +342,8 @@ def run_business_browser(directory, logger):
     for key in ("E2E_LIVE", "E2E_CREDENTIAL_SOURCE"):
         env.pop(key, None)
     env["E2E_FULL_COVERAGE"] = "0"
-    result_path = ROOT / ".e2e/current/results.json"
+    env["E2E_BROWSER_REPORT_DIR"] = str((directory / "business-browser").resolve())
+    result_path = Path(env["E2E_BROWSER_REPORT_DIR"]) / "results.json"
     started = time.time()
     try:
         command_stream(["bash", "scripts/e2e.sh", *files, "--grep", pattern], logger, env=env)

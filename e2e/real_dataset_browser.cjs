@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const {chromium, expect} = require('../frontend/node_modules/@playwright/test');
 const {verifyCodexLogs} = require('./codex_browser.cjs');
+const {verifyModelDeployment} = require('./model_deployment_browser.cjs');
 const dir = process.env.E2E_DATASET_DIR;
 const access = JSON.parse(fs.readFileSync(path.join(dir, 'access.json')));
 const data = JSON.parse(fs.readFileSync(path.join(__dirname, '../docs/testdata/real-acceptance/dataset.json')));
@@ -71,7 +72,8 @@ async function verifyMediaLogs(page, ui) {
   }
 }
 
-/** 用途：执行登录、租户展示、个人密钥请求、账单和护栏流程；无参数，返回 Promise；不拦截真实网络。 */
+/** 用途：执行登录、按部署 ID 核对模型完整入口、租户展示、个人密钥请求、账单和护栏流程。
+ * 无参数，返回完成 Promise；调用场景为真实数据集验收，不拦截真实网络，页面或接口不符时抛错并保留报告。 */
 async function main() {
   log('启动无头 Chromium，视口=1440x1000');
   browser = await chromium.launch({headless: true});
@@ -103,12 +105,7 @@ async function main() {
   await page.goto(ui + '/ui/models-and-endpoints/');
   for (const deployment of access.deployments) {
     if (deployment.temporary_fault) continue;
-    const region = page.getByRole('region', {name: '公开模型 ' + deployment.public_name, exact: true});
-    await expect(region).toBeVisible({timeout: 30000});
-    await expect(region.getByText(deployment.provider, {exact: true}).first()).toBeVisible();
-    await expect(region.getByText(deployment.model, {exact: true}).first()).toBeVisible();
-    await expect(region.getByText(deployment.transport, {exact: true}).first()).toBeVisible();
-    for (const endpoint of deployment.endpoint_types) await expect(region.getByText(endpoint, {exact: true}).first()).toBeVisible();
+    await verifyModelDeployment(page, deployment);
     report.checks.push({name: 'browser-model-' + deployment.public_name, model: deployment.public_name, protocol: deployment.transport, passed: true});
     log('✅ [' + deployment.public_name + ' / ' + deployment.transport + ' / 模型与端点] 公开名、供应商、上游型号、协议和用户入口均正确');
   }

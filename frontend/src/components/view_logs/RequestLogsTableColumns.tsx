@@ -17,7 +17,6 @@ import { AgentBadge, AgentIcon, BatchBadge, LlmBadge, McpBadge, SparkleIcon, Wre
 import { t } from "@/i18n";
 
 export interface RequestLogsTableColumnsDeps {
-  onKeyHashClick: (keyHash: string) => void;
   onSessionClick: (log: LogEntry) => void;
 }
 
@@ -41,9 +40,9 @@ function TruncatedText({ value }: { value: string | undefined }) {
   return <CellTooltip content={display} trigger={<span className="max-w-[15ch] truncate block">{display}</span>} />;
 }
 
-/** 返回日志表格列定义；接收密钥/会话点击回调，兼容失败状态与批次部分失败，供日志和错误日志共用。 */
+/** 返回普通与错误日志共用的列定义；参数为会话点击回调，供 RequestLogsTable 渲染。
+ * 密钥 Hash 仅展示日志中的标识，不查询可能已删除或无权查看的密钥；缺失值显示占位符。 */
 export const getRequestLogsTableColumns = ({
-  onKeyHashClick,
   onSessionClick,
 }: RequestLogsTableColumnsDeps): ColumnDef<LogEntry>[] => [
   {
@@ -241,7 +240,7 @@ export const getRequestLogsTableColumns = ({
     size: 110,
     enableSorting: false,
     cell: ({ row }) => (
-      <IdCell value={readMetaString(row.original.metadata, "user_api_key")} variant="plain" onClick={onKeyHashClick} />
+      <IdCell value={readMetaString(row.original.metadata, "user_api_key")} variant="plain" />
     ),
   },
   {

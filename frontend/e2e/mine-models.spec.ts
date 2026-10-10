@@ -3,9 +3,13 @@ import { execFileSync } from "node:child_process";
 import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t } from "./helpers";
 
 /** 前置真实浏览器、隔离数据库和本地上游；创建授权模型和 API Key，验证四入口、价格、接口切换、复制、
- * 实际执行页面 curl、响应和用量日志，并检查移动端；finally 删除测试模型及密钥，schema 清理账单。 */
+ * 实际执行页面 curl、响应和用量日志、移除公共定义入口且不发起定义请求，并检查移动端；finally 删除测试模型及密钥，schema 清理账单。 */
 test("my models exposes prices, access, executable API examples and call guide", async ({ page }) => {
   test.setTimeout(120_000);
+  const schemaRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/openapi.json") schemaRequests.push(request.url());
+  });
   // 无头浏览器默认拒绝剪贴板；授予隔离测试上下文权限，验证真实复制而非替换 API。
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await loginAdmin(page);
@@ -59,6 +63,7 @@ test("my models exposes prices, access, executable API examples and call guide",
     await dialog.getByRole("tab", { name: "接入信息" }).click();
     await expect(dialog.getByText("POST /v1/chat/completions", { exact: true })).toBeVisible();
     await dialog.getByRole("tab", { name: "API 接入" }).click();
+    await expect(dialog.getByRole("link", { name: "查看 API 接口定义" })).toHaveCount(0);
     await dialog.getByRole("combobox", { name: "选择调用接口" }).selectOption("/v1/responses");
     await expect(dialog.getByLabel("复制调用示例", { exact: true }).filter({ hasText: "curl" })).toContainText(
       '"input": "你好"',
@@ -103,6 +108,7 @@ test("my models exposes prices, access, executable API examples and call guide",
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(card.getByRole("button", { name: "模型价格", exact: true })).toBeFocused();
+    expect(schemaRequests, "模型详情应直接使用模型绑定，不请求已移除的公共接口定义").toEqual([]);
   } finally {
     if (key)
       expect((await page.request.post(GATEWAY + "/key/delete", { headers, data: { keys: [key] } })).status()).toBe(200);
