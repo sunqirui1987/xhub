@@ -2006,7 +2006,7 @@ describe("KeyEditView", () => {
       await userEvent.clear(duration);
       await userEvent.type(duration, "45d");
 
-      await chooseSelectOption(userEvent, screen.getByLabelText(/TPM Rate Limit Type/), /^Guaranteed throughput/);
+      expect(screen.queryByLabelText(/TPM Rate Limit Type/)).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
@@ -2015,7 +2015,7 @@ describe("KeyEditView", () => {
       });
       const payload = onSubmitMock.mock.calls[0][0];
       expect(payload.duration).toBe("45d");
-      expect(payload.tpm_limit_type).toBe("guaranteed_throughput");
+      expect(payload.tpm_limit_type).toBeNull();
       expect(payload.rpm_limit_type).toBeNull();
     });
 
@@ -2190,7 +2190,7 @@ describe("KeyEditView", () => {
       renderForPayload(onSubmitMock);
       await screen.findByRole("button", { name: /save changes/i });
 
-      await chooseSelectOption(userEvent, screen.getByLabelText(/RPM Rate Limit Type/), /^Guaranteed throughput/);
+      expect(screen.queryByLabelText(/RPM Rate Limit Type/)).not.toBeInTheDocument();
 
       await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
@@ -2198,7 +2198,7 @@ describe("KeyEditView", () => {
         expect(onSubmitMock).toHaveBeenCalled();
       });
       const payload = onSubmitMock.mock.calls[0][0];
-      expect(payload.rpm_limit_type).toBe("guaranteed_throughput");
+      expect(payload.rpm_limit_type).toBeNull();
       expect(payload.tpm_limit_type).toBeNull();
     });
 

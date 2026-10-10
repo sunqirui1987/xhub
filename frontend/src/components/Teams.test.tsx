@@ -906,3 +906,26 @@ describe("Teams - the create form keeps the organization and models picks while 
     expect(modelsField()).toHaveValue("");
   });
 });
+
+/** 新建团队页面速率与预算提交测试；组织列表为空，验证固定值及留空共享；mock 接口无持久数据，框架清理 DOM。 */
+describe("Teams creation quota fields", () => {
+  it.each([true, false])("submits fixed or shared rates: %s", async fixed => {
+    vi.clearAllMocks();
+    mockUseOrganizations.mockReturnValue({ data: [] });
+    vi.mocked(teamCreateCall).mockResolvedValue({ team_id: "rates-team" });
+    vi.mocked(fetchAvailableModelsForTeamOrKey).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWithQueryClient(<Teams accessToken="test-token" userID="user-123" userRole="Admin" />);
+    await user.click(screen.getByTestId("create-team-button"));
+    await user.type(screen.getByTestId("team-name-input"), "rates-team");
+    await user.type(screen.getByLabelText("Max Budget (USD)"), "100");
+    if (fixed) {
+      await user.type(screen.getByLabelText("Requests per minute Limit (RPM)"), "0");
+      await user.type(screen.getByLabelText("Tokens per minute Limit (TPM)"), "256");
+    }
+    await user.click(screen.getByTestId("create-team-submit"));
+    await waitFor(() => expect(teamCreateCall).toHaveBeenCalledWith("test-token", expect.objectContaining({
+      rpm_limit: fixed ? 0 : null, tpm_limit: fixed ? 256 : null,
+    })));
+  });
+});

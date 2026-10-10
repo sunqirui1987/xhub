@@ -36,6 +36,9 @@ export const TableIconActionButtonMap: Record<string, TableIconActionButtonBaseP
   Copy: { icon: ClipboardCopyIcon, className: "hover:text-info" },
 };
 
+/** 组合表格图标按钮及提示；参数提供动作、已翻译说明与禁用原因，返回带可访问名称的按钮。
+ * 调用方为管理表格；禁用原因只改变提示，保留动作名称便于辅助技术识别。
+ */
 export default function TableIconActionButton({
   onClick,
   tooltipText,
@@ -47,7 +50,14 @@ export default function TableIconActionButton({
   const { icon, className } = TableIconActionButtonMap[variant];
   const title = disabled ? disabledTooltipText : tooltipText;
   const button = (
-    <BaseActionButton icon={icon} onClick={onClick} className={className} disabled={disabled} dataTestId={dataTestId} />
+    <BaseActionButton
+      icon={icon}
+      onClick={onClick}
+      className={className}
+      disabled={disabled}
+      dataTestId={dataTestId}
+      ariaLabel={tooltipText || variant}
+    />
   );
 
   if (!title) {

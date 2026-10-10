@@ -23,6 +23,77 @@ RUNNER_SPEC.loader.exec_module(RUNNER)
 class DatasetTests(unittest.TestCase):
     """验证层级唯一性、输入失败和账单边界，临时文件由上下文清理。"""
 
+    def test_permissions_separate_limits_from_models_and_status(self):
+        """目的：防止组织管理员分配额度再次被旧验收拒绝；前置四角色及原值含 null/零的团队，核对每项请求的状态码和原值，并验证意外放行立即失败；不连接后台，临时报告自动清理。"""
+        for unexpected_allow in (False, True):
+            with self.subTest(unexpected_allow=unexpected_allow), tempfile.TemporaryDirectory() as directory:
+                dataset = Dataset("http://127.0.0.1:1", directory, load_manifest(), logger=lambda _: None)
+                dataset.admin = "platform-session"
+                dataset.state["member_password"] = "unit-password"
+                for persona in dataset.data["personas"]:
+                    if persona["role"] == "platform_admin":
+                        continue
+                    dataset.state["users"].append({
+                        "email": persona["role"], "organization_slug": persona["organization"],
+                        "team_slug": persona["team"], "member_index": persona["member_index"],
+                        "organization_id": "own-org", "team_id": "own-team"})
+                dataset.state["teams"] = [{"id": "foreign-team", "organization_id": "foreign-org"}]
+                info = {"max_budget": 30, "rpm_limit": None, "tpm_limit": 0,
+                        "models": ["unit-model"], "status": "active"}
+                calls = []
+
+                def api(route, body=None, token=None, expected=200, method=None):
+                    """用途：按独立权限矩阵模拟接口并记录请求；参数兼容 Dataset.api，返回正文和响应头；状态码不符抛错，仅写内存，供权限单测调用。"""
+                    role = "platform_admin" if token in (None, "platform-session") else token
+                    if route == "/v2/login":
+                        return {"key": body["username"]}, {}
+                    if route == "/team/list":
+                        return [{}] * {"platform_admin": 9, "organization_admin": 3,
+                                       "team_admin": 1, "member": 1}[role], {}
+                    if route.startswith("/team/info?"):
+                        return {"team_info": info.copy()}, {}
+                    allowed = role == "platform_admin"
+                    if route == "/team/update":
+                        calls.append((role, body.copy(), expected))
+                        own = body["team_id"] == "own-team"
+                        if "team_description" in body:
+                            allowed |= own and role in ("organization_admin", "team_admin")
+                        elif any(limit in body for limit in ("max_budget", "rpm_limit", "tpm_limit")):
+                            allowed |= own and role == "organization_admin"
+                        if unexpected_allow and role == "organization_admin" and "models" in body:
+                            allowed = True
+                    actual = 200 if allowed else 403
+                    if actual != expected:
+                        raise AssertionError(f"{role} {route}: actual={actual}, expected={expected}")
+                    return {}, {}
+
+                dataset.api = api
+                if unexpected_allow:
+                    with self.assertRaisesRegex(AssertionError, "organization_admin.*actual=200, expected=403"):
+                        dataset.verify_permissions()
+                else:
+                    dataset.verify_permissions()
+                    self.assertEqual(len(dataset.state["personas"]), 4)
+                    for role in ("platform_admin", "organization_admin", "team_admin", "member"):
+                        for tid in ("own-team", "foreign-team"):
+                            for limit in ("max_budget", "rpm_limit", "tpm_limit"):
+                                matches = [(body, status) for caller, body, status in calls
+                                           if caller == role and body["team_id"] == tid and limit in body]
+                                self.assertEqual(len(matches), 1, f"{role}/{tid}/{limit} 必须独立验收")
+                                self.assertEqual(matches[0][0][limit], info[limit], "不得改变团队原有配置")
+
+    def test_permission_manifest_requires_distinct_limit_and_model_expectations(self):
+        """目的：缺失或非法权限预期必须在写库前失败；前置真实清单副本，覆盖四个必填字段及无效状态码，临时清单自动清理。"""
+        for field in ("own_team_limits", "foreign_team_limits", "team_models_update", "team_status_update"):
+            for value in (None, 201):
+                with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as directory:
+                    data = load_manifest()
+                    data["permission_scenarios"][0][field] = value
+                    path = Path(directory) / "manifest.json"
+                    path.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(ValueError, "预期状态码"):
+                        load_manifest(path)
+
     def test_hierarchy(self):
         """目的：固定清单展开27个唯一成员和81把钥匙；前置真实清单，断言团队均三人，无外部数据清理。"""
         data = load_manifest()

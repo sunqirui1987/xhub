@@ -1,7 +1,10 @@
-import { expect, it } from "vitest";
+import { beforeEach, expect, it } from "vitest";
+import { setActiveLocale } from "@/i18n";
 import { imagePreviewSources, isOpenAIImageEndpoint, parseNativeRequest, validateImageRequest } from "./imageRequest";
 import { nativeRequestTemplate } from "./nativeRequestTemplate";
 import type { ModelEndpoint } from "@/components/llm_calls/fetch_models";
+
+beforeEach(() => setActiveLocale("zh-CN"));
 
 const endpoint: ModelEndpoint = {
   endpoint_id: "images",
@@ -62,4 +65,13 @@ it("提取安全预览并忽略非图片及错误响应", () => {
   expect(imagePreviewSources('{"data":[{"b64_json":"AAAA"}]}', "webp")).toEqual(["data:image/webp;base64,AAAA"]);
   for (const response of ["bad", "null", "{}", '{"data":{}}', '{"data":[{},1,{"url":"bad"},{"b64_json":"<svg>"}]}'])
     expect(imagePreviewSources(response)).toEqual([]);
+});
+
+/** 前置英文语言与非法参数；验证纯函数错误随当前语言变化且不改变正文，无网络与清理。 */
+it("英文错误精确定位图片参数", () => {
+  setActiveLocale("en");
+  expect(() => parseNativeRequest("[]")).toThrow("Request parameters must be a JSON object");
+  expect(() => validateImageRequest({ prompt: "", size: "auto" })).toThrow("Enter an image prompt");
+  expect(() => validateImageRequest({ prompt: "A cat", size: "bad" })).toThrow("Enter a valid image size");
+  expect(() => validateImageRequest({ prompt: "A cat", size: "auto", n: 0 })).toThrow("positive integer");
 });

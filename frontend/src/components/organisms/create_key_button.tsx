@@ -56,6 +56,7 @@ const requiredRule = (required: boolean, message: string) => ({
   validate: (value: unknown) => (required && isBlank(value) ? message : true),
 });
 
+/** 表单预检显式团队的单项上限；参数为父级上限和国际化消息，返回规则；全树总分配仍由后台事务校验。 */
 const ceilingRule = (ceiling: number | null | undefined, message: (limit: number) => string) => ({
   validate: (value: unknown) =>
     value && ceiling !== null && ceiling !== undefined && (value as number) > ceiling ? message(ceiling) : true,
@@ -453,18 +454,8 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                           </span>
                         }
                         name="max_budget"
-                        help={selectedCreateKeyTeam ? t("Budget cannot exceed team max budget: ${value0}", {
-                          value0:
-                            selectedCreateKeyTeam?.max_budget !== null &&
-                            selectedCreateKeyTeam?.max_budget !== undefined
-                              ? selectedCreateKeyTeam.max_budget
-                              : t("unlimited"),
-                        }) : undefined}
-                        rules={ceilingRule(selectedCreateKeyTeam?.max_budget, (limit) =>
-                          t("Budget cannot exceed team max budget: ${value0}", {
-                            value0: formatNumberWithCommas(limit, 4),
-                          }),
-                        )}
+                        help={t("quotaGuide.key")}
+                        rules={ceilingRule(selectedCreateKeyTeam?.max_budget, (limit) => t("Budget cannot exceed team max budget: ${value0}", { value0: limit }))}
                       >
                         {(control) => (
                           <NumericalInput
@@ -476,6 +467,14 @@ const CreateKey: React.FC<CreateKeyProps> = ({ team, teams, data, addKey, autoOp
                           />
                         )}
                       </MountedFormField>
+
+                      <p className="text-sm text-muted-foreground sm:col-span-2">{t("quotaGuide.rates")}</p>
+                      {(["rpm_limit", "tpm_limit"] as const).map((name) => (
+                        <MountedFormField key={name} name={name} label={t(name === "rpm_limit" ? "Requests per minute Limit (RPM)" : "Tokens per minute Limit (TPM)")}
+                          rules={{ validate: (value) => isBlank(value) || (Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647) || t("Must be a non-negative whole number") }}>
+                          {(control) => <Input {...control} value={control.value as string | number ?? ""} type="number" min={0} max={2147483647} step={1} placeholder={t("quotaGuide.rateBlank")} />}
+                        </MountedFormField>
+                      ))}
 
                       <MountedFormField
                         label={

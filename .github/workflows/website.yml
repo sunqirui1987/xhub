@@ -3,9 +3,9 @@ name: XHub Website
 on:
   push:
     branches: [main]
-    paths: ["website/**", "docs/**", "internal/**/*.md", "cmd/regression/**/*.md", ".github/workflows/website.yml"]
+    paths: ["website/**", "docs/**", "frontend/src/components/docs/**", "frontend/src/i18n/messages/docs*.ts", "internal/**/*.md", "cmd/regression/**/*.md", ".github/workflows/website.yml"]
   pull_request:
-    paths: ["website/**", "docs/**", "internal/**/*.md", "cmd/regression/**/*.md", ".github/workflows/website.yml"]
+    paths: ["website/**", "docs/**", "frontend/src/components/docs/**", "frontend/src/i18n/messages/docs*.ts", "internal/**/*.md", "cmd/regression/**/*.md", ".github/workflows/website.yml"]
   workflow_dispatch:
 
 permissions:

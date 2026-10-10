@@ -2,20 +2,19 @@
 
 import { useState, useEffect } from "react";
 import ChatUI from "@/app/(dashboard)/playground/components/chat_ui/ChatUI";
-import CompareUI from "@/app/(dashboard)/playground/components/compareUI/CompareUI";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { fetchProxySettings } from "@/utils/proxyUtils";
 import { canAccessManagement } from "@/utils/roles";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 interface ProxySettings {
   PROXY_BASE_URL?: string;
   LITELLM_UI_API_DOC_BASE_URL?: string | null;
 }
 
-/** 按权限提供对话与对比工作区；无参数，返回页面；代理配置只向管理员加载。 */
+/** 按权限直接提供单一调试工作区；无参数，返回页面；只读角色被拦截，代理配置仅向管理员加载。 */
 export default function PlaygroundPage() {
+  const t = useT();
   const { accessToken, userRole, userId, disabledPersonalKeyCreation, token, isViewOnly } = useAuthorized();
   const [proxySettings, setProxySettings] = useState<ProxySettings | undefined>(undefined);
 
@@ -46,40 +45,14 @@ export default function PlaygroundPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
-      <Tabs defaultValue="chat" className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden">
-        <TabsList
-          variant="line"
-          className="h-12 w-full shrink-0 justify-start gap-2 overflow-x-auto border-b border-border bg-card px-2"
-        >
-          <TabsTrigger value="chat" className="h-10 flex-none px-4 text-base">
-            {t("pages.playground.chat")}
-          </TabsTrigger>
-          <TabsTrigger value="compare" className="h-10 flex-none px-4 text-base">
-            {t("pages.playground.compare")}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent
-          value="chat"
-          className="mt-0 flex-1 min-h-0 min-w-0 overflow-hidden data-hidden:hidden"
-          keepMounted
-        >
-          <ChatUI
-            accessToken={accessToken}
-            token={token}
-            userRole={userRole}
-            userID={userId}
-            disabledPersonalKeyCreation={disabledPersonalKeyCreation}
-            proxySettings={proxySettings}
-          />
-        </TabsContent>
-        <TabsContent
-          value="compare"
-          className="mt-0 flex-1 min-h-0 min-w-0 overflow-hidden data-hidden:hidden"
-          keepMounted
-        >
-          <CompareUI accessToken={accessToken} disabledPersonalKeyCreation={disabledPersonalKeyCreation} />
-        </TabsContent>
-      </Tabs>
+      <ChatUI
+        accessToken={accessToken}
+        token={token}
+        userRole={userRole}
+        userID={userId}
+        disabledPersonalKeyCreation={disabledPersonalKeyCreation}
+        proxySettings={proxySettings}
+      />
     </div>
   );
 }

@@ -110,56 +110,54 @@ test("chat explains missing credentials and unavailable deployment, then recover
   }
 });
 
-/** 前置两张独立真实对比卡片；一张缺密钥、一张成功，验证失败隔离和补齐后重试；finally 删除专用部署。 */
-test("comparison isolates card failures and supports recovery", async ({ page }) => {
+/** 前置隔离真实聊天部署；验证单工作区无对比入口、中英文切换保留草稿、curl 和真实请求及账单。
+ * finally 删除专用部署，runner 清理账单和会话，无外部服务凭据。 */
+test("single workspace has no comparison controls and preserves bilingual chat", async ({ page }) => {
   await loginAdmin(page);
-  const name = "e2e-compare-missing-key";
-  const id = await deployment(page, name, false);
+  const name = "e2e-single-workspace";
+  const id = await deployment(page, name);
   const headers = { Authorization: "Bearer " + (await sessionBearer(page)) };
   try {
     await stableGoto(page, "/playground");
-    await page.getByRole("tab", { name: t("pages.playground.compare"), exact: true }).click();
-    const first = page.getByRole("region", { name: "对比卡片 1", exact: true });
-    const second = page.getByRole("region", { name: "对比卡片 2", exact: true });
-    for (const [card, model] of [
-      [first, name],
-      [second, "gpt-4o-mini"],
-    ] as const) {
-      await card.getByRole("combobox").first().click();
-      await page.getByRole("option", { name: model, exact: true }).click();
-    }
-    const input = page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true });
-    await input.fill("对比失败隔离");
-    await page.getByRole("button", { name: t("Send message") }).click();
-    await expect(first.getByRole("alert")).toContainText("模型未配置上游密钥");
-    await expect(second.getByText("e2e-ok", { exact: true })).toBeVisible();
-    await expect(input).toHaveValue("对比失败隔离");
-    expect(
-      (
-        await page.request.patch(GATEWAY + "/model/" + id + "/update", {
-          headers,
-          data: { litellm_params: { api_key: "sk-fake" } },
-        })
-      ).status(),
-    ).toBe(200);
-    await page.getByRole("button", { name: t("Send message") }).click();
-    await expect(first.getByText("e2e-ok", { exact: true })).toBeVisible();
+    await expect(page.getByRole("tablist")).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "对比", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "添加对比卡片", exact: true })).toHaveCount(0);
+    await selectChat(page, name);
+    const prompt = "Describe a sunrise in one sentence.";
+    await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).fill(prompt);
+    await page.getByRole("button", { name: "English", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Models and endpoints", exact: true })).toBeVisible();
+    await expect(page.getByRole("tablist")).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Compare", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add Comparison", exact: true })).toHaveCount(0);
+    const input = page.getByPlaceholder("Type your message... (Shift+Enter for new line)");
+    await expect(input).toHaveValue(prompt);
+    const guide = page.getByLabel("Complete curl request", { exact: true });
+    await guide.locator("summary").click();
+    await expect(guide.getByLabel("Copy request example", { exact: true }).filter({ hasText: "curl" })).toContainText(
+      prompt,
+    );
+    const pending = page.waitForResponse(
+      (response) =>
+        /chat\/completions$/.test(new URL(response.url()).pathname) && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Send message", exact: true }).click();
+    const response = await pending;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON().messages).toEqual([{ role: "user", content: prompt }]);
+    await expect(page.getByText("e2e-ok", { exact: true })).toBeVisible();
     await expect(input).toHaveValue("");
-    await expect(second.getByText("e2e-ok", { exact: true })).toHaveCount(1);
-    await expect(first.getByText("e2e-ok", { exact: true })).toBeInViewport();
-    await expect(second.getByText("e2e-ok", { exact: true })).toBeInViewport();
-    await page.screenshot({ path: "../.e2e/playground/comparison-desktop.png", fullPage: true });
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await input.fill("窄屏对比");
-    await page.getByRole("button", { name: t("Send message") }).click();
-    await expect(input).toHaveValue("");
-    await expect(first.getByText("e2e-ok", { exact: true })).toHaveCount(2);
-    await expect(second.getByText("e2e-ok", { exact: true })).toHaveCount(2);
-    await second.getByText("e2e-ok", { exact: true }).last().scrollIntoViewIfNeeded();
-    await expect(second.getByText("e2e-ok", { exact: true }).last()).toBeInViewport();
-    await page.screenshot({ path: "../.e2e/playground/comparison-mobile.png", fullPage: true });
-    await page.getByRole("button", { name: t("Clear All Chats") }).click();
+    const callId = response.headers()["x-litellm-call-id"];
+    expect(callId).toBeTruthy();
+    await expect
+      .poll(async () => {
+        const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callId, { headers });
+        return detail.ok() ? (await detail.json()).model : "";
+      })
+      .toBe(name);
+    await page.getByRole("button", { name: "中文", exact: true }).click();
+    await expect(page.getByText("e2e-ok", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: t("Clear Chat"), exact: true }).click();
     await expect(page.getByText("e2e-ok", { exact: true })).toHaveCount(0);
   } finally {
     expect((await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } })).status()).toBe(200);

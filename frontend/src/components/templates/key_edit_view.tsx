@@ -19,7 +19,7 @@ import AccessGroupSelector from "../common_components/AccessGroupSelector";
 import BudgetDurationDropdown from "../common_components/budget_duration_dropdown";
 import { mapInternalToDisplayNames } from "../callback_info_helpers";
 import KeyLifecycleSettings from "../common_components/KeyLifecycleSettings";
-import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
+
 import OrganizationDropdown from "../common_components/OrganizationDropdown";
 import RouteTemplateSelect from "../route_templates/RouteTemplateSelect";
 import { estimateTooltips, withNormalizedEstimates } from "./estimatedOutputTokens";
@@ -81,6 +81,7 @@ interface KeyEditViewProps {
   premiumUser?: boolean;
 }
 
+/** 编辑个人密钥配置；参数为密钥、权限与保存/取消回调，返回表单。分钟配额只提供固定值或留空共享，越界阻止提交，跨层超配由后台拒绝。 */
 export function KeyEditView({
   keyData,
   onCancel,
@@ -464,39 +465,16 @@ export function KeyEditView({
             />
           </Field>
 
+          <p className="text-sm text-muted-foreground">{t("quotaGuide.rates")}</p>
           <FormField control={form.control} name="tpm_limit" label={t("TPM Limit")}>
-            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} />}
-          </FormField>
-
-          <FormField control={form.control} name="tpm_limit_type">
-            {({ value, onChange, id }) => (
-              <RateLimitTypeFormItem
-                id={id}
-                type="tpm"
-                name="tpm_limit_type"
-                showDetailedDescriptions={false}
-                value={value as string | null}
-                onChange={onChange}
-              />
-            )}
+            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} max={2147483647} step={1} placeholder={t("quotaGuide.rateBlank")} />}
           </FormField>
 
           <FormField control={form.control} name="rpm_limit" label={t("RPM Limit")}>
-            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} />}
+            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} max={2147483647} step={1} placeholder={t("quotaGuide.rateBlank")} />}
           </FormField>
 
-          <FormField control={form.control} name="rpm_limit_type">
-            {({ value, onChange, id }) => (
-              <RateLimitTypeFormItem
-                id={id}
-                type="rpm"
-                name="rpm_limit_type"
-                showDetailedDescriptions={false}
-                value={value as string | null}
-                onChange={onChange}
-              />
-            )}
-          </FormField>
+
 
           <FormField
             control={form.control}
@@ -525,7 +503,7 @@ export function KeyEditView({
           </FormField>
 
           <FormField control={form.control} name="max_parallel_requests" label={t("Max Parallel Requests")}>
-            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} />}
+            {({ ref: _ref, ...field }) => <NumericalInput {...field} value={field.value ?? ""} min={0} step={1} placeholder={t("quotaGuide.rateBlank")} />}
           </FormField>
 
           <FormField control={form.control} name="model_tpm_limit" label={t("Model TPM Limit")}>

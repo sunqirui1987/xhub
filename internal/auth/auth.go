@@ -88,9 +88,12 @@ type Principal struct {
 	Hash  string
 	// TeamID 描述密钥绑定的团队，或会话唯一成员团队；多团队会话不猜测归属。
 	// ProjectID 和 OwnerType 描述密钥绑定，会话不携带密钥项目或所有权。
-	TeamID    string
-	ProjectID string
-	OwnerType string
+	// BillingTeamID/BillingOrgID 是调用前快照，避免结算时重新读取成员归属。
+	BillingTeamID string
+	BillingOrgID  string
+	TeamID        string
+	ProjectID     string
+	OwnerType     string
 	// OrgID is the organization above the caller's team. It is filled while the
 	// identity chain is walked for budget checks, so a later reader does not
 	// have to fetch the team again to learn it. A session with no team, or a key

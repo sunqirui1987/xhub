@@ -127,12 +127,13 @@ export const OrgCreateDialog = ({
               )}
             </FormField>
 
+            <p className="text-sm text-muted-foreground">{t("quotaGuide.rates")}</p>
             <FormField control={form.control} name="tpm_limit" label={t("Tokens per minute Limit (TPM)")}>
-              {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} />}
+              {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} max={2147483647} placeholder={t("quotaGuide.rateBlank")} />}
             </FormField>
 
             <FormField control={form.control} name="rpm_limit" label={t("Requests per minute Limit (RPM)")}>
-              {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} />}
+              {({ ref, ...field }) => <Input {...field} ref={ref} type="number" step={1} min={0} max={2147483647} placeholder={t("quotaGuide.rateBlank")} />}
             </FormField>
 
             <FormField control={form.control} name="metadata" label={t("Metadata")}>

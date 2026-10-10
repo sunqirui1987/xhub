@@ -1,5 +1,7 @@
 "use client";
 
+import { QuotaGuide } from "@/components/shared/QuotaGuide";
+
 import { teamListCall as v2TeamListCall } from "@/app/(dashboard)/hooks/teams/useTeams";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { KeyResponse, Team } from "@/components/key_team_helpers/key_list";
@@ -72,6 +74,7 @@ export default function ApiKeysDashboard() {
 
   return (
     <main className="flex h-full min-h-0 flex-col">
+      <QuotaGuide scope="key" />
       <VirtualKeysTable
         headerActions={
           isViewOnly && userRole === "Admin" ? undefined : (

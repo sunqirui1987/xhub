@@ -94,7 +94,9 @@ test("my models exposes prices, access, executable API examples and call guide",
       })
       .toBeGreaterThan(0);
     await dialog.getByRole("tab", { name: "调用文档" }).click();
-    await expect(dialog.getByRole("heading", { name: "1. 准备 API Key" })).toBeVisible();
+    await expect(
+      dialog.getByRole("tabpanel", { name: "调用文档", exact: true }).getByRole("heading", { name: "1. 准备 API Key" }),
+    ).toBeVisible();
     await expect(
       dialog.getByRole("tabpanel", { name: "调用文档", exact: true }).getByRole("link", { name: "管理虚拟密钥" }),
     ).toHaveAttribute("href", /api-keys/);
@@ -109,6 +111,32 @@ test("my models exposes prices, access, executable API examples and call guide",
     await expect(dialog).toBeHidden();
     await expect(card.getByRole("button", { name: "模型价格", exact: true })).toBeFocused();
     expect(schemaRequests, "模型详情应直接使用模型绑定，不请求已移除的公共接口定义").toEqual([]);
+    await stableGoto(page, "/playground");
+    await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
+    await page.getByRole("option", { name, exact: true }).click();
+    await page
+      .getByPlaceholder(t("Type your message... (Shift+Enter for new line)"))
+      .fill("Describe a sunrise in one sentence.");
+    const guide = page.getByLabel("完整 curl 调用", { exact: true });
+    await guide.locator("summary").click();
+    const live = await guide.getByLabel("复制调用示例", { exact: true }).filter({ hasText: "curl" }).textContent();
+    expect(live).toContain("Describe a sunrise in one sentence.");
+    const liveOutput = execFileSync("bash", ["-c", live!], {
+      env: { ...process.env, XHUB_API_KEY: key },
+      timeout: 20000,
+      encoding: "utf8",
+    });
+    expect(liveOutput).toContain("e2e-ok");
+    await page.getByRole("button", { name: "English", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Models and endpoints" })).toBeVisible();
+    await expect(page.getByText("Connection settings", { exact: true })).toBeVisible();
+    await expect(
+      page.getByLabel("Complete curl request").getByRole("heading", { name: "1. Prepare your API key" }),
+    ).toBeVisible();
+    await expect(page.getByPlaceholder("Type your message... (Shift+Enter for new line)")).toHaveValue(
+      "Describe a sunrise in one sentence.",
+    );
+    await page.getByRole("button", { name: "中文", exact: true }).click();
   } finally {
     if (key)
       expect((await page.request.post(GATEWAY + "/key/delete", { headers, data: { keys: [key] } })).status()).toBe(200);

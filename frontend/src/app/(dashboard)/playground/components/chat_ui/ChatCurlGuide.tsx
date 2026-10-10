@@ -46,7 +46,7 @@ export function ChatCurlGuide({
   const messages = [...options.messages];
   if (options.input.trim() || image)
     messages.push(
-      attachment?.file === image && attachment.input === options.input
+      attachment && attachment.file === image && attachment.input === options.input
         ? attachment.message
         : { role: "user", content: options.input },
     );

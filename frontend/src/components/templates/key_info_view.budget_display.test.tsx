@@ -202,7 +202,7 @@ describe("KeyInfoView overview budget display (LIT-2845)", () => {
     });
   });
 
-  it("renders 'Unlimited' when max_budget is null", async () => {
+  it("renders shared parent budget when max_budget is null", async () => {
     renderWithProviders(
       <KeyInfoView
         keyData={{ ...MOCK_KEY_DATA, max_budget: null } as unknown as KeyResponse}
@@ -213,11 +213,11 @@ describe("KeyInfoView overview budget display (LIT-2845)", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/of Unlimited/)).toBeInTheDocument();
+      expect(screen.getByText(/of Shared parent budget/)).toBeInTheDocument();
     });
   });
 
-  it("never pairs key spend with the team budget: shows Unlimited plus an inherited-budget hint", async () => {
+  it("never pairs key spend with the team budget: shows shared parent budget plus an inherited-budget hint", async () => {
     vi.mocked(useTeams).mockReturnValue({
       teams: [makeTeam({ team_id: "team-123", team_alias: "Test Budget", max_budget: 1200, budget_duration: "30d" })],
       setTeams: vi.fn(),
@@ -232,7 +232,7 @@ describe("KeyInfoView overview budget display (LIT-2845)", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/of Unlimited/)).toBeInTheDocument();
+      expect(screen.getByText(/of Shared parent budget/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/of \$1,200\.00/)).not.toBeInTheDocument();
     expect(screen.queryByText(/\(Team: Test Budget/)).not.toBeInTheDocument();
@@ -256,14 +256,14 @@ describe("KeyInfoView overview budget display (LIT-2845)", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/of Unlimited/)).toBeInTheDocument();
+      expect(screen.getByText(/of Shared parent budget/)).toBeInTheDocument();
     });
     await userEvent.setup().hover(screen.getByLabelText("question-circle"));
     expect(screen.getByTestId("inherited-budget-hint")).toHaveTextContent("Organization Acme Org: $5,000.00");
     expect(screen.getByTestId("inherited-budget-hint")).not.toHaveTextContent("Team Org Team");
   });
 
-  it("renders 'Unlimited' with no hint when neither key, team, nor org has a budget", async () => {
+  it("renders shared parent budget with no hint when neither key, team, nor org has a budget", async () => {
     vi.mocked(useTeams).mockReturnValue({
       teams: [makeTeam({ team_id: "team-789", team_alias: "Free Team" })],
       setTeams: vi.fn(),
@@ -278,9 +278,11 @@ describe("KeyInfoView overview budget display (LIT-2845)", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/of Unlimited/)).toBeInTheDocument();
+      expect(screen.getByText(/of Shared parent budget/)).toBeInTheDocument();
     });
     expect(screen.queryByLabelText("question-circle")).not.toBeInTheDocument();
+    expect(screen.getAllByText("RPM: Share parent remaining capacity").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("TPM: Share parent remaining capacity").length).toBeGreaterThan(0);
   });
 
   it("shows no hint when the key has its own budget even if the team has one", async () => {

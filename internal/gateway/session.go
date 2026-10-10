@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -673,6 +674,12 @@ func (s *Server) writeIAMError(w http.ResponseWriter, r *http.Request, err error
 		httpx.WriteTypedError(w, r.URL.Path, 404, "not_found", "Not found")
 	case err == iam.ErrConflict:
 		httpx.WriteTypedError(w, r.URL.Path, 409, "conflict", err.Error())
+	case errors.Is(err, iam.ErrRateAllocation):
+		httpx.WriteError(w, 400, "rate_allocation_exceeded", "child RPM/TPM allocations exceed the parent limit")
+	case errors.Is(err, iam.ErrQuotaAllocation):
+		httpx.WriteTypedError(w, r.URL.Path, 400, "quota_allocation_exceeded", err.Error())
+	case errors.Is(err, iam.ErrMultipleTeams):
+		httpx.WriteTypedError(w, r.URL.Path, 400, "single_team_required", err.Error())
 	case err == iam.ErrInvalid, err == iam.ErrLastAdmin, err == iam.ErrLastPlatformAdmin, err == iam.ErrInactive:
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", err.Error())
 	default:

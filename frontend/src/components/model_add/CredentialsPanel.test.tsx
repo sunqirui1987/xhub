@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CredentialItem, credentialCreateCall, credentialUpdateCall } from "@/components/networking";
 import { toast } from "@/lib/toast";
 
+import { setActiveLocale, t } from "@/i18n";
+
 import CredentialsPanel from "./CredentialsPanel";
 
 const mockUseAuthorized = vi.fn();
@@ -90,6 +92,7 @@ const renderPanel = () =>
 
 describe("CredentialsPanel", () => {
   beforeEach(() => {
+    setActiveLocale("zh-CN");
     vi.clearAllMocks();
   });
 
@@ -129,7 +132,7 @@ describe("CredentialsPanel", () => {
 
     renderPanel();
 
-    expect(screen.getByText("No credentials configured")).toBeInTheDocument();
+    expect(screen.getByText(t("No credentials configured"))).toBeInTheDocument();
   });
 
   it("shows the loading skeleton instead of the empty state while credentials load", () => {
@@ -139,7 +142,7 @@ describe("CredentialsPanel", () => {
     renderPanel();
 
     // isLoading must reach the table: the empty state must not render mid-load.
-    expect(screen.queryByText("No credentials configured")).not.toBeInTheDocument();
+    expect(screen.queryByText(t("No credentials configured"))).not.toBeInTheDocument();
   });
 
   it("opens the add modal when the add button is clicked", async () => {
@@ -168,10 +171,10 @@ describe("CredentialsPanel", () => {
     await user.click(screen.getByTestId("credential-modal-add-submit"));
 
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("Credential added successfully");
+      expect(toast.success).toHaveBeenCalledWith(t("Credential added successfully"));
     });
     const payload = vi.mocked(credentialCreateCall).mock.calls[0][1];
-    expect(payload.credential_info).toMatchObject({catalog_id:"qiniu"});
+    expect(payload.credential_info).toMatchObject({ catalog_id: "qiniu" });
     expect(payload.credential_values).not.toHaveProperty("catalog_id");
     expect(refetch).toHaveBeenCalled();
     expect(screen.queryByTestId("credential-modal-add-submit")).not.toBeInTheDocument();
@@ -189,7 +192,7 @@ describe("CredentialsPanel", () => {
     await user.click(screen.getByTestId("credential-modal-add-submit"));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Failed to add credential");
+      expect(toast.error).toHaveBeenCalledWith(t("Failed to add credential"));
     });
     // The modal stays open so the user can retry, and no success toast fired.
     expect(screen.getByTestId("credential-modal-add-submit")).toBeInTheDocument();
@@ -219,13 +222,16 @@ describe("CredentialsPanel", () => {
   /** 验证编辑保存失败保留弹窗且不刷新；前置管理员和网络错误，独立 mock 自动清理。 */
   it("keeps edit modal open when update fails", async () => {
     mockUseAuthorized.mockReturnValue({ accessToken: "test-token", userRole: "Admin" });
-    const refetch=vi.fn();mockUseCredentials.mockReturnValue({data:{credentials},isLoading:false,refetch});
-    vi.mocked(credentialUpdateCall).mockRejectedValueOnce(new Error("offline"));renderPanel();
+    const refetch = vi.fn();
+    mockUseCredentials.mockReturnValue({ data: { credentials }, isLoading: false, refetch });
+    vi.mocked(credentialUpdateCall).mockRejectedValueOnce(new Error("offline"));
+    renderPanel();
     await userEvent.click(screen.getByTestId("credential-actions-openai-key"));
     await userEvent.click(await screen.findByTestId("credential-action-edit"));
     await userEvent.click(screen.getByTestId("credential-modal-edit-submit"));
-    await waitFor(()=>expect(toast.error).toHaveBeenCalledWith("Failed to update credential"));
-    expect(screen.getByTestId("credential-modal-edit-submit")).toBeVisible();expect(refetch).not.toHaveBeenCalled();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(t("Failed to update credential")));
+    expect(screen.getByTestId("credential-modal-edit-submit")).toBeVisible();
+    expect(refetch).not.toHaveBeenCalled();
   });
 
   describe("Admin Viewer write-action gating", () => {
@@ -249,4 +255,16 @@ describe("CredentialsPanel", () => {
       expect(screen.queryByTestId("credential-actions-openai-key")).not.toBeInTheDocument();
     });
   });
+});
+
+/** 前置管理员和英文语言；验证列表标题、操作和说明国际化，无后端写入，测试后恢复语言。 */
+it("英文供应商列表无硬编码中文标题", () => {
+  setActiveLocale("en");
+  mockUseAuthorized.mockReturnValue({ accessToken: "token", userRole: "Admin", isViewOnly: false });
+  mockUseCredentials.mockReturnValue({ data: { credentials: [] }, isLoading: false, refetch: vi.fn() });
+  render(<CredentialsPanel />);
+  expect(screen.getByRole("heading", { name: "Model providers" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Add provider" })).toBeVisible();
+  expect(screen.getByText(/Manage connection addresses/)).toBeVisible();
+  setActiveLocale("zh-CN");
 });

@@ -66,12 +66,8 @@ const PREMIUM_METADATA_FIELDS = ["policies", "guardrails", "prompts", "tags", "a
 const isEmptyValue = (v: unknown): boolean =>
   v == null || (Array.isArray(v) && v.length === 0) || (typeof v === "string" && v.trim() === "");
 
-/**
- * ─────────────────────────────────────────────────────────────────────────
- * @deprecated
- * This component is being DEPRECATED in favor of src/app/(dashboard)/virtual-keys/components/KeyInfoView.tsx
- * Please contribute to the new refactor.
- * ─────────────────────────────────────────────────────────────────────────
+/** 密钥详情组件；参数含密钥、关闭和更新回调，返回额度展示及编辑页；共享字段显示继承含义，保存失败保留输入，成功刷新详情。
+ * @deprecated 保留兼容入口，后续由 virtual-keys 详情组件替代；当前管理页面仍使用此组件。
  */
 export default function KeyInfoView({
   onClose,
@@ -421,8 +417,9 @@ export default function KeyInfoView({
   const orgId = currentKeyData.organization_id || currentKeyData.org_id || parentTeam?.organization_id || "";
   const parentOrg = orgId ? organizations?.find((org) => org.organization_id === orgId) : null;
 
-  const hasOwnBudget = currentKeyData.max_budget !== null;
-  const budgetDisplay = hasOwnBudget ? `$${formatNumberWithCommas(currentKeyData.max_budget, 2)}` : "Unlimited";
+  // 留空仅表示共享个人及其祖先的余额，详情不能承诺无限额。
+  const hasOwnBudget = currentKeyData.max_budget != null;
+  const budgetDisplay = hasOwnBudget ? `$${formatNumberWithCommas(currentKeyData.max_budget, 2)}` : t("quotaGuide.blank");
   const inheritedGates = hasOwnBudget ? [] : inheritedBudgetGates(parentTeam, parentOrg);
 
   return (
@@ -594,10 +591,10 @@ export default function KeyInfoView({
                 <p className="text-sm">{t("Rate Limits")}</p>
                 <div className="mt-2">
                   <p className="text-sm">
-                    TPM: {currentKeyData.tpm_limit !== null ? currentKeyData.tpm_limit : t("Unlimited")}
+                    TPM: {currentKeyData.tpm_limit != null ? currentKeyData.tpm_limit : t("quotaGuide.rateBlank")}
                   </p>
                   <p className="text-sm">
-                    RPM: {currentKeyData.rpm_limit !== null ? currentKeyData.rpm_limit : t("Unlimited")}
+                    RPM: {currentKeyData.rpm_limit != null ? currentKeyData.rpm_limit : t("quotaGuide.rateBlank")}
                   </p>
                   {Boolean(currentKeyData.metadata?.throttle_on_budget_exceeded) && (
                     <p className="text-sm">{t("Throttle on budget exceeded: Yes")}</p>
@@ -837,9 +834,9 @@ export default function KeyInfoView({
                   <div>
                     <p className="text-sm font-medium">{t("Budget")}</p>
                     <p className="text-sm">
-                      {currentKeyData.max_budget !== null
+                      {currentKeyData.max_budget != null
                         ? `$${formatNumberWithCommas(currentKeyData.max_budget, 2)}`
-                        : t("Unlimited")}
+                        : t("quotaGuide.blank")}
                     </p>
                   </div>
 
@@ -965,10 +962,10 @@ export default function KeyInfoView({
                   <div>
                     <p className="text-sm font-medium">{t("Rate Limits")}</p>
                     <p className="text-sm">
-                      TPM: {currentKeyData.tpm_limit !== null ? currentKeyData.tpm_limit : t("Unlimited")}
+                      TPM: {currentKeyData.tpm_limit != null ? currentKeyData.tpm_limit : t("quotaGuide.rateBlank")}
                     </p>
                     <p className="text-sm">
-                      RPM: {currentKeyData.rpm_limit !== null ? currentKeyData.rpm_limit : t("Unlimited")}
+                      RPM: {currentKeyData.rpm_limit != null ? currentKeyData.rpm_limit : t("quotaGuide.rateBlank")}
                     </p>
                     <p className="text-sm">
                       {t("Max Parallel Requests: {value0}", { value0: (currentKeyData.max_parallel_requests !== null

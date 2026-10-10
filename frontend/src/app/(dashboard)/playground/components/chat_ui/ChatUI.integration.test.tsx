@@ -94,9 +94,9 @@ describe("ChatUI", () => {
     render(
       <ChatUI accessToken="test" token="test" userRole="user" userID="test" disabledPersonalKeyCreation={false} />,
     );
-    expect(screen.getByRole("heading", { name: "模型与端点" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: translate("en", "myModels.modelsAndEndpoints") })).toBeVisible();
     expect(screen.getByLabelText("Virtual Key Source")).not.toBeVisible();
-    await userEvent.click(screen.getByText("连接设置"));
+    await userEvent.click(screen.getByText(translate("en", "myModels.connectionSettings")));
     expect(screen.getByLabelText("Virtual Key Source")).toBeVisible();
   });
 
@@ -325,7 +325,7 @@ describe("ChatUI", () => {
     expect(screen.getByPlaceholderText(translate("en", "Select a Model"))).toHaveValue("Model 1");
 
     await user.click(screen.getAllByRole("button", { name: "Clear" })[0]);
-    const input = screen.getByPlaceholderText("请先选择模型和有效端点");
+    const input = screen.getByPlaceholderText(translate("en", "myModels.selectValidEndpoint"));
     fireEvent.change(input, { target: { value: "Contract endpoint check" } });
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
@@ -700,7 +700,7 @@ describe("ChatUI", () => {
       expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("连接设置"));
+    await user.click(screen.getByText(translate("en", "myModels.connectionSettings")));
     const keySourceTrigger = screen.getByLabelText("Virtual Key Source");
     expect(keySourceTrigger).toHaveTextContent("Current UI Session");
     expect(keySourceTrigger).not.toHaveTextContent("session");
@@ -735,7 +735,7 @@ describe("ChatUI", () => {
       expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
     });
 
-    await user.click(screen.getByText("连接设置"));
+    await user.click(screen.getByText(translate("en", "myModels.connectionSettings")));
     await user.click(screen.getByLabelText("Virtual Key Source"));
     await user.click(await screen.findByRole("option", { name: "Virtual Key" }));
 

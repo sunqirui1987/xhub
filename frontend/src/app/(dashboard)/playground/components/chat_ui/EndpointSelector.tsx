@@ -1,7 +1,7 @@
 import { SearchSelect } from "@/components/shared/SearchSelect";
 import React from "react";
 import type { SearchSelectOption } from "@/components/shared/SearchSelect";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 interface EndpointSelectorProps {
   endpointType: string | null;
@@ -22,6 +22,7 @@ const EndpointSelector: React.FC<EndpointSelectorProps> = ({
   options,
   disabled,
 }) => {
+  const t = useT();
   return (
     <div className={className}>
       <SearchSelect
@@ -29,7 +30,7 @@ const EndpointSelector: React.FC<EndpointSelectorProps> = ({
         onValueChange={onEndpointChange}
         options={options}
         disabled={disabled}
-        emptyText="所选模型没有配置可用端点"
+        emptyText={t("myModels.noEndpoints")}
         placeholder={t("Select an endpoint")}
       />
     </div>

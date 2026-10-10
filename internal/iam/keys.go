@@ -18,21 +18,23 @@ import (
 
 // Key 是虚拟密钥；个人密钥属于用户且可选绑定团队，服务密钥必须属于团队或其项目。
 type Key struct {
-	ID        string   `xorm:"pk 'id'" json:"id"`
-	TokenHash string   `xorm:"'token_hash'" json:"-"`
-	KeyPrefix string   `xorm:"'key_prefix'" json:"key_prefix"`
-	OwnerType string   `xorm:"'owner_type'" json:"owner_type"`
-	UserID    *string  `xorm:"'user_id'" json:"user_id"`
-	TeamID    string   `xorm:"'team_id'" json:"team_id"`
-	ProjectID *string  `xorm:"'project_id'" json:"project_id"`
-	CreatedBy *string  `xorm:"'created_by'" json:"created_by"`
-	Name      string   `xorm:"'name'" json:"name"`
-	Models    []string `xorm:"json 'models'" json:"models"`
-	MaxBudget *float64 `xorm:"'max_budget'" json:"max_budget"`
-	Spend     float64  `xorm:"'spend'" json:"spend"`
-	TPMLimit  *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
-	RPMLimit  *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
-	Status    string   `xorm:"'status'" json:"status"`
+	// BillingUserID 是服务密钥的业务账号；个人密钥沿 user_id 分配。
+	BillingUserID string   `xorm:"'billing_user_id'" json:"billing_user_id"`
+	ID            string   `xorm:"pk 'id'" json:"id"`
+	TokenHash     string   `xorm:"'token_hash'" json:"-"`
+	KeyPrefix     string   `xorm:"'key_prefix'" json:"key_prefix"`
+	OwnerType     string   `xorm:"'owner_type'" json:"owner_type"`
+	UserID        *string  `xorm:"'user_id'" json:"user_id"`
+	TeamID        string   `xorm:"'team_id'" json:"team_id"`
+	ProjectID     *string  `xorm:"'project_id'" json:"project_id"`
+	CreatedBy     *string  `xorm:"'created_by'" json:"created_by"`
+	Name          string   `xorm:"'name'" json:"name"`
+	Models        []string `xorm:"json 'models'" json:"models"`
+	MaxBudget     *float64 `xorm:"'max_budget'" json:"max_budget"`
+	Spend         float64  `xorm:"'spend'" json:"spend"`
+	TPMLimit      *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
+	RPMLimit      *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
+	Status        string   `xorm:"'status'" json:"status"`
 	// RouteTemplateID is the named router settings this key selects. Empty means
 	// it selects nothing and inherits from its team.
 	RouteTemplateID *string    `xorm:"'route_template_id'" json:"route_template_id,omitempty"`
@@ -170,6 +172,13 @@ func (db *DB) CreateKey(ctx context.Context, by Actor, in KeyInput) (*Key, strin
 		k := Key{ID: newID(), TokenHash: HashKey(plain), KeyPrefix: plain[:11], OwnerType: in.OwnerType,
 			TeamID: in.TeamID, Name: in.Name, Models: nonNil(in.Models), MaxBudget: in.MaxBudget,
 			TPMLimit: in.TPMLimit, RPMLimit: in.RPMLimit, Status: StatusActive, ExpiresAt: in.ExpiresAt}
+		if in.OwnerType == OwnerService {
+			var err error
+			k.BillingUserID, err = businessOwner(s, in.TeamID)
+			if err != nil {
+				return err
+			}
+		}
 		if in.UserID != "" {
 			k.UserID = &in.UserID
 		}
@@ -190,6 +199,9 @@ func (db *DB) CreateKey(ctx context.Context, by Actor, in KeyInput) (*Key, strin
 			s.Omit("team_id")
 		}
 		if _, err := s.Insert(&k); err != nil {
+			return err
+		}
+		if err := validateQuota(s, "key", k.ID); err != nil {
 			return err
 		}
 		out = &k
@@ -304,6 +316,9 @@ func (db *DB) UpdateKey(ctx context.Context, by Actor, id string, in KeyInput) (
 			return err
 		}
 		if out, err = getKey(ctx, s, id); err != nil {
+			return err
+		}
+		if err := validateQuota(s, "key", id); err != nil {
 			return err
 		}
 		return writeAudit(s, by, Audit{Action: "key.update", ObjectType: "key", ObjectID: id, TeamID: cur.TeamID})
@@ -706,6 +721,9 @@ func (db *DB) ResetKeySpend(ctx context.Context, by Actor, id string, to float64
 			return err
 		}
 		if out, err = getKey(ctx, s, id); err != nil {
+			return err
+		}
+		if err := validateQuota(s, "key", id); err != nil {
 			return err
 		}
 		return writeAudit(s, by, Audit{Action: "key.reset_spend", ObjectType: "key", ObjectID: id, TeamID: cur.TeamID,

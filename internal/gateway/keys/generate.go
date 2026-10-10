@@ -250,6 +250,15 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	// 更新与创建使用相同的输入边界；错误输入必须保留原固定额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	token := str(body["key"])
 	if token == "" {
 		httpx.WriteError(w, 400, "invalid_request", "key required")
@@ -414,6 +423,12 @@ func keyFilter(sc *authz.Scope) iam.KeyFilter {
 // 调用：Generate、gateway/keys/admin.go；不产生持久化副作用，非法归属或期限返回错误。
 // 测试：key_input_test.go。
 func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, error) {
+	if err := httpx.ValidateRateFields(body); err != nil {
+		return iam.KeyInput{}, err
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget"); err != nil {
+		return iam.KeyInput{}, err
+	}
 	in := iam.KeyInput{
 		OwnerType: str(body["owner_type"]),
 		UserID:    str(body["user_id"]),
@@ -422,8 +437,8 @@ func keyInputFrom(body map[string]any, defaultUserID string) (iam.KeyInput, erro
 		Name:      str(body["key_alias"]),
 		Models:    keyModels(body["models"]),
 		MaxBudget: parseFloat(body["max_budget"]),
-		TPMLimit:  parseInt(body["tpm_limit"]),
-		RPMLimit:  parseInt(body["rpm_limit"]),
+		TPMLimit:  httpx.Rate(body, "tpm_limit"),
+		RPMLimit:  httpx.Rate(body, "rpm_limit"),
 		// The selection must be read here as well as on update. It was only on
 		// update, so a key created with a template silently got none and the
 		// first request through it routed by the team's settings instead -
@@ -491,10 +506,10 @@ func patchFrom(cur *iam.Key, body map[string]any) iam.KeyInput {
 		in.MaxBudget = parseFloat(body["max_budget"])
 	}
 	if _, ok := body["tpm_limit"]; ok {
-		in.TPMLimit = parseInt(body["tpm_limit"])
+		in.TPMLimit = httpx.Rate(body, "tpm_limit")
 	}
 	if _, ok := body["rpm_limit"]; ok {
-		in.RPMLimit = parseInt(body["rpm_limit"])
+		in.RPMLimit = httpx.Rate(body, "rpm_limit")
 	}
 	if _, ok := body["duration"]; ok {
 		if exp, err := iam.ParseExpiry(str(body["duration"])); err == nil {

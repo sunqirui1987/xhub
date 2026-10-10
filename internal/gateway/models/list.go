@@ -25,7 +25,7 @@ const (
 
 var logTraceOnceList sync.Once
 
-// List serves GET /v1/models. Either an inference identity or a management identity is accepted. scope accepts only empty or expand; any other value returns 400. created uses the fixed LiteLLM default time, not the time the model was stored.
+// List 提供模型发现：GET /models 无凭据时公开已启用模型名，GET /v1/models 保留鉴权契约。 Either an inference identity or a management identity is accepted. scope accepts only empty or expand; any other value returns 400. created uses the fixed LiteLLM default time, not the time the model was stored.
 // 参数 s（Host）：列出使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/mount.go、gateway/prefs/mount.go
@@ -34,6 +34,23 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 	logTraceOnceList.Do(func() { logx.Trace("enter models.List") })
 
 	httpx.SetCallID(w, httpx.CallID())
+	// 根路径是公开发现入口，只公布已启用的公开模型名；有显式凭据时仍按权限过滤，错误凭据不能降级为匿名。
+	if r.URL.Path == "/models" && r.Header.Get("Authorization") == "" && r.Header.Get("x-api-key") == "" && r.Header.Get("x-goog-api-key") == "" && r.Header.Get("api-key") == "" && r.Header.Get("x-litellm-api-key") == "" {
+		scope := r.URL.Query().Get("scope")
+		if scope != "" && scope != "expand" {
+			httpx.WriteError(w, 400, "invalid_request", "Invalid scope parameter. Only 'expand' is currently supported.")
+			return
+		}
+		s.LockModels()
+		list := append([]config.ModelEntry(nil), (*s.ModelTable())...)
+		s.UnlockModels()
+		names := proxyModelNames(list)
+		if queryBool(r.URL.Query().Get("only_model_access_groups")) {
+			names = nil
+		}
+		writeModelList(w, names)
+		return
+	}
 	p, err := s.Resolve(r)
 	if err != nil || (!s.AllowLLM(p) && !p.PlatformAdmin()) {
 		if err != nil {
@@ -49,11 +66,15 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := availableNames(s, r, p)
+	writeModelList(w, names)
+}
+
+// writeModelList 输出兼容模型目录；参数为响应 writer 和公开模型名，返回无；匿名与鉴权列表共用。
+// 仅返回协议标准字段，不暴露部署、凭证、上游地址或价格；空列表输出 data: []。
+func writeModelList(w http.ResponseWriter, names []string) {
 	data := make([]map[string]any, 0, len(names))
 	for _, name := range names {
-		data = append(data, map[string]any{
-			"id": name, "object": "model", "created": defaultModelCreatedAt, "owned_by": "openai",
-		})
+		data = append(data, map[string]any{"id": name, "object": "model", "created": defaultModelCreatedAt, "owned_by": "openai"})
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"object": "list", "data": data})
 }

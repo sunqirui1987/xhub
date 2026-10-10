@@ -152,3 +152,18 @@ describe("CreateUserButton", () => {
     expect(screen.queryByLabelText("Make an organization administrator")).not.toBeInTheDocument();
   });
 });
+
+/** 新建个人页面同时提交金额和速率，0 保持禁用；mock 接口不生成持久数据，测试框架清理 DOM。 */
+it("creates a personal budget and RPM/TPM from visible fields", async () => {
+  vi.clearAllMocks();
+  mockUserCreateCall.mockResolvedValue({ user_id: "rates-user" });
+  const user = userEvent.setup();
+  renderButton(true);
+  await fillAccount(user);
+  await user.click(screen.getByRole("switch", { name: /budget/i }));
+  await user.type(screen.getByLabelText("Budget in dollars"), "25");
+  await user.type(screen.getByLabelText("Requests per minute Limit (RPM)"), "0");
+  await user.type(screen.getByLabelText("Tokens per minute Limit (TPM)"), "128");
+  await user.click(screen.getByRole("button", { name: /create user/i }));
+  await waitFor(() => expect(submittedPayload()).toMatchObject({ max_budget: 25, rpm_limit: 0, tpm_limit: 128 }));
+});

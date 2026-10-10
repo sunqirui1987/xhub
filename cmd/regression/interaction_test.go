@@ -164,11 +164,16 @@ func TestChangingABudgetTakesEffectImmediately(t *testing.T) {
 	// 先确认能调。
 	h.ok(http.MethodPost, "/v1/chat/completions", tn.key, request)
 
-	// 把上限压到零：下一次必须立刻被拒，不用等任何东西过期。
-	h.setUserBudget(t, admin, tn.userID, 0)
+	// 前置已消费；将上限压到累计消费，下一次立刻被拒；harness 清理账单与账号。
+	h.flushSpend()
+	user, err := h.gw.Identity().GetUser(t.Context(), tn.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.setUserBudget(t, admin, tn.userID, user.Spend)
 	r := h.do(http.MethodPost, "/v1/chat/completions", tn.key, request)
 	if r.status != http.StatusTooManyRequests {
-		t.Fatalf("a budget set to zero did not stop the next call: %s", r.describe())
+		t.Fatalf("a budget set to cumulative spend did not stop the next call: %s", r.describe())
 	}
 
 	// 再抬回去，也必须立刻恢复。

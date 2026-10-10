@@ -1,3 +1,4 @@
+import { QuotaGuide } from "./shared/QuotaGuide";
 import { useQueryClient } from "@tanstack/react-query";
 import { FieldGroup } from "@/components/ui/field";
 import { FormField } from "@/components/shared/form/FormField";
@@ -65,14 +66,7 @@ const labelWithHint = (label: string, hint: string): React.ReactNode => (
 const createdUserId = (response: { data?: { user_id?: string }; user_id?: string } | null | undefined): string =>
   response?.data?.user_id || response?.user_id || "";
 
-/**
- * CreateUserButton creates an account with everything that decides what it can
- * reach: its platform role, an optional team and team role, and a spending
- * ceiling. Organization administration is chosen on the organization page.
- *
- * All of it goes in one request. The membership used to be a second call, which
- * could fail after the account already existed.
- */
+/** 新建个人入口；接收管理凭证与创建回调，渲染唯一团队和三项限额表单，一次请求原子创建并刷新列表；失败保留输入。 */
 export const CreateUserButton: React.FC<CreateuserProps> = ({
   accessToken,
   onUserCreated,
@@ -92,6 +86,7 @@ export const CreateUserButton: React.FC<CreateuserProps> = ({
     form.reset(EMPTY_CREATE_USER_FORM);
   };
 
+  /** 校验表单后创建账户；参数为完整表单，无返回值，错误提示后保留输入，成功刷新列表并重置。 */
   const handleCreate = async (values: CreateUserFormValues) => {
     const problem = validateCreateUser(values);
     if (problem === "email") {
@@ -104,6 +99,10 @@ export const CreateUserButton: React.FC<CreateuserProps> = ({
     }
     if (problem === "budget") {
       toast.fromError(t("The budget must be a number that is zero or more."));
+      return;
+    }
+    if (problem === "rate") {
+      toast.fromError(t("Must be a non-negative whole number"));
       return;
     }
     setSaving(true);
@@ -124,6 +123,7 @@ export const CreateUserButton: React.FC<CreateuserProps> = ({
 
   const fields = (
     <FieldGroup>
+      <QuotaGuide scope="person" />
       <FormField control={form.control} name="user_email" label={t("pages.users.userEmail")}>
         {({ ref, value, ...control }) => (
           <Input {...control} ref={ref} type="email" autoComplete="off" value={value ?? ""} />
@@ -171,14 +171,14 @@ export const CreateUserButton: React.FC<CreateuserProps> = ({
         name="unlimited_budget"
         label={labelWithHint(
           t("Budget"),
-          t("The most this account may spend across everything it can reach. Leave it unlimited to inherit the team's ceiling."),
+          t("quotaGuide.person"),
         )}
       >
         {({ id, value, onChange }) => (
           <div className="flex items-center gap-2">
             <Switch id={id} checked={!value} onCheckedChange={(unlimited) => onChange(!unlimited)} />
             <span className="text-sm text-muted-foreground">
-              {value ? t("No per-account ceiling") : t("Set a ceiling")}
+              {value ? t("quotaGuide.blank") : t("Set a ceiling")}
             </span>
           </div>
         )}
@@ -195,6 +195,16 @@ export const CreateUserButton: React.FC<CreateuserProps> = ({
           )}
         </FormField>
       ) : null}
+      {(["rpm_limit", "tpm_limit"] as const).map((name) => (
+        <FormField key={name} control={form.control} name={name}
+          label={t(name === "rpm_limit" ? "Requests per minute Limit (RPM)" : "Tokens per minute Limit (TPM)")}
+          description={t("quotaGuide.rates")}>
+          {({ ref, value, ...control }) => (
+            <Input {...control} ref={ref} type="number" min="0" max="2147483647" step="1"
+              value={value ?? ""} placeholder={t("quotaGuide.rateBlank")} />
+          )}
+        </FormField>
+      ))}
       <FormField
         control={form.control}
         name="team_id"

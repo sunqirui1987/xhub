@@ -1,10 +1,7 @@
 /** 调试台文案覆盖旧自动翻译；键为既有英文文案，只影响对应显示，无数据副作用。 */
 export const playgroundZhCN: Record<string, string> = {
-  "Comparison mode": "对比模式",
   Models: "模型",
   Agents: "智能体",
-  "Add Comparison": "添加对比卡片",
-  "Clear All Chats": "清空全部对话",
   "Chat history cleared.": "对话已清空",
   "Explain quantum computing": "解释量子计算",
   "Type your message... (Shift+Enter for new line)": "输入消息…（Shift+Enter 换行）",
@@ -16,7 +13,6 @@ export const playgroundZhCN: Record<string, string> = {
   "What are the next steps?": "接下来应该怎么做？",
   "Get Code": "查看调用代码",
   "Current UI Session": "当前界面会话",
-  "Remove Comparison": "移除对比卡片",
   "Send message": "发送消息",
   "Model Settings": "模型设置",
   "Use API session management": "使用响应 ID 续接对话",

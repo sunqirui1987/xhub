@@ -1,3 +1,5 @@
+import { t } from "@/i18n/runtime";
+
 /**
  * The single HTTP client for the dashboard. This is the only file allowed to
  * call fetch() directly (enforced by the no-restricted-syntax lint rule and its
@@ -54,7 +56,15 @@ const deriveDetailMessage = (detail: any): string | undefined => {
   return undefined;
 };
 
+/** 解析接口错误；参数为任意错误正文，返回当前语言提示。HTTP 客户端与旧接口共用；未知错误保留原文，无副作用。 */
 export const deriveErrorMessage = (errorData: any): string => {
+  const quotaErrors: Record<string, string> = {
+    quota_allocation_exceeded: "quotaGuide.allocationError",
+    rate_allocation_exceeded: "quotaGuide.rateAllocationError",
+    single_team_required: "quotaGuide.singleTeamError",
+  };
+  const key = quotaErrors[errorData?.error?.type];
+  if (key) return t(key);
   const detailStr = deriveDetailMessage(errorData?.detail);
   return (
     (errorData?.error &&
@@ -99,10 +109,7 @@ export const extractProxyErrorMessage = (error: unknown): string => {
 
 // The gateway answers a non-administrator with one of these. They are a normal
 // result for that account, not a failed page.
-const QUIET_ACCESS_DENIALS = [
-  "Not allowed to access management endpoints",
-  "this credential cannot list deployments",
-];
+const QUIET_ACCESS_DENIALS = ["Not allowed to access management endpoints", "this credential cannot list deployments"];
 
 export const readErrorMessage = (error: unknown): string => {
   if (typeof error === "string") return error;

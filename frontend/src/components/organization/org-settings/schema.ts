@@ -14,7 +14,7 @@ const isJsonObject = (value: string): boolean => {
 
 const wholeNumberOrEmpty = z
   .string()
-  .refine((value) => isBlank(value) || /^\d+$/.test(value.trim()), t("Must be a non-negative whole number"));
+  .refine((value) => isBlank(value) || (/^\d+$/.test(value.trim()) && Number(value) <= 2147483647), t("Must be a non-negative whole number"));
 
 const amountOrEmpty = z
   .string()

@@ -90,7 +90,7 @@ export const fetchAvailableModelsForTeam = async (accessToken: string, teamId: s
  * 参数 accessToken：会话或虚拟密钥；strict：调试台需要区分读取失败时传 true；返回公开模型列表。
  * 默认读取失败返回空列表；strict 模式向调用方抛出原始异常。
  * 使用 /model/available，管理目录与价格目录不作为调用权限或能力来源。
- * 调用：ChatUI、CompareUI。测试：fetch_models.test.tsx。
+ * 调用：ChatUI。测试：fetch_models.test.tsx。
  */
 export const fetchAvailableModels = async (accessToken: string, strict = false): Promise<ModelGroup[]> => {
   try {

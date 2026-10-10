@@ -7,6 +7,8 @@ const __dirname = path.dirname(__filename);
 
 const nextConfig = {
   output: "standalone",
+  outputFileTracingRoot: path.resolve(__dirname, ".."),
+  outputFileTracingIncludes: { "/docs/[[...slug]]": ["../docs/api/**/*.md"] },
   distDir: process.env.E2E_BUILD_DIR || ".next",
   typescript: { tsconfigPath: process.env.E2E_BUILD_DIR ? "tsconfig.e2e.json" : "tsconfig.json" },
   experimental: {

@@ -32,7 +32,7 @@ export function invocationURL(base: string, path: string): string | null {
   }
 }
 
-/** 为后台开放的普通或 Bypass 端点生成 curl；参数为对外模型名、真实绑定和网关。
+/** 为后台开放的普通或 Bypass 端点生成 curl；参数为对外模型名、真实绑定、网关和可选当前正文/附件/请求头。当前正文优先，过滤鉴权请求头，避免示例泄露真实密钥。
  * 返回示例或 null，供模型详情调用；已知协议使用 JSON/multipart，未知协议读取用户准备的 request.json。
  * 模型名和 URL 安全转义，密钥只引用环境变量；无效地址、方法和未展开路径不生成命令，无网络副作用。 */
 export function invocationCurl(
@@ -69,7 +69,7 @@ export function invocationCurl(
     },
     ark: { model, content: [{ type: "text", text: "A kitten walking in the sunlight, cinematic style" }] },
     "openai-images": { model, prompt: "A kitten sitting by a window, watercolor style", n: 1, size: "1024x1024" },
-    "openai-audio-speech": { model, input: "Hello，Welcome to XHub.", voice: "alloy", response_format: "mp3" },
+    "openai-audio-speech": { model, input: "Hello, welcome to XHub.", voice: "alloy", response_format: "mp3" },
     fal: fal ? { model, ...fal } : undefined,
   };
   const parts = [
@@ -271,5 +271,9 @@ export function invocationSteps(model: string, endpoint: ModelEndpoint, base: st
       copy: "copyDownload",
     });
   }
-  return steps;
+  // Ark/Fal 的下载来自结果 URL，追加下载后再将可选删除放到最后，避免用户先删除任务。
+  return [
+    ...steps.filter((step) => step.title !== "deleteTask"),
+    ...steps.filter((step) => step.title === "deleteTask"),
+  ];
 }

@@ -256,6 +256,7 @@ describe("TeamMembersComponent", () => {
     expect(screen.getByText("Default Proxy Admin")).toBeInTheDocument();
   });
 
+  /** 验证个人累计消费与限速；前置真实组件和成员数据，断言累计字段，渲染器自动清理。 */
   it("should display spend and rate limits for member with membership", () => {
     renderWithProviders(
       <TeamMembersComponent
@@ -269,12 +270,13 @@ describe("TeamMembersComponent", () => {
     );
 
     expect(screen.getByText("$100.50")).toBeInTheDocument();
-    expect(screen.getByText("$1,538.26")).toBeInTheDocument();
+    expect(screen.queryByText("$1,538.26")).not.toBeInTheDocument();
     expect(screen.getByText(/100 RPM/)).toBeInTheDocument();
     expect(screen.getByText(/10000 TPM/)).toBeInTheDocument();
   });
 
-  it("should display the budget reset date for member with a budget reset", () => {
+  /** 验证累计额度不展示误导性的重置日期；前置旧周期字段，断言不出现，自动清理。 */
+  it("does not promise a budget reset for cumulative personal budgets", () => {
     renderWithProviders(
       <TeamMembersComponent
         teamData={createMockTeamData()}
@@ -286,10 +288,11 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getByText("Jul 15, 2026")).toBeInTheDocument();
+    expect(screen.queryByText("Jul 15, 2026")).not.toBeInTheDocument();
   });
 
-  it("should display formatted budget and Unlimited for member with no budget", () => {
+  /** 验证固定额度与共享空额度；前置两种成员，断言空值不显示无限额，自动清理。 */
+  it("displays fixed personal budgets and shared team balance for a blank budget", () => {
     renderWithProviders(
       <TeamMembersComponent
         teamData={createMockTeamData()}
@@ -302,10 +305,10 @@ describe("TeamMembersComponent", () => {
     );
 
     expect(screen.getByText("$1,000.00")).toBeInTheDocument();
-    expect(screen.getByText("Unlimited")).toBeInTheDocument();
+    expect(screen.getByText("Shared parent budget")).toBeInTheDocument();
   });
 
-  it("should display No Limits for rate limits when member has no limits", () => {
+  it("displays shared parent capacity for blank member rate allocations", () => {
     renderWithProviders(
       <TeamMembersComponent
         teamData={createMockTeamData()}
@@ -317,7 +320,7 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getByText("No Limits")).toBeInTheDocument();
+    expect(screen.getByText("Share parent remaining capacity")).toBeInTheDocument();
   });
 
   it("should call setIsEditMemberModalVisible and setSelectedEditMember when edit button is clicked", async () => {
@@ -372,7 +375,7 @@ describe("TeamMembersComponent", () => {
 
     const memberRow = screen.getByRole("row", { name: /user1@test\.com/ });
     expect(within(memberRow).getByText("0 RPM / 0 TPM")).toBeInTheDocument();
-    expect(within(memberRow).queryByText("No Limits")).not.toBeInTheDocument();
+    expect(within(memberRow).queryByText("Share parent remaining capacity")).not.toBeInTheDocument();
 
     await user.click(within(memberRow).getByTestId("edit-member"));
 

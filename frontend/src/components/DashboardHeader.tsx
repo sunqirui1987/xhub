@@ -14,16 +14,17 @@ import { DocsLink } from "@/components/Navbar/DocsLink/DocsLink";
 import ViewSwitcher from "@/components/Navbar/ViewSwitcher";
 import ThemeToggle from "@/components/ThemeToggle/ThemeToggle";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 import WorkerDropdown from "@/components/Navbar/WorkerDropdown/WorkerDropdown";
 import { useWorker } from "@/hooks/useWorker";
 import { clearTokenCookies } from "@/utils/cookieUtils";
 import { clearStoredReturnUrl, getLoginUrl } from "@/utils/returnUrlUtils";
 import { usePathname } from "next/navigation";
 
-// Top bar over the content column. The product name lives in the sidebar, so this
-// bar starts with the view switcher and the current page.
+/** 展示当前页导航和语言入口；无参数，返回订阅语言的顶部栏。
+ * Dashboard 布局调用，语言切换保留页面状态；工作节点切换清除旧凭据并导航到登录页。 */
 export function DashboardHeader() {
+  const t = useT();
   const { title } = getBreadcrumb(usePathname(), t);
   const { isControlPlane, selectedWorker } = useWorker();
   const showWorkerSwitch = isControlPlane && selectedWorker !== null;

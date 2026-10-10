@@ -10,6 +10,7 @@ import { organizationDeleteCall } from "@/components/networking";
 import { OrgCreateDialog } from "@/components/organization/org-create/OrgCreateDialog";
 import OrganizationInfoView from "@/components/organization/organization_view";
 import { Button } from "@/components/ui/button";
+import { QuotaGuide } from "@/components/shared/QuotaGuide";
 import { t } from "@/i18n";
 
 import OrganizationsTable from "./OrganizationsTable";
@@ -99,6 +100,7 @@ const OrganizationsPanel: React.FC<OrganizationsPanelProps> = ({ userRole, acces
 
   return (
     <div className="flex flex-col gap-4">
+      <QuotaGuide scope="organization" />
       {(userRole === "Admin" || userRole === "Org Admin") && (
         <Button className="w-fit" onClick={() => setIsOrgModalVisible(true)}>
           + {t("pages.organizations.create")}

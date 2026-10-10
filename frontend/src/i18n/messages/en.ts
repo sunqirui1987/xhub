@@ -1,8 +1,41 @@
+import { docsEn } from "./docs.en";
 import { enPhrases } from "./phrases.en";
 import { pageDescriptionsEn } from "./pageDescriptions.en";
 import { routeTemplatesEn } from "./routeTemplates.en";
 
 export const en = {
+  quotaGuide: {
+    rateAllocationError: "Child RPM/TPM allocations exceed the parent limit. Reduce allocations or increase the parent limit.",
+    rates: "Allocate RPM and TPM like budgets: fixed child allocations must add up to at most the parent limit. Blank shares the unreserved capacity; zero blocks calls. All personal keys and sessions count together, then roll up to the team and organization. Unused fixed capacity is reserved each UTC minute. TPM uses the token estimate at admission.",
+    rateBlank: "Share parent remaining capacity",
+    editMember: "Edit member",
+    deleteMember: "Delete member",
+    moreModels: "+{count} more",
+    allocationError:
+      "Spending plus unused child allocations exceeds the parent budget. Lower this budget or release other allocations.",
+    singleTeamError: "Each person can join only one team. Leave the current team first.",
+    spend: "Personal cumulative spend (USD)",
+    spendHelp:
+      "All personal keys and session usage count toward cumulative personal spending. It does not reset monthly and remains after leaving a team.",
+    title: "How quota allocation works",
+    chain: "Organization → Team → Person → API Key · USD",
+    organization:
+      "A fixed organization budget reserves money for its teams. A budget of $1,000 can allocate $500 + $300 + $200; additional allocations are rejected.",
+    team: "Fixed personal allocations and shared consumption must fit within the team budget. Team administrators allocate personal budgets; organization administrators allocate team budgets.",
+    person:
+      "All your keys share your personal budget. Fixed key allocations reserve their unused amounts; keys without a budget share the remainder.",
+    key: "Key budgets are allocated from their owner’s personal budget. Leaving this blank shares the remaining personal budget and still counts toward the team and organization.",
+    shared:
+      "Blank means share the parent’s available pool; it does not bypass a parent limit. Zero blocks spending. Consumed money plus unused child allocations cannot exceed a fixed budget.",
+    singleTeam:
+      "Each person belongs to one team. To change teams, remove the old membership first; team-bound keys are revoked, independent personal keys remain usable, and historical spending stays with the original team.",
+    business:
+      "For unrestricted business usage, create a separate unlimited organization and team. Service keys use a separate business account in that team.",
+    blank: "Shared parent budget",
+    amount: "of ${amount}",
+  },
+
+  docs: docsEn,
   audit: {
     adminOnly: "Only platform administrators can access audit logs.",
     loadError: "Unable to load audit logs. Use Refresh to try again.",
@@ -84,11 +117,15 @@ export const en = {
   },
   modelProviders: {
     title: "Model providers",
-    description: "Manage provider connections, accounts, addresses and credentials. Each provider can have multiple independent connections.",
-    listHint: "Manage connection addresses and API credentials here. Select one of these providers when adding a model.",
+    description:
+      "Manage provider connections, accounts, addresses and credentials. Each provider can have multiple independent connections.",
+    listHint:
+      "Manage connection addresses and API credentials here. Select one of these providers when adding a model.",
     add: "Add provider",
   },
   myModels: {
+    selectValidEndpoint: "Select a model and a valid endpoint first",
+    customerEndpoint: "Customer API",
     imagePrompt: "Image prompt",
     imagePromptPlaceholder: "Describe the subject, style, composition and lighting…",
     imageSize: "Image size",
@@ -96,7 +133,8 @@ export const en = {
     imageQuality: "Image quality",
     imageQualityOptional: "Image quality (optional)",
     imageQualityPlaceholder: "Leave blank to use the provider default",
-    imageDefaultsHint: "The default is one 1024x1024 image. Supported sizes, counts and quality depend on the selected model and provider. Edit more parameters in JSON.",
+    imageDefaultsHint:
+      "The default is one 1024x1024 image. Supported sizes, counts and quality depend on the selected model and provider. Edit more parameters in JSON.",
     invalidRequestObject: "Request parameters must be a JSON object",
     imagePromptRequired: "Enter an image prompt",
     imageSizeInvalid: "Enter a valid image size such as 1024x1024. Supported sizes depend on the selected provider",
@@ -141,16 +179,19 @@ export const en = {
     generatedImage: "Generated image {index}",
     openImage: "Open image {index}",
     noImagePreview: "No image preview found. Inspect the native response.",
-    localFilesHint: "Place upload files in the terminal working directory using the displayed filenames. Each image has a separate request; executing it creates a call.",
+    localFilesHint:
+      "Place upload files in the terminal working directory using the displayed filenames. Each image has a separate request; executing it creates a call.",
     viewParameters: "View protocol parameters",
     backToCurl: "Back to curl steps",
     invalidExample: "Cannot generate commands for this configuration. Check the gateway and endpoint binding.",
     prepareKey: "Prepare your API key",
-    prepareKeyHint: "Create or select an XHub virtual key with access to this model. Replace <YOUR_XHUB_API_KEY> and run all steps in the same terminal.",
+    prepareKeyHint:
+      "Create or select an XHub virtual key with access to this model. Replace <YOUR_XHUB_API_KEY> and run all steps in the same terminal.",
     sendRequest: "Send the request",
     requestHint: "Run the complete command below. Use the public model name and edit the input as needed.",
     createTask: "Create a generation task",
-    createTaskHint: "Save the returned task ID. Generation is asynchronous; query the existing task instead of creating it again.",
+    createTaskHint:
+      "Save the returned task ID. Generation is asynchronous; query the existing task instead of creating it again.",
     saveTaskId: "Save the task ID",
     taskIdHint: "Copy id from the create response and replace <TASK_ID>.",
     falTaskIdHint: "Copy request_id from the create response and replace <TASK_ID>.",
@@ -158,18 +199,29 @@ export const en = {
     queryResult: "Get task results",
     downloadVideo: "Download the video",
     deleteTask: "Delete or cancel the task (optional)",
-    arkResultHint: "For queued, creating_assets or running, wait 5–10 seconds and query again. For succeeded, use content.video_url. For failed or expired, inspect error.",
-    falResultHint: "For IN_QUEUE or IN_PROGRESS, wait 5–10 seconds and query again. After COMPLETED, get the result. Video URLs may appear in video.url, videos or video_url depending on the model.",
-    videoResultHint: "Wait and query again for queued or in_progress. Download after completed; inspect error for failed.",
-    downloadContentHint: "Run only after completion. Saves video.mp4 in the current directory, overwriting any existing file.",
-    arkDownloadHint: "After succeeded, replace <VIDEO_URL> with content.video_url. Saves video.mp4, overwriting any existing file.",
-    falDownloadHint: "After completion, replace <VIDEO_URL> with the actual result URL. Saves video.mp4, overwriting any existing file.",
-    deleteTaskHint: "Optional: save the result first. Cancellation support depends on the provider; deleting a task does not refund incurred charges.",
-    customBodyHint: "Save the complete provider request body to request.json in the current directory, using the public model name. Then run this command. See protocol parameters for the required schema.",
-    imageUrlHint: "Replace <IMAGE_URL> with an HTTPS image URL accessible to the provider. See protocol parameters for model-specific fields.",
-    imageHint: "Edit prompt and run. Supported size and n values depend on the model. Open data URLs or decode b64_json.",
+    arkResultHint:
+      "For queued, creating_assets or running, wait 5–10 seconds and query again. For succeeded, use content.video_url. For failed or expired, inspect error.",
+    falResultHint:
+      "For IN_QUEUE or IN_PROGRESS, wait 5–10 seconds and query again. After COMPLETED, get the result. Video URLs may appear in video.url, videos or video_url depending on the model.",
+    videoResultHint:
+      "Wait and query again for queued or in_progress. Download after completed; inspect error for failed.",
+    downloadContentHint:
+      "Run only after completion. Saves video.mp4 in the current directory, overwriting any existing file.",
+    arkDownloadHint:
+      "After succeeded, replace <VIDEO_URL> with content.video_url. Saves video.mp4, overwriting any existing file.",
+    falDownloadHint:
+      "After completion, replace <VIDEO_URL> with the actual result URL. Saves video.mp4, overwriting any existing file.",
+    deleteTaskHint:
+      "Optional: save the result first. Cancellation support depends on the provider; deleting a task does not refund incurred charges.",
+    customBodyHint:
+      "Save the complete provider request body to request.json in the current directory, using the public model name. Then run this command. See protocol parameters for the required schema.",
+    imageUrlHint:
+      "Replace <IMAGE_URL> with an HTTPS image URL accessible to the provider. See protocol parameters for model-specific fields.",
+    imageHint:
+      "Edit prompt and run. Supported size and n values depend on the model. Open data URLs or decode b64_json.",
     imageEditHint: "Save the source image as input.png in the current directory. curl handles multipart automatically.",
-    audioUploadHint: "Save audio.mp3 in the current directory before running. Supported formats and limits depend on the model.",
+    audioUploadHint:
+      "Save audio.mp3 in the current directory before running. Supported formats and limits depend on the model.",
     speechHint: "Edit input and voice. Saves speech.mp3 in the current directory, overwriting any existing file.",
     copySetup: "Copy key setup",
     copyTaskId: "Copy task ID setup",
@@ -178,43 +230,53 @@ export const en = {
     copyDownload: "Copy download command",
     copyDelete: "Copy delete command",
     checkUsage: "Check results and usage",
-    checkUsageHint: "Check request logs for status, errors and usage, and the usage page for charges. Asynchronous results and final billing require a completion query.",
+    checkUsageHint:
+      "Check request logs for status, errors and usage, and the usage page for charges. Asynchronous results and final billing require a completion query.",
     parameterGuide: "Protocol parameters",
-    parameterGuideHint: "Standard and Bypass bindings use the selected protocol format. Common fields are listed below; required fields, ranges and extensions depend on the provider model schema.",
+    parameterGuideHint:
+      "Standard and Bypass bindings use the selected protocol format. Common fields are listed below; required fields, ranges and extensions depend on the provider model schema.",
     parameter: "Parameter / response field",
     parameterMeaning: "Value and purpose",
     paramAuthorization: "Required header: Bearer followed by an XHub virtual key, not a provider key.",
     paramModel: "Required public model name displayed on this page; the gateway maps it to the provider model.",
     paramPathModel: "The model is already included in the registered URL; no body model field is needed.",
-    paramMessages: "Required message array with role and content. Common roles are user and assistant; system prompts follow the selected protocol.",
+    paramMessages:
+      "Required message array with role and content. Common roles are user and assistant; system prompts follow the selected protocol.",
     paramStream: "Optional boolean. true returns SSE; add --no-buffer to curl for immediate output.",
     paramMaxTokens: "Optional positive output token limit; supported maximum depends on the model.",
     paramRequiredMaxTokens: "Required positive output token limit; the example uses 256.",
     paramInput: "Required text or structured protocol input.",
     paramEmbeddingInput: "Required string or array of strings to embed.",
     paramAnthropicVersion: "Version header; the example uses 2023-06-01.",
-    paramContents: "Required messages with role and parts; text parts use {\"text\":\"your question\"}.",
+    paramContents: 'Required messages with role and parts; text parts use {"text":"your question"}.',
     paramGenerationConfig: "Optional generation settings such as temperature and maxOutputTokens.",
     paramPrompt: "Required description of the content to generate or edit.",
     paramQuery: "Required ranking query.",
     paramDocuments: "Required array of documents to rank.",
     paramTopN: "Optional number of ranked results.",
-    paramArkContent: "Required array: text uses {\"type\":\"text\",\"text\":\"description\"}; media fields depend on the model.",
-    paramVideoOptions: "Optional duration, resolution, ratio or size; field names and values depend on the protocol and model.",
-    paramArkResult: "Creation returns id; queries return status. After success, content.video_url is the download URL; inspect error on failure.",
-    paramFalImages: "Image-to-video commonly uses image_url; references commonly use image_urls. Check the exact model schema.",
+    paramArkContent:
+      'Required array: text uses {"type":"text","text":"description"}; media fields depend on the model.',
+    paramVideoOptions:
+      "Optional duration, resolution, ratio or size; field names and values depend on the protocol and model.",
+    paramArkResult:
+      "Creation returns id; queries return status. After success, content.video_url is the download URL; inspect error on failure.",
+    paramFalImages:
+      "Image-to-video commonly uses image_url; references commonly use image_urls. Check the exact model schema.",
     paramFalResult: "Creation returns request_id. Query status before fetching results; video URL structures vary.",
     paramImageFile: "Required multipart file: curl --form image=@./input.png.",
     paramImageOptions: "Optional size and count such as size=1024x1024 and n=1; supported values depend on the model.",
     paramImageResult: "Result array with image url or b64_json requiring decoding.",
-    paramVideoResult: "Creation returns id. Query status and download content after completed; inspect error on failure.",
+    paramVideoResult:
+      "Creation returns id. Query status and download content after completed; inspect error on failure.",
     paramVoice: "Required voice name, such as alloy; supported voices depend on the model.",
     paramAudioFormat: "Optional output format, such as mp3. Match the saved file extension to the format.",
     paramAudioFile: "Required multipart file: curl --form file=@./audio.mp3.",
     paramLanguage: "Optional audio language, such as zh. Translation targets follow the protocol.",
-    paramCustomBody: "Save the complete provider JSON body to request.json, with the public model name. A generic chat body is insufficient.",
+    paramCustomBody:
+      "Save the complete provider JSON body to request.json, with the public model name. A generic chat body is insufficient.",
     curlGuide: "Complete curl request",
-    curlCurrentHint: "Commands follow the current request parameters. Set your key, then run the request in your terminal. Playground credentials are never embedded.",
+    curlCurrentHint:
+      "Commands follow the current request parameters. Set your key, then run the request in your terminal. Playground credentials are never embedded.",
     curlInvalid: "Request parameters must be a valid JSON object. Fix them before copying curl.",
     howToCall: "How to call",
     pricing: "Model pricing",
@@ -236,21 +298,27 @@ export const en = {
     copyGateway: "Copy gateway URL",
     copied: "Copied",
     copyFailed: "Copy failed. Select and copy the content manually.",
-    exampleHint: "Run these steps in the same terminal on macOS, Linux, or Windows WSL / Git Bash. Requires curl 7.76 or newer. Replace placeholders in angle brackets.",
-    specialized: "This endpoint requires a specialized request format. Follow the provider’s protocol documentation and test the request in the Playground.",
+    exampleHint:
+      "Run these steps in the same terminal on macOS, Linux, or Windows WSL / Git Bash. Requires curl 7.76 or newer. Replace placeholders in angle brackets.",
+    specialized:
+      "This endpoint requires a specialized request format. Follow the provider’s protocol documentation and test the request in the Playground.",
     actions: "Task follow-up operations",
-    priceNote: "These are the token rates reported by the gateway, in USD per 1M tokens. Missing prices do not mean free usage. Media pricing and final charges follow the gateway bill.",
+    priceNote:
+      "These are the token rates reported by the gateway, in USD per 1M tokens. Missing prices do not mean free usage. Media pricing and final charges follow the gateway bill.",
     item: "Billing item",
     rate: "Rate / 1M tokens",
     stepKey: "1. Prepare an API key",
     stepKeyHint: "Create or select a key with access to this model in API Keys, then set the environment variable:",
     keys: "Manage API keys",
     stepCall: "2. Choose an endpoint and call",
-    stepCallHint: "Select an available protocol under API access and copy its example. Request formats differ by protocol.",
+    stepCallHint:
+      "Select an available protocol under API access and copy its example. Request formats differ by protocol.",
     stepResult: "3. Check the result and usage",
-    stepResultHint: "Check the curl response, then inspect request logs and usage. For asynchronous tasks, query until completion before downloading.",
+    stepResultHint:
+      "Check the curl response, then inspect request logs and usage. For asynchronous tasks, query until completion before downloading.",
     errors: "Common errors",
-    errorHint: "401: check the API key. 403: check model access. 404: check the path and model name. 429: check quotas and rate limits. 5xx: check the provider or contact an administrator.",
+    errorHint:
+      "401: check the API key. 403: check model access. 404: check the path and model name. 429: check quotas and rate limits. 5xx: check the provider or contact an administrator.",
     eyebrow: "YOUR AVAILABLE MODELS",
     title: "My models",
     description:
@@ -825,7 +893,6 @@ export const en = {
       accessDeniedBody:
         "Your role does not have access to the Playground. Ask your proxy admin for access to test models.",
       chat: "Chat",
-      compare: "Compare",
       compliance: "Compliance",
       agentBuilder: "Agent Builder (Experimental)",
     },

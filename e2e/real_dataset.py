@@ -194,6 +194,10 @@ def load_manifest(path=MANIFEST):
         raise ValueError("必须包含四类可登录身份")
     if {s["role"] for s in data.get("permission_scenarios", [])} != required_roles:
         raise ValueError("四类角色必须具有可执行权限场景")
+    for scenario in data["permission_scenarios"]:
+        if any(scenario.get(field) not in (200, 403) for field in (
+                "own_team_limits", "foreign_team_limits", "team_models_update", "team_status_update")):
+            raise ValueError("权限场景必须分别声明团队额度、跨组织额度、模型和状态的预期状态码")
     for guard in data["guardrails"]:
         params = guard["litellm_params"]
         if params.get("guardrail") == "custom_code" and (params.get("custom_code_language") != "xgo" or
@@ -1717,7 +1721,7 @@ class Dataset:
 
 
     def verify_permissions(self):
-        """用途：按清单登录四角色验收读写；无参数/返回；验证列表真实隔离、团队配置和护栏管理拒绝，临时护栏 finally 删除。"""
+        """用途：按清单登录四角色验收权限；无参数/返回，供真实验收调用；分别检查资料、金额/RPM/TPM、模型、状态和护栏权限。额度及模型使用平台读取的原值，避免改变保留数据的分配和路由，临时护栏 finally 删除；状态码不符立即失败。"""
         personas = []
         for scenario in self.data["permission_scenarios"]:
             role = scenario["role"]
@@ -1737,9 +1741,20 @@ class Dataset:
             for tid, field in ((user["team_id"], "own_team_update"), (foreign["id"], "foreign_team_update")):
                 self.api("/team/update", {"team_id": tid, "team_description": "真实验收权限验证"},
                          token=token, expected=scenario[field])
-            # 组织/团队管理员可编辑描述，但扩大预算和模型边界仍属于平台权限。
-            self.api("/team/update", {"team_id": user["team_id"], "max_budget": 30}, token=token,
-                     expected=200 if role == "platform_admin" else 403)
+            # 三项额度共用上级分配权限，模型和封禁状态仍由平台管理，不能合并成同一权限断言。
+            # 原值写回仍会经过真实鉴权和分配校验；避免给共享验收数据添加分钟限制或清空模型。
+            for tid, field in ((user["team_id"], "own_team_limits"),
+                               (foreign["id"], "foreign_team_limits")):
+                stored, _ = self.api("/team/info?team_id=" + tid)
+                info = stored["team_info"]
+                for limit in ("max_budget", "rpm_limit", "tpm_limit"):
+                    self.api("/team/update", {"team_id": tid, limit: info.get(limit)},
+                             token=token, expected=scenario[field])
+                if tid == user["team_id"]:
+                    for setting, expected_field in (("models", "team_models_update"),
+                                                    ("status", "team_status_update")):
+                        self.api("/team/update", {"team_id": tid, setting: info[setting]},
+                                 token=token, expected=scenario[expected_field])
             created = None
             try:
                 created, _ = self.api("/guardrails", {"guardrail_name": "权限临时-" + role,
@@ -1753,7 +1768,7 @@ class Dataset:
                              "team_id": user["team_id"], "visible_teams": len(teams)})
             self.report["checks"].append({"name": "permissions-" + role, "passed": True})
             self.action_ok("gpt-5.6-sol + z-ai/glm-5", "identity-rbac", role + " 权限矩阵",
-                           f"登录、可见团队={len(teams)}、本团队编辑、跨组织拒绝、预算边界和全局护栏权限均已核对",
+                           f"登录、可见团队={len(teams)}、资料、金额/RPM/TPM分配、跨组织、模型/状态和全局护栏权限均已核对",
                            record=False)
         self.state["personas"] = personas
         self.save()

@@ -24,7 +24,7 @@ describe("UserAccountEditor", () => {
     await user.type(screen.getByLabelText("Max Budget (USD)"), "0");
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-    expect(update).toHaveBeenCalledWith("session", { user_id: "u1", user_email: "user@example.com", user_alias: "After", user_role: "user", max_budget: 0, blocked: false }, null);
+    expect(update).toHaveBeenCalledWith("session", { user_id: "u1", user_email: "user@example.com", user_alias: "After", user_role: "user", max_budget: 0, rpm_limit: null, tpm_limit: null, blocked: false }, null);
   });
 
   /** 边界保存：前置名称/预算为空且账户禁用，验证空名称和无限预算不会被默认值覆盖；卸载清理。 */
@@ -47,6 +47,17 @@ describe("UserAccountEditor", () => {
     expect(screen.getByLabelText("User Alias")).toHaveValue("Before");
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+  });
+
+  /** 分钟边界：已有固定分配，清空 RPM 表示共享、TPM 零禁止调用；验证后台请求及刷新，卸载清理。 */
+  it("clears RPM and preserves zero TPM", async () => {
+    const user = userEvent.setup();
+    render(<UserAccountEditor user={{ ...account, rpm_limit: 10, tpm_limit: 64 }} accessToken="session" onSaved={vi.fn().mockResolvedValue(undefined)} onCancel={vi.fn()} />);
+    await user.clear(screen.getByLabelText("Requests per minute Limit (RPM)"));
+    await user.clear(screen.getByLabelText("Tokens per minute Limit (TPM)"));
+    await user.type(screen.getByLabelText("Tokens per minute Limit (TPM)"), "0");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith("session", expect.objectContaining({ rpm_limit: null, tpm_limit: 0 }), null));
   });
 
   /** 取消操作：前置可编辑账户，点击取消仅触发回调，后台不写入；卸载清理。 */

@@ -95,12 +95,12 @@ func TestTeamlessPersonalKeys(t *testing.T) {
 		t.Fatalf("独立密钥模型限制失效: %s", r.describe())
 	}
 	h.ok(http.MethodPost, "/key/update", session, map[string]any{"key": id, "models": []string{"all-proxy-models"}})
-	h.setUserBudget(t, admin, uid, 0)
+	h.setUserBudget(t, admin, uid, owner.Spend)
 	if r := h.do(http.MethodPost, "/v1/chat/completions", secret, chatRequest("solo-chat", "user budget")); r.status != 429 || !strings.Contains(errorMessage(r), "User") {
 		t.Fatalf("个人额度未生效: %s", r.describe())
 	}
 	h.setUserBudget(t, admin, uid, 100)
-	h.setKeyBudget(t, admin, secret, 0)
+	h.setKeyBudget(t, admin, secret, k.Spend)
 	if r := h.do(http.MethodPost, "/v1/chat/completions", secret, chatRequest("solo-chat", "key budget")); r.status != 429 || !strings.Contains(errorMessage(r), "Key") {
 		t.Fatalf("密钥额度未生效: %s", r.describe())
 	}

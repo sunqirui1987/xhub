@@ -209,3 +209,23 @@ describe("extractProxyErrorMessage", () => {
     expect(extractProxyErrorMessage("plain failure")).toBe("plain failure");
   });
 });
+
+/** 验证额度错误中英文解析；前置真实翻译目录，正常错误、单团队错误与未知错误均有结果；最后恢复英文，无持久数据。 */
+it("localizes quota allocation and single-team errors", async () => {
+  const { setActiveLocale } = await import("@/i18n/runtime");
+  const { translate } = await import("@/i18n/translate");
+  try {
+    for (const locale of ["zh-CN", "en"] as const) {
+      setActiveLocale(locale);
+      expect(deriveErrorMessage({ error: { type: "quota_allocation_exceeded", message: "raw" } })).toBe(
+        translate(locale, "quotaGuide.allocationError"),
+      );
+      expect(deriveErrorMessage({ error: { type: "single_team_required", message: "raw" } })).toBe(
+        translate(locale, "quotaGuide.singleTeamError"),
+      );
+      expect(deriveErrorMessage({ error: { type: "other", message: "original" } })).toBe("original");
+    }
+  } finally {
+    setActiveLocale("en");
+  }
+});

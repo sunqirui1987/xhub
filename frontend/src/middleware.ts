@@ -68,7 +68,7 @@ export function appPageWritePath(method: string, pathname: string): string | nul
   return APP_PAGES.has(path) ? path : null;
 }
 
-// dashboardAppPath 是 Next 真正渲染的控制台路径。不在页面集合里的地址，包括 /ui 前缀，交给网关。
+/** 解析 Next 页面路径；参数为请求路径，返回页面路径或 null。供中间件分流调用，支持 /ui 别名及文档子目录，未知非文档路径交网关，无副作用。 */
 export function dashboardAppPath(pathname: string): string | null {
   let path = pathname;
   if (path === "/ui" || path === "/ui/" || path.startsWith("/ui/")) {
@@ -77,7 +77,8 @@ export function dashboardAppPath(pathname: string): string | null {
   } else {
     path = stripSlash(path) || "/";
   }
-  return APP_PAGES.has(path) ? path : null;
+  // /docs 专用目录交给 Next，未知文章由页面返回 404，不能误转发到数据面。
+  return path === "/docs" || path.startsWith("/docs/") || APP_PAGES.has(path) ? path : null;
 }
 
 export function middleware(req: NextRequest) {

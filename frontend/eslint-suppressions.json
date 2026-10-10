@@ -641,27 +641,6 @@
       "count": 1
     }
   },
-  "src/app/(dashboard)/playground/components/compareUI/CompareUI.tsx": {
-    "max-lines": {
-      "count": 1
-    },
-    "no-nested-ternary": {
-      "count": 4
-    },
-    "react-hooks/set-state-in-effect": {
-      "count": 1
-    }
-  },
-  "src/app/(dashboard)/playground/components/compareUI/components/ComparisonPanel.tsx": {
-    "local/no-complex-jsx-arrow": {
-      "count": 2
-    }
-  },
-  "src/app/(dashboard)/playground/components/compareUI/components/MessageDisplay.tsx": {
-    "no-nested-ternary": {
-      "count": 1
-    }
-  },
   "src/app/(dashboard)/playground/components/complianceUI/ComplianceUI.tsx": {
     "local/no-complex-jsx-arrow": {
       "count": 2

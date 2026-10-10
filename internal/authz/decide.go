@@ -14,8 +14,10 @@ type Action string
 
 const (
 	// Account management.
-	ActionUserRead   Action = "user.read"
-	ActionUserWrite  Action = "user.write"
+	ActionUserRead  Action = "user.read"
+	ActionUserWrite Action = "user.write"
+	// ActionUserBudget 仅授权团队归属内的个人额度，不允许修改角色、状态或身份资料。
+	ActionUserBudget Action = "user.budget"
 	ActionUserCreate Action = "user.create"
 	ActionUserDelete Action = "user.delete"
 	// ActionUserPassword is setting somebody else's password. It is separate
@@ -462,6 +464,24 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 	// ---------- account ----------
 	case ActionUserRead, ActionUserWrite, ActionUserCreate, ActionUserDelete:
 		return g.decideUser(action, obj, admin)
+	case ActionUserBudget:
+		if admin {
+			return nil
+		}
+		if g.z == nil || g.z.db == nil {
+			return ErrForbidden
+		}
+		members, err := g.z.db.MemberTeams(ctx, obj.ID)
+		if err != nil {
+			return err
+		}
+		if len(members) != 1 {
+			return ErrForbidden
+		}
+		if g.TeamAdminOf(members[0].TeamID) || g.OrgAdminOf(members[0].OrganizationID) {
+			return nil
+		}
+		return ErrForbidden
 	case ActionUserPassword:
 		return g.decideUserPassword(ctx, obj, admin)
 
@@ -484,7 +504,13 @@ func (g *Guard) decide(ctx context.Context, action Action, obj Object) error {
 	// ---------- teams ----------
 	case ActionTeamRead:
 		return g.decideTeamRead(obj, admin)
-	case ActionTeamCreate, ActionTeamDelete, ActionTeamMove, ActionTeamBudget, ActionTeamModels:
+	// 组织管理员仅在本组织分配团队额度，不获得平台配置权限。
+	case ActionTeamCreate, ActionTeamBudget:
+		if admin || g.OrgAdminOf(obj.OrgID) {
+			return nil
+		}
+		return ErrForbidden
+	case ActionTeamDelete, ActionTeamMove, ActionTeamModels:
 		if admin {
 			return nil
 		}

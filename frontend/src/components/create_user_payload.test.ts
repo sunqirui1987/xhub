@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isValidRateAllocation,
   buildCreateUserPayload,
   EMPTY_CREATE_USER_FORM,
   validateCreateUser,
@@ -78,5 +79,23 @@ describe("buildCreateUserPayload", () => {
     const payload = buildCreateUserPayload(form({ user_role: "" }));
     expect(payload.user_role).toBe("user");
     expect(payload.auto_create_key).toBe(false);
+  });
+});
+
+/** 新建配额纯函数测试：正常、边界和失败输入，验证共享与 0 区分；不写入数据，无需清理。 */
+describe("personal creation rate allocations", () => {
+  it.each(["", "  ", "0", "12", "2147483647", 0, undefined])("accepts shared or integer rate %s", value => {
+    expect(isValidRateAllocation(value)).toBe(true);
+  });
+  it.each(["-1", "1.5", "NaN", "2147483648", "1e2", "abc", Infinity])("rejects invalid rate %s", value => {
+    expect(isValidRateAllocation(value)).toBe(false);
+    expect(validateCreateUser(form({ rpm_limit: String(value) }))).toBe("rate");
+    expect(validateCreateUser(form({ tpm_limit: String(value) }))).toBe("rate");
+  });
+  it("preserves zero and fixed rates while omitting shared fields", () => {
+    expect(buildCreateUserPayload(form({ rpm_limit: "0", tpm_limit: "128" }))).toMatchObject({ rpm_limit: 0, tpm_limit: 128 });
+    expect(buildCreateUserPayload(form())).not.toHaveProperty("rpm_limit");
+    expect(buildCreateUserPayload(form())).not.toHaveProperty("tpm_limit");
+    expect(validateCreateUser(form({ unlimited_budget: false, max_budget: "" }))).toBe("budget");
   });
 });

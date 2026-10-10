@@ -11,6 +11,8 @@ import (
 
 // teamRow reads one team together with the caller's role, if any.
 type teamRow struct {
+	RPMLimit       *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
+	TPMLimit       *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
 	ID             string   `xorm:"'id'"`
 	OrganizationID string   `xorm:"'organization_id'"`
 	Name           string   `xorm:"'name'"`
@@ -25,15 +27,24 @@ type teamRow struct {
 
 // ---------- organizations ----------
 
-// CreateOrg inserts an organization.
+// CreateOrg 创建组织并检查根额度；非有限或负数额度返回错误，不产生组织或审计记录。
 // 参数 ctx（context.Context）：上下文，取消时停止；by（Actor）：执行这次修改的操作者。审计日志记这个人的 id 和角色；name（string）：创建组织要查找或展示的名称。空串表示还没有命名；maxBudget（*float64）：创建组织使用的float64。
 // 返回 *Organization（*Organization）：交给调用方的组织行；error（error）：失败原因。nil 表示这一步成功。
 // 调用：gateway/identity/handlers.go
 // 测试：activity_http_test.go、authz_test.go、permission_test.go
-func (db *DB) CreateOrg(ctx context.Context, by Actor, name string, maxBudget *float64) (*Organization, error) {
+func (db *DB) CreateOrg(ctx context.Context, by Actor, name string, maxBudget *float64, rates ...RateLimits) (*Organization, error) {
 	var out *Organization
 	err := db.tx(ctx, func(s *xorm.Session) error {
 		o := Organization{ID: newID(), Name: name, Status: StatusActive, MaxBudget: maxBudget}
+		if len(rates) > 0 {
+			o.RPMLimit, o.TPMLimit = rates[0].RPMLimit, rates[0].TPMLimit
+		}
+		if err := ValidateRates(o.RPMLimit, o.TPMLimit); err != nil {
+			return err
+		}
+		if _, err := quotaUnused(&quotaNode{Limit: maxBudget}); err != nil {
+			return err
+		}
 		if _, err := s.Insert(&o); err != nil {
 			return err
 		}
@@ -112,6 +123,8 @@ func (db *DB) ListOrgs(ctx context.Context, userID string) ([]Organization, erro
 
 // OrgUpdate changes an organization; nil fields keep their value.
 type OrgUpdate struct {
+	RPMLimit  **int
+	TPMLimit  **int
 	Name      *string
 	Status    *string
 	MaxBudget **float64
@@ -142,14 +155,28 @@ func (db *DB) UpdateOrg(ctx context.Context, by Actor, id string, in OrgUpdate) 
 		if in.MaxBudget != nil {
 			cur.MaxBudget = *in.MaxBudget
 		}
+		if in.RPMLimit != nil {
+			cur.RPMLimit = *in.RPMLimit
+		}
+		if in.TPMLimit != nil {
+			cur.TPMLimit = *in.TPMLimit
+		}
+		if err := ValidateRates(cur.RPMLimit, cur.TPMLimit); err != nil {
+			return err
+		}
 		if in.RouteTemplateID != nil {
 			cur.RouteTemplateID = *in.RouteTemplateID
 		}
-		if _, err := s.ID(id).Cols("name", "status", "max_budget", "route_template_id").Update(cur); err != nil {
+		if _, err := s.ID(id).Cols("name", "status", "max_budget", "route_template_id", "rpm_limit", "tpm_limit").Update(cur); err != nil {
 			return err
 		}
 		if out, err = getOrg(ctx, s, id); err != nil {
 			return err
+		}
+		if in.MaxBudget != nil || in.RPMLimit != nil || in.TPMLimit != nil {
+			if err := validateQuota(s, "org", id); err != nil {
+				return err
+			}
 		}
 		return writeAudit(s, by, Audit{Action: "org.update", ObjectType: "organization", ObjectID: id})
 	})
@@ -178,6 +205,8 @@ func (db *DB) DeleteOrg(ctx context.Context, by Actor, id string) error {
 // than no models, so a team created without a choice reaches what the
 // deployment offers; narrowing it later is what limits it.
 type TeamInput struct {
+	RPMLimit       *int
+	TPMLimit       *int
 	OrganizationID string
 	Name           string
 	Description    string
@@ -192,20 +221,38 @@ type TeamInput struct {
 // 调用：gateway/identity/handlers.go
 // 测试：activity_http_test.go、authz_test.go、permission_test.go
 func (db *DB) CreateTeam(ctx context.Context, by Actor, in TeamInput) (*Team, error) {
-	if in.AdminUserID == "" {
-		return nil, ErrInvalid
-	}
+
 	var out *Team
 	err := db.tx(ctx, func(s *xorm.Session) error {
-		if err := requireActiveUser(s, in.AdminUserID); err != nil {
-			return err
+		if in.AdminUserID != "" {
+			if err := requireActiveUser(s, in.AdminUserID); err != nil {
+				return err
+			}
 		}
 		t := Team{ID: newID(), OrganizationID: in.OrganizationID, Name: in.Name, Description: in.Description,
-			Status: StatusActive, Models: nonNil(in.Models), MaxBudget: in.MaxBudget}
+			Status: StatusActive, Models: nonNil(in.Models), MaxBudget: in.MaxBudget, RPMLimit: in.RPMLimit, TPMLimit: in.TPMLimit}
+		if err := ValidateRates(t.RPMLimit, t.TPMLimit); err != nil {
+			return err
+		}
 		if _, err := s.Insert(&t); err != nil {
 			return err
 		}
-		if _, err := s.Insert(&TeamMembership{TeamID: t.ID, UserID: in.AdminUserID, Role: TeamAdmin}); err != nil {
+		if in.AdminUserID != "" {
+			if err := singleTeamMember(s, in.AdminUserID, t.ID); err != nil {
+				admin, e := getUser(ctx, s, in.AdminUserID)
+				if e != nil || !admin.Admin() {
+					return err
+				}
+				// 平台管理员通过平台权限管理新团队，不创建第二个个人归属。
+				in.AdminUserID = ""
+			}
+			if in.AdminUserID != "" {
+				if _, err := s.Insert(&TeamMembership{TeamID: t.ID, UserID: in.AdminUserID, Role: TeamAdmin}); err != nil {
+					return err
+				}
+			}
+		}
+		if err := validateQuota(s, "team", t.ID); err != nil {
 			return err
 		}
 		out = &t
@@ -278,7 +325,7 @@ func (db *DB) ListTeams(ctx context.Context, userID, organizationID string) ([]T
 	var rows []teamRow
 	if userID == "" {
 		err := s.Table("teams").
-			Select("id, organization_id, name, description, status, max_budget, spend, created_at, updated_at, '' AS role").
+			Select("id, organization_id, name, description, status, rpm_limit, tpm_limit, max_budget, spend, created_at, updated_at, '' AS role").
 			Where("? = '' OR organization_id = ?", organizationID, organizationID).
 			Asc("name", "id").Find(&rows)
 		if err != nil {
@@ -288,7 +335,7 @@ func (db *DB) ListTeams(ctx context.Context, userID, organizationID string) ([]T
 		err := s.Table("teams").Alias("t").
 			Join("INNER", "team_members m", "m.team_id = t.id").
 			Select("t.id AS id, t.organization_id AS organization_id, t.name AS name, t.description AS description, t.status AS status, "+
-				"t.max_budget AS max_budget, t.spend AS spend, t.created_at AS created_at, t.updated_at AS updated_at, m.role AS role").
+				"t.rpm_limit AS rpm_limit, t.tpm_limit AS tpm_limit, t.max_budget AS max_budget, t.spend AS spend, t.created_at AS created_at, t.updated_at AS updated_at, m.role AS role").
 			Where("m.user_id = ? AND (? = '' OR t.organization_id = ?)", userID, organizationID, organizationID).
 			Asc("t.name", "t.id").Find(&rows)
 		if err != nil {
@@ -299,7 +346,7 @@ func (db *DB) ListTeams(ctx context.Context, userID, organizationID string) ([]T
 	for _, r := range rows {
 		out = append(out, TeamWithRole{
 			Team: Team{ID: r.ID, OrganizationID: r.OrganizationID, Name: r.Name, Description: r.Description,
-				Status: r.Status, MaxBudget: r.MaxBudget, Spend: r.Spend,
+				Status: r.Status, MaxBudget: r.MaxBudget, Spend: r.Spend, RPMLimit: r.RPMLimit, TPMLimit: r.TPMLimit,
 				CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
 			Role: r.Role,
 		})
@@ -343,7 +390,7 @@ func (db *DB) UpdateTeamProfile(ctx context.Context, by Actor, id string, name, 
 // 返回 *Team（*Team）：交给调用方的团队行；error（error）：失败原因。nil 表示这一步成功。
 // 调用：gateway/identity/handlers.go
 // 测试：authz_test.go
-func (db *DB) AdminUpdateTeam(ctx context.Context, by Actor, id string, status *string, maxBudget **float64, models *[]string) (*Team, error) {
+func (db *DB) AdminUpdateTeam(ctx context.Context, by Actor, id string, status *string, maxBudget **float64, models *[]string, rates ...RatePatch) (*Team, error) {
 	var out *Team
 	err := db.tx(ctx, func(s *xorm.Session) error {
 		if err := lockTeam(ctx, s, id); err != nil {
@@ -351,6 +398,20 @@ func (db *DB) AdminUpdateTeam(ctx context.Context, by Actor, id string, status *
 		}
 		var cols []string
 		var patch Team
+		if len(rates) > 0 {
+			rp := rates[0]
+			if rp.RPMLimit != nil {
+				patch.RPMLimit = *rp.RPMLimit
+				cols = append(cols, "rpm_limit")
+			}
+			if rp.TPMLimit != nil {
+				patch.TPMLimit = *rp.TPMLimit
+				cols = append(cols, "tpm_limit")
+			}
+			if err := ValidateRates(patch.RPMLimit, patch.TPMLimit); err != nil {
+				return err
+			}
+		}
 		if status != nil {
 			patch.Status, cols = *status, append(cols, "status")
 		}
@@ -370,6 +431,11 @@ func (db *DB) AdminUpdateTeam(ctx context.Context, by Actor, id string, status *
 		var err error
 		if out, err = getTeam(ctx, s, id); err != nil {
 			return err
+		}
+		if maxBudget != nil || len(rates) > 0 {
+			if err := validateQuota(s, "team", id); err != nil {
+				return err
+			}
 		}
 		return writeAudit(s, by, Audit{Action: "team.admin_update", ObjectType: "team", ObjectID: id, TeamID: id,
 			Detail: map[string]any{"status": out.Status}})
@@ -393,6 +459,9 @@ func (db *DB) MoveTeam(ctx context.Context, by Actor, id, organizationID string)
 		}
 		var err error
 		if out, err = getTeam(ctx, s, id); err != nil {
+			return err
+		}
+		if err := validateQuota(s, "team", id); err != nil {
 			return err
 		}
 		return writeAudit(s, by, Audit{Action: "team.move", ObjectType: "team", ObjectID: id, TeamID: id,
@@ -517,7 +586,7 @@ func (db *DB) ListOrgAdmins(ctx context.Context, orgID string) ([]Member, error)
 	var out []Member
 	err := s.Table("organization_members").Alias("m").
 		Join("INNER", "users u", "u.id = m.user_id").
-		Select("u.id AS user_id, u.email AS email, u.name AS name, m.role AS role, u.status AS status").
+		Select("u.id AS user_id, u.email AS email, u.name AS name, m.role AS role, u.status AS status, u.rpm_limit AS rpm_limit, u.tpm_limit AS tpm_limit, u.max_budget AS max_budget, u.spend AS spend").
 		Where("m.organization_id = ? AND m.role = ?", orgID, OrgAdmin).
 		Asc("u.email").Find(&out)
 	return out, err
@@ -593,7 +662,7 @@ func (db *DB) ListVisibleTeams(ctx context.Context, userID, organizationID strin
 	err := s.Table("teams").Alias("t").
 		Join("LEFT", "team_members m", "m.team_id = t.id AND m.user_id = ?", userID).
 		Select("t.id AS id, t.organization_id AS organization_id, t.name AS name, t.description AS description, t.status AS status, "+
-			"t.max_budget AS max_budget, t.spend AS spend, t.created_at AS created_at, t.updated_at AS updated_at, COALESCE(m.role, '') AS role").
+			"t.rpm_limit AS rpm_limit, t.tpm_limit AS tpm_limit, t.max_budget AS max_budget, t.spend AS spend, t.created_at AS created_at, t.updated_at AS updated_at, COALESCE(m.role, '') AS role").
 		Where("(m.user_id IS NOT NULL OR t.organization_id IN (SELECT organization_id FROM organization_members WHERE user_id = ? AND role = ?)) AND (? = '' OR t.organization_id = ?)",
 			userID, OrgAdmin, organizationID, organizationID).
 		Asc("t.name", "t.id").Find(&rows)
@@ -604,7 +673,7 @@ func (db *DB) ListVisibleTeams(ctx context.Context, userID, organizationID strin
 	for _, r := range rows {
 		out = append(out, TeamWithRole{
 			Team: Team{ID: r.ID, OrganizationID: r.OrganizationID, Name: r.Name, Description: r.Description,
-				Status: r.Status, MaxBudget: r.MaxBudget, Spend: r.Spend,
+				Status: r.Status, MaxBudget: r.MaxBudget, Spend: r.Spend, RPMLimit: r.RPMLimit, TPMLimit: r.TPMLimit,
 				CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt},
 			Role: r.Role,
 		})
@@ -758,11 +827,15 @@ func (db *DB) Memberships(ctx context.Context, userID string) (map[string]string
 
 // Member is one team membership with the public fields of the account.
 type Member struct {
-	UserID string `xorm:"'user_id'" json:"user_id"`
-	Email  string `xorm:"'email'" json:"email"`
-	Name   string `xorm:"'name'" json:"name"`
-	Role   string `xorm:"'role'" json:"role"`
-	Status string `xorm:"'status'" json:"status"`
+	RPMLimit  *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
+	TPMLimit  *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
+	UserID    string   `xorm:"'user_id'" json:"user_id"`
+	Email     string   `xorm:"'email'" json:"email"`
+	Name      string   `xorm:"'name'" json:"name"`
+	Role      string   `xorm:"'role'" json:"role"`
+	Status    string   `xorm:"'status'" json:"status"`
+	MaxBudget *float64 `xorm:"'max_budget'" json:"max_budget"`
+	Spend     float64  `xorm:"'spend'" json:"spend"`
 }
 
 // ListMembers returns the team's members with public account fields only.
@@ -776,7 +849,7 @@ func (db *DB) ListMembers(ctx context.Context, teamID string) ([]Member, error) 
 	var out []Member
 	err := s.Table("team_members").Alias("m").
 		Join("INNER", "users u", "u.id = m.user_id").
-		Select("u.id AS user_id, u.email AS email, u.name AS name, m.role AS role, u.status AS status").
+		Select("u.id AS user_id, u.email AS email, u.name AS name, m.role AS role, u.status AS status, u.rpm_limit AS rpm_limit, u.tpm_limit AS tpm_limit, u.max_budget AS max_budget, u.spend AS spend").
 		Where("m.team_id = ?", teamID).Asc("u.email").Find(&out)
 	return out, err
 }
@@ -805,10 +878,16 @@ func (db *DB) AddMember(ctx context.Context, by Actor, teamID, email, role strin
 			}
 			return err
 		}
+		if err := singleTeamMember(s, u.ID, teamID); err != nil {
+			return err
+		}
 		if _, err := s.Insert(&TeamMembership{TeamID: teamID, UserID: u.ID, Role: role}); err != nil {
 			return err
 		}
-		out = Member{UserID: u.ID, Email: u.Email, Name: u.Name, Role: role, Status: u.Status}
+		if err := validateQuota(s, "user", u.ID); err != nil {
+			return err
+		}
+		out = Member{UserID: u.ID, Email: u.Email, Name: u.Name, Role: role, Status: u.Status, MaxBudget: u.MaxBudget, Spend: u.Spend, RPMLimit: u.RPMLimit, TPMLimit: u.TPMLimit}
 		return writeAudit(s, by, Audit{Action: "member.add", ObjectType: "team_member", ObjectID: u.ID, TeamID: teamID,
 			Detail: map[string]any{"role": role}})
 	})
@@ -824,6 +903,12 @@ func (db *DB) AddMember(ctx context.Context, by Actor, teamID, email, role strin
 // 调用：gateway/identity/members.go
 // 测试：无直接单测
 func (db *DB) SetMemberRole(ctx context.Context, by Actor, teamID, userID, role string) error {
+	return db.SetMemberRoleBudget(ctx, by, teamID, userID, role, nil)
+}
+
+// SetMemberRoleBudget 原子修改成员角色和个人额度；参数包含操作者、唯一团队、用户、角色及可选额度。
+// 返回权限关系、最后管理员或额度错误；调用：成员编辑接口，任何失败均回滚两项，null 共享父级。
+func (db *DB) SetMemberRoleBudget(ctx context.Context, by Actor, teamID, userID, role string, budget **float64, rates ...RatePatch) error {
 	if role != TeamAdmin && role != TeamMember {
 		return ErrInvalid
 	}
@@ -844,12 +929,46 @@ func (db *DB) SetMemberRole(ctx context.Context, by Actor, teamID, userID, role 
 			Cols("role").Update(&TeamMembership{Role: role}); err != nil {
 			return err
 		}
+		if len(rates) > 0 {
+			rp := rates[0]
+			var patch User
+			var cols []string
+			if rp.RPMLimit != nil {
+				patch.RPMLimit = *rp.RPMLimit
+				cols = append(cols, "rpm_limit")
+			}
+			if rp.TPMLimit != nil {
+				patch.TPMLimit = *rp.TPMLimit
+				cols = append(cols, "tpm_limit")
+			}
+			if err := ValidateRates(patch.RPMLimit, patch.TPMLimit); err != nil {
+				return err
+			}
+			if len(cols) > 0 {
+				if _, err := s.ID(userID).Cols(cols...).Update(&patch); err != nil {
+					return err
+				}
+			}
+		}
+		if budget != nil {
+			if _, err := s.ID(userID).Cols("max_budget").Update(&User{MaxBudget: *budget}); err != nil {
+				return err
+			}
+			if err := validateQuota(s, "user", userID); err != nil {
+				return err
+			}
+		}
+		if len(rates) > 0 {
+			if err := validateQuota(s, "user", userID); err != nil {
+				return err
+			}
+		}
 		return writeAudit(s, by, Audit{Action: "member.role", ObjectType: "team_member", ObjectID: userID, TeamID: teamID,
 			Detail: map[string]any{"from": cur.Role, "to": role}})
 	})
 }
 
-// RemoveMember deletes a membership and revokes the user's personal keys bound to this team, protecting the last team_admin.
+// RemoveMember 解除团队归属并撤销绑定本团队的个人密钥；独立个人密钥和额度继续有效，历史账单不迁移，保留最后管理员保护。
 // 参数 ctx（context.Context）：上下文，取消时停止；by（Actor）：执行这次修改的操作者。审计日志记这个人的 id 和角色；teamID（string）：团队 id。空串表示没有指定团队；userID（string）：用户 id。空串表示没有指定用户。
 // 返回 error（error）：失败原因，nil 表示这一步成功。
 // 调用：gateway/identity/members.go

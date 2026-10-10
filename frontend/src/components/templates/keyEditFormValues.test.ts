@@ -31,3 +31,14 @@ describe("keyEditFormSchema", () => {
     expect(parse({ default_estimated_output_tokens_per_model: '{"gpt-4": 4096}' }).success).toBe(true);
   });
 });
+
+/** 密钥编辑 RPM/TPM 的正常、空白、零和失败边界；纯 schema 无持久化，测试结束无需清理。 */
+describe("key rate allocation boundaries", () => {
+  it.each([undefined, null, "", 0, "0", 12, "2147483647"])("accepts %s", (value) => {
+    expect(parse({ rpm_limit: value, tpm_limit: value }).success).toBe(true);
+  });
+  it.each([-1, "1.5", 2147483648, "wrong", true, {}, NaN, Infinity])("rejects %s", (value) => {
+    expect(parse({ rpm_limit: value }).success).toBe(false);
+    expect(parse({ tpm_limit: value }).success).toBe(false);
+  });
+});

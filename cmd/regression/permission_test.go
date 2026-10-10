@@ -215,7 +215,7 @@ func TestInvalidKeyIsRefused(t *testing.T) {
 }
 
 // TestOrganizationAndTeamHierarchy 证明组织与团队的归属层级真的建立起来了：
-// 团队挂在指定的组织下，成员挂进团队之后就从团队视角看得见。
+// 前置隔离 schema；团队挂在指定组织下，第二归属被拒绝，退出后转入可见；harness 清理全部数据。
 // 参数 t（*testing.T）：当前测试。
 // 返回：无。
 func TestOrganizationAndTeamHierarchy(t *testing.T) {
@@ -235,6 +235,13 @@ func TestOrganizationAndTeamHierarchy(t *testing.T) {
 
 	// 再建一个用户并加进这个团队，然后它应该出现在成员列表里。
 	member := h.newTenant(t, admin, "perm-member")
+	second := h.do(http.MethodPost, "/team/member_add", admin, map[string]any{
+		"team_id": a.teamID, "user_email": member.email, "role": "user",
+	})
+	if second.status != 400 {
+		t.Fatalf("第二个团队必须拒绝: %s", second.describe())
+	}
+	h.ok(http.MethodPost, "/team/member_delete", admin, map[string]any{"team_id": member.teamID, "user_id": member.userID})
 	h.ok(http.MethodPost, "/team/member_add", admin, map[string]any{
 		"team_id": a.teamID, "user_email": member.email, "role": "user",
 	})

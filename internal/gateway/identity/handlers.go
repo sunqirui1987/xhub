@@ -37,12 +37,22 @@ func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	in := iam.UserInput{
-		Email:       str(body["user_email"]),
-		Name:        str(body["user_alias"]),
-		Password:    str(body["password"]),
-		Role:        iam.StoreRole(str(body["user_role"])),
-		MaxBudget:   floatPtr(body["max_budget"]),
+		Email:     str(body["user_email"]),
+		Name:      str(body["user_alias"]),
+		Password:  str(body["password"]),
+		Role:      iam.StoreRole(str(body["user_role"])),
+		MaxBudget: floatPtr(body["max_budget"]),
+		RPMLimit:  httpx.Rate(body, "rpm_limit"), TPMLimit: httpx.Rate(body, "tpm_limit"),
 		TeamID:      str(body["team_id"]),
 		AdminOrgIDs: stringList(body["admin_organization_ids"]),
 	}
@@ -228,6 +238,15 @@ func UserInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	target := r.URL.Query().Get("user_id")
 	if v := str(body["user_id"]); v != "" {
 		target = v
@@ -265,12 +284,46 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	target := r.PathValue("user_id")
 	if target == "" {
 		target = str(body["user_id"])
 	}
 	if target == "" {
 		target = p.UserID
+	}
+	// 额度管理员只提交额度字段；独立授权避免借额度入口提升账号权限。
+	if !p.PlatformAdmin() && (optionalFloat(body, "max_budget") != nil || httpx.OptionalRate(body, "rpm_limit") != nil || httpx.OptionalRate(body, "tpm_limit") != nil) {
+		invalidFields := false
+		for key := range body {
+			if key != "user_id" && key != "max_budget" && key != "rpm_limit" && key != "tpm_limit" {
+				invalidFields = true
+			}
+		}
+		if invalidFields {
+			httpx.WriteError(w, 400, "invalid_request", "limit updates must contain only user_id, max_budget, rpm_limit and tpm_limit")
+			return
+		}
+		if err := g.Authorize(r, p, authz.ActionUserBudget, authz.Object{Type: authz.ObjectUser, ID: target}); err != nil {
+			g.WriteAuthz(w, r, err)
+			return
+		}
+		u, err := g.Identity().AdminUpdateUser(r.Context(), actorOf(p), target, iam.UserUpdate{MaxBudget: optionalFloat(body, "max_budget"),
+			RPMLimit: httpx.OptionalRate(body, "rpm_limit"), TPMLimit: httpx.OptionalRate(body, "tpm_limit")})
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, 200, map[string]any{"user_info": userPublic(u, nil)})
+		return
 	}
 	self := target == p.UserID && p.Kind == authz.KindSession
 	if err := g.Authorize(r, p, authz.ActionUserWrite, authz.Object{Type: authz.ObjectUser, ID: target}); err != nil {
@@ -296,8 +349,9 @@ func UserUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 			Status:    statusPtr(body),
 			Email:     stringPtr(body, "user_email"),
 			MaxBudget: optionalFloat(body, "max_budget"),
+			RPMLimit:  httpx.OptionalRate(body, "rpm_limit"), TPMLimit: httpx.OptionalRate(body, "tpm_limit"),
 		}
-		if in.Name == nil && in.Role == nil && in.Status == nil && in.Email == nil && in.MaxBudget == nil {
+		if in.Name == nil && in.Role == nil && in.Status == nil && in.Email == nil && in.MaxBudget == nil && in.RPMLimit == nil && in.TPMLimit == nil {
 			if !self {
 				httpx.WriteError(w, 400, "invalid_request", "no supported field to update")
 				return
@@ -377,6 +431,15 @@ func UserSetPassword(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	target := r.PathValue("user_id")
 	if target == "" {
 		target = str(body["user_id"])
@@ -415,6 +478,15 @@ func UserDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	target := r.PathValue("user_id")
 	if target == "" {
 		target = str(body["user_id"])
@@ -452,6 +524,15 @@ func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
@@ -460,7 +541,7 @@ func OrgNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
-	o, err := g.Identity().CreateOrg(r.Context(), actorOf(p), str(body["organization_alias"]), floatPtr(body["max_budget"]))
+	o, err := g.Identity().CreateOrg(r.Context(), actorOf(p), str(body["organization_alias"]), floatPtr(body["max_budget"]), iam.RateLimits{RPMLimit: httpx.Rate(body, "rpm_limit"), TPMLimit: httpx.Rate(body, "tpm_limit")})
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
@@ -578,6 +659,15 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := str(body["organization_id"])
 	if id == "" {
 		httpx.WriteError(w, 400, "invalid_request", "organization_id required")
@@ -586,7 +676,7 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	// A budget or a status change is the platform administrator's. An
 	// organization administrator may rename the organization only.
 	action := authz.ActionOrgAdmin
-	if _, budget := body["max_budget"]; budget || stringPtr(body, "status") != nil {
+	if _, budget := body["max_budget"]; budget || httpx.OptionalRate(body, "rpm_limit") != nil || httpx.OptionalRate(body, "tpm_limit") != nil || stringPtr(body, "status") != nil {
 		action = authz.ActionOrgWrite
 	}
 	if err := g.Authorize(r, p, action, authz.Object{Type: authz.ObjectOrg, ID: id}); err != nil {
@@ -601,6 +691,7 @@ func OrgUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		Name:      orgNamePtr(body),
 		Status:    stringPtr(body, "status"),
 		MaxBudget: optionalFloat(body, "max_budget"),
+		RPMLimit:  httpx.OptionalRate(body, "rpm_limit"), TPMLimit: httpx.OptionalRate(body, "tpm_limit"),
 		// Selecting a router template is the organization administrator's, so it
 		// travels with the name rather than with the budget: it does not widen
 		// what the organization can reach, only how traffic inside it is spread.
@@ -655,23 +746,32 @@ func OrgDelete(g Gate, w http.ResponseWriter, r *http.Request) {
 
 // ---------- teams ----------
 
-// TeamNew creates a team inside an organization, together with its first administrator. Only a platform administrator may create or move a team.
+// TeamNew 在组织内创建团队并校验逐级额度；平台管理员或本组织管理员可创建，创建者已有团队时不重复建立个人归属。
 // 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/identity/mount.go
 // 测试：无直接单测
 func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
-	p := g.RequireManage(w, r)
+	p := g.RequireUser(w, r)
 	if p == nil {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	if err := templateauth.Selection(g, r, p, str(body["route_template_id"])); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
 	}
-	if err := g.Authorize(r, p, authz.ActionTeamCreate, authz.Object{Type: authz.ObjectTeam}); err != nil {
+	if err := g.Authorize(r, p, authz.ActionTeamCreate, authz.Object{Type: authz.ObjectTeam, OrgID: str(body["organization_id"])}); err != nil {
 		g.WriteAuthz(w, r, err)
 		return
 	}
@@ -681,16 +781,21 @@ func TeamNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		Description:    str(body["team_description"]),
 		Models:         stringList(body["models"]),
 		MaxBudget:      floatPtr(body["max_budget"]),
-		AdminUserID:    teamAdminID(body),
+		RPMLimit:       httpx.Rate(body, "rpm_limit"), TPMLimit: httpx.Rate(body, "tpm_limit"),
+		AdminUserID: teamAdminID(body),
 	}
 	if in.AdminUserID == "" {
-		// The console's create-team form names no administrator, and the route's
-		// contract is that the caller becomes the team's first team_admin. A team
-		// with no administrator could never be managed again, so this is a
-		// default rather than an omission.
-		in.AdminUserID = p.UserID
+		// 没有个人团队的创建者可成为首位团队管理员；已有归属者使用平台或组织管理权限，不能重复入队。
+		members, err := g.Identity().MemberTeams(r.Context(), p.UserID)
+		if err != nil {
+			g.WriteIAMError(w, r, err)
+			return
+		}
+		if len(members) == 0 {
+			in.AdminUserID = p.UserID
+		}
 	}
-	if in.OrganizationID == "" || in.Name == "" || in.AdminUserID == "" {
+	if in.OrganizationID == "" || in.Name == "" {
 		httpx.WriteError(w, 400, "invalid_request", "organization_id, team_alias and the first team admin are required")
 		return
 	}
@@ -861,6 +966,15 @@ func TeamInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := r.PathValue("team_id")
 	if id == "" {
 		id = r.URL.Query().Get("team_id")
@@ -936,7 +1050,7 @@ func teamRoster(g Gate, r *http.Request, p *auth.Principal, teamID string) []map
 	return out
 }
 
-// TeamUpdate changes a team. A team administrator may change the name and the description of their own team; the status and the budget ceiling are a platform administrator's decision, and the two are separate actions because the matrix separates them.
+// TeamUpdate 修改团队资料与额度；团队管理员可改资料，所属组织管理员可分配团队额度，状态和模型仍由平台管理员管理。
 // 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/identity/mount.go
@@ -948,6 +1062,15 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := r.PathValue("team_id")
 	if id == "" {
 		id = str(body["team_id"])
@@ -978,20 +1101,26 @@ func TeamUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 	// budget: a team administrator chooses which template their own team routes
 	// by, but they cannot edit the template's contents, so the reach they can
 	// grant themselves is bounded by what the platform published.
-	if status != nil || budget != nil || models != nil {
+	if status != nil || models != nil {
+		if err := g.Authorize(r, p, authz.ActionTeamModels, authz.Object{Type: authz.ObjectTeam, ID: id}); err != nil {
+			g.WriteAuthz(w, r, err)
+			return
+		}
+	}
+	if status != nil || budget != nil || models != nil || httpx.OptionalRate(body, "rpm_limit") != nil || httpx.OptionalRate(body, "tpm_limit") != nil {
 		if err := g.Authorize(r, p, authz.ActionTeamBudget, authz.Object{Type: authz.ObjectTeam, ID: id}); err != nil {
 			g.WriteAuthz(w, r, err)
 			return
 		}
 	}
-	if name != nil || description != nil {
-		if _, err := g.Identity().UpdateTeamProfile(r.Context(), actorOf(p), id, name, description); err != nil {
+	if status != nil || budget != nil || models != nil || httpx.OptionalRate(body, "rpm_limit") != nil || httpx.OptionalRate(body, "tpm_limit") != nil {
+		if _, err := g.Identity().AdminUpdateTeam(r.Context(), actorOf(p), id, status, budget, models, iam.RatePatch{RPMLimit: httpx.OptionalRate(body, "rpm_limit"), TPMLimit: httpx.OptionalRate(body, "tpm_limit")}); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
 	}
-	if status != nil || budget != nil || models != nil {
-		if _, err := g.Identity().AdminUpdateTeam(r.Context(), actorOf(p), id, status, budget, models); err != nil {
+	if name != nil || description != nil {
+		if _, err := g.Identity().UpdateTeamProfile(r.Context(), actorOf(p), id, name, description); err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
@@ -1099,6 +1228,15 @@ func TeamMove(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := r.PathValue("team_id")
 	if id == "" {
 		id = str(body["team_id"])
@@ -1134,6 +1272,15 @@ func ProjectNew(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	teamID := str(body["team_id"])
 	if err := g.Authorize(r, p, authz.ActionProjectWrite, authz.Object{Type: authz.ObjectProject, TeamID: teamID}); err != nil {
 		g.WriteAuthz(w, r, err)
@@ -1251,6 +1398,15 @@ func ProjectInfo(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := r.PathValue("project_id")
 	if id == "" {
 		id = r.URL.Query().Get("project_id")
@@ -1286,6 +1442,15 @@ func ProjectUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := r.PathValue("project_id")
 	if id == "" {
 		id = str(body["project_id"])
@@ -1482,8 +1647,8 @@ func userPublic(u *iam.User, teams []map[string]any) map[string]any {
 		"updated_at":      u.UpdatedAt.UTC().Format(time.RFC3339),
 		"key_count":       0,
 		"sso_user_id":     nil,
-		"tpm_limit":       nil,
-		"rpm_limit":       nil,
+		"tpm_limit":       u.TPMLimit,
+		"rpm_limit":       u.RPMLimit,
 		"budget_duration": nil,
 		"metadata":        map[string]any{},
 	}
@@ -1497,14 +1662,15 @@ func userPublic(u *iam.User, teams []map[string]any) map[string]any {
 func teamPublic(t *iam.Team, role string) map[string]any {
 	var budgetDuration any
 	return map[string]any{
-		"team_id":            t.ID,
-		"team_alias":         t.Name,
-		"team_name":          t.Name,
-		"organization_id":    t.OrganizationID,
-		"description":        t.Description,
-		"status":             t.Status,
-		"blocked":            t.Status == iam.StatusBlocked,
-		"max_budget":         floatJSON(t.MaxBudget),
+		"team_id":         t.ID,
+		"team_alias":      t.Name,
+		"team_name":       t.Name,
+		"organization_id": t.OrganizationID,
+		"description":     t.Description,
+		"status":          t.Status,
+		"blocked":         t.Status == iam.StatusBlocked,
+		"max_budget":      floatJSON(t.MaxBudget),
+		"rpm_limit":       t.RPMLimit, "tpm_limit": t.TPMLimit,
 		"spend":              t.Spend,
 		"budget_duration":    budgetDuration,
 		"user_role":          emptyNil(role),
@@ -1538,7 +1704,8 @@ func orgPublic(o *iam.Organization) map[string]any {
 		// The console used to read the budget from a nested table. The budget
 		// lives on the organization; this object keeps that one field so an
 		// older screen does not crash looking it up.
-		"litellm_budget_table": map[string]any{"max_budget": budget},
+		"rpm_limit": o.RPMLimit, "tpm_limit": o.TPMLimit,
+		"litellm_budget_table": map[string]any{"max_budget": budget, "rpm_limit": o.RPMLimit, "tpm_limit": o.TPMLimit},
 		"spend":                o.Spend,
 		"models":               []string{},
 		"members":              []any{},

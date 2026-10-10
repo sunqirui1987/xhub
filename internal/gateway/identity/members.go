@@ -65,6 +65,10 @@ func memberPublic(m *iam.Member) map[string]any {
 		"role":       m.Role,
 		"user_role":  m.Role,
 		"status":     m.Status,
+		"max_budget": m.MaxBudget,
+		"spend":      m.Spend,
+		"rpm_limit":  m.RPMLimit, "tpm_limit": m.TPMLimit,
+		"litellm_budget_table": map[string]any{"max_budget": m.MaxBudget, "rpm_limit": m.RPMLimit, "tpm_limit": m.TPMLimit},
 	}
 }
 
@@ -80,6 +84,15 @@ func OrgMemberAdd(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	orgID := str(body["organization_id"])
 	email, _ := memberFromBody(body)
 	if orgID == "" || email == "" {
@@ -115,6 +128,15 @@ func OrgMemberRemove(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	orgID := str(body["organization_id"])
 	target := str(body["user_id"])
 	if target == "" {
@@ -148,6 +170,15 @@ func TeamMemberAdd(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	teamID := teamIDFrom(r)
 	if teamID == "" {
 		teamID = str(body["team_id"])
@@ -181,6 +212,15 @@ func TeamMemberUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	teamID := teamIDFrom(r)
 	if teamID == "" {
 		teamID = str(body["team_id"])
@@ -199,7 +239,11 @@ func TeamMemberUpdate(g Gate, w http.ResponseWriter, r *http.Request) {
 		g.WriteAuthz(w, r, err)
 		return
 	}
-	if err := g.Identity().SetMemberRole(r.Context(), actorOf(p), teamID, target, role); err != nil {
+	budget := optionalFloat(body, "max_budget_in_team")
+	if budget == nil {
+		budget = optionalFloat(body, "max_budget")
+	}
+	if err := g.Identity().SetMemberRoleBudget(r.Context(), actorOf(p), teamID, target, role, budget, iam.RatePatch{RPMLimit: httpx.OptionalRate(body, "rpm_limit"), TPMLimit: httpx.OptionalRate(body, "tpm_limit")}); err != nil {
 		g.WriteIAMError(w, r, err)
 		return
 	}
@@ -218,6 +262,15 @@ func TeamMemberRemove(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 在可选额度解析前拒绝非法值，避免错误输入清空原额度。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "max_budget_in_team"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	teamID := teamIDFrom(r)
 	if teamID == "" {
 		teamID = str(body["team_id"])

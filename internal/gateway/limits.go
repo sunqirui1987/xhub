@@ -138,11 +138,39 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 			return false
 		}
 	}
+	// 所有入口沿同一额度树校验，共享主体不能消费兄弟的保留额度。
+	kind, id := "user", p.UserID
+	if p.Key != nil {
+		kind, id = "key", p.KeyID
+	}
+	team, org, scope, err := s.IAM.QuotaPath(ctx, kind, id, s.hotSpendRef)
+	if err != nil {
+		budgetRefusal(w, path, err)
+		return false
+	}
+	p.BillingTeamID, p.BillingOrgID = team, org
+	if scope != "" {
+		names := map[string]string{"user": "User", "key": "Key", "team": "Team", "org": "Organization"}
+		budgetRefusal(w, path, errBudget{scope: names[scope]})
+		return false
+	}
+	if team != "" {
+		t, err := s.IAM.GetTeam(ctx, team)
+		if err != nil || t.Status != iam.StatusActive {
+			budgetRefusal(w, path, errKeyUnusable)
+			return false
+		}
+		o, err := s.IAM.GetOrg(ctx, org)
+		if err != nil || o.Status != iam.StatusActive {
+			budgetRefusal(w, path, errKeyUnusable)
+			return false
+		}
+	}
 	if alias != "" && !modelaccess.AllowsModel(s, ctx, p, p.TeamID, alias) {
 		httpx.WriteTypedError(w, path, 401, "invalid_request_error", "model not in allowed model list")
 		return false
 	}
-	return p.Key == nil || s.enforceRateLimits(w, path, p, est)
+	return s.enforceRateLimits(w, path, p, est)
 }
 
 // resolveSessionRouteTemplate 为控制台推理解析会话的唯一团队及继承模板。
@@ -207,7 +235,7 @@ func (s *Server) resolvePreviewIdentity(ctx context.Context, p *auth.Principal) 
 	return nil
 }
 
-// keyBudgetOK 沿密钥归属链检查实时额度；独立个人密钥检查用户与密钥额度，团队密钥继续检查项目、团队和组织。
+// keyBudgetOK 沿密钥归属链检查实时额度；密钥检查状态及独立上限，enforceIdentityLimits 统一检查额度树及个人唯一团队。
 // 无团队时保留密钥选择的路由模板，否则使用平台默认；指定的父级丢失仍返回错误，不能跳过额度。
 // 同时记录团队所属组织及路由模板；按密钥、团队、组织顺序选择第一个明确配置，复用额度查询避免重复读取。
 // 参数 ctx（context.Context）：上下文，取消或超时时停止后续工作；p（*auth.Principal）：已经解析的调用方，含用户、团队和密钥。
@@ -348,83 +376,79 @@ func (s *Server) hotSpendRef(kind, id string) float64 {
 	return s.Live.HotSpend(live.SpendRef(kind, id))
 }
 
-// enforceRateLimits uses the Redis minute bucket when Redis is set, otherwise a process-local sliding window. Over the limit it writes 429 and returns false.
-// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；path（string）：enforce单价Limits要定位的路径。可能是 URL，也可能是字段路径；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；est（int）：enforce单价Limits使用的整数。零表示没有这项或尚未计数。
-// 返回 bool（bool）：RPM 和 TPM 都在限额内时返回真。超限时写 429 并返回假。
-// 调用：仅在 limits.go 内使用
-// 测试：无直接单测
+// enforceRateLimits 检查四层分配保留与汇总分钟窗口；参数为响应、路径、主体和 token 估算，返回是否放行。
+// 调用：所有推理入口；超限 429 不计入任何层，存储故障 503，不调用上游。
 func (s *Server) enforceRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
-	if p.Key == nil {
-		return true
+	kind, id := "user", p.UserID
+	if p.Key != nil {
+		kind, id = "key", p.KeyID
 	}
+	plan, err := s.IAM.RatePlan(context.Background(), kind, id)
+	if err != nil {
+		httpx.WriteTypedError(w, path, 503, "rate_limit_unavailable", "rate limiting is temporarily unavailable")
+		return false
+	}
+	var rejected string
 	if s.Live != nil {
-		return s.enforceRedisRateLimits(w, path, p, est)
+		rejected, err = s.Live.AdmitRatePlan(plan, est, time.Now())
+	} else {
+		rejected = s.admitLocalRatePlan(plan, est, time.Now())
 	}
-	now := time.Now()
-	win := now.Add(-time.Minute)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	hash := p.Hash
-	if p.Key.RPMLimit != nil {
-		var keep []time.Time
-		for _, t := range s.rpmHits[hash] {
-			if t.After(win) {
-				keep = append(keep, t)
-			}
-		}
-		s.rpmHits[hash] = keep
-		if int64(len(keep)) >= int64(*p.Key.RPMLimit) {
-			httpx.WriteTypedError(w, path, 429, "rate_limit", "rpm_limit exceeded")
-			return false
-		}
-		s.rpmHits[hash] = append(keep, now)
+	if err != nil {
+		httpx.WriteTypedError(w, path, 503, "rate_limit_unavailable", "rate limiting is temporarily unavailable")
+		return false
 	}
-	if p.Key.TPMLimit != nil {
-		var keep []tokHit
-		sum := 0
-		for _, h := range s.tpmHits[hash] {
-			if h.t.After(win) {
-				keep = append(keep, h)
-				sum += h.n
-			}
-		}
-		s.tpmHits[hash] = keep
-		if *p.Key.TPMLimit == 0 || int64(sum+est) > int64(*p.Key.TPMLimit) {
-			httpx.WriteTypedError(w, path, 429, "rate_limit", "tpm_limit exceeded")
-			return false
-		}
-		s.tpmHits[hash] = append(keep, tokHit{t: now, n: est})
+	if rejected != "" {
+		httpx.WriteTypedError(w, path, 429, "rate_limit", rejected+" exceeded")
+		return false
 	}
 	return true
 }
 
-// enforceRedisRateLimits checks RPM and TPM against the Redis minute bucket. A limit of 0 is treated as already exceeded.
-// 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；path（string）：enforceRedis单价Limits要定位的路径。可能是 URL，也可能是字段路径；p（*auth.Principal）：已经鉴权的调用方，含用户、团队、密钥哈希和别名；est（int）：enforceRedis单价Limits使用的整数。零表示没有这项或尚未计数。
-// 返回 bool（bool）：Redis 分钟桶里的 RPM 和 TPM 都未超限时返回真。限额为 0 视为已经超限。
-// 调用：仅在 limits.go 内使用
-// 测试：无直接单测
-func (s *Server) enforceRedisRateLimits(w http.ResponseWriter, path string, p *auth.Principal, est int) bool {
-	if p.Key.RPMLimit != nil {
-		n, err := s.Live.HitRPM(p.Hash)
-		if err != nil {
-			httpx.WriteTypedError(w, path, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiting is temporarily unavailable")
-			return false
-		}
-		if *p.Key.RPMLimit == 0 || n > int64(*p.Key.RPMLimit) {
-			httpx.WriteTypedError(w, path, 429, "rate_limit", "rpm_limit exceeded")
-			return false
+// admitLocalRates 用互斥锁原子校验并记录全部层；参数为范围、预估和时钟，返回拒绝字段或空串。
+// 调用：无 Redis 的推理入口；固定 UTC 分钟桶，先全量校验再计数，拒绝不占兄弟容量。
+func (s *Server) admitLocalRates(scopes []live.RateScope, est int, now time.Time) string {
+	plan := live.RatePlan{}
+	for i, scope := range scopes {
+		plan.Nodes = append(plan.Nodes, live.RateNode{RateScope: scope, Parent: -1})
+		plan.Path = append(plan.Path, i)
+	}
+	return s.admitLocalRatePlan(plan, est, now)
+}
+
+// admitLocalRatePlan 原子校验父级分配和分钟用量；参数计划、估算、时钟，返回拒绝字段。
+// 调用：无 Redis 推理入口；固定分配保留未用容量，先全量检查再更新调用路径，旧桶及时清理。
+func (s *Server) admitLocalRatePlan(plan live.RatePlan, est int, now time.Time) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rpmHits == nil {
+		s.rpmHits = map[string][]time.Time{}
+	}
+	if s.tpmHits == nil {
+		s.tpmHits = map[string][]tokHit{}
+	}
+	start := now.Truncate(time.Minute)
+	est = max(0, est)
+	for id, hits := range s.rpmHits {
+		if len(hits) == 0 || hits[len(hits)-1].Before(start) {
+			delete(s.rpmHits, id)
+			delete(s.tpmHits, id)
 		}
 	}
-	if p.Key.TPMLimit != nil {
-		n, err := s.Live.HitTPM(p.Hash, est)
-		if err != nil {
-			httpx.WriteTypedError(w, path, http.StatusServiceUnavailable, "rate_limit_unavailable", "rate limiting is temporarily unavailable")
-			return false
-		}
-		if *p.Key.TPMLimit == 0 || n > int64(*p.Key.TPMLimit) {
-			httpx.WriteTypedError(w, path, 429, "rate_limit", "tpm_limit exceeded")
-			return false
+	rpm, tpm := make([]int64, len(plan.Nodes)), make([]int64, len(plan.Nodes))
+	for i, n := range plan.Nodes {
+		rpm[i] = int64(len(s.rpmHits[n.ID]))
+		for _, h := range s.tpmHits[n.ID] {
+			tpm[i] += int64(h.n)
 		}
 	}
-	return true
+	if rejected := live.CheckRatePlan(plan, rpm, tpm, est); rejected != "" {
+		return rejected
+	}
+	for _, i := range plan.Path {
+		id := plan.Nodes[i].ID
+		s.rpmHits[id] = append(s.rpmHits[id], now)
+		s.tpmHits[id] = append(s.tpmHits[id], tokHit{t: now, n: est})
+	}
+	return ""
 }

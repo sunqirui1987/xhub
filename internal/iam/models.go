@@ -41,6 +41,8 @@ const (
 
 // User is a platform account. Role is the only account-level grant.
 type User struct {
+	RPMLimit       *int      `xorm:"'rpm_limit'" json:"rpm_limit"`
+	TPMLimit       *int      `xorm:"'tpm_limit'" json:"tpm_limit"`
 	ID             string    `xorm:"pk 'id'" json:"id"`
 	Email          string    `xorm:"'email'" json:"email"`
 	Name           string    `xorm:"'name'" json:"name"`
@@ -77,6 +79,8 @@ func (u *User) Admin() bool { return u.Active() && u.Role == RoleAdmin }
 
 // Organization groups teams. Only platform administrators manage it.
 type Organization struct {
+	RPMLimit  *int     `xorm:"'rpm_limit'" json:"rpm_limit"`
+	TPMLimit  *int     `xorm:"'tpm_limit'" json:"tpm_limit"`
 	ID        string   `xorm:"pk 'id'" json:"id"`
 	Name      string   `xorm:"'name'" json:"name"`
 	Status    string   `xorm:"'status'" json:"status"`
@@ -98,6 +102,8 @@ func (Organization) TableName() string { return "organizations" }
 
 // Team belongs to exactly one organization.
 type Team struct {
+	RPMLimit       *int   `xorm:"'rpm_limit'" json:"rpm_limit"`
+	TPMLimit       *int   `xorm:"'tpm_limit'" json:"tpm_limit"`
 	ID             string `xorm:"pk 'id'" json:"id"`
 	OrganizationID string `xorm:"'organization_id'" json:"organization_id"`
 	Name           string `xorm:"'name'" json:"name"`

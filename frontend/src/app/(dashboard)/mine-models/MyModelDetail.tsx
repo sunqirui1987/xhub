@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Check, Copy, Terminal } from "lucide-react";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 import { getProxyBaseUrl } from "@/components/networking";
 import { endpointLabel } from "@/components/llm_calls/model_endpoints";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export type ModelDetailTab = "pricing" | "access" | "api" | "docs";
 /** 展示可复制字段；参数为文本和按钮名称，返回复制按钮。
  * 供模型接入详情调用；点击时写剪贴板，失败显示可观察提示，不自动读取或复制任何密钥。 */
 function CopyValue({ value, label }: { value: string; label: string }) {
+  const t = useT();
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   /** 复制当前字段；无参数，返回异步完成状态；仅用户点击时写剪贴板，失败保留正文以便手动复制。 */
   async function copy() {
@@ -63,6 +64,7 @@ export function MyModelDetail({
   initialTab: ModelDetailTab;
   onClose: () => void;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<ModelDetailTab>(initialTab);
   const endpoints = model.unavailable_reason ? [] : (model.endpoints ?? []);
   const [path, setPath] = useState(endpoints[0]?.path ?? "");

@@ -1029,6 +1029,8 @@ export const userListCall = async (
  * Response type for /v2/user/info — lightweight endpoint that returns only the user object.
  */
 export interface UserInfoV2Response {
+  rpm_limit?: number | null;
+  tpm_limit?: number | null;
   user_id: string;
   user_email: string | null;
   user_alias: string | null;
@@ -2826,7 +2828,7 @@ export const teamMemberAddCall = async (accessToken: string, teamId: string, for
         console.warn("Failed to parse error body as JSON:", errorText);
       }
 
-      const rawMessage = parsedError?.detail?.error || "Failed to add team member";
+      const rawMessage = deriveErrorMessage(parsedError);
       const err = new Error(rawMessage);
       (err as any).raw = parsedError;
       throw err;
@@ -2952,7 +2954,7 @@ export const teamMemberUpdateCall = async (
         console.warn("Failed to parse error body as JSON:", errorText);
       }
 
-      const rawMessage = parsedError?.detail?.error || "Failed to add team member";
+      const rawMessage = deriveErrorMessage(parsedError);
       const err = new Error(rawMessage);
       (err as any).raw = parsedError;
       throw err;

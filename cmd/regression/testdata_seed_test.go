@@ -9,9 +9,10 @@ import (
 	"testing"
 )
 
-// TestTestdataSeedWithoutModelCalls 验证建数器通过真实管理路由创建完整层级且不执行任何模型。
+// TestTestdataSeedWithoutModelCalls 验证建数器和四角色验收脚本通过真实管理路由执行且不调用任何供应商。
 // 前置条件为独立 PostgreSQL schema、管理员及无模型网关；验证 81 把成员密钥和管理员个人密钥、持久化模型和零上游调用，
-// 已有组织时再次建数必须失败；schema 由 harness 清理，报告由临时目录清理，不依赖供应商凭据。
+// 同时验证组织管理员可写三项团队额度、跨组织/模型/状态越权被拒绝，原配置不变；已有组织时再次建数必须失败。
+// schema 由 harness 清理，报告由临时目录清理，不依赖供应商凭据。
 func TestTestdataSeedWithoutModelCalls(t *testing.T) {
 	h := newHarness(t)
 	admin := h.adminSession()
@@ -68,6 +69,34 @@ func TestTestdataSeedWithoutModelCalls(t *testing.T) {
 	logs := rowsOf(h.ok(http.MethodGet, "/spend/logs/ui?page_size=200", admin, nil), "data")
 	if len(logs) != 0 {
 		t.Fatalf("建数阶段不应产生数据面调用日志，实际 %d 条", len(logs))
+	}
+	// 直接执行发生故障的 Python 权限验收，而非在 Go 中复制它的断言，防止脚本与后台规则再次漂移。
+	command = exec.Command("python3", "-c", `
+import json, sys
+from pathlib import Path
+sys.path.insert(0, "../../e2e")
+from real_dataset import Dataset, load_manifest
+directory = Path(sys.argv[2])
+access = json.loads((directory / "access.json").read_text())
+dataset = Dataset(sys.argv[1], directory, load_manifest())
+dataset.state = access
+dataset.admin = access["admin"]
+fields = ("max_budget", "rpm_limit", "tpm_limit", "models", "status")
+before = {}
+for team in dataset.state["teams"]:
+    body, _ = dataset.api("/team/info?team_id=" + team["id"])
+    before[team["id"]] = {field: body["team_info"][field] for field in fields}
+dataset.verify_permissions()
+assert len(dataset.state["personas"]) == 4, "四类角色必须全部通过"
+for team in dataset.state["teams"]:
+    body, _ = dataset.api("/team/info?team_id=" + team["id"])
+    assert {field: body["team_info"][field] for field in fields} == before[team["id"]], "权限验收改变了原额度、模型或状态"
+`, h.server.URL, directory)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("真实四角色权限验收失败: %v\n%s", err, output)
+	}
+	if len(h.upstreamCalls()) != 0 {
+		t.Fatal("权限验收不应产生供应商调用")
 	}
 	command = exec.Command("python3", "../../e2e/real_dataset.py", "--gateway", h.server.URL, "--directory", t.TempDir(), "--seed-only")
 	command.Env = append(os.Environ(), "E2E_DATASET_ADMIN=regression-admin@example.com", "E2E_DATASET_PASSWORD=regression-admin-password")

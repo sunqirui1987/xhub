@@ -5,6 +5,7 @@ import { extractLoggingSettings, formatMetadataForDisplay, stripTagsFromMetadata
 import { mapInternalToDisplayNames } from "../callback_info_helpers";
 import { estimateChecks, estimateFields } from "./estimatedOutputTokens";
 import { canonicalBudgetDuration } from "./keyEditFieldNormalizers";
+import { t } from "@/i18n";
 
 export interface McpServersAndGroups {
   servers: string[];
@@ -121,6 +122,12 @@ export const toKeyEditFormValues = (keyData: KeyResponse): KeyEditFormValues => 
   route_template_id: keyData.route_template_id ?? "",
 });
 
+/** 密钥编辑分钟配额规则：空值共享、零阻断、其余必须为数据库 INT 范围的非负整数；供编辑 schema 使用，无副作用。 */
+const rateAllocationSchema = z.custom<number | string | null | undefined>().refine(
+  (value) => value == null || value === "" || ((typeof value === "number" || typeof value === "string") && Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647),
+  { error: () => t("Must be a non-negative whole number") },
+);
+
 export const keyEditFormSchema = z.object({
   key_alias: z.custom<string | undefined>(),
   models: z.custom<string[] | undefined>(),
@@ -128,9 +135,9 @@ export const keyEditFormSchema = z.object({
   max_budget: z.custom<number | string | null | undefined>(),
   soft_budget: z.custom<number | string | null | undefined>(),
   budget_duration: z.custom<string | null | undefined>(),
-  tpm_limit: z.custom<number | string | null | undefined>(),
+  tpm_limit: rateAllocationSchema,
   tpm_limit_type: z.custom<string | null | undefined>(),
-  rpm_limit: z.custom<number | string | null | undefined>(),
+  rpm_limit: rateAllocationSchema,
   rpm_limit_type: z.custom<string | null | undefined>(),
   throttle_on_budget_exceeded: z.custom<boolean | undefined>(),
   enable_prompt_caching: z.custom<boolean | undefined>(),

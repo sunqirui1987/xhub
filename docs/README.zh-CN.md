@@ -20,6 +20,7 @@
 | [权限规则](development/permissions.md) | 角色、可见范围、秘密串读取、模型范围 |
 | [路由规则](development/routing.md) | 模板继承、权重、重试、超时、会话粘性 |
 | [计价与用量](development/pricing.md) | 费率、时段、价格快照、持久化链路 |
+| [额度链路实现与验证](development/quota-chain.md) | 四层分配不变量、请求准入、消费归属与分层测试 |
 | [运行行为与限制](development/runtime.md) | 缓存、幂等、协议、媒体任务及运行边界 |
 | [测试指南](development/testing.md) | 测试层次、数据库隔离、定向运行、可选演示数据 |
 | [全功能实现说明](development/implementation.md) | 逐项功能契约、实现位置及验收要点 |

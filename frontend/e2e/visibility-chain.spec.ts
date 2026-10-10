@@ -71,6 +71,9 @@ async function signInAs(page: Page, email: string) {
 
 test.describe.configure({ mode: "serial" });
 
+/** 验证四角色从真实页面登录后的可见范围和写权限；参数 page 为浏览器，无返回。
+ * 前置独立后台及本地数据库，覆盖组织管理员页面分配金额/RPM/TPM、越权拒绝与密码失效；脚本最终清理隔离 schema。
+ */
 test("the visibility chain holds at every tier", async ({ page }) => {
   test.setTimeout(240_000);
   const guard = watchGateway(page);
@@ -204,6 +207,36 @@ test("the visibility chain holds at every tier", async ({ page }) => {
     "an org admin must not read another organization's team",
   ).toBe(true);
 
+  // 组织管理员从页面分配三项额度；服务端读取确认落库，模型和封禁状态仍归平台管理。
+  await stableGoto(page, "/teams?team=" + tenant.teamA1);
+  await page.getByRole("tab", { name: t("Settings"), exact: true }).click();
+  await page.getByRole("button", { name: t("Edit Settings"), exact: true }).click();
+  await page.getByLabel(t("Max Budget (USD)"), { exact: true }).fill("30");
+  await page.getByLabel(t("Requests per minute Limit (RPM)"), { exact: true }).fill("10");
+  await page.getByLabel(t("Tokens per minute Limit (TPM)"), { exact: true }).fill("1000");
+  const savedLimits = page.waitForResponse(
+    response => response.url().endsWith("/team/update") && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: t("Save Changes"), exact: true }).click();
+  expect((await savedLimits).status(), "组织管理员应能保存本组织团队额度").toBe(200);
+  const ownTeam = await orgAdmin.ok("GET", `/team/info?team_id=${tenant.teamA1}`);
+  expect(ownTeam.team_info).toMatchObject({ max_budget: 30, rpm_limit: 10, tpm_limit: 1000 });
+  // 各字段单独请求，避免一个已拒绝的字段掩盖另一个字段缺失鉴权。
+  for (const limits of [{ max_budget: 30 }, { rpm_limit: 10 }, { tpm_limit: 1000 }]) {
+    const response = await page.request.post(`${GW}/team/update`, {
+      headers: { Authorization: `Bearer ${await sessionFrom(page)}` },
+      data: { team_id: tenant.teamB1, ...limits },
+    });
+    expect(response.status(), "组织管理员跨组织分配必须返回 403").toBe(403);
+  }
+  for (const setting of [{ models: ["gpt-4o-mini"] }, { status: "blocked" }]) {
+    const response = await page.request.post(`${GW}/team/update`, {
+      headers: { Authorization: `Bearer ${await sessionFrom(page)}` },
+      data: { team_id: tenant.teamA1, ...setting },
+    });
+    expect(response.status(), "组织管理员不能修改团队模型或状态").toBe(403);
+  }
+
   // ---------- the team administrator of team A1 ----------
   const teamAdmin = as(page, (await signInAs(page, teamAdminA1Email)).session);
 
@@ -212,11 +245,15 @@ test("the visibility chain holds at every tier", async ({ page }) => {
   expect(teamAdminTeams, "a team admin must not see a sibling team").not.toContain(tenant.teamA2);
   expect(teamAdminTeams, "a team admin must not see another organization").not.toContain(tenant.teamB1);
 
-  // The budget and the model list are the platform's, even on their own team.
+  // 团队管理员不能自行修改三项团队额度；这些额度由组织或平台管理员分配。
   expect(
     await teamAdmin.denied("POST", "/team/update", { team_id: tenant.teamA1, max_budget: 1 }),
     "a team admin must not raise their own team's budget",
   ).toBe(true);
+  for (const limits of [{ rpm_limit: 11 }, { tpm_limit: 1001 }]) {
+    expect(await teamAdmin.denied("POST", "/team/update", { team_id: tenant.teamA1, ...limits }),
+      "团队管理员不能自行提高团队分钟额度").toBe(true);
+  }
   expect(
     await teamAdmin.denied("POST", "/team/update", { team_id: tenant.teamA1, models: ["gpt-4o-mini"] }),
     "a team admin must not widen their own team's model list",

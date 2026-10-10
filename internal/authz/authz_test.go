@@ -5,27 +5,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sunqirui1987/xhub/internal/iam"
 	"github.com/sunqirui1987/xhub/cmd/regression/testsupport"
+	"github.com/sunqirui1987/xhub/internal/iam"
 	"xorm.io/builder"
 )
 
 // fixture exercises the role boundaries documented in docs/development/permissions.md:
 // two organizations, two teams each, two projects each, and five accounts.
 //
-//	orgA: teamA1 (alice admin, carol member)     teamA2 (dave admin)
-//	orgB: teamB1 (bob admin, carol admin)        teamB2
+//	orgA: teamA1 (alice admin, plain member)    teamA2 (dave admin)
+//	orgB: teamB1 (carol admin)                  teamB2
 //
-// carol deliberately administers B while merely belonging to A: it is the
-// cross-tenant case that catches a policy that keys off "is an admin anywhere"
-// instead of "is an admin here".
+// 每个人仅属于一个团队；carol 管理 B 而不属于 A，用于验证跨组织权限隔离。
 type fixture struct {
 	db   *iam.DB
 	auth *Authorizer
 
 	admin *iam.User // platform administrator
 	alice *iam.User // team_admin of teamA1
-	carol *iam.User // member of teamA1, team_admin of teamB1
+	carol *iam.User // team_admin of teamB1 only
 	dave  *iam.User // team_admin of teamA2, member of nothing else
 	plain *iam.User // member of teamA1 only
 	gone  *iam.User // disabled account
@@ -52,7 +50,8 @@ func testDB(t *testing.T) *iam.DB {
 	return db
 }
 
-// newFixture builds the plan's acceptance scenario on a private schema.
+// newFixture 构造单团队授权矩阵；参数 t 为测试上下文，返回夹具，隔离 schema 自动清理。
+// Carol 只属于 B1；A1 成员隐私由 plainKey 验证。
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	db := testDB(t)
@@ -101,14 +100,13 @@ func newFixture(t *testing.T) *fixture {
 	// member of orgB, which is exactly the cross-organization reach the matrix
 	// says she must not have.
 	f.teamB1 = team(f.orgB.ID, "Team B1", f.carol.ID)
-	_ = team(f.orgB.ID, "Team B2", f.carol.ID)
+	_ = team(f.orgB.ID, "Team B2", "")
 
 	join := func(teamID, userID, role string) {
 		if _, err := db.AddMember(ctx, sys, teamID, emailOf(db, t, userID), role); err != nil {
 			t.Fatalf("add member %s: %v", userID, err)
 		}
 	}
-	join(f.teamA1, f.carol.ID, iam.TeamMember)
 	join(f.teamA1, f.plain.ID, iam.TeamMember)
 	// f.solo is deliberately left in no team at all.
 
@@ -131,7 +129,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.aliceKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.alice.ID, TeamID: f.teamA1, Name: "alice-personal"})
 	f.aliceServiceKey = key(iam.KeyInput{OwnerType: iam.OwnerService, TeamID: f.teamA1, Name: "a1-service"})
-	f.carolKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.carol.ID, TeamID: f.teamA1, Name: "carol-personal"})
+	f.carolKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.carol.ID, TeamID: f.teamB1, Name: "carol-personal"})
 	f.plainKey = key(iam.KeyInput{OwnerType: iam.OwnerPersonal, UserID: f.plain.ID, TeamID: f.teamA1, Name: "plain-personal"})
 
 	if _, err := db.AdminUpdateUser(ctx, sys, f.gone.ID, iam.UserUpdate{Status: ptr(iam.StatusDisabled)}); err != nil {
@@ -145,6 +143,38 @@ func ptr[T any](v T) *T { return &v }
 // bootActor is the empty identity the fixture uses to create the first account,
 // before any account exists to attribute the write to.
 var bootActor = iam.Actor{}
+
+// TestTeamQuotaAndModelAdministrationScope 验证团队额度与模型/状态管理使用不同权限。
+// 参数 t 为测试上下文，无返回；前置隔离数据库与四角色，覆盖本组织/跨组织/不存在团队的边界，fixture 自动清理数据。
+func TestTeamQuotaAndModelAdministrationScope(t *testing.T) {
+	f := newFixture(t)
+	if err := f.db.SetOrgAdmin(t.Context(), f.sys(), f.orgA.ID, f.solo.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name           string
+		actor          *iam.User
+		team           string
+		budget, models string
+	}{
+		{"平台管理本组织", f.admin, f.teamA1, "allow", "allow"},
+		{"平台管理其他组织", f.admin, f.teamB1, "allow", "allow"},
+		{"组织分配本组织额度", f.solo, f.teamA1, "allow", "forbidden"},
+		{"组织分配未加入的本组织团队", f.solo, f.teamA2, "allow", "forbidden"},
+		{"组织不能跨组织修改", f.solo, f.teamB1, "forbidden", "forbidden"},
+		{"团队不能自行提额", f.alice, f.teamA1, "forbidden", "forbidden"},
+		{"普通成员不能自行提额", f.plain, f.teamA1, "forbidden", "forbidden"},
+		{"不存在的团队", f.admin, "missing-team", "notfound", "notfound"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for action, want := range map[Action]string{ActionTeamBudget: tc.budget, ActionTeamModels: tc.models} {
+				if got := f.decide(t, session(tc.actor), action, Object{Type: ObjectTeam, ID: tc.team}); got != want {
+					t.Fatalf("团队权限 %s: got=%s want=%s", action, got, want)
+				}
+			}
+		})
+	}
+}
 
 func emailOf(db *iam.DB, t *testing.T, id string) string {
 	t.Helper()
@@ -222,7 +252,7 @@ func TestSessionMatrix(t *testing.T) {
 		// ---- organizations ----
 		{"member reads own org", session(f.alice), ActionOrgRead, Object{Type: ObjectOrg, ID: f.orgA.ID}, "allow"},
 		{"member cannot read the other org", session(f.alice), ActionOrgRead, Object{Type: ObjectOrg, ID: f.orgB.ID}, "notfound"},
-		{"carol reaches both orgs", session(f.carol), ActionOrgRead, Object{Type: ObjectOrg, ID: f.orgB.ID}, "allow"},
+		{"carol reaches her own org", session(f.carol), ActionOrgRead, Object{Type: ObjectOrg, ID: f.orgB.ID}, "allow"},
 		{"member cannot write orgs", session(f.alice), ActionOrgWrite, Object{Type: ObjectOrg, ID: f.orgA.ID}, "forbidden"},
 		{"team admin cannot write orgs", session(f.alice), ActionOrgWrite, Object{Type: ObjectOrg, ID: f.orgA.ID}, "forbidden"},
 		{"admin writes orgs", session(f.admin), ActionOrgWrite, Object{Type: ObjectOrg, ID: f.orgA.ID}, "allow"},
@@ -260,10 +290,10 @@ func TestSessionMatrix(t *testing.T) {
 
 		// ---- personal keys: the privacy rule ----
 		{"owner reads own personal key", session(f.alice), ActionKeyRead, Object{Type: ObjectKey, ID: f.aliceKey.ID}, "allow"},
-		{"team admin cannot read a member's personal key", session(f.alice), ActionKeyRead, Object{Type: ObjectKey, ID: f.carolKey.ID}, "notfound"},
+		{"team admin cannot read a member's personal key", session(f.alice), ActionKeyRead, Object{Type: ObjectKey, ID: f.plainKey.ID}, "notfound"},
 		{"admin reads any personal key", session(f.admin), ActionKeyRead, Object{Type: ObjectKey, ID: f.carolKey.ID}, "allow"},
 		{"owner deletes own personal key", session(f.alice), ActionKeyDelete, Object{Type: ObjectKey, ID: f.aliceKey.ID}, "allow"},
-		{"team admin cannot delete a member's personal key", session(f.alice), ActionKeyDelete, Object{Type: ObjectKey, ID: f.carolKey.ID}, "notfound"},
+		{"team admin cannot delete a member's personal key", session(f.alice), ActionKeyDelete, Object{Type: ObjectKey, ID: f.plainKey.ID}, "notfound"},
 		{"a member cannot create a personal key for someone else", session(f.alice), ActionKeyCreate,
 			Object{Type: ObjectKey, TeamID: f.teamA1, OwnerType: iam.OwnerPersonal, OwnerUserID: f.plain.ID}, "forbidden"},
 		{"a member creates a personal key for themselves", session(f.plain), ActionKeyCreate,
@@ -295,7 +325,7 @@ func TestSessionMatrix(t *testing.T) {
 			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID}, "notfound"},
 		{"member cannot read another team's template", session(f.plain), ActionRouteTemplateRead,
 			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID, TeamID: f.teamB1}, "notfound"},
-		{"carol reads both organizations' templates", session(f.carol), ActionRouteTemplateRead,
+		{"carol reads her own organization's templates", session(f.carol), ActionRouteTemplateRead,
 			Object{Type: ObjectRouteTemplate, OrgID: f.orgB.ID}, "allow"},
 
 		// Writing is the owner's alone: reading a sibling team's configuration is
@@ -726,5 +756,39 @@ func TestUnknownActorKindDenies(t *testing.T) {
 		if got := f.decide(t, a, ActionOrgWrite, Object{Type: ObjectOrg, ID: f.orgA.ID}); got != "forbidden" {
 			t.Fatalf("role %q got %s writing an organization, want forbidden", role, got)
 		}
+	}
+}
+
+// TestQuotaAdministrationScope 验证个人额度管理只授予唯一归属团队/组织管理员；前置真实隔离 schema。
+// 参数 t 为测试上下文，无返回；覆盖本团队、跨团队、独立个人与普通成员，testDB 自动清理记录。
+func TestQuotaAdministrationScope(t *testing.T) {
+	f := newFixture(t)
+	for _, tc := range []struct {
+		name   string
+		actor  *iam.User
+		target string
+		want   string
+	}{
+		{"平台管理独立个人", f.admin, f.solo.ID, "allow"},
+		{"团队管理本团队个人", f.alice, f.plain.ID, "allow"},
+		{"团队不能管理另一团队", f.alice, f.dave.ID, "forbidden"},
+		{"跨组织管理员不能管理个人", f.carol, f.plain.ID, "forbidden"},
+		{"普通成员不能自行提额", f.plain, f.plain.ID, "forbidden"},
+		{"团队不能管理独立个人", f.alice, f.solo.ID, "forbidden"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := f.decide(t, session(tc.actor), ActionUserBudget, Object{Type: ObjectUser, ID: tc.target}); got != tc.want {
+				t.Fatalf("个人额度权限 got=%s want=%s", got, tc.want)
+			}
+		})
+	}
+	if err := f.db.SetOrgAdmin(t.Context(), f.sys(), f.orgA.ID, f.solo.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.decide(t, session(f.solo), ActionUserBudget, Object{Type: ObjectUser, ID: f.plain.ID}); got != "allow" {
+		t.Fatalf("组织管理员本组织额度: %s", got)
+	}
+	if got := f.decide(t, session(f.solo), ActionUserBudget, Object{Type: ObjectUser, ID: f.carol.ID}); got != "forbidden" {
+		t.Fatalf("组织管理员跨组织额度: %s", got)
 	}
 }

@@ -52,7 +52,7 @@ As AI adoption grows from one application to multiple departments, model access 
 | Security and programmable guardrails | Keywords, regular expressions, secret detection, XGo scripts, external moderation adapters, blocking, redaction, and execution records | Business policies enforced in the request path |
 | Agents and sessions | Chat, Responses, Messages, Gemini/Vertex dialogue endpoints, tool calls, history continuation, and session tracing | Support for business assistants, coding agents, and multi-turn tool workflows |
 | Multimodal and media tasks | Deployment-specific image, audio, embedding, rerank, and video operations, with asynchronous result and usage tracking | Shared management for dialogue, retrieval, and content generation |
-| Testing and operations | Model discovery, Playground, model comparison, configuration diagnostics, request and error logs, audit records, and health checks | Provider validation, daily administration, and problem investigation |
+| Testing and operations | Model discovery, Playground, configuration diagnostics, request and error logs, audit records, and health checks | Provider validation, daily administration, and problem investigation |
 
 ### Model access: shared protocols and native capabilities
 
@@ -68,7 +68,7 @@ Give people personal keys and applications team or project service keys. Keys su
 
 ### Cost management: usage with traceable pricing
 
-Review usage and calculated costs by user, key, team, and project. Configure budgets and key RPM/TPM limits. Pricing supports catalog and manual rates, input/output and cache read/write distinctions, token, picture, second, and query units, and peak/off-peak windows.
+Review usage and calculated costs by user, key, team, and project. Configure budgets and RPM/TPM allocations on organization, team, user, and API Key pages. Pricing supports catalog and manual rates, input/output and cache read/write distinctions, token, picture, second, and query units, and peak/off-peak windows.
 
 Each call retains its applied price snapshot, so later price changes preserve historical pricing evidence. Gateway response caching and provider prompt caching are recorded separately to support usage and cost reconciliation. Available measurement dimensions depend on the upstream data reported.
 
@@ -88,7 +88,7 @@ XGo guardrails can combine HTTP, JSON, and LLM calls for business checks. Implem
 
 Handle multi-turn messages and tool-call structures in supported dialogue protocols. Continue Responses history through `previous_response_id` so subsequent turns can send incremental input. Associate sessions, call IDs, keys, and usage to trace consecutive requests from business assistants and coding agents.
 
-The Playground supports streaming and non-streaming calls, session continuation, and model comparison to validate real requests and results before application integration.
+The Playground supports streaming and non-streaming calls, session continuation, and complete curl examples to validate real requests and results before application integration.
 
 ### Multimodal and asynchronous tasks: a shared management layer
 
@@ -262,3 +262,12 @@ XHub is actively evolving. Evaluate production requirements against the [runtime
 ## Contributing
 
 XHub is actively evolving. [Open an issue](https://github.com/sunqirui1987/xhub/issues) with an enterprise use case or reproduction steps, improve the documentation, or submit a pull request. For code changes, follow the [developer guide](docs/development/README.md) and the relevant module's validation requirements.
+
+### Hierarchical quota allocation
+
+Budgets follow **Organization → Team → Person → API Key**, in USD. Each person belongs to at most one team. Fixed child budgets reserve their unused amounts; sibling allocations and consumed money must fit within the parent budget. Blank budgets share the parent's unreserved balance; zero blocks spending. An organization budget of $1,000 can allocate $500 + $300 + $200 across teams, but cannot allocate another dollar. Personal keys without an explicit team binding still bill the owner's sole team. Service keys bill a separate business account. Use a separate unlimited organization and team for unrestricted business usage.
+
+RPM and TPM follow the same hierarchy: team allocations sum within the organization, personal allocations within the team, and key allocations within the person. Fixed values reserve minute capacity; blank values share the unreserved remainder; zero blocks calls. Blank intermediates pass fixed descendant allocations upward. Over-allocation rolls back the save. Admission atomically counts the unique ownership path and rejected calls consume no rate capacity. TPM uses the incoming token estimate; windows are UTC calendar minutes. Multiple gateway instances need shared Redis.
+
+See [quota management](docs/quota-management.md) for examples, administrator permissions, membership changes, historical spending, and the request-admission/settlement boundary.
+For code ownership, allocation invariants, admission and accounting flow, and layered test commands, see [quota implementation and verification](docs/development/quota-chain.md).

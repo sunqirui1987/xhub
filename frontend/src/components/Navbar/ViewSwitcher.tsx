@@ -9,7 +9,7 @@ import {
 import { Check, ChevronsUpDown, LayoutGrid } from "lucide-react";
 import { usePluginMode } from "@/contexts/PluginModeContext";
 import { uiHref, routeSegmentForPathname } from "@/utils/uiHref";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 const GATEWAY = "ai-gateway";
 const CHAT = "chat";
@@ -21,7 +21,9 @@ interface ViewSwitcherItem {
   onClick?: () => void;
 }
 
+/** 展示工作区切换入口；无参数，返回订阅当前语言的菜单；导航调用，切换工作区时更新路由。 */
 export default function ViewSwitcher() {
+  const t = useT();
   const { mode, setMode, plugins } = usePluginMode();
   const pathname = usePathname();
 

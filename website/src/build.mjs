@@ -1,3 +1,4 @@
+import { consoleDocuments } from "./console-docs.mjs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -32,11 +33,17 @@ for (const source of sources) {
   const lang = source.startsWith("docs/development/") || /zh-CN|_cn\.md$/.test(source) ? "zh" : "en";
   documents.push({ source: websiteSource, repositorySource: source, lang, ...rendered });
 }
+const synced = await consoleDocuments(root);
+for (const document of synced.documents) {
+  const rendered = renderMarkdown(document.markdown, document.repositorySource, document.source, mappings);
+  documents.push({ ...document, ...rendered });
+}
 for (const document of documents) {
   const alternateCandidates = document.source.includes("zh-CN") ? [document.source.replace(".zh-CN", "")] : document.source.endsWith("_cn.md") ? [document.source.replace("_cn.md", ".md")] : [document.source.replace(/\.md$/, ".zh-CN.md"), document.source.replace(/\.md$/, "_cn.md")];
   const alternate = alternateCandidates.find((candidate) => documents.some((item) => item.source === candidate)) || (document.lang === "zh" ? "README.md" : "README.zh-CN.md");
-  await emit(documentPath(document.source), documentPage({ ...document, documents, alternate }));
+  await emit(documentPath(document.source), documentPage({ ...document, documents, alternate: document.source.startsWith("center/") ? document.source.replace("/" + document.lang + "/", document.lang === "zh" ? "/en/" : "/zh/") : alternate, centerGroups: synced.groups }));
 }
+await emit("docs/index.html", '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=./center/zh/index.html"><title>XHub 文档中心</title><a href="./center/zh/index.html">XHub 文档中心 / Documentation</a></html>');
 await emit("index.html", homepage("zh"));
 await emit("en/index.html", homepage("en"));
 await emit("search-index.json", JSON.stringify(documents.map(({ source, title, text, lang }) => ({ url: documentPath(source), title, text, lang }))));

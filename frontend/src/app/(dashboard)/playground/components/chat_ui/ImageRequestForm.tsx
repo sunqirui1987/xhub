@@ -73,9 +73,7 @@ export function ImageRequestForm({
           ))}
         </datalist>
       </label>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {t("myModels.imageDefaultsHint")}
-      </p>
+      <p className="text-xs leading-relaxed text-muted-foreground">{t("myModels.imageDefaultsHint")}</p>
     </div>
   );
 }

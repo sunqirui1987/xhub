@@ -4,7 +4,7 @@ export const integration = `from openai import OpenAI
 
 client = OpenAI(
     api_key="YOUR_XHUB_VIRTUAL_KEY",
-    base_url="http://localhost:4000/v1",
+    base_url="http://localhost:4000",
 )
 
 response = client.chat.completions.create(
@@ -71,6 +71,7 @@ export const copy = {
 };
 
 export const groups = [
+  { zh: "文档中心 · 操作帮助、工具、计费与 API", en: "Documentation center", files: ["center/zh/index.md", "center/zh/help/troubleshooting.md", "center/zh/tools-agents-clients/overview.md", "center/zh/billing/usage-based-billing.md", "center/zh/api/models.md"], english: ["center/en/index.md", "center/en/help/troubleshooting.md", "center/en/tools-agents-clients/overview.md", "center/en/billing/usage-based-billing.md", "center/en/api/models.md"] },
   { zh: "开始使用", en: "Getting started", files: ["README.zh-CN.md", "getting-started.zh-CN.md", "user-guide.zh-CN.md"], english: ["README.md", "getting-started.md", "user-guide.md"] },
   { zh: "接入与集成", en: "Models & integration", files: ["development/model-endpoints.md", "development/provider-catalog.md", "development/provider-credential-forms.md", "development/model-marketplace.md", "development/api-reference.md"] },
   { zh: "企业治理", en: "Enterprise governance", files: ["development/permissions.md", "development/routing.md", "development/routing-groups.md", "development/pricing.md", "development/guardrails.md"] },

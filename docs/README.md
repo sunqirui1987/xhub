@@ -22,6 +22,7 @@ The central development references are in Chinese. Package-level `readme.md` and
 | [Permissions](development/permissions.md) | Roles, visibility, secret access, and model scope |
 | [Routing](development/routing.md) | Template inheritance, weights, retries, timeouts, and affinity |
 | [Pricing and usage](development/pricing.md) | Rates, time windows, price snapshots, and persistence |
+| [Quota implementation and verification](development/quota-chain.md) | Allocation invariants, request admission, spend attribution, and layered tests |
 | [Runtime behavior and limits](development/runtime.md) | Cache, idempotency, protocols, media tasks, and operating limits |
 | [Testing](development/testing.md) | Test layers, database isolation, focused commands, and optional demo data |
 | [Feature implementation](development/implementation.md) | End-to-end contracts and source locations for core features |
@@ -36,3 +37,5 @@ The central development references are in Chinese. Package-level `readme.md` and
 Document shipped behavior with code references. Update the relevant guide when behavior changes. Keep customer steps in the user guide and implementation details in the development references. Temporary plans, AI transcripts, review diaries, and test output do not belong here.
 
 [`testdata/catalog.json`](testdata/catalog.json) is a test fixture consumed by automated checks; it is not a list of guaranteed provider capabilities. [`assets/`](assets/) contains the console screenshots used by the project home page.
+
+- [组织、团队、个人与 API Key 额度管理](quota-management.md)：金额与 RPM/TPM 逐级固定分配、共享余额、单团队归属及不限额业务。

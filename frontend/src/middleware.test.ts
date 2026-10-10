@@ -67,3 +67,14 @@ describe("dashboardAppPath", () => {
     expect(dashboardAppPath("/audit/logs")).toBeNull();
   });
 });
+
+/** 目的：文档首页、子目录和未知文章均由 Next 处理；前置路由分流函数，验证 /ui 别名及相近 API 不误匹配，无持久化数据。 */
+it("routes the documentation namespace without swallowing similar API paths", () => {
+  for (const path of ["/docs", "/docs/api/models", "/docs/missing"]) {
+    expect(dashboardAppPath(path)).toBe(path);
+    expect(dashboardAppPath("/ui" + path + "/")).toBe(path);
+  }
+  expect(dashboardAppPath("/docs-api")).toBeNull();
+  expect(dashboardAppPath("/v1/models")).toBeNull();
+  expect(appPageWritePath("POST", "/docs")).toBeNull();
+});

@@ -3,7 +3,7 @@ import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import MemberTable from "@/components/common_components/MemberTable";
 import { Member } from "@/components/networking";
-import { DateCell, MoneyCell } from "@/components/shared/table_cells";
+import { MoneyCell } from "@/components/shared/table_cells";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { isProxyAdminRole, isUserTeamAdminForSingleTeam } from "@/utils/roles";
 import { CircleHelp } from "lucide-react";
@@ -20,6 +20,10 @@ interface TeamMemberTabProps {
   setIsAddMemberModalVisible: (visible: boolean) => void;
 }
 
+/** 展示唯一团队成员的个人累计消费、固定或共享额度及模型权限。
+ * 参数包含团队数据、编辑权限及成员操作回调；返回成员表格。
+ * 调用：团队详情页；退出团队后个人累计账单保留，界面不承诺自动周期重置。
+ */
 export default function TeamMemberTab({
   teamData,
   canEditTeam,
@@ -28,6 +32,7 @@ export default function TeamMemberTab({
   setIsEditMemberModalVisible,
   setIsAddMemberModalVisible,
 }: TeamMemberTabProps) {
+  /** 格式化限速数字；参数为可能为空的金额/次数，返回去除多余零的字符串，无副作用。 */
   const formatNumber = (value: number | null): string => {
     if (value === null || value === undefined) return "0";
 
@@ -47,27 +52,23 @@ export default function TeamMemberTab({
     return "0";
   };
 
-  const getUserCurrentCycleSpend = (userId: string | null): number => {
+  /** 按成员 ID 读取个人累计消费；缺失成员返回零，供消费列和排序使用。 */
+  const getUserSpend = (userId: string | null): number => {
     if (!userId) return 0;
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
     return membership?.spend ?? 0;
   };
 
-  const getUserTotalSpend = (userId: string | null): number => {
-    if (!userId) return 0;
-    const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
-    return membership?.total_spend ?? 0;
-  };
-
+  /** 按成员 ID 读取个人上限；返回 null 表示共享团队余额，供额度列使用。 */
   const getUserBudget = (userId: string | null): number | null => {
     if (!userId) return null;
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
     return membership?.litellm_budget_table?.max_budget ?? null;
   };
 
-  // Helper function to get rate limits for a user
+  /** 按成员 ID 读取并格式化限速；返回本地化共享提示或 RPM/TPM，无副作用。 */
   const getUserRateLimits = (userId: string | null): string => {
-    if (!userId) return "No Limits";
+    if (!userId) return t("quotaGuide.rateBlank");
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
     const rpmLimit = membership?.litellm_budget_table?.rpm_limit;
     const tpmLimit = membership?.litellm_budget_table?.tpm_limit;
@@ -76,7 +77,7 @@ export default function TeamMemberTab({
     const tpmText = tpmLimit != null ? `${formatNumber(tpmLimit)} TPM` : null;
 
     const limits = [rpmText, tpmText].filter(Boolean);
-    return limits.length > 0 ? limits.join(" / ") : "No Limits";
+    return limits.length > 0 ? limits.join(" / ") : t("quotaGuide.rateBlank");
   };
 
   const { data: uiSettingsData } = useUISettings();
@@ -85,17 +86,12 @@ export default function TeamMemberTab({
   const isUserTeamAdmin = isUserTeamAdminForSingleTeam(teamData.team_info.members_with_roles, userId || "");
   const isProxyAdmin = isProxyAdminRole(userRole || "");
 
+  /** 按成员 ID 读取模型白名单；缺失或空列表返回 null，表示继承团队模型范围。 */
   const getUserAllowedModels = (userId: string | null): string[] | null => {
     if (!userId) return null;
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
     const models = membership?.litellm_budget_table?.allowed_models;
     return models && models.length > 0 ? models : null;
-  };
-
-  const getUserBudgetReset = (userId: string | null): string | null => {
-    if (!userId) return null;
-    const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
-    return membership?.litellm_budget_table?.budget_reset_at ?? null;
   };
 
   const extraColumns: NonNullable<ComponentProps<typeof MemberTable>["extraColumns"]> = [
@@ -125,7 +121,7 @@ export default function TeamMemberTab({
             ))}
             {remaining > 0 && (
               <SimpleTooltip content={models.slice(2).join(", ")}>
-                <span className="text-muted-foreground">+{remaining} more</span>
+                <span className="text-muted-foreground">{t("quotaGuide.moreModels", { count: remaining })}</span>
               </SimpleTooltip>
             )}
           </div>
@@ -135,42 +131,23 @@ export default function TeamMemberTab({
     {
       title: (
         <span className="flex items-center gap-1">
-          {t("Current Cycle Spend (USD)")}
-          <SimpleTooltip content={t("Spend for the current budget cycle. Resets to $0 when the member's budget window rolls over. This is the value checked against the member's budget.")}>
-            <CircleHelp className="size-4" aria-label={t("Current cycle spend information")} />
+          {t("quotaGuide.spend")}
+          <SimpleTooltip content={t("quotaGuide.spendHelp")}>
+            <CircleHelp className="size-4" aria-label={t("quotaGuide.spend")} />
           </SimpleTooltip>
         </span>
       ),
       key: "spend",
-      sortValue: (record: Member) => getUserCurrentCycleSpend(record.user_id),
-      render: (record: Member) => <MoneyCell value={getUserCurrentCycleSpend(record.user_id)} decimals={2} />,
-    },
-    {
-      title: (
-        <span className="flex items-center gap-1">
-          {t("Total Spend (USD)")}
-          <SimpleTooltip content={t("Cumulative spend by this member within this team, across all budget cycles. Tracking began 2026-04-21; spend from before that date is not included.")}>
-            <CircleHelp className="size-4" aria-label={t("Total spend information")} />
-          </SimpleTooltip>
-        </span>
-      ),
-      key: "total_spend",
-      sortValue: (record: Member) => getUserTotalSpend(record.user_id),
-      render: (record: Member) => <MoneyCell value={getUserTotalSpend(record.user_id)} decimals={2} />,
+      sortValue: (record: Member) => getUserSpend(record.user_id),
+      render: (record: Member) => <MoneyCell value={getUserSpend(record.user_id)} decimals={2} />,
     },
     {
       title: t("Team Member Budget (USD)"),
       key: "budget",
       sortValue: (record: Member) => getUserBudget(record.user_id),
       render: (record: Member) => (
-        <MoneyCell value={getUserBudget(record.user_id)} decimals={2} emptyText={t("Unlimited")} showZero />
+        <MoneyCell value={getUserBudget(record.user_id)} decimals={2} emptyText={t("quotaGuide.blank")} showZero />
       ),
-    },
-    {
-      title: t("Budget Reset"),
-      key: "budget_reset",
-      sortValue: (record: Member) => getUserBudgetReset(record.user_id),
-      render: (record: Member) => <DateCell value={getUserBudgetReset(record.user_id)} precision="date" />,
     },
     {
       title: (
@@ -187,7 +164,8 @@ export default function TeamMemberTab({
   ];
 
   const hasMemberBudgets = teamData.team_memberships.some(
-    (membership) => membership.litellm_budget_table != null || membership.spend != null || membership.total_spend != null,
+    (membership) =>
+      membership.litellm_budget_table != null || membership.spend != null || membership.total_spend != null,
   );
 
   return (

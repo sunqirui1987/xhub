@@ -13,7 +13,7 @@ import UserDropdown from "./Navbar/UserDropdown/UserDropdown";
 import ThemeToggle from "./ThemeToggle/ThemeToggle";
 import ViewSwitcher from "./Navbar/ViewSwitcher";
 import WorkerDropdown from "./Navbar/WorkerDropdown/WorkerDropdown";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 interface NavbarProps {
   accessToken: string | null;
@@ -30,6 +30,7 @@ const Navbar: React.FC<NavbarProps> = ({
   sidebarCollapsed = false,
   onToggleSidebar,
 }) => {
+  const t = useT();
   const proxySettings = useProxySettings(accessToken);
   const { logoUrl } = useTheme();
   const { data: healthData } = useHealthReadinessDetails(accessToken);

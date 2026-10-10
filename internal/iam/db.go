@@ -105,6 +105,10 @@ func (db *DB) tx(ctx context.Context, fn func(*xorm.Session) error) error {
 	if err := s.Begin(); err != nil {
 		return err
 	}
+	// 在行锁前统一串行化管理写入与结算，防止并发兄弟分配读取同一余额。
+	if _, err := s.Exec("SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 864209731))"); err != nil {
+		return err
+	}
 	if err := fn(s); err != nil {
 		_ = s.Rollback()
 		return mapErr(err)
@@ -173,6 +177,9 @@ func mapErr(err error) error {
 		case "23505":
 			return fmt.Errorf("%w: %s", ErrConflict, pg.ConstraintName)
 		case "23503", "23514", "23502":
+			if pg.ConstraintName == "single_team_required" {
+				return ErrMultipleTeams
+			}
 			return fmt.Errorf("%w: %s", ErrInvalid, pg.ConstraintName)
 		}
 	}

@@ -42,18 +42,33 @@ export function homepage(lang) {
 }
 
 /** 生成文档页面；参数包含已消毒正文、标题目录与文档清单，返回 HTML；不重新解析 Markdown。 */
-export function documentPage({ source, title, html, headings, documents, lang, alternate }) {
+export function documentPage({ source, title, html, headings, documents, lang, alternate, centerGroups = [] }) {
   const output = documentPath(source);
   const prefix = rootPrefix(output);
   const t = copy[lang];
   const known = new Map(documents.map((item) => [item.source, item]));
   const used = new Set();
-  const sidebar = groups.map((group) => {
+  const center = source.startsWith("center/");
+  const category = documents.find((item) => item.source === source)?.group;
+  const categoryNav = centerGroups.filter((item) => item.lang === lang).map((item) => '<a href="' + prefix + documentPath(item.files[0]) + '"' + (item.group === category ? ' aria-current="page"' : '') + '>' + e(item.title) + '</a>').join("");
+  const selectedGroups = center ? centerGroups.filter((item) => item.lang === lang && item.group === category).map((item) => ({ zh: item.title, en: item.title, files: item.files })) : groups;
+  const sidebar = selectedGroups.map((group) => {
     const files = lang === "en" && group.english ? group.english : group.files;
+    if (center && category === "api") {
+      const articles = files.filter((file) => known.has(file)).map((file) => known.get(file));
+      articles.forEach((article) => used.add(article.source));
+      return [...new Set(articles.map((article) => article.section))].map((section) => {
+        const items = articles.filter((article) => article.section === section);
+        return '<section class="nav-group"><h2>' + e(items[0].sectionTitle) + '</h2>' + [...new Set(items.map((article) => article.protocol))].map((protocol) => {
+          const children = items.filter((article) => article.protocol === protocol);
+          return '<details open><summary>' + e(children[0].protocolTitle) + '</summary>' + children.map((article) => '<a href="' + prefix + documentPath(article.source) + '"' + (article.source === source ? ' aria-current="page"' : '') + '>' + e(article.title) + '</a>').join("") + '</details>';
+        }).join("") + '</section>';
+      }).join("");
+    }
     return `<section class="nav-group"><h2>${group[lang]}</h2>${files.filter((file) => known.has(file)).map((file) => { used.add(file); return `<a href="${prefix}${documentPath(file)}" ${file === source ? 'aria-current="page"' : ""}>${e(known.get(file).title)}</a>`; }).join("")}</section>`;
   }).join("");
-  const remaining = documents.filter((item) => !used.has(item.source) && !(lang === "zh" ? /^(README|getting-started|user-guide)\.md$/.test(item.source) : /zh-CN/.test(item.source)));
+  const remaining = documents.filter((item) => !center && !item.source.startsWith("center/") && !used.has(item.source) && !(lang === "zh" ? /^(README|getting-started|user-guide)\.md$/.test(item.source) : /zh-CN/.test(item.source)));
   const refs = remaining.map((item) => `<a href="${prefix}${documentPath(item.source)}" ${item.source === source ? 'aria-current="page"' : ""}>${e(item.title)}<small>${e(item.source.replace(/\/readme(?:_cn)?\.md$/i, ""))}</small></a>`).join("");
-  const body = `<div class="docs-layout"><aside class="docs-sidebar" aria-label="${t.documentHome}"><button class="search-open sidebar-search">${t.search}<kbd>/</kbd></button>${sidebar}<details class="nav-group additional-docs" ${used.has(source) ? "" : "open"}><summary>${t.moduleDocs}</summary>${refs}</details></aside><main id="main" class="doc-main"><div class="doc-meta"><a href="${prefix}${documentPath(lang === "zh" ? "README.zh-CN.md" : "README.md")}">${t.documentHome}</a><span>/</span><span>${e(title)}</span></div>${lang === "zh" && /^development\//.test(source) ? `<p class="reference-note">中文参考文档 · <a href="${prefix}en/index.html">English overview</a></p>` : ""}<article class="prose">${html}</article><div class="doc-end"><a href="${repository}/blob/main/${source.startsWith("modules/") ? source.slice(8) : `docs/${source}`}">${t.source} ↗</a><a href="#main">↑ ${t.toc}</a></div></main><aside class="toc" aria-label="${t.toc}"><strong>${t.toc}</strong>${headings.filter((item) => item.depth === 2 || item.depth === 3).map((item) => `<a class="depth-${item.depth}" href="#${e(item.id)}">${e(item.text)}</a>`).join("")}</aside></div>`;
+  const body = `<div class="docs-layout"><aside class="docs-sidebar" aria-label="${t.documentHome}"><button class="search-open sidebar-search">${t.search}<kbd>/</kbd></button>${center ? categoryNav : ""}${sidebar}<details class="nav-group additional-docs" ${used.has(source) ? "" : "open"}><summary>${t.moduleDocs}</summary>${refs}</details></aside><main id="main" class="doc-main"><div class="doc-meta"><a href="${prefix}${documentPath(lang === "zh" ? "README.zh-CN.md" : "README.md")}">${t.documentHome}</a><span>/</span><span>${e(title)}</span></div>${lang === "zh" && /^development\//.test(source) ? `<p class="reference-note">中文参考文档 · <a href="${prefix}en/index.html">English overview</a></p>` : ""}<article class="prose">${html}</article><div class="doc-end"><a href="${repository}/blob/main/${documents.find((item) => item.source === source)?.repositorySource || (source.startsWith("modules/") ? source.slice(8) : `docs/${source}`)}">${t.source} ↗</a><a href="#main">↑ ${t.toc}</a></div></main><aside class="toc" aria-label="${t.toc}"><strong>${t.toc}</strong>${headings.filter((item) => item.depth === 2 || item.depth === 3).map((item) => `<a class="depth-${item.depth}" href="#${e(item.id)}">${e(item.text)}</a>`).join("")}</aside></div>`;
   return shell({ lang, output, title, description: `${title} — XHub ${t.docs}`, body, alternate: `${prefix}${documentPath(alternate)}`, docs: true });
 }

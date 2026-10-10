@@ -28,6 +28,19 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await scenario("构建回归：文档、资源、搜索页面和锚点均可达", async () => { assert.deepEqual(regression.errors, []); assert.ok(regression.indexedDocuments >= 100); });
+  // 前置为真实静态网站和共享文档源，四类切换只显示本类正文及目录，验证帮助、中英对应页；无业务写入。
+  await scenario("同步文档中心 → 帮助 → 四分类 → 英文", async () => {
+    await page.goto(base + "docs/");
+    await page.getByRole("heading", {name: "欢迎使用 XHub", exact: true}).waitFor();
+    await page.getByRole("link", {name: "常见问题与故障排查", exact: true}).click();
+    assert.match(await page.locator("article").innerText(), /401/);
+    await page.getByRole("link", {name: "API 文档", exact: true}).click();
+    await page.getByRole("heading", {name: "模型列表", exact: true}).waitFor();
+    assert.equal(await page.locator(".docs-sidebar").getByRole("link", {name: "快速开始", exact: true}).count(), 0);
+    assert.match(await page.locator("article").innerText(), /data\[\]\.id/);
+    await page.getByRole("link", {name: "Switch to English", exact: true}).click();
+    await page.getByRole("heading", {name: "List models", exact: true}).waitFor();
+  });
   // 前置为独立静态服务器，验证首页入口到安装页、命令和刷新；不写业务数据，结束关闭上下文。
   await scenario("首页 → Docker 安装文档 → 刷新保留正文", async () => {
     await page.goto(base);

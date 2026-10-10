@@ -47,18 +47,12 @@ import {
   TeamModelBadgeKind,
 } from "./teamModelAccess";
 
-import {
-  metadataObjectToPairs,
-  metadataPairsSchema,
-} from "../common_components/MetadataKeyValueFields";
+import { metadataObjectToPairs, metadataPairsSchema } from "../common_components/MetadataKeyValueFields";
 import { useTeamMetadataSchema } from "@/app/(dashboard)/hooks/teams/useTeamMetadataSchema";
 import DeleteResourceModal from "../common_components/DeleteResourceModal";
 import { unfurlWildcardModelsInList } from "../key_team_helpers/fetch_available_models_team_key";
 
-import {
-  mcpServersForIdentifier,
-  type EffectiveMcpServer,
-} from "../mcp_server_management/effectiveMcpServers";
+import { mcpServersForIdentifier, type EffectiveMcpServer } from "../mcp_server_management/effectiveMcpServers";
 import type { MCPServer } from "../mcp_tools/types";
 import { type AccessGroupResponse } from "@/app/(dashboard)/hooks/accessGroups/useAccessGroups";
 import { ModelSelect } from "../ModelSelect/ModelSelect";
@@ -291,6 +285,12 @@ const SUPPRESSED_BY_DESCRIPTION = "";
 
 const numericInputSchema = z.union([z.string(), z.number()]).nullish();
 
+// 分钟分配只接受非负 INT；空白共享上级，避免小数在页面被默默取整。
+const rateInputSchema = numericInputSchema.refine(
+  (value) => value == null || value === "" || (Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 2147483647),
+  t("Must be a non-negative whole number"),
+);
+
 const teamUpdateFieldsSchema = z.object({
   team_alias: z.string().min(1, t("Please input a team name")),
   team_description: z.string().optional(),
@@ -303,12 +303,12 @@ const teamUpdateFieldsSchema = z.object({
   team_member_budget: numericInputSchema,
   team_member_budget_duration: z.string().nullish(),
   team_member_key_duration: z.string().optional(),
-  team_member_tpm_limit: numericInputSchema,
-  team_member_rpm_limit: numericInputSchema,
+  team_member_tpm_limit: rateInputSchema,
+  team_member_rpm_limit: rateInputSchema,
   budget_duration: z.string().nullish(),
   route_template_id: z.string().optional(),
-  tpm_limit: numericInputSchema,
-  rpm_limit: numericInputSchema,
+  tpm_limit: rateInputSchema,
+  rpm_limit: rateInputSchema,
   modelLimits: z
     .array(
       z.object({
@@ -654,8 +654,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
     fetchOrganization();
   }, [accessToken, teamData?.team_info?.organization_id]);
 
-
-
   const handleMemberCreate = async (values: any) => {
     try {
       if (accessToken == null) return;
@@ -692,6 +690,9 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
     }
   };
 
+  /** 保存成员角色与个人额度；参数 values 为成员编辑表单，返回异步保存结果，供 MemberModal 提交调用。
+   * 成功时关闭弹窗并刷新列表；失败时显示本地化错误并重新抛出，保留弹窗与输入供用户修正，禁止表单误判成功并清空。
+   */
   const handleMemberUpdate = async (values: any) => {
     try {
       if (accessToken == null) {
@@ -728,12 +729,11 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
       } else if (error?.message) {
         errMsg = error.message;
       }
-      setIsEditMemberModalVisible(false);
-
       toast.dismiss(); // Remove all existing toasts
 
       toast.fromError(errMsg);
       console.error("Error updating team member:", error);
+      throw error;
     }
   };
 
@@ -785,9 +785,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
         return v;
       };
 
-      // The gateway only stores the name, the description, and — for a platform
-      // administrator — the model list, the budget ceiling and blocked. Sending
-      // models or a budget from a team admin makes the whole save fail.
+      // 组织管理员分配团队额度；平台管理员另可修改模型与状态，团队管理员编辑资料和成员额度。
       const updateData: Record<string, unknown> = {
         team_id: teamId,
         team_alias: values.team_alias,
@@ -795,8 +793,13 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
       };
       if (is_proxy_admin) {
         updateData.models = Array.isArray(values.models) ? values.models : [];
-        updateData.max_budget = sanitizeNumeric(values.max_budget);
+
         updateData.blocked = values.blocked === true;
+      }
+      if (is_proxy_admin || is_org_admin || isOrgAdminForTeam) {
+        updateData.max_budget = sanitizeNumeric(values.max_budget);
+        updateData.rpm_limit = sanitizeNumeric(values.rpm_limit);
+        updateData.tpm_limit = sanitizeNumeric(values.tpm_limit);
       }
       updateData.route_template_id = values.route_template_id ?? "";
 
@@ -814,7 +817,6 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
       setIsTeamSaving(false);
     }
   };
-
 
   if (loading) {
     return <div className="p-4">{t("Loading...")}</div>;
@@ -848,7 +850,8 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
               <h3 className="text-lg font-medium">${formatNumberWithCommas(info.spend, 2)}</h3>
               <p className="text-muted-foreground">
                 {t("Budget cap: {value0}", {
-                  value0: info.max_budget === null ? t("Unlimited") : `$${formatNumberWithCommas(info.max_budget, 2)}`,
+                  value0:
+                    info.max_budget === null ? t("quotaGuide.blank") : `$${formatNumberWithCommas(info.max_budget, 2)}`,
                 })}
               </p>
             </div>
@@ -980,9 +983,7 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                     )}
                   </FormField>
 
-                  <p className="text-sm text-muted-foreground">
-                    {t("Only a platform administrator can change models and the budget ceiling.")}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("quotaGuide.team")}</p>
 
                   <FormField control={form.control} name="max_budget" label={t("Max Budget (USD)")}>
                     {({ ref, value, ...field }) => (
@@ -992,11 +993,17 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                         value={value ?? ""}
                         step={0.01}
                         precision={2}
-                        disabled={!is_proxy_admin}
+                        disabled={!(is_proxy_admin || is_org_admin || isOrgAdminForTeam)}
                       />
                     )}
                   </FormField>
 
+                  <p className="text-sm text-muted-foreground">{t("quotaGuide.rates")}</p>
+                  {(["rpm_limit", "tpm_limit"] as const).map((name) => (
+                    <FormField key={name} control={form.control} name={name} label={t(name === "rpm_limit" ? "Requests per minute Limit (RPM)" : "Tokens per minute Limit (TPM)")}>
+                      {({ ref, value, ...field }) => <NumericalInput {...field} ref={ref} value={value ?? ""} min={0} step={1} precision={0} placeholder={t("quotaGuide.rateBlank")} disabled={!(is_proxy_admin || is_org_admin || isOrgAdminForTeam)} />}
+                    </FormField>
+                  ))}
                   {is_proxy_admin ? (
                     <FormField control={form.control} name="blocked" label={t("Blocked")}>
                       {({ id, value, onChange }) => (
@@ -1038,7 +1045,9 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                 <p className="font-medium">{t("Models")}</p>
                 {info.models.length === 0 ? (
                   <div className="text-muted-foreground">
-                    {t("Leave the model list empty to allow every published model. A list limits the team to those models.")}
+                    {t(
+                      "Leave the model list empty to allow every published model. A list limits the team to those models.",
+                    )}
                   </div>
                 ) : (
                   <div className="mt-1 flex flex-wrap gap-2">
@@ -1055,7 +1064,9 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
                 <div>
                   {t("Max Budget: {value0}", {
                     value0:
-                      info.max_budget !== null ? `$${formatNumberWithCommas(info.max_budget, 4)}` : t("No Limit"),
+                      info.max_budget !== null
+                        ? `$${formatNumberWithCommas(info.max_budget, 4)}`
+                        : t("quotaGuide.blank"),
                   })}
                 </div>
               </div>
@@ -1128,6 +1139,18 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
           title: t("Edit Member"),
           showEmail: true,
           showUserId: true,
+          additionalFields: [
+            { name: "rpm_limit", label: t("Requests per minute Limit (RPM)"), type: "numerical", min: 0, step: 1, placeholder: t("quotaGuide.rateBlank") },
+            { name: "tpm_limit", label: t("Tokens per minute Limit (TPM)"), type: "numerical", min: 0, step: 1, placeholder: t("quotaGuide.rateBlank") },
+            {
+              name: "max_budget_in_team",
+              label: t("Team Member Budget (USD)"),
+              type: "numerical",
+              min: 0,
+              step: 0.01,
+              placeholder: t("quotaGuide.blank"),
+            },
+          ],
           roleOptions: [
             { label: t("Team admin"), value: "admin" },
             { label: t("Team member"), value: "user" },

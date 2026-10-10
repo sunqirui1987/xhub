@@ -72,11 +72,11 @@ describe("DashboardHeader breadcrumb", () => {
     expect(screen.queryByText("Observability")).not.toBeInTheDocument();
   });
 
-  // 目的：核对当前控制台文档入口已隐藏的契约；前置为真实 DocsLink，验证无失效链接，结束清理渲染树。
-  it("does not expose a docs link while the console docs entry is disabled", () => {
+  // 目的：核对右上角文档入口；前置为真实 DocsLink，验证同站 /docs 链接，结束清理渲染树。
+  it("opens the local documentation center", () => {
     render(<DashboardHeader />);
 
-    expect(screen.queryByRole("link", { name: "Docs" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", "/docs");
   });
 
   it("renders the tools divider centered rather than stretched to the top of the row", () => {

@@ -29,6 +29,15 @@ func ServiceAccount(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 先检查所有额度字段，批量更新不能因为非法输入清空固定限额。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "reset_to"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	body["owner_type"] = iam.OwnerService
 	body["user_id"] = ""
 	in, err := keyInputFrom(body, p.UserID)
@@ -66,6 +75,15 @@ func Regenerate(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 先检查所有额度字段，批量更新不能因为非法输入清空固定限额。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "reset_to"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	token := r.PathValue("key")
 	if token == "" {
 		token = str(body["key"])
@@ -103,6 +121,15 @@ func ResetSpend(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 先检查所有额度字段，批量更新不能因为非法输入清空固定限额。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "reset_to"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	token := r.PathValue("key")
 	if token == "" {
 		token = str(body["key"])
@@ -203,6 +230,15 @@ func BulkUpdate(s Host, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := readMap(r)
+	// 先检查所有额度字段，批量更新不能因为非法输入清空固定限额。
+	if err := httpx.ValidateRateFields(body); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
+	if err := httpx.ValidateBudgetFields(body, "max_budget", "reset_to"); err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	tokens := idsFrom(body, "keys", "key")
 	if err := templateauth.Selection(s, r, p, str(body["route_template_id"])); err != nil {
 		s.WriteAuthz(w, r, err)

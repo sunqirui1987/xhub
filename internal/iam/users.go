@@ -147,6 +147,8 @@ func defaultAdminName(email string) string {
 
 // UserInput creates an account. Only platform administrators call this.
 type UserInput struct {
+	RPMLimit  *int
+	TPMLimit  *int
 	Email     string
 	Name      string
 	Password  string
@@ -164,15 +166,16 @@ type UserInput struct {
 	AdminOrgIDs []string
 }
 
-// CreateUser inserts a platform account together with the memberships the caller asked for, in one transaction. The memberships are written only after the account row exists, and a failure to write anyof them rolls the whole thing back: an account that came out of a failed create would be one nobody intended to make. The budget is stored as given; nil means no ceiling rather than zero, which is the
-//
-//	difference between "unlimited" and "cannot spend anything".
+// CreateUser inserts a platform account together with the memberships the caller asked for, in one transaction. The memberships are written only after the account row exists, and a failure to write anyof them rolls the whole thing back: an account that came out of a failed create would be one nobody intended to make. 额度为空表示共享唯一团队的余额；零表示禁止消费。固定额度占用团队的可分配金额。
 //
 // 参数 ctx（context.Context）：上下文，取消时停止；by（Actor）：执行这次修改的操作者。审计日志记这个人的 id 和角色；in（UserInput）：调用方提交的UserInput。字段为空表示这项不改。
 // 返回 *User（*User）：新建的平台账户。成员关系在同一事务里写入。失败时为 nil；error（error）：密码、唯一约束或事务失败。nil 表示账户和成员都已写入。
 // 调用：gateway/identity/handlers.go
 // 测试：activity_http_test.go、authz_test.go、dial_log_test.go
 func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, error) {
+	if err := ValidateRates(in.RPMLimit, in.TPMLimit); err != nil {
+		return nil, err
+	}
 	hash, err := hashPassword(in.Password)
 	if err != nil {
 		return nil, err
@@ -189,7 +192,7 @@ func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, er
 	var out *User
 	err = db.tx(ctx, func(s *xorm.Session) error {
 		u := User{ID: newID(), Email: normEmail(in.Email), Name: in.Name, PasswordHash: hash,
-			Role: in.Role, Status: StatusActive, SessionVersion: 1, MaxBudget: in.MaxBudget}
+			Role: in.Role, Status: StatusActive, SessionVersion: 1, MaxBudget: in.MaxBudget, RPMLimit: in.RPMLimit, TPMLimit: in.TPMLimit}
 		if _, err := s.Insert(&u); err != nil {
 			return err
 		}
@@ -215,6 +218,9 @@ func (db *DB) CreateUser(ctx context.Context, by Actor, in UserInput) (*User, er
 			if _, err := s.Insert(&OrganizationMembership{OrganizationID: orgID, UserID: u.ID, Role: OrgAdmin}); err != nil {
 				return err
 			}
+		}
+		if err := validateQuota(s, "user", u.ID); err != nil {
+			return err
 		}
 		out = &u
 		return writeAudit(s, by, Audit{Action: "user.create", ObjectType: "user", ObjectID: u.ID,
@@ -482,6 +488,8 @@ func (db *DB) SetPassword(ctx context.Context, by Actor, id, password string) er
 
 // UserUpdate 是管理员修改账户时的增量字段；nil 保留原值，Name 的空字符串用于清空显示名称。
 type UserUpdate struct {
+	RPMLimit  **int
+	TPMLimit  **int
 	Name      *string
 	Role      *string
 	Status    *string
@@ -502,6 +510,15 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 			return err
 		}
 		next := *cur
+		if in.RPMLimit != nil {
+			next.RPMLimit = *in.RPMLimit
+		}
+		if in.TPMLimit != nil {
+			next.TPMLimit = *in.TPMLimit
+		}
+		if err := ValidateRates(next.RPMLimit, next.TPMLimit); err != nil {
+			return err
+		}
 		if in.Name != nil {
 			next.Name = *in.Name
 		}
@@ -531,7 +548,7 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 		if next.Role != cur.Role || next.Status != cur.Status {
 			next.SessionVersion = cur.SessionVersion + 1
 		}
-		if _, err := s.ID(id).Cols("name", "role", "status", "max_budget", "email", "session_version").Update(&next); err != nil {
+		if _, err := s.ID(id).Cols("name", "role", "status", "max_budget", "email", "session_version", "rpm_limit", "tpm_limit").Update(&next); err != nil {
 			return err
 		}
 		if next.Status != StatusActive && cur.Status == StatusActive {
@@ -541,6 +558,11 @@ func (db *DB) AdminUpdateUser(ctx context.Context, by Actor, id string, in UserU
 		}
 		if out, err = getUser(ctx, s, id); err != nil {
 			return err
+		}
+		if in.MaxBudget != nil || in.RPMLimit != nil || in.TPMLimit != nil {
+			if err := validateQuota(s, "user", id); err != nil {
+				return err
+			}
 		}
 		return writeAudit(s, by, Audit{Action: "user.update", ObjectType: "user", ObjectID: id,
 			Detail: map[string]any{"role": next.Role, "status": next.Status}})

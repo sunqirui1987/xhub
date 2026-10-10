@@ -43,6 +43,8 @@ const DEFAULT_PAYLOAD = {
   key_type: "llm_api",
   max_budget: undefined,
   budget_duration: undefined,
+  rpm_limit: undefined,
+  tpm_limit: undefined,
   user_id: "test-user-id",
   duration: null,
   metadata: "{}",
@@ -97,8 +99,8 @@ describe("CreateKey", () => {
       await openModal();
 
       expect(screen.queryByText("Optional Settings")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Tokens per minute Limit (TPM)")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Requests per minute Limit (RPM)")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Tokens per minute Limit (TPM)")).toBeInTheDocument();
+      expect(screen.getByLabelText("Requests per minute Limit (RPM)")).toBeInTheDocument();
       expect(screen.queryByLabelText("Metadata")).not.toBeInTheDocument();
       expect(screen.queryByText("Guardrails")).not.toBeInTheDocument();
       expect(screen.queryByText("MCP Settings")).not.toBeInTheDocument();
@@ -111,6 +113,15 @@ describe("CreateKey", () => {
       await submit();
 
       expect(await createdPayload()).toStrictEqual(DEFAULT_PAYLOAD);
+    });
+
+    /** 分配边界：前置创建弹窗，提交零 RPM 与整数 TPM；验证字段进入个人 Key 请求，组件卸载清理。 */
+    it("submits RPM zero and TPM allocation", async () => {
+      await openModal(); await nameTheKey();
+      await userEvent.type(screen.getByLabelText("Requests per minute Limit (RPM)"), "0");
+      await userEvent.type(screen.getByLabelText("Tokens per minute Limit (TPM)"), "64");
+      await submit();
+      expect(await createdPayload()).toMatchObject({ rpm_limit: "0", tpm_limit: "64" });
     });
 
     it("submits the key budget", async () => {

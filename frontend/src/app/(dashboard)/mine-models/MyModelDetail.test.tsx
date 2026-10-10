@@ -46,8 +46,8 @@ it("从卡片直接打开四标签详情并复制实际接口示例", async () =
   const user = userEvent.setup();
   render(<MyModels models={[model]} />);
   for (const name of ["模型价格", "接入信息", "API 接入", "调用文档"])
-    expect(screen.getByRole("button", { name, exact: true })).toBeInTheDocument();
-  const trigger = screen.getByRole("button", { name: "如何调用", exact: true });
+    expect(screen.getByRole("button", { name })).toBeInTheDocument();
+  const trigger = screen.getByRole("button", { name: "如何调用" });
   await user.click(trigger);
   const dialog = screen.getByRole("dialog", { name: "my-chat" });
   expect(within(dialog).getByRole("tab", { name: "API 接入" })).toHaveAttribute("aria-selected", "true");
@@ -72,7 +72,7 @@ it("从卡片直接打开四标签详情并复制实际接口示例", async () =
   expect(await navigator.clipboard.readText()).toBe("https://gateway.test");
   await user.click(screen.getByRole("tab", { name: "调用文档" }));
   expect(screen.getByRole("heading", { name: "1. 准备 API Key" })).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "API 接入", exact: true }));
+  await user.click(screen.getByRole("button", { name: "API 接入" }));
   expect(within(dialog).getByRole("tab", { name: "API 接入" })).toHaveAttribute("aria-selected", "true");
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

@@ -643,10 +643,16 @@ export default function UserInfoView({
                   <p>
                     {userData.max_budget !== null && userData.max_budget !== undefined
                       ? `$${formatNumberWithCommas(userData.max_budget, 4)}`
-                      : t("pages.users.unlimited")}
+                      : t("quotaGuide.blank")}
                   </p>
                 </div>
 
+                {(["rpm_limit", "tpm_limit"] as const).map((field) => (
+                  <div key={field}>
+                    <p className="font-medium">{t(field === "rpm_limit" ? "Requests per minute Limit (RPM)" : "Tokens per minute Limit (TPM)")}</p>
+                    <p>{userData[field] ?? t("quotaGuide.rateBlank")}</p>
+                  </div>
+                ))}
                 <div>
                   <p className="font-medium">{t("pages.users.budgetReset")}</p>
                   <p>{getBudgetDurationLabel(userData.budget_duration ?? null)}</p>

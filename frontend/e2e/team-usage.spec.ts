@@ -112,7 +112,7 @@ test("usage views reconcile stored successes, failures, dimensions, filters and 
     await expect(page.getByRole("heading", { name: t("Input Tokens"), exact: true })).toBeVisible();
     // 显示零价及未知供应商后逐行对账，避免失败和免费调用在费用表中消失。
     await page.getByText(t("Show Zero Spend"), { exact: true }).locator("..").getByRole("switch").check();
-    await page.getByText(t("Show Unknown"), { exact: true }).locator("xpath=ancestor::*[descendant::*[@role="switch"]][1]").getByRole("switch").check();
+    await page.getByText(t("Show Unknown"), { exact: true }).locator('xpath=ancestor::*[descendant::*[@role="switch"]][1]').getByRole("switch").check();
     const providers: Record<string, any> = {};
     for (const day of initialBody.results) for (const [name, bucket] of Object.entries(day.breakdown.providers ?? {})) {
       const metrics = (bucket as any).metrics;

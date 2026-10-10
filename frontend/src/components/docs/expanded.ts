@@ -1,0 +1,240 @@
+import { helpPages } from "./help";
+import type { DocPage } from "./catalog";
+/** 已核对实现的补充目录；正文通过双语翻译树提供，示例仅使用占位凭据。 */
+export const additionalPages: readonly DocPage[] = [
+  ...helpPages,
+  {
+    id: "fal-seedance",
+    group: "api",
+    path: "api/fal-seedance",
+    code: 'curl "$XHUB_BASE_URL/queue/bytedance/seedance-2.0/text-to-video" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt": "A lighthouse at sunrise."}\'',
+  },
+  {
+    id: "fal-kling",
+    group: "api",
+    path: "api/fal-kling",
+    code: 'curl "$XHUB_BASE_URL/queue/fal-ai/kling-video/v2.5-turbo/pro/text-to-video" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt": "A lighthouse at sunrise."}\'',
+  },
+  {
+    id: "fal-vidu",
+    group: "api",
+    path: "api/fal-vidu",
+    code: 'curl "$XHUB_BASE_URL/queue/fal-ai/vidu/q1/text-to-video" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt": "A lighthouse at sunrise."}\'',
+  },
+  {
+    id: "fal-veo",
+    group: "api",
+    path: "api/fal-veo",
+    code: 'curl "$XHUB_BASE_URL/queue/fal-ai/veo3.1" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt": "A lighthouse at sunrise."}\'',
+  },
+  {
+    id: "fal-minimax",
+    group: "api",
+    path: "api/fal-minimax",
+    code: 'curl "$XHUB_BASE_URL/queue/minimax/h3-max/text-to-video" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt": "A lighthouse at sunrise."}\'',
+  },
+  {
+    id: "codex",
+    group: "tools",
+    path: "tools-agents-clients/codex",
+    code: 'model = "YOUR_MODEL_NAME"\nmodel_provider = "xhub"\n\n[model_providers.xhub]\nname = "XHub"\nbase_url = "https://YOUR_GATEWAY_HOST"\nenv_key = "XHUB_API_KEY"\nwire_api = "responses"',
+  },
+  {
+    id: "claude-code",
+    group: "tools",
+    path: "tools-agents-clients/claude-code",
+    code: 'export ANTHROPIC_BASE_URL="https://YOUR_GATEWAY_HOST"\nexport ANTHROPIC_AUTH_TOKEN="$XHUB_API_KEY"\nexport ANTHROPIC_MODEL="YOUR_MODEL_NAME"\nclaude',
+  },
+  {
+    id: "opencode",
+    group: "tools",
+    path: "tools-agents-clients/opencode",
+    code: '{\n  "$schema": "https://opencode.ai/config.json",\n  "provider": {\n    "xhub": {\n      "npm": "@ai-sdk/openai-compatible",\n      "name": "XHub",\n      "options": {\n        "baseURL": "https://YOUR_GATEWAY_HOST",\n        "apiKey": "{env:XHUB_API_KEY}"\n      },\n      "models": {\n        "YOUR_MODEL_NAME": {\n          "name": "YOUR_MODEL_NAME"\n        }\n      }\n    }\n  }\n}',
+  },
+  {
+    id: "cursor",
+    group: "tools",
+    path: "tools-agents-clients/cursor",
+  },
+  {
+    id: "vscode",
+    group: "tools",
+    path: "tools-agents-clients/vscode",
+  },
+  {
+    id: "cherry-studio",
+    group: "tools",
+    path: "tools-agents-clients/cherry-studio",
+  },
+  {
+    id: "claude-desktop",
+    group: "tools",
+    path: "tools-agents-clients/claude-desktop",
+  },
+  {
+    id: "agents",
+    group: "tools",
+    path: "tools-agents-clients/agents",
+    code: "OPENAI_BASE_URL=https://YOUR_GATEWAY_HOST\nOPENAI_API_KEY=YOUR_XHUB_API_KEY\nOPENAI_MODEL=YOUR_MODEL_NAME",
+  },
+  {
+    id: "javascript-sdk",
+    group: "tools",
+    path: "tools-agents-clients/javascript-sdk",
+    code: 'import OpenAI from "openai";\nconst client = new OpenAI({\n  apiKey: process.env.XHUB_API_KEY,\n  baseURL: process.env.XHUB_BASE_URL.replace(/\\/$/, ""),\n});\nconst response = await client.chat.completions.create({\n  model: "YOUR_MODEL_NAME",\n  messages: [{ role: "user", content: "Hello, introduce yourself." }],\n});\nconsole.log(response.choices[0].message.content);',
+  },
+  {
+    id: "responses",
+    group: "api",
+    path: "api/responses",
+    code: 'curl "$XHUB_BASE_URL/v1/responses" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","input":"Hello, introduce yourself."}\'',
+  },
+  {
+    id: "messages",
+    group: "api",
+    path: "api/messages",
+    code: 'curl "$XHUB_BASE_URL/v1/messages" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","max_tokens":256,"messages":[{"role":"user","content":"Hello, introduce yourself."}]}\'',
+  },
+  {
+    id: "embeddings",
+    group: "api",
+    path: "api/embeddings",
+    code: 'curl "$XHUB_BASE_URL/v1/embeddings" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","input":["Hello world"]}\'',
+  },
+  {
+    id: "completions",
+    group: "api",
+    path: "api/completions",
+    code: 'curl "$XHUB_BASE_URL/v1/completions" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","prompt":"Write a short greeting.","max_tokens":64}\'',
+  },
+  {
+    id: "images",
+    group: "api",
+    path: "api/images",
+    code: 'curl "$XHUB_BASE_URL/v1/images/generations" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","prompt":"A small lighthouse at sunrise.","n":1}\'',
+  },
+  {
+    id: "image-edits",
+    group: "api",
+    path: "api/image-edits",
+    code: 'curl "$XHUB_BASE_URL/v1/images/edits" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -F "model=YOUR_MODEL_NAME" -F "image=@source.png" \\\n  -F "prompt=Add a small lighthouse."',
+  },
+  {
+    id: "speech",
+    group: "api",
+    path: "api/speech",
+    code: 'curl "$XHUB_BASE_URL/v1/audio/speech" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","input":"Hello, welcome to XHub.","voice":"alloy"}\' --output speech.mp3',
+  },
+  {
+    id: "transcriptions",
+    group: "api",
+    path: "api/transcriptions",
+    code: 'curl "$XHUB_BASE_URL/v1/audio/transcriptions" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -F "model=YOUR_MODEL_NAME" -F "file=@sample.wav"',
+  },
+  {
+    id: "translations",
+    group: "api",
+    path: "api/translations",
+    code: 'curl "$XHUB_BASE_URL/v1/audio/translations" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -F "model=YOUR_MODEL_NAME" -F "file=@sample.wav"',
+  },
+  {
+    id: "moderations",
+    group: "api",
+    path: "api/moderations",
+    code: 'curl "$XHUB_BASE_URL/v1/moderations" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","input":"Hello world."}\'',
+  },
+  {
+    id: "rerank",
+    group: "api",
+    path: "api/rerank",
+    code: 'curl "$XHUB_BASE_URL/v1/rerank" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","query":"What is XHub?","documents":["XHub is a model gateway."],"top_n":1}\'',
+  },
+  {
+    id: "gemini",
+    group: "api",
+    path: "api/gemini",
+    code: 'curl "$XHUB_BASE_URL/v1beta/models/YOUR_MODEL_NAME:generateContent" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"contents":[{"role":"user","parts":[{"text":"Hello, introduce yourself."}]}]}\'',
+  },
+  {
+    id: "videos",
+    group: "api",
+    path: "api/videos",
+    code: 'curl "$XHUB_BASE_URL/v1/videos" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -F "model=YOUR_MODEL_NAME" -F "prompt=A lighthouse at sunrise." -F "seconds=8"',
+  },
+  {
+    id: "ark",
+    group: "api",
+    path: "api/ark",
+    code: 'curl "$XHUB_BASE_URL/api/v3/contents/generations/tasks" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","content":[{"type":"text","text":"A lighthouse at sunrise."}]}\'',
+  },
+  {
+    id: "fal",
+    group: "api",
+    path: "api/fal",
+    code: 'curl "$XHUB_BASE_URL/queue/fal-ai/kling-video/v2.5-turbo/pro/text-to-video" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"prompt":"A lighthouse at sunrise.","duration":"5"}\'',
+  },
+  {
+    id: "bypass",
+    group: "api",
+    path: "api/native-bypass",
+  },
+  {
+    id: "deployments",
+    group: "product",
+    path: "product/deployments",
+  },
+  {
+    id: "playground",
+    group: "product",
+    path: "product/playground",
+  },
+  {
+    id: "teams",
+    group: "product",
+    path: "product/teams",
+  },
+  {
+    id: "native-anthropic",
+    group: "api",
+    path: "api/native-anthropic",
+    code: 'curl "$XHUB_BASE_URL/bypass/anthropic/v1/messages" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","max_tokens":256,"messages":[{"role":"user","content":"Hello, introduce yourself."}]}\'',
+  },
+  {
+    id: "native-vertex",
+    group: "api",
+    path: "api/native-vertex",
+    code: 'curl "$XHUB_BASE_URL/bypass/vertex/v1/models/YOUR_MODEL_NAME:generateContent" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"contents":[{"role":"user","parts":[{"text":"Hello, introduce yourself."}]}]}\'',
+  },
+  {
+    id: "native-gemini",
+    group: "api",
+    path: "api/native-gemini",
+    code: 'curl "$XHUB_BASE_URL/bypass/gemini/v1beta/models/YOUR_MODEL_NAME:generateContent" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"contents":[{"role":"user","parts":[{"text":"Hello, introduce yourself."}]}]}\'',
+  },
+  {
+    id: "native-images",
+    group: "api",
+    path: "api/native-images",
+    code: 'curl "$XHUB_BASE_URL/bypass/openai/v1/images/generations" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","prompt":"A small lighthouse at sunrise.","n":1}\'',
+  },
+  {
+    id: "native-image-edits",
+    group: "api",
+    path: "api/native-image-edits",
+    code: 'curl "$XHUB_BASE_URL/bypass/openai/v1/images/edits" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -F "model=YOUR_MODEL_NAME" -F "image=@source.png" \\\n  -F "prompt=Add a small lighthouse."',
+  },
+  {
+    id: "native-responses",
+    group: "api",
+    path: "api/native-responses",
+    code: 'curl "$XHUB_BASE_URL/bypass/openai/v1/responses" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","input":"Hello, introduce yourself."}\'',
+  },
+  {
+    id: "native-chat",
+    group: "api",
+    path: "api/native-chat",
+    code: 'curl "$XHUB_BASE_URL/bypass/openai/v1/chat/completions" \\\n  -H "Authorization: Bearer $XHUB_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"YOUR_MODEL_NAME","messages":[{"role":"user","content":"Hello, introduce yourself."}],"stream":false}\'',
+  },
+];
+/** 已实现推理接口契约；示意响应的可选字段依供应商而异。 */
+export { apiSpecs } from "./apiSpecs";

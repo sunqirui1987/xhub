@@ -386,28 +386,44 @@
       "own_team_update": 200,
       "foreign_team_update": 200,
       "global_guardrail_create": 200,
-      "visible_teams": 9
+      "visible_teams": 9,
+      "own_team_limits": 200,
+      "foreign_team_limits": 200,
+      "team_models_update": 200,
+      "team_status_update": 200
     },
     {
       "role": "organization_admin",
       "own_team_update": 200,
       "foreign_team_update": 403,
       "global_guardrail_create": 403,
-      "visible_teams": 3
+      "visible_teams": 3,
+      "own_team_limits": 200,
+      "foreign_team_limits": 403,
+      "team_models_update": 403,
+      "team_status_update": 403
     },
     {
       "role": "team_admin",
       "own_team_update": 200,
       "foreign_team_update": 403,
       "global_guardrail_create": 403,
-      "visible_teams": 1
+      "visible_teams": 1,
+      "own_team_limits": 403,
+      "foreign_team_limits": 403,
+      "team_models_update": 403,
+      "team_status_update": 403
     },
     {
       "role": "member",
       "own_team_update": 403,
       "foreign_team_update": 403,
       "global_guardrail_create": 403,
-      "visible_teams": 1
+      "visible_teams": 1,
+      "own_team_limits": 403,
+      "foreign_team_limits": 403,
+      "team_models_update": 403,
+      "team_status_update": 403
     }
   ],
   "lifecycle_scenarios": [

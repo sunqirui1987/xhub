@@ -59,3 +59,13 @@ func TestKeyModelSelection(t *testing.T) {
 		t.Fatalf("缺字段覆盖原模型: %v", got)
 	}
 }
+
+// TestInvalidQuotaInput 验证创建密钥解析拒绝非法额度；前置纯请求对象，无持久化记录需清理。
+// 参数 t 为测试上下文，无返回；覆盖错误字符串、无穷、负数及对象，避免转成共享额度。
+func TestInvalidQuotaInput(t *testing.T) {
+	for _, value := range []any{"wrong", "NaN", "Infinity", -1.0, true, map[string]any{}} {
+		if _, err := keyInputFrom(map[string]any{"max_budget": value}, "me"); err == nil {
+			t.Fatalf("非法密钥额度未拒绝: %v", value)
+		}
+	}
+}

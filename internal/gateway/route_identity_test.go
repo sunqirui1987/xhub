@@ -78,8 +78,10 @@ func TestPreviewIdentityInheritance(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("个人密钥不继承成员团队", &auth.Principal{Kind: authz.KindKey, KeyID: personal.ID, TeamID: "stale"}, "", "", "", "")
-	mustAddMember(t, f.db, f.teamB.ID, f.teamMember.user.Email, iam.TeamMember)
-	check("多团队不猜测", &auth.Principal{Kind: authz.KindSession, UserID: f.teamMember.user.ID}, "", "", "", "")
+	if _, err := f.db.AddMember(ctx, by, f.teamB.ID, f.teamMember.user.Email, iam.TeamMember); err != iam.ErrMultipleTeams {
+		t.Fatalf("第二团队应拒绝: %v", err)
+	}
+	check("拒绝第二团队后保留原归属", &auth.Principal{Kind: authz.KindSession, UserID: f.teamMember.user.ID}, f.teamA.ID, f.orgA.ID, team, "team")
 	if err := s.resolvePreviewIdentity(ctx, &auth.Principal{Kind: authz.KindKey, KeyID: "missing"}); err == nil {
 		t.Fatal("不存在的密钥未返回读取错误")
 	}

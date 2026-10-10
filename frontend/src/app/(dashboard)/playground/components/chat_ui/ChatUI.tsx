@@ -130,6 +130,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
   simplified = false,
   fixedModel,
 }) => {
+  const t = useT();
   const syntaxTheme = useSyntaxTheme(coy);
   const canViewPolicies = useCan("viewPolicies");
   const [mcpServers, setMCPServers] = useState<MCPServer[]>([]);
@@ -1228,7 +1229,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
   const inputPlaceholder =
     endpointType === null
-      ? "请先选择模型和有效端点"
+      ? "myModels.selectValidEndpoint"
       : endpointType === EndpointType.CHAT ||
           endpointType === EndpointType.EMBEDDINGS ||
           endpointType === EndpointType.RESPONSES ||
@@ -1330,7 +1331,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
                 <div>
                   <label className="mb-2 flex items-center text-sm font-medium text-foreground">
-                    <Wrench className="mr-2 size-4" aria-hidden="true" /> {t("客户调用接口")}
+                    <Wrench className="mr-2 size-4" aria-hidden="true" /> {t("myModels.customerEndpoint")}
                   </label>
                   <EndpointSelector
                     options={endpointOptions}

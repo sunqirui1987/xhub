@@ -1,3 +1,5 @@
+import { isValidRateAllocation } from "./create_user_payload";
+import { QuotaGuide } from "./shared/QuotaGuide";
 import { useOrganizations } from "@/app/(dashboard)/hooks/organizations/useOrganizations";
 import useCan from "@/app/(dashboard)/hooks/useCan";
 import AvailableTeamsPanel from "@/components/team/AvailableTeamsPanel";
@@ -55,6 +57,8 @@ const SUPPRESSED_BY_DESCRIPTION = "";
 
 const numericInputSchema = z.union([z.string(), z.number()]).optional();
 
+const rateInputSchema = numericInputSchema.refine(isValidRateAllocation, { error: () => t("Must be a non-negative whole number") });
+
 const teamCreateFieldsSchema = z.object({
   team_alias: z.string().min(1, t("Please input a team name")),
   team_description: z.string().optional(),
@@ -62,8 +66,8 @@ const teamCreateFieldsSchema = z.object({
   models: z.array(z.string()).optional(),
   max_budget: numericInputSchema,
   budget_duration: z.string().nullish(),
-  tpm_limit: numericInputSchema,
-  rpm_limit: numericInputSchema,
+  tpm_limit: rateInputSchema,
+  rpm_limit: rateInputSchema,
   metadata: metadataPairsSchema.optional(),
   team_id: z.string().optional(),
   team_member_budget: z.number().optional(),
@@ -374,6 +378,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
     fetchUserModels();
   }, [accessToken, userID, userRole]);
 
+  /** 创建团队；接收已校验表单，提交组织与金额/RPM/TPM，留空速率保持共享；失败展示后台超配原因，成功刷新列表。 */
   const handleCreate = async (formValues: Record<string, any>) => {
     try {
       if (accessToken != null) {
@@ -431,6 +436,8 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
           organization_id: formValues.organization_id,
           models: Array.isArray(formValues.models) ? formValues.models : [],
           max_budget: formValues.max_budget,
+          rpm_limit: formValues.rpm_limit == null || String(formValues.rpm_limit).trim() === "" ? null : Number(formValues.rpm_limit),
+          tpm_limit: formValues.tpm_limit == null || String(formValues.tpm_limit).trim() === "" ? null : Number(formValues.tpm_limit),
           ...(formValues.route_template_id ? { route_template_id: formValues.route_template_id } : {}),
         });
         toast.success(t("Team created"));
@@ -600,6 +607,7 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
             <TooltipProvider>
               <form onSubmit={form.handleSubmit(onCreateSubmit)}>
                 <FieldGroup>
+                  <QuotaGuide scope="team" />
                   <FormField control={form.control} name="team_alias" label={t("Team Name")}>
                     {({ ref, value, ...field }) => (
                       <UIInput {...field} ref={ref} value={value ?? ""} data-testid="team-name-input" />
@@ -690,11 +698,21 @@ const Teams: React.FC<TeamProps> = ({ accessToken, userID, userRole, premiumUser
                     )}
                   </FormField>
 
-                  <FormField control={form.control} name="max_budget" label={t("Max Budget (USD)")}>
+                  <FormField control={form.control} name="max_budget" label={t("Max Budget (USD)")} description={t("quotaGuide.team")}>
                     {({ ref, value, ...field }) => (
                       <NumericalInput {...field} ref={ref} value={value ?? ""} step={0.01} precision={2} width={200} />
                     )}
                   </FormField>
+                  {(["rpm_limit", "tpm_limit"] as const).map((name) => (
+                    <FormField key={name} control={form.control} name={name}
+                      label={t(name === "rpm_limit" ? "Requests per minute Limit (RPM)" : "Tokens per minute Limit (TPM)")}
+                      description={t("quotaGuide.rates")}>
+                      {({ ref, value, ...field }) => (
+                        <UIInput {...field} ref={ref} type="number" min="0" max="2147483647" step="1"
+                          value={value ?? ""} placeholder={t("quotaGuide.rateBlank")} />
+                      )}
+                    </FormField>
+                  ))}
                 </FieldGroup>
                 <div className="mt-[10px] text-right">
                   <UIButton type="submit" data-testid="create-team-submit">

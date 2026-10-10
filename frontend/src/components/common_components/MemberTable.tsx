@@ -179,14 +179,14 @@ const buildColumns = ({
         <span className="inline-flex items-center gap-2">
           <TableIconActionButton
             variant="Edit"
-            tooltipText="Edit member"
+            tooltipText={t("quotaGuide.editMember")}
             dataTestId="edit-member"
             onClick={() => onEdit(row.original)}
           />
           {(!showDeleteForMember || showDeleteForMember(row.original)) && (
             <TableIconActionButton
               variant="Delete"
-              tooltipText="Delete member"
+              tooltipText={t("quotaGuide.deleteMember")}
               dataTestId="delete-member"
               onClick={() => onDelete(row.original)}
             />

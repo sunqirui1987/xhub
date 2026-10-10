@@ -38,7 +38,7 @@ export const endpointUIType = (endpoint?: ModelEndpoint): EndpointType | null =>
 /** textEndpoints 返回模型声明的文本对话端点。
  * 参数 model：可选模型元数据。返回：Chat Completions、Responses、Messages 的真实绑定。
  * 无文本绑定的视频模型不能发送文本对比请求；不根据 family 自动补建路径。
- * 调用：ChatUI、CompareUI、callTextEndpoint。测试：model_endpoints.test.ts。
+ * 调用：ChatUI、callTextEndpoint。测试：model_endpoints.test.ts。
  */
 export const textEndpoints = (model?: ModelGroup): ModelEndpoint[] =>
   modelEndpoints(model).filter((endpoint) => /\/(chat\/completions|responses|messages)$/.test(endpoint.path));
@@ -64,7 +64,7 @@ export const endpointURL = (base: string, path: string): string => {
  * onText/onUsage/onTiming/onLatency：文本、实测用量、首字延迟和总延迟回调，延迟单位为秒。
  * 返回 Promise<void>。HTTP 错误、协议失败、缺少完成事件或 SSE 超限会抛出异常。
  * 不向原生请求体加入网关专属字段，也不在浏览器计算价格。
- * 调用：ChatUI、CompareUI。测试：model_endpoints.test.ts。
+ * 调用：ChatUI。测试：model_endpoints.test.ts。
  */
 export async function callTextEndpoint({
   endpoint,

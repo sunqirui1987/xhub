@@ -262,22 +262,17 @@ func (s *Server) recordSpend(w http.ResponseWriter, p *auth.Principal, callID, a
 		ownerType = p.OwnerType
 		userID = p.UserID
 		if p.Key != nil {
-			teamID, projectID = p.Key.TeamID, deref(p.Key.ProjectID)
+			teamID, projectID = p.BillingTeamID, deref(p.Key.ProjectID)
 			// A key carries no organization of its own; its team's is the
 			// billing scope above it, snapshotted onto the usage row.
-			orgID = s.teamOrg(p.Key.TeamID)
+			orgID = p.BillingOrgID
 			if p.Key.UserID != nil {
 				userID = *p.Key.UserID
+			} else {
+				userID = p.Key.BillingUserID
 			}
 		} else if p.Kind == authz.KindSession && userID != "" && s.IAM != nil {
-			// A console session has no key. Leaving the owner blank makes the
-			// store call it a service log with no team, which neither the caller
-			// nor their organization administrator is allowed to read.
-			memberships, err := s.IAM.MemberTeams(context.Background(), userID)
-			if err != nil {
-				logx.Error("usage team lookup failed user=%s err=%v", userID, err)
-			}
-			ownerType, teamID, orgID = sessionLogBinding(ownerType, teamID, orgID, memberships)
+			ownerType, teamID, orgID = iam.OwnerSession, p.BillingTeamID, p.BillingOrgID
 		}
 	}
 	end := time.Now()

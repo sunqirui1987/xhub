@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowDownUp, ArrowRight, Boxes, Search, SlidersHorizontal } from "lucide-react";
-import { t } from "@/i18n";
+import { t, useT } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +43,7 @@ function categoryLabel(category: string): string {
 /** 展示授权模型摘要和四类详情入口；参数为模型及打开回调，返回卡片。
  * 供我的模型列表调用；只按实际绑定展示可用状态，不因目录分类推断接口。 */
 function ModelCard({ model, onOpen }: { model: MyModelCard; onOpen: (tab: ModelDetailTab) => void }) {
+  const t = useT();
   const unavailable = Boolean(model.unavailable_reason) || model.endpoints?.length === 0;
   return (
     <article
@@ -161,6 +162,7 @@ export function MyModels({
   isError?: boolean;
   onRetry?: () => void;
 }) {
+  const t = useT();
   const [detail, setDetail] = useState<{ model: MyModelCard; tab: ModelDetailTab } | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");

@@ -124,9 +124,13 @@ vi.mock("@/components/mcp_server_management/MCPServerSelector", () => ({
 }));
 
 vi.mock("@/components/team/TeamMemberTab", () => ({
-  default: vi.fn(({ setIsAddMemberModalVisible }) => (
+  default: vi.fn(({ setIsAddMemberModalVisible, setSelectedEditMember, setIsEditMemberModalVisible }) => (
     <div>
       <button onClick={() => setIsAddMemberModalVisible(true)}>Add Member</button>
+      <button onClick={() => {
+        setSelectedEditMember({ user_email: "edit@test.com", user_id: "edit-user", role: "user", max_budget_in_team: 400 });
+        setIsEditMemberModalVisible(true);
+      }}>Edit Member</button>
     </div>
   )),
 }));
@@ -137,19 +141,6 @@ vi.mock("@/components/common_components/user_search_modal", () => ({
       <div>
         <button onClick={onCancel}>Cancel</button>
         <button onClick={() => onSubmit({ user_email: "new@test.com", user_id: "new-user", role: "user" })}>
-          Submit
-        </button>
-      </div>
-    ) : null,
-  ),
-}));
-
-vi.mock("@/components/team/EditMembership", () => ({
-  default: vi.fn(({ visible, onCancel, onSubmit }) =>
-    visible ? (
-      <div>
-        <button onClick={onCancel}>Cancel</button>
-        <button onClick={() => onSubmit({ user_email: "edit@test.com", user_id: "edit-user", role: "admin" })}>
           Submit
         </button>
       </div>
@@ -801,6 +792,39 @@ describe("TeamInfoView", () => {
 
       expect(await screen.findByText(/Please input a team name|请输入团队名称/)).toBeInTheDocument();
       expect(networking.teamUpdateCall).not.toHaveBeenCalled();
+    });
+
+    /** 验证成员超配失败后保留编辑输入并能重试；前置模拟额度接口失败后成功，确认保存结果与列表刷新，测试框架清理 DOM 与 mock。 */
+    it("preserves the member budget on failure and allows a corrected retry", async () => {
+      const user = userEvent.setup({ delay: null });
+      const onUpdate = vi.fn();
+      vi.mocked(networking.teamInfoCall).mockResolvedValue(createMockTeamData());
+      vi.mocked(networking.teamMemberUpdateCall)
+        .mockRejectedValueOnce(new Error("Quota allocation exceeds available budget"))
+        .mockResolvedValueOnce({} as any);
+
+      renderWithProviders(<TeamInfoView {...defaultProps} onUpdate={onUpdate} />);
+      await user.click(await screen.findByRole("tab", { name: "Members" }));
+      await user.click(screen.getByRole("button", { name: "Edit Member" }));
+      const dialog = await screen.findByRole("dialog");
+      const budget = within(dialog).getByLabelText("Team Member Budget (USD)");
+      await user.clear(budget);
+      await user.type(budget, "601");
+      await user.click(within(dialog).getByRole("button", { name: "Save Changes" }));
+      await waitFor(() => expect(networking.teamMemberUpdateCall).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save Changes" })).toBeEnabled());
+      expect(dialog).toBeVisible();
+      expect(budget).toHaveValue(601);
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      await user.clear(budget);
+      await user.type(budget, "401");
+      await user.click(within(dialog).getByRole("button", { name: "Save Changes" }));
+      await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+      expect(networking.teamMemberUpdateCall).toHaveBeenLastCalledWith(
+        "test-token", "123", expect.objectContaining({ user_id: "edit-user", max_budget_in_team: "401" }),
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     });
 
     it("should add team member when form is submitted", async () => {

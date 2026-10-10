@@ -298,3 +298,36 @@ CREATE INDEX IF NOT EXISTS audit_logs_ts ON audit_logs (ts);
 
 -- 异步任务原日志结算标记，零费用完成同样只认领一次。
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS task_settled boolean NOT NULL DEFAULT false;
+
+-- 服务密钥保留原权限类型，由团队业务账号承接个人额度层。
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS billing_user_id TEXT NOT NULL DEFAULT '';
+INSERT INTO users (id,email,name,spend)
+SELECT 'business-' || t.id, 'business-' || t.id || '@internal.invalid', 'Business account',
+ COALESCE((SELECT SUM(k.spend) FROM api_keys k WHERE k.team_id=t.id AND k.owner_type='service'),0)
+FROM teams t WHERE EXISTS (SELECT 1 FROM api_keys k WHERE k.team_id=t.id AND k.owner_type='service')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO team_members (team_id,user_id)
+SELECT DISTINCT team_id, 'business-' || team_id FROM api_keys WHERE owner_type='service'
+ON CONFLICT DO NOTHING;
+UPDATE api_keys SET billing_user_id='business-' || team_id WHERE owner_type='service' AND billing_user_id='';
+
+-- 保留存量多团队关系供管理员修复；禁止新建第二个归属，不自动删除历史。
+CREATE OR REPLACE FUNCTION enforce_single_team() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended(NEW.user_id, 314159));
+    IF EXISTS (SELECT 1 FROM team_members WHERE user_id=NEW.user_id AND team_id<>NEW.team_id) THEN
+        RAISE EXCEPTION 'a person may belong to only one team' USING ERRCODE='23514', CONSTRAINT='single_team_required';
+    END IF;
+    RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS single_team_required ON team_members;
+CREATE TRIGGER single_team_required BEFORE INSERT OR UPDATE OF user_id,team_id ON team_members
+FOR EACH ROW EXECUTE FUNCTION enforce_single_team();
+
+-- 各层分钟上限独立汇总；迁移保持旧数据未设本层限制。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS rpm_limit INT CHECK (rpm_limit >= 0);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tpm_limit INT CHECK (tpm_limit >= 0);
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS rpm_limit INT CHECK (rpm_limit >= 0);
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS tpm_limit INT CHECK (tpm_limit >= 0);
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS rpm_limit INT CHECK (rpm_limit >= 0);
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS tpm_limit INT CHECK (tpm_limit >= 0);

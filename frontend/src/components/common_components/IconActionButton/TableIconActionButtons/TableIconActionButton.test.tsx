@@ -86,4 +86,32 @@ describe("TableIconActionButton", () => {
 
     expect(await screen.findByText("Cannot edit")).toBeInTheDocument();
   });
+  /** 验证键盘和中文可访问名称；前置可用编辑按钮，回车触发一次，测试框架清理 DOM。 */
+  it("supports keyboard activation with the translated action name", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(<TableIconActionButton variant="Edit" onClick={onClick} tooltipText="编辑成员" />);
+    await user.tab();
+    expect(screen.getByRole("button", { name: "编辑成员" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  /** 验证禁用边界；前置不可编辑按钮，原生 disabled 保留动作名称且鼠标不能触发，框架清理 DOM。 */
+  it("exposes a disabled native button without changing its action name", async () => {
+    const onClick = vi.fn();
+    render(
+      <TableIconActionButton
+        variant="Edit"
+        onClick={onClick}
+        tooltipText="Edit member"
+        disabled
+        disabledTooltipText="No permission"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Edit member" });
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });

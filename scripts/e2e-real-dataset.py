@@ -326,7 +326,7 @@ def run_business_browser(directory, logger):
         "关键词正则完成草稿调试、保存、编辑、真实拦截与删除",
         "XGo editor executes, persists, reloads, and edits real scripts",
         "chat explains missing credentials and unavailable deployment, then recovers",
-        "comparison isolates card failures and supports recovery",
+        "single workspace has no comparison controls and preserves bilingual chat",
         "cancel and clear ignore delayed real responses; mobile chat remains usable",
         "错误日志详情完整显示上游正文并可返回普通日志",
         "异步任务原日志展示生命周期且轮询不增加日志：完成",

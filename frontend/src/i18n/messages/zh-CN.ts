@@ -1,9 +1,37 @@
+import { docsZhCN } from "./docs.zh-CN";
 import { playgroundZhCN } from "./playground.zh-CN";
 import { zhPhrases } from "./phrases.zh-CN";
 import { pageDescriptionsZhCN } from "./pageDescriptions.zh-CN";
 import { routeTemplatesZhCN } from "./routeTemplates.zh-CN";
 
 export const zhCN = {
+  quotaGuide: {
+    rateAllocationError: "下级 RPM/TPM 固定分配合计超过上级限制，请减少分配或调整上级限制。",
+    rates: "RPM、TPM 与金额额度按同一层级分配：下级固定分配合计不能超过上级。留空共享未分配容量，0 禁止调用。个人所有 Key 与会话汇总，再逐级汇总到团队和组织；固定分配的未用容量每个 UTC 自然分钟保留，TPM 按准入时预估 token 计数。",
+    rateBlank: "共享上级剩余容量",
+    editMember: "编辑成员",
+    deleteMember: "删除成员",
+    moreModels: "另 {count} 个",
+    allocationError: "已消费金额与下级未用额度超过上级可分配余额，请降低额度或释放其他分配。",
+    singleTeamError: "每个人只能加入一个团队，请先退出原团队。",
+    spend: "个人累计消费 (USD)",
+    spendHelp: "所有个人 Key 和会话消费累计计入个人额度，不自动按月重置；退出团队后仍保留个人累计消费。",
+    title: "额度分配说明",
+    chain: "组织 → 团队 → 个人 → API Key · 美元（USD）",
+    organization: "组织固定额度用于分配给团队。例如组织额度 1,000，可分配 500＋300＋200；继续分配会被拒绝。",
+    team: "员工固定额度与共享消费必须在团队额度内。团队管理员分配员工额度，组织管理员分配团队额度。",
+    person: "所有密钥共同使用个人额度。设置固定额度的密钥保留未消费金额；未设置的密钥共享剩余金额。",
+    key: "密钥额度从所属个人额度中分配。留空表示共享个人剩余额度，消费仍计入团队和组织。",
+    shared:
+      "留空表示共享上级可用额度，不能绕过上级限制；0 表示禁止消费。已消费金额与下级未消费的保留额度之和不得超过固定额度。",
+    singleTeam:
+      "每个人只能加入一个团队。换团队须先移除原成员关系，绑定原团队的密钥撤销，独立个人密钥继续可用，历史消费保留在原团队。",
+    business: "不限额度的业务请单独创建不限额组织和团队；服务密钥使用该团队独立业务账号的个人额度。",
+    blank: "共享上级额度",
+    amount: "额度 ${amount}",
+  },
+
+  docs: docsZhCN,
   audit: {
     adminOnly: "仅平台管理员可以访问审计日志。",
     loadError: "审计日志加载失败，请点击刷新重试。",
@@ -90,6 +118,8 @@ export const zhCN = {
     add: "添加提供商",
   },
   myModels: {
+    selectValidEndpoint: "请先选择模型和有效端点",
+    customerEndpoint: "客户调用接口",
     imagePrompt: "图片提示词",
     imagePromptPlaceholder: "描述主体、风格、构图和光线…",
     imageSize: "图片尺寸",
@@ -97,7 +127,8 @@ export const zhCN = {
     imageQuality: "图片质量",
     imageQualityOptional: "图片质量（可选）",
     imageQualityPlaceholder: "留空使用渠道默认值",
-    imageDefaultsHint: "默认尺寸为 1024x1024，生成 1 张。尺寸、数量和质量的支持范围以所选模型及渠道为准；更多参数可在 JSON 中编辑。",
+    imageDefaultsHint:
+      "默认尺寸为 1024x1024，生成 1 张。尺寸、数量和质量的支持范围以所选模型及渠道为准；更多参数可在 JSON 中编辑。",
     invalidRequestObject: "请求参数必须是 JSON 对象",
     imagePromptRequired: "请填写图片提示词",
     imageSizeInvalid: "请填写有效的图片尺寸，例如 1024x1024；支持的尺寸以所选渠道为准",
@@ -147,7 +178,8 @@ export const zhCN = {
     backToCurl: "返回 curl 步骤",
     invalidExample: "当前接口配置无法生成命令，请检查网关地址和接口绑定。",
     prepareKey: "准备 API Key",
-    prepareKeyHint: "先在「管理虚拟密钥」创建或选择有此模型权限的密钥。将 <YOUR_XHUB_API_KEY> 替换为你的密钥，在同一个终端执行下面所有步骤。",
+    prepareKeyHint:
+      "先在「管理虚拟密钥」创建或选择有此模型权限的密钥。将 <YOUR_XHUB_API_KEY> 替换为你的密钥，在同一个终端执行下面所有步骤。",
     sendRequest: "发送请求",
     requestHint: "复制执行下面的完整命令。model 使用当前对外模型名称；可以修改正文里的输入内容。",
     createTask: "创建生成任务",
@@ -159,18 +191,27 @@ export const zhCN = {
     queryResult: "查询任务结果",
     downloadVideo: "下载生成的视频",
     deleteTask: "删除或取消任务（可选）",
-    arkResultHint: "queued、creating_assets 或 running 表示仍在生成，等待 5–10 秒再执行查询。succeeded 时读取 content.video_url；failed 或 expired 时查看 error，不要继续下载。",
-    falResultHint: "IN_QUEUE 或 IN_PROGRESS 时等待 5–10 秒再查询；COMPLETED 后获取结果。结果视频地址字段因模型而异，常见为 video.url、videos 或 video_url；错误时查看 error。",
-    videoResultHint: "queued 或 in_progress 时等待 5–10 秒后再查询；completed 后下载，failed 时查看 error。查询不会重新创建任务。",
+    arkResultHint:
+      "queued、creating_assets 或 running 表示仍在生成，等待 5–10 秒再执行查询。succeeded 时读取 content.video_url；failed 或 expired 时查看 error，不要继续下载。",
+    falResultHint:
+      "IN_QUEUE 或 IN_PROGRESS 时等待 5–10 秒再查询；COMPLETED 后获取结果。结果视频地址字段因模型而异，常见为 video.url、videos 或 video_url；错误时查看 error。",
+    videoResultHint:
+      "queued 或 in_progress 时等待 5–10 秒后再查询；completed 后下载，failed 时查看 error。查询不会重新创建任务。",
     downloadContentHint: "仅在任务完成后执行。文件保存为当前目录 video.mp4，会覆盖同名文件。",
-    arkDownloadHint: "仅在 succeeded 后，将 <VIDEO_URL> 替换为结果的 content.video_url。下载到当前目录 video.mp4，会覆盖同名文件。",
-    falDownloadHint: "任务完成后，将 <VIDEO_URL> 替换为结果中的实际视频地址。下载到当前目录 video.mp4，会覆盖同名文件。",
-    deleteTaskHint: "这是可选操作，请先保存需要的结果。是否支持取消进行中的任务由供应商决定，删除不会退还已发生的费用。",
-    customBodyHint: "先按协议参数文档把完整 JSON 正文保存为当前目录 request.json，model 填当前对外模型名称，再执行命令。此接口有专用字段，不能直接套用聊天参数。",
+    arkDownloadHint:
+      "仅在 succeeded 后，将 <VIDEO_URL> 替换为结果的 content.video_url。下载到当前目录 video.mp4，会覆盖同名文件。",
+    falDownloadHint:
+      "任务完成后，将 <VIDEO_URL> 替换为结果中的实际视频地址。下载到当前目录 video.mp4，会覆盖同名文件。",
+    deleteTaskHint:
+      "这是可选操作，请先保存需要的结果。是否支持取消进行中的任务由供应商决定，删除不会退还已发生的费用。",
+    customBodyHint:
+      "先按协议参数文档把完整 JSON 正文保存为当前目录 request.json，model 填当前对外模型名称，再执行命令。此接口有专用字段，不能直接套用聊天参数。",
     imageUrlHint: "把 <IMAGE_URL> 替换为供应商可访问的图片 HTTPS 地址，再执行。素材字段和可选参数请查看协议参数文档。",
     imageHint: "修改 prompt 后执行。size 和 n 的可用值依模型而定；结果 data 中的 url 可打开，b64_json 需要解码为图片。",
-    imageEditHint: "先把待编辑图片保存为当前目录 input.png，再执行。curl 自动处理 multipart，无需手动设置 Content-Type。",
-    audioUploadHint: "先把待处理音频保存为当前目录 audio.mp3，再执行。curl 自动上传文件；文件类型和大小限制依模型而定。",
+    imageEditHint:
+      "先把待编辑图片保存为当前目录 input.png，再执行。curl 自动处理 multipart，无需手动设置 Content-Type。",
+    audioUploadHint:
+      "先把待处理音频保存为当前目录 audio.mp3，再执行。curl 自动上传文件；文件类型和大小限制依模型而定。",
     speechHint: "修改 input 和 voice 后执行。音频保存为当前目录 speech.mp3，会覆盖同名文件；voice 的可用值依模型而定。",
     copySetup: "复制密钥设置",
     copyTaskId: "复制任务 ID 设置",
@@ -179,9 +220,11 @@ export const zhCN = {
     copyDownload: "复制下载命令",
     copyDelete: "复制删除命令",
     checkUsage: "检查响应与用量",
-    checkUsageHint: "成功响应后可在请求日志查看请求状态、错误和用量，在用量页面核对费用。异步任务要查询到完成后才有最终结果和结算。",
+    checkUsageHint:
+      "成功响应后可在请求日志查看请求状态、错误和用量，在用量页面核对费用。异步任务要查询到完成后才有最终结果和结算。",
     parameterGuide: "协议参数说明",
-    parameterGuideHint: "普通接入与 Bypass 使用所选协议的相同请求格式。以下列出示例字段和常用选项；必填条件、范围及扩展字段以具体模型供应商文档为准。",
+    parameterGuideHint:
+      "普通接入与 Bypass 使用所选协议的相同请求格式。以下列出示例字段和常用选项；必填条件、范围及扩展字段以具体模型供应商文档为准。",
     parameter: "参数 / 响应字段",
     parameterMeaning: "填写方式与用途",
     paramAuthorization: "必填请求头：Bearer 后填写 XHub 虚拟密钥，不是供应商密钥。",
@@ -194,13 +237,13 @@ export const zhCN = {
     paramInput: "必填输入文本或该协议支持的结构化输入。",
     paramEmbeddingInput: "必填：文本字符串或字符串数组，返回向量。",
     paramAnthropicVersion: "请求头版本标识，示例为 2023-06-01。",
-    paramContents: "必填消息数组，每项包含 role 和 parts；文本使用 {\"text\":\"Your question\"}。",
+    paramContents: '必填消息数组，每项包含 role 和 parts；文本使用 {"text":"Your question"}。',
     paramGenerationConfig: "可选生成配置，例如 temperature、maxOutputTokens，支持范围依模型而定。",
     paramPrompt: "必填：描述希望生成或修改的内容。",
     paramQuery: "必填：用于排序的查询文本。",
     paramDocuments: "必填：待排序文档数组。",
     paramTopN: "可选：返回前几条排序结果。",
-    paramArkContent: "必填数组：文本使用 {\"type\":\"text\",\"text\":\"Description\"}；图片等素材按具体型号规定提供。",
+    paramArkContent: '必填数组：文本使用 {"type":"text","text":"Description"}；图片等素材按具体型号规定提供。',
     paramVideoOptions: "可选生成选项：时长、分辨率、画面比例或尺寸；字段名称和取值因协议与型号而异。",
     paramArkResult: "创建返回 id；查询返回 status，成功后 content.video_url 为下载地址，失败查看 error。",
     paramFalImages: "图生视频常用 image_url，参考视频常用 image_urls 数组；以所选模型的实际 schema 为准。",
@@ -237,7 +280,8 @@ export const zhCN = {
     copyGateway: "复制网关地址",
     copied: "已复制",
     copyFailed: "复制失败，请手动选择并复制下方内容。",
-    exampleHint: "在同一个终端按顺序执行。适用于 macOS、Linux 或 Windows 的 WSL / Git Bash，需要 curl 7.76 或更新版本。尖括号内的占位内容需要替换。",
+    exampleHint:
+      "在同一个终端按顺序执行。适用于 macOS、Linux 或 Windows 的 WSL / Git Bash，需要 curl 7.76 或更新版本。尖括号内的占位内容需要替换。",
     specialized: "该接口使用专用请求格式。请按供应商协议文档构造参数，再前往调试台测试。",
     actions: "任务后续操作",
     priceNote:
@@ -250,7 +294,8 @@ export const zhCN = {
     stepCall: "2. 选择接口并调用",
     stepCallHint: "在 API 接入中选择实际开放的协议，复制对应示例。不同协议的请求格式不同，请勿混用参数。",
     stepResult: "3. 检查结果与用量",
-    stepResultHint: "执行 curl 后检查响应，再在请求日志与用量页面核对消耗。异步任务按 API 接入步骤查询到完成后下载结果。",
+    stepResultHint:
+      "执行 curl 后检查响应，再在请求日志与用量页面核对消耗。异步任务按 API 接入步骤查询到完成后下载结果。",
     errors: "常见错误",
     errorHint:
       "401：检查 API Key；403：检查模型权限；404：检查路径和模型名称；429：检查额度或限流；5xx：检查供应商服务或联系管理员。",
@@ -814,7 +859,6 @@ export const zhCN = {
       accessDenied: "无权访问",
       accessDeniedBody: "当前角色无法使用调试台。请联系代理管理员以获得测试模型的权限。",
       chat: "对话",
-      compare: "对比",
       compliance: "合规",
       agentBuilder: "智能体构建器（实验）",
     },

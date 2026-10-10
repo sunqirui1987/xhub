@@ -140,7 +140,7 @@ func keyBudgetChain(t *testing.T, live bool) {
 }
 
 // TestBudgetNamesTheNarrowestExhaustedScope 把五层一起顶到同一条线上。
-// 拒绝必须先点名最窄的一层；每抬高一层，下一层的名字才出现。最后一次成功只加一笔。
+// 前置隔离 schema、本地上游；先释放子级保留额再收紧父级，断言额度拦截不调用供应商；harness 自动清理。
 func TestBudgetNamesTheNarrowestExhaustedScope(t *testing.T) {
 	runBoth(t, func(t *testing.T) { narrowBudgetChain(t, false) }, func(t *testing.T) { narrowBudgetChain(t, true) })
 }
@@ -158,24 +158,25 @@ func narrowBudgetChain(t *testing.T, live bool) {
 
 	h.assertBilled(t, c, admin, model, "fills the tight scopes", []string{model})
 	spent := h.moneyOf(t, c)
-	h.setUserBudget(t, admin, c.userID, spent.user)
+	// 先收回密钥未用保留额，才能降低个人；同时到顶时维持旧入口的个人优先错误契约。
 	h.setKeyBudget(t, admin, c.key, spent.key)
-	h.setOrgBudget(t, admin, c.orgID, spent.org)
-	// 个人和密钥都到顶时，点名的是更窄的个人。
+	h.setUserBudget(t, admin, c.userID, spent.user)
 	h.assertBudgetStop(t, c, admin, model, "user and key are both spent", "User")
 	h.setUserBudget(t, admin, c.userID, room)
 	h.assertBudgetStop(t, c, admin, model, "key is the narrow one left", "Key")
-	h.setKeyBudget(t, admin, c.key, room)
-
-	h.setTeamBudget(t, admin, c.teamID, spent.team)
+	// 将个人额度改为共享，避免未消费的个人保留额阻止降低团队额度。
+	h.ok(http.MethodPost, "/user/update", admin, map[string]any{"user_id": c.userID, "max_budget": nil})
+	h.ok(http.MethodPost, "/key/update", admin, map[string]any{"key": c.key, "max_budget": nil})
 	h.setProjectBudget(t, admin, c.projectID, spent.project)
-	// 项目和团队都到顶时，点名的是更窄的项目。
+	h.setTeamBudget(t, admin, c.teamID, spent.team)
 	h.assertBudgetStop(t, c, admin, model, "project and team are both spent", "Project")
 	h.setTeamBudget(t, admin, c.teamID, room)
 	h.setProjectBudget(t, admin, c.projectID, room)
 	h.setTeamBudget(t, admin, c.teamID, spent.team)
 	h.assertBudgetStop(t, c, admin, model, "only the team is spent", "Team")
-	h.setTeamBudget(t, admin, c.teamID, room)
+	// 根组织收紧前释放团队保留额，个人/密钥继续共享根组织的金额上限。
+	h.ok(http.MethodPost, "/team/update", admin, map[string]any{"team_id": c.teamID, "max_budget": nil})
+	h.setOrgBudget(t, admin, c.orgID, spent.org)
 	h.assertBudgetStop(t, c, admin, model, "only the organization is spent", "Organization")
 	h.setOrgBudget(t, admin, c.orgID, room)
 	h.assertBilled(t, c, admin, model, "every ceiling is open", []string{model})
