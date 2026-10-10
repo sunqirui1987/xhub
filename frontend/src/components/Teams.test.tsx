@@ -12,6 +12,7 @@ import {
   getDefaultTeamSettings,
   getGuardrailsList,
   getPoliciesList,
+  getRouteTemplatesCall,
   teamCreateCall,
 } from "./networking";
 import Teams from "./Teams";
@@ -67,6 +68,7 @@ vi.mock("./networking", () => ({
   getGuardrailsList: vi.fn().mockResolvedValue({ guardrails: [] }),
   getPoliciesList: vi.fn().mockResolvedValue({ policies: [] }),
   getDefaultTeamSettings: vi.fn().mockResolvedValue({ values: {} }),
+  getRouteTemplatesCall: vi.fn().mockResolvedValue([]),
 }));
 
 // Teams invalidates teamsTableKeys on mutations; the selected team is passed up from the table.

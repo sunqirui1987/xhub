@@ -1,13 +1,15 @@
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/../tests/test-utils";
 import PipelineFlowBuilder, { FlowBuilderPage, PipelineInfoDisplay } from "./pipeline_flow_builder";
 import { GuardrailPipeline, PipelineStep } from "@/components/policies/types";
 import { Guardrail } from "@/components/guardrails/types";
+import { setActiveLocale } from "@/i18n";
 
 vi.mock("@/components/networking");
+afterEach(() => setActiveLocale("en"));
 
 const step = (overrides: Partial<PipelineStep> = {}): PipelineStep => ({
   guardrail: "pii-masker",
@@ -83,6 +85,17 @@ describe("PipelineFlowBuilder", () => {
     expect(screen.getByText("ON PASS")).toBeInTheDocument();
     expect(screen.getByText("ON FAIL")).toBeInTheDocument();
     expect(screen.getByText("ON API FAILURE")).toBeInTheDocument();
+  });
+
+  /** 前置中文语言和一个完整步骤；验证通过、失败与 API 失败三类决策标签均来自目录；卸载后恢复英文，无持久化数据。 */
+  it("localizes every decision section label", () => {
+    setActiveLocale("zh-CN");
+    renderWithProviders(
+      <PipelineFlowBuilder pipeline={pipeline([step()])} onChange={vi.fn()} availableGuardrails={guardrails} />,
+    );
+    expect(screen.getByText("通过时")).toBeInTheDocument();
+    expect(screen.getByText("未通过时")).toBeInTheDocument();
+    expect(screen.getByText("API 失败时")).toBeInTheDocument();
   });
 
   it("inserts a step at the clicked connector", async () => {

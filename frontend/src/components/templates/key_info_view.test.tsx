@@ -1021,8 +1021,8 @@ describe("KeyInfoView", () => {
       );
     });
 
-    it("should keep an empty policies field when the key previously had policies set", async () => {
-      // Premium users must still be able to clear existing policies by sending `[]`.
+    it("should strip policies from the regular key update when the key previously had policies set", async () => {
+      // 权限字段由独立权限接口保存，普通 key/update 不再携带 policies。
       const keyData: KeyResponse = {
         ...MOCK_KEY_DATA,
         user_id: "proxy-admin-user",
@@ -1033,12 +1033,14 @@ describe("KeyInfoView", () => {
       await enterEditMode(keyData);
       await editViewMocks.onSubmit!({ key: keyData.token, token: keyData.token, policies: [] });
 
-      expect(keyUpdateCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ policies: [] }));
+      expect(keyUpdateCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ policies: expect.anything() }),
+      );
     });
 
-    it("should keep an empty policies field when the previous value lives only at the top level of keyData", async () => {
-      // Defensive: some premium fields may be present at the top level but not
-      // mirrored into metadata. A genuine clear must still be forwarded.
+    it("should strip policies from the regular key update when the previous value is top-level only", async () => {
+      // 即使旧响应把字段放在顶层，普通 key/update 也必须遵守新的字段边界。
       const keyData: KeyResponse = {
         ...MOCK_KEY_DATA,
         user_id: "proxy-admin-user",
@@ -1049,7 +1051,10 @@ describe("KeyInfoView", () => {
       await enterEditMode(keyData);
       await editViewMocks.onSubmit!({ key: keyData.token, token: keyData.token, policies: [] });
 
-      expect(keyUpdateCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ policies: [] }));
+      expect(keyUpdateCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ policies: expect.anything() }),
+      );
     });
 
     it("puts the key identifier and an explicit null max_budget on the wire when the edit view hands over a cleared budget", async () => {
@@ -1089,9 +1094,11 @@ describe("KeyInfoView", () => {
       await waitFor(() => expect(editViewMocks.onSubmit).toBeDefined());
     };
 
-    const submittedToolPermissions = () => {
+    const expectPermissionFieldsStripped = () => {
       const payload = vi.mocked(keyUpdateCall).mock.calls.at(-1)?.[1] as Record<string, any>;
-      return payload.object_permission.mcp_tool_permissions;
+      expect(payload).not.toHaveProperty("mcp_servers_and_groups");
+      expect(payload).not.toHaveProperty("mcp_tool_permissions");
+      expect(payload).not.toHaveProperty("object_permission");
     };
 
     beforeEach(() => {
@@ -1111,7 +1118,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({});
+      expectPermissionFieldsStripped();
     });
 
     it("drops only the deselected server and keeps the one still granted", async () => {
@@ -1123,7 +1130,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ "srv-1": ["read"] });
+      expectPermissionFieldsStripped();
     });
 
     it("keeps an allowlist whose server is reachable through a retained access group", async () => {
@@ -1135,7 +1142,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ "srv-2": ["write"] });
+      expectPermissionFieldsStripped();
     });
 
     it("drops an allowlist the retained access group does not reach", async () => {
@@ -1147,7 +1154,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ "srv-2": ["write"] });
+      expectPermissionFieldsStripped();
     });
 
     it("drops an allowlist the retained toolset does not cover", async () => {
@@ -1159,10 +1166,10 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ "srv-2": ["write"] });
+      expectPermissionFieldsStripped();
     });
 
-    it("refuses to save a permission change while a selected toolset is unresolvable", async () => {
+    it("saves regular fields without permission fields while a selected toolset is unresolvable", async () => {
       vi.mocked(useMCPToolsets).mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useMCPToolsets>);
       await enterEditMode(KEY_WITH_TOOL_PERMISSIONS);
       await editViewMocks.onSubmit!({
@@ -1172,7 +1179,8 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(keyUpdateCall).not.toHaveBeenCalled();
+      expect(keyUpdateCall).toHaveBeenCalledTimes(1);
+      expectPermissionFieldsStripped();
     });
 
     it("resolves a name-keyed allowlist against the server catalog", async () => {
@@ -1184,7 +1192,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { deploy_tracker: ["read"], incident_log: ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ deploy_tracker: ["read"] });
+      expectPermissionFieldsStripped();
     });
 
     it("clears every allowlist when the admin picks the no-MCP-servers sentinel", async () => {
@@ -1196,7 +1204,7 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({});
+      expectPermissionFieldsStripped();
     });
 
     it("keeps every allowlist when the admin grants all proxy servers", async () => {
@@ -1208,10 +1216,10 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(submittedToolPermissions()).toEqual({ "srv-1": ["read"], "srv-2": ["write"] });
+      expectPermissionFieldsStripped();
     });
 
-    it("refuses to save a permission change it cannot compute without the server catalog", async () => {
+    it("saves regular fields without permission fields when the server catalog is unavailable", async () => {
       vi.mocked(useMCPServers).mockReturnValue({ data: undefined } as ReturnType<typeof useMCPServers>);
       await enterEditMode(KEY_WITH_TOOL_PERMISSIONS);
       await editViewMocks.onSubmit!({
@@ -1221,10 +1229,11 @@ describe("KeyInfoView", () => {
         mcp_tool_permissions: { "srv-1": ["read"], "srv-2": ["write"] },
       });
 
-      expect(keyUpdateCall).not.toHaveBeenCalled();
+      expect(keyUpdateCall).toHaveBeenCalledTimes(1);
+      expectPermissionFieldsStripped();
     });
 
-    it("preserves a vector-store edit made in the same save", async () => {
+    it("strips vector-store edits from the regular key update", async () => {
       await enterEditMode(KEY_WITH_TOOL_PERMISSIONS);
       await editViewMocks.onSubmit!({
         key: KEY_WITH_TOOL_PERMISSIONS.token,
@@ -1235,7 +1244,8 @@ describe("KeyInfoView", () => {
       });
 
       const payload = vi.mocked(keyUpdateCall).mock.calls.at(-1)?.[1] as Record<string, any>;
-      expect(payload.object_permission.vector_stores).toEqual(["vs-1"]);
+      expect(payload).not.toHaveProperty("vector_stores");
+      expect(payload).not.toHaveProperty("object_permission");
     });
   });
 

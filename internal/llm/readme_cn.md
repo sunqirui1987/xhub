@@ -4,9 +4,9 @@
 
 ## 职责与实现契约
 
-Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 OpenAI/Anthropic/Gemini 等上游请求和响应。build/call/message/gemini 处理协议结构；credential 解析凭据；allow/proxy_params/groups 限制参数；bypass/passthrough 处理传输描述。
-这些函数不负责真正发送 HTTP、执行重试、访问数据库或写费用。数据面选择部署之后调用它们，并拥有超时、流生命周期和结算。供应商 api_base 与默认端点拼接要避免 /v1 重复或丢失。
-代理专属参数不应漏给供应商；明确支持的字段与未知字段有不同处理。协议 usage、错误和流事件需要保持原始语义，尤其缓存 token 与明确零值。新增适配器需固定样本、失败样本和真实模型请求，而不能只测 Build 返回非空。
+对话协议转换、凭据填充、请求过滤和直通辅助函数为数据面提供支持。`dialogue.go` 通过统一结构转换受支持的对话协议；`credential.go` 填充部署参数；`allow.go` 与 `proxy_params.go` 限制请求；`passthrough.go` 拼接传输地址。`call.go` 只定义操作名常量。
+本包不发送 HTTP、不执行重试、不访问数据库，也不记录费用。数据面选择部署后负责超时、流生命周期和结算；API 根地址和端点构造由选中的供应商实现负责。
+代理专属参数不应泄漏给供应商。协议 usage、错误和流事件需要保留原始语义，尤其是缓存 token 与明确零值。新增适配器需提供成功样本、失败样本和真实模型请求证据。
 
 ## 子目录与协作边界
 
@@ -24,29 +24,27 @@ Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 O
 
 ### build.go
 
-公开类型：`Request`, `Upstream`.
+公开类型：`Upstream`，保存供应商调用使用的 URL、请求头和正文。具体构造由选中的供应商实现负责。
 
-- [`func Build(ctx context.Context, in Request) (Upstream, error)`](build.go) — Build builds the upstream request for the protocol group.  OpenAI and providers that only change the base URL and a Bearer key use github.com/openai/openai-go. Gemini and Vertex generateContent use google.golang.org/genai. Azure still uses the OpenAI SDK JSON, but the URL is the deployment path and the auth header is api-key. Anthropic, Cohere, and Bedrock each have their own path and body. They are not posted to /chat/completions.
-- [`func ErrUnknownProvider() error`](build.go) — ErrUnknownProvider is errUnknownProvider exported, so a caller can tell "the gateway cannot encode for this provider at all" apart from a specific encoding failure. The two need different messages: the first is a wrong provider name, the second is a request the chosen provider cannot express.
-- [`func ChatProbeUsesFixture(provider string) bool`](build.go) — ChatProbeUsesFixture reports that the standard test upstream can answer this chat. Those providers' chat URLs end in /chat/completions, /v1/messages, or :generateContent. Every other protocol group must be checked from the URL and body Build returns. Success cannot be judged from the same OpenAI path.
-- [`func RealtimeClientSecretsURL(apiBase string) string`](build.go) — RealtimeClientSecretsURL matches LiteLLM OpenAIRealtimeHTTPConfig.get_complete_url. A custom api_base that ends in /v1 is trimmed first and then joined with /v1/realtime/client_secrets.
-
-### bypass.go
-
-- [`func ResponsesToChat(raw []byte, model string) []byte`](bypass.go) — ResponsesToChat turns one Responses JSON object into a chat completion. A body that is already a chat completion, or that is not a response object, is returned unchanged.
-- [`func ResponsesSSEToChat(buf []byte, model string, flush bool) (emit, rest []byte)`](bypass.go) — ResponsesSSEToChat turns complete Responses SSE events into chat completion chunks. rest is the unfinished tail. flush parses that tail and ends the chat stream with [DONE].
+原生 Responses 的转发、usage 与 continuation 由 [provider/openai](../provider/openai/readme_cn.md) 和 [dataplane](../dataplane/readme_cn.md) 负责，不能用已经移除的 Responses-to-chat 转换函数作为验证入口。
 
 ### call.go
 
-- [`func Headers(apiKey string) http.Header`](call.go) — Headers 组装访问上游的请求头。有密钥时写 Bearer，并带上调用方允许转发的头。
-- [`func DefaultAPIBase(provider string) string`](call.go) — DefaultAPIBase is the official root used when a deployment does not set api_base. OpenAI chat joins /chat/completions onto https://api.openai.com/v1. An unknown provider returns an empty string.
-- [`func Endpoint(op, provider, apiBase, model string) string`](call.go) — Endpoint returns the full URL for this operation. apiBase must already be resolved by the credential layer. This function does not replace an empty address with api.openai.com, or an unconfigured deployment would quietly call the official host. The caller should return an authentication error when the address or the key is empty. Path rules match each LiteLLM provider's get_complete_url, folded into one table: OpenAI-compatible providers share the default branch, and Azure, Anthropic, Gemini, and Vertex have their own branches.
-- [`func Encode(op, provider string, body map[string]any, model string) ([]byte, error)`](call.go) — Encode turns the public request into the upstream body. The public model is the routing alias. The upstream wants the real model name from the deployment, so model is overwritten here. Other fields are kept as they are. Temperature, tools, and the stream flag come from the caller. This function does not fill defaults, except Anthropic Messages, which fills max_tokens with 256 when it is missing. That field is required by the Messages API, and the upstream returns 400 without it.
-- [`func Decode(op, provider, alias string, raw []byte) []byte`](call.go) — Decode turns an upstream response into the public shape and sets model back to the alias the caller used. Audio bytes have no JSON model field and are returned unchanged. The model field on images, rerank, and transcriptions belongs to the result and is not overwritten with the alias. Other JSON objects set model to the alias. A Messages operation then turns a chat.completion into an Anthropic message object.
+本文件定义路由和供应商实现共享的 `Op*` 操作常量，不负责选择默认 API 根地址、构造请求头或编码供应商请求。
 
 ### credential.go
 
 - [`func Hydrate(params, credentialValues map[string]any) map[string]any`](credential.go) — Hydrate fills deployment parameters that are still empty from a named credential. LiteLLM load_credentials_from_list writes a value only when the key is entirely absent. Deployments in this gateway often store api_key as an empty string after a redacted response is read back, so an empty string also counts as unset. api_key is the exception. The dashboard masks a stored key as ***** and the update handlerkeeps the previous value, so a model can keep a stale key after the user points it at a credential. A non-blank api_key on the credential replaces that stale key. Every other credential fieldstill fills only a blank deployment field, and a non-empty value there still wins. os.environ/NAME inside a string is expanded on this call, not when the credential is saved. The same credential can fo
+
+### dialogue.go
+
+公开类型：`Turn`、`Dialogue`、`DialogueResult`。
+
+- [`func ParseDialogue(protocol string, body map[string]any) (Dialogue, error)`](dialogue.go) — 把受支持协议的请求转换为统一对话结构，不支持的协议返回错误。
+- [`func EncodeDialogue(d Dialogue, protocol, model string) (map[string]any, error)`](dialogue.go) — 把统一对话转换为选定的上游协议和模型。
+- [`func ParseDialogueResult(protocol string, raw []byte) (DialogueResult, error)`](dialogue.go) — 解析受支持的上游响应，并保留协议用量事实。
+- [`func EncodeDialogueResult(r DialogueResult, protocol, model string) ([]byte, error)`](dialogue.go) — 输出选定的公开响应协议和模型名。
+- [`func NormalizeDialogueUsage(u map[string]any) map[string]any`](dialogue.go) — 规范用量字段，同时保留明确零值和缓存 token 数量。
 
 ### error.go
 
@@ -56,9 +54,7 @@ Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 O
 
 内部实现和协议边界见 [gemini.go](gemini.go)。
 
-### groups.go
-
-- [`func ProtocolGroup(provider string) (string, bool)`](groups.go) — ProtocolGroup returns the protocol group for a provider name from the LiteLLM 1.102.0 provider set. Groups follow wire format and authentication, not the old Python package layout. An unknown or empty name returns false.
+供应商协议分类由 [provider/capability.go](../provider/capability.go) 的能力定义和 [build.go](build.go) 的分派处理，未知协议必须沿真实失败路径验证。
 
 ### message.go
 
@@ -87,7 +83,10 @@ Build、Endpoint、Encode、Decode、Hydrate 等函数把统一调用转换为 O
 
 | 测试文件 | 场景入口 |
 | --- | --- |
-| [call_test.go](call_test.go) | `TestHydrateCredentialAPIKeyReplacesStaleDeploymentKey`, `TestHydrateKeepsDeploymentKeyWhenCredentialHasNone`, `TestDefaultAPIBase` |
+| [allow_test.go](allow_test.go) | `TestAllowWithoutPublicSchema`, `TestFilterRejectsPublicSchema` |
+| [call_test.go](call_test.go) | `TestHydrateCredentialAPIKeyReplacesStaleDeploymentKey`, `TestHydrateKeepsDeploymentKeyWhenCredentialHasNone` |
+| [dialogue_test.go](dialogue_test.go) | `TestDialogueProtocolMatrix`, `TestDialogueRejectsUnsupported`, `TestDialogueResultMatrix` |
+| [dialogue_google_test.go](dialogue_google_test.go) | `TestGoogleDialogueBoundaries`, `TestGoogleResultBoundaries` |
 
 ```bash
 go test ./internal/llm -count=1

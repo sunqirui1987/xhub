@@ -14,6 +14,11 @@ vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: useAuthorizedMock,
 }));
 
+/** 服务器已授予全局费用能力，验证分页共享与缓存页签接线；页面权限另由能力测试覆盖。 */
+vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
+  default: (capability: string) => capability === "viewProxyWideCostData",
+}));
+
 vi.mock("@/components/networking", () => ({
   userDailyActivityCall: (...args: unknown[]) => mockUserDailyActivityCall(...args),
   userDailyActivityAggregatedCall: (...args: unknown[]) => mockUserDailyActivityAggregatedCall(...args),
@@ -93,4 +98,10 @@ describe("CostOptimizationView daily activity", () => {
     expect(await screen.findByText(/Currently fetching spend data: fetched 1 \/ 3 pages/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
+});
+
+/** 固定导入期英文翻译，验证表单和接口契约；本组不测试语言切换，DOM 由框架自动清理。 */
+vi.mock("@/i18n", async () => {
+  const { translate } = await import("@/i18n/translate");
+  return { getActiveLocale: () => "en", t: (key: string, params?: Record<string, string | number>) => translate("en", key, params) };
 });

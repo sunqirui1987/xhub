@@ -30,6 +30,11 @@ vi.mock("@/app/(dashboard)/hooks/organizations/useOrganizations", () => ({
 vi.mock("../networking", () => {
   return {
     serverRootPath: "",
+    getRouteTemplatesCall: vi.fn().mockResolvedValue([]),
+    getRouteTemplateBindingCall: vi.fn().mockResolvedValue({
+      route_template_id: "",
+      effective: { scope_type: "platform" },
+    }),
     keyUpdateCall: (...args: any[]) => keyUpdateCallMock(...args),
     keyDeleteCall: (...args: any[]) => keyDeleteCallMock(...args),
   };
@@ -295,7 +300,7 @@ describe("KeyInfoView handleKeyUpdate guardrails guard", () => {
     expect(sentPayload.key).toBe("tok_123");
   });
 
-  it("should preserve guardrails & prompts for non-premium users with write access role (e.g. Admin)", async () => {
+  it("should preserve guardrails and omit the retired prompts field for non-premium admins", async () => {
     renderView(false); // premiumUser = false, userRole = "Admin"
 
     fireEvent.click(screen.getByText("Settings"));
@@ -313,13 +318,14 @@ describe("KeyInfoView handleKeyUpdate guardrails guard", () => {
 
     const [, sentPayload] = keyUpdateCallMock.mock.calls[0];
 
+    // prompts 已退出 key/update 契约；guardrails 仍同步到顶层和 metadata。
     expect(sentPayload.guardrails).toEqual(["gr-1"]);
-    expect(sentPayload.prompts).toEqual(["fast"]);
+    expect(sentPayload).not.toHaveProperty("prompts");
     expect(sentPayload.metadata?.guardrails).toEqual(["gr-1"]);
     expect(sentPayload.key).toBe("tok_123");
   });
 
-  it("should preserve guardrails & prompts for premium users and includes metadata.guardrails", async () => {
+  it("should preserve premium guardrails and omit the retired prompts field", async () => {
     renderView(true); // premiumUser = true
 
     fireEvent.click(screen.getByText("Settings"));
@@ -337,15 +343,16 @@ describe("KeyInfoView handleKeyUpdate guardrails guard", () => {
 
     const [, sentPayload] = keyUpdateCallMock.mock.calls[0];
 
+    // prompts 已退出 key/update 契约；premium 用户的 guardrails 仍需保留。
     expect(sentPayload.guardrails).toEqual(["gr-1"]);
-    expect(sentPayload.prompts).toEqual(["fast"]);
+    expect(sentPayload).not.toHaveProperty("prompts");
     expect(sentPayload.metadata?.guardrails).toEqual(["gr-1"]);
     expect(sentPayload.key).toBe("tok_123");
   });
 });
 
 describe("KeyInfoView handleKeyUpdate mcp_toolsets", () => {
-  it("should forward the toolsets the edit form supplies into object_permission", async () => {
+  it("should omit permission fields that are persisted by their dedicated flow", async () => {
     renderView(true);
 
     fireEvent.click(screen.getByText("Settings"));
@@ -361,13 +368,15 @@ describe("KeyInfoView handleKeyUpdate mcp_toolsets", () => {
     await waitFor(() => expect(keyUpdateCallMock).toHaveBeenCalled());
 
     const [, sentPayload] = keyUpdateCallMock.mock.calls[0];
-    expect(sentPayload.object_permission.mcp_toolsets).toEqual(["ts-1"]);
+    // 权限由独立接口保存，普通 key/update 不应重复发送权限对象或表单聚合字段。
+    expect(sentPayload).not.toHaveProperty("object_permission");
+    expect(sentPayload).not.toHaveProperty("mcp_servers_and_groups");
     expect(sentPayload.max_budget).toBe(40000);
   });
 });
 
 describe("KeyInfoView handleKeyUpdate skills", () => {
-  it("should forward the skills the edit form supplies into object_permission and drop the form key", async () => {
+  it("should omit skills because the dedicated permission flow persists them", async () => {
     renderView(true);
 
     fireEvent.click(screen.getByText("Settings"));
@@ -382,11 +391,12 @@ describe("KeyInfoView handleKeyUpdate skills", () => {
     await waitFor(() => expect(keyUpdateCallMock).toHaveBeenCalled());
 
     const [, sentPayload] = keyUpdateCallMock.mock.calls[0];
-    expect(sentPayload.object_permission.skills).toEqual(["private-skill"]);
+    // skills 已由权限保存流程处理，普通 key/update 只负责剔除临时表单字段。
+    expect(sentPayload).not.toHaveProperty("object_permission");
     expect(sentPayload).not.toHaveProperty("skills");
   });
 
-  it("should send an explicit empty skills list when the form clears every skill", async () => {
+  it("should omit an explicitly cleared skills list from key update", async () => {
     renderView(true);
 
     fireEvent.click(screen.getByText("Settings"));
@@ -401,7 +411,9 @@ describe("KeyInfoView handleKeyUpdate skills", () => {
     await waitFor(() => expect(keyUpdateCallMock).toHaveBeenCalled());
 
     const [, sentPayload] = keyUpdateCallMock.mock.calls[0];
-    expect(sentPayload.object_permission.skills).toEqual([]);
+    // 空列表同样由权限保存流程处理，避免 key/update 覆盖对象权限。
+    expect(sentPayload).not.toHaveProperty("object_permission");
+    expect(sentPayload).not.toHaveProperty("skills");
   });
 });
 

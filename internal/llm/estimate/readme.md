@@ -6,7 +6,7 @@
 
 tokencount.go estimates input tokens using tokenizers; cost.go provides TokenCost and related helpers for rates, margins, discounts, and service tiers. Estimates support checks and quotes, not authoritative settlement.
 Tokenizer mismatch, multimodal input, hidden reasoning, and cache behavior limit precision. Billing uses actual upstream quantities and catalog prices when available.
-There are no direct HTTP routes; gateway token and quote handlers call these helpers. Document supported inputs, unknown models, and units when extending estimation. This directory currently has no direct test file; integration checks do not prove every estimation branch.
+There are no direct HTTP routes; gateway token and quote handlers call these helpers. Document supported inputs, unknown models, and units when extending estimation. Direct tests cover deterministic estimation contracts; integration checks cover their externally visible use.
 
 ## Source responsibilities and entry points
 
@@ -36,7 +36,7 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Verification and maintenance
 
-There are no direct test files here. Integration tests prove executed paths rather than every internal failure branch.
+[cost_test.go](cost_test.go) checks discount/markup precedence, cost breakdown, token-price units and billing tiers. [tokencount_test.go](tokencount_test.go) checks text/message estimates, unknown-model fallback, supported parameters and model-prefix handling. [Pricing regression](../../../cmd/regression/pricing_test.go) and [pricing browser E2E](../../../frontend/e2e/price-model-selects.spec.ts) cover the corresponding service and user contracts; tokenizer internals and image/audio estimates remain outside this proof.
 
 ```bash
 go test ./internal/llm/estimate -count=1

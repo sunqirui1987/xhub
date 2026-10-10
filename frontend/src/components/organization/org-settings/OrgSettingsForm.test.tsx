@@ -4,6 +4,12 @@ import userEvent from "@testing-library/user-event";
 import React from "react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 
+// 表单校验文案来自当前语言环境；固定英文以匹配本文件其余可访问名称断言。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/components/ModelSelect/ModelSelect", () => ({
   ModelSelect: ({ onChange }: { onChange: (values: string[]) => void }) => (
     <button type="button" onClick={() => onChange([])}>

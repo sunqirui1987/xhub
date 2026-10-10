@@ -9,7 +9,7 @@ import (
 )
 
 // acceptanceDaily 是用户 daily 聚合接口中与计费原子性有关的总计。
-// 它只保存可由调用方观察到的金额、真实响应 token 和请求数，便于比较成功调用的增量以及拒绝前后的不变性。
+// 它保存可观察的金额、真实响应 token 和成功/失败请求数；拒绝新增失败请求，但金额和 token 不变。
 type acceptanceDaily struct {
 	spend, prompt, completion, total, requests, success, failed float64
 }
@@ -24,7 +24,7 @@ type acceptanceSnapshot struct {
 }
 
 // TestAcceptanceLimitsAndAccountingContract 串起发布验收所需的限制与计费契约。
-// 前置条件是 harness 提供真实网关、隔离 PostgreSQL schema、独立 Redis 和本地上游；测试验证真实响应 token 在事件、daily 和五级金额中一致，预算、RPM、TPM 与模型名单拒绝均无外发和账单，并在放宽限制后用原密钥恢复。
+// 前置条件是 harness 提供真实网关、隔离 PostgreSQL schema、独立 Redis 和本地上游；验证真实响应 token 在事件、daily 和五级金额中一致。预算、RPM、TPM 与模型名单拒绝无外发、不扣费，但保留可关联的零费用失败日志并增加 daily 失败数；放宽后原密钥恢复。
 // 测试资源由 harness 的 Cleanup 清理；本函数不依赖外部供应商凭据，也不修改已有租户数据。
 func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 	const (
@@ -33,6 +33,7 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 		room   = 1000.0
 	)
 	h := newHarness(t, chatDeployment(modelA), chatDeployment(modelB))
+	// 子测试顺序执行并暂时切换断言上下文；不能复制包含互斥锁的 harness，服务器闭包必须继续使用原对象。
 	admin := h.adminSession()
 	c := h.openScope(t, admin, "acceptance-limits")
 	h.usageOverride(modelA, map[string]any{

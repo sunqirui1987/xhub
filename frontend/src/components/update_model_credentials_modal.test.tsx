@@ -5,6 +5,12 @@ import UpdateModelCredentialsModal from "./update_model_credentials_modal";
 import * as networking from "./networking";
 import { toast } from "@/lib/toast";
 
+/** 导入静态校验器前固定英文翻译；使用真实翻译，避免 setup 的语言初始化晚于模块求值；结束由 Vitest 清理 mock。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
+});
+
 vi.mock("./networking", async () => {
   const actual = await vi.importActual("./networking");
   return {

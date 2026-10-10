@@ -710,12 +710,12 @@ function RequestResponseSection({
               </TabsContent>
               <TabsContent value="json">
                 <div className="space-y-4 p-4">
-                  <JsonPanel title="Headers" data={requestHeaders(getRawRequest()) ?? {}} copyLabel="Copy headers" />
-                  <JsonPanel title="Request" data={requestBody(getRawRequest())} copyLabel="Copy request" />
+                  <JsonPanel title={t("Headers")} data={requestHeaders(getRawRequest()) ?? {}} copyLabel={t("Copy headers")} />
+                  <JsonPanel title={t("Request")} data={requestBody(getRawRequest())} copyLabel={t("Copy request")} />
                   <JsonPanel
-                    title="Response"
+                    title={t("Response")}
                     data={hasResponse || hasError ? getFormattedResponse() : null}
-                    copyLabel="Copy response"
+                    copyLabel={t("Copy response")}
                     empty={t("Response data not available")}
                   />
                 </div>

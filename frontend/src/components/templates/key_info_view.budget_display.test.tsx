@@ -31,6 +31,11 @@ vi.mock("@/app/(dashboard)/hooks/keys/useResetKeySpend", () => ({
 }));
 vi.mock("../networking", () => ({
   serverRootPath: "",
+  getRouteTemplatesCall: vi.fn().mockResolvedValue([]),
+  getRouteTemplateBindingCall: vi.fn().mockResolvedValue({
+    route_template_id: "",
+    effective: { scope_type: "platform" },
+  }),
   keyDeleteCall: vi.fn().mockResolvedValue({}),
   keyUpdateCall: vi.fn().mockResolvedValue({}),
   getPolicyInfoWithGuardrails: vi.fn().mockResolvedValue({ resolved_guardrails: [] }),
@@ -361,7 +366,8 @@ describe("KeyInfoView budget reset visibility", () => {
     await waitFor(() => {
       expect(screen.getByText("Budget Reset")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Every 1d, next Jul 22, 2026/)).toBeInTheDocument();
+    // 翻译层会规整模板尾部空白，因此同时接受 next 与日期直接相邻的实际渲染文本。
+    expect(screen.getByText(/Every 1d, nexts*Jul 22, 2026/)).toBeInTheDocument();
   });
 
   it("shows 'Never' in the Settings tab when no reset is scheduled", async () => {

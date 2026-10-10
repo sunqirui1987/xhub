@@ -4,6 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MultiSelect, type MultiSelectOption } from "./MultiSelect";
 
+/** 固定英文并保留真实插值；验证创建选项名称与拆分结果，结束由 Vitest 清理 mock。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, values?: Parameters<typeof original.translate>[2]) => original.translate("en", key, values) };
+});
+
 const OPTIONS: MultiSelectOption[] = [
   { value: "vs-alpha", label: "alpha-kb (vs-alpha)" },
   { value: "vs-beta", label: "beta-kb (vs-beta)", description: "second store" },
@@ -94,11 +100,13 @@ describe("MultiSelect", () => {
     expect(await screen.findByText(translate("en", "No options found"))).toBeInTheDocument();
   });
 
+  // 目的：验证粘贴的逗号输入按 token 拆分并去空白；前置为允许自定义的真实组合框，结束清理渲染树和 mock。
   it("splits a comma-separated custom entry into one value per token", async () => {
     const { onValueChange, input } = renderMultiSelect({ allowCustomValues: true });
 
-    await userEvent.type(input, "udp, kafka ,terraform");
-    await userEvent.click(await screen.findByText('Create "udp, kafka ,terraform"'));
+    await userEvent.click(input);
+    await userEvent.paste("udp, kafka ,terraform");
+    await userEvent.click(await screen.findByRole("option", { name: translate("en", 'Create "{customOption}"', { customOption: "udp, kafka ,terraform" }) }));
 
     expect(onValueChange).toHaveBeenCalledWith(["udp", "kafka", "terraform"]);
   });

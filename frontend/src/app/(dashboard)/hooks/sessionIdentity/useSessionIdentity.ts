@@ -2,6 +2,7 @@ import { useQuery, UseQueryResult } from "@tanstack/react-query";
 import { getProxyBaseUrl, getGlobalLitellmHeaderName, deriveErrorMessage } from "@/components/networking";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { createQueryKeys } from "@/app/(dashboard)/hooks/common/queryKeysFactory";
+import { t } from "@/i18n";
 
 /**
  * The capabilities the gateway says this session holds.
@@ -53,6 +54,11 @@ export interface SessionIdentity {
 
 const identityKeys = createQueryKeys("sessionIdentity");
 
+/**
+ * 读取当前控制台会话的后台身份。
+ * 参数 accessToken 是已授权的会话令牌；返回规范化后的身份、能力和团队角色，供 useSessionIdentity 查询调用。
+ * 请求失败时优先保留后台错误；后台没有可读错误时按当前语言返回含状态码的提示。成功响应缺少列表时返回空列表。
+ */
 const fetchIdentity = async (accessToken: string): Promise<SessionIdentity> => {
   const baseUrl = getProxyBaseUrl();
   const response = await fetch(`${baseUrl}/auth/me`, {
@@ -65,7 +71,7 @@ const fetchIdentity = async (accessToken: string): Promise<SessionIdentity> => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(deriveErrorMessage(errorData) || `Identity request failed (${response.status})`);
+    throw new Error(deriveErrorMessage(errorData) || t("Identity request failed ({value0})", { value0: response.status }));
   }
 
   const data = (await response.json()) as Partial<SessionIdentity>;

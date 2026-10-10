@@ -3,6 +3,12 @@ import userEvent from "@testing-library/user-event";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
+
+/** 导入静态校验器前固定英文翻译；真实验证器保持启用，结束由 Vitest 清理 mock。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
+});
 import { TeamMetadataField } from "@/app/(dashboard)/hooks/teams/useTeamMetadataSchema";
 import { useZodForm } from "@/lib/forms/useZodForm";
 import MetadataKeyValueFields, {

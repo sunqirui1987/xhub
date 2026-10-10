@@ -10,6 +10,34 @@ import type { MCPToolset } from "../mcp_tools/types";
 
 vi.mock("../networking");
 
+/** 固定历史组件文案；现行网关不提供 MCP 目录，本组仅验证保留组件的隔离行为。 */
+vi.mock("@/i18n", async () => {
+  const { translate } = await import("@/i18n/translate");
+  return { t: (key: string, params?: Record<string, string | number>) => translate("en", key, params) };
+});
+
+/** 为历史组件注入受控目录查询，覆盖加载、失败和竞态；不改变现行 useMCPServers 的空目录契约。 */
+vi.mock("../../app/(dashboard)/hooks/mcpServers/useMCPServers", async () => {
+  const { useQuery } = await import("@tanstack/react-query");
+  const networking = await import("../networking");
+  return { useMCPServers: () => useQuery({
+    queryKey: ["legacy-component-server-fixture"],
+    queryFn: () => networking.fetchMCPServers("123", undefined),
+    retry: false,
+  }) };
+});
+
+/** 为历史组件注入工具集查询，验证继承、未完成查询和错误；QueryClient 在每个用例前清理。 */
+vi.mock("../../app/(dashboard)/hooks/mcpServers/useMCPToolsets", async () => {
+  const { useQuery } = await import("@tanstack/react-query");
+  const networking = await import("../networking");
+  return { useMCPToolsets: () => useQuery({
+    queryKey: ["legacy-component-toolset-fixture"],
+    queryFn: () => networking.fetchMCPToolsets("123"),
+    retry: false,
+  }) };
+});
+
 describe("MCPToolPermissions", () => {
   const mockAccessToken = "test-token";
   const mockServerId = "server-123";

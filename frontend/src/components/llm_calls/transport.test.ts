@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { postLLMRequest, readJSONStream } from "./transport";
+import { setActiveLocale } from "@/i18n";
 
 /** 把 UTF-8 文本按指定字节长度切成响应，验证网络分片边界；返回 SSE Response，无持久化副作用。 */
 function sse(text: string, chunkSize = 1): Response {
@@ -19,7 +20,10 @@ async function collect(response: Response, signal?: AbortSignal) {
   for await (const event of readJSONStream(response, signal)) events.push(event);
   return events;
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setActiveLocale("en");
+});
 
 describe("fetch 数据面传输", () => {
   /** 前置 fetch 隔离；验证 URL、鉴权、标签、JSON 与 signal，结束恢复全局对象。 */
@@ -90,6 +94,12 @@ describe("SSE 分片和失败边界", () => {
   it("拒绝超限事件及缺少 body", async () => {
     await expect(collect(sse("data: " + "x".repeat(8 * 1024 * 1024), 1024 * 1024))).rejects.toThrow("limit");
     await expect(collect(new Response(null))).rejects.toThrow("no body");
+  });
+  /** 前置中文语言、供应商无详细错误及无正文响应；验证协议失败兜底均来自中文目录；恢复语言，无持久化数据。 */
+  it("按当前语言返回流式协议兜底错误", async () => {
+    setActiveLocale("zh-CN");
+    await expect(collect(sse("event: error\ndata: {}\n\n", 128))).rejects.toThrow("流式响应失败");
+    await expect(collect(new Response(null))).rejects.toThrow("流式响应没有正文");
   });
   /** 前置挂起读取；取消必须解除等待和锁，不依赖网络；无持久化清理。 */
   it("取消挂起流并释放 reader", async () => {

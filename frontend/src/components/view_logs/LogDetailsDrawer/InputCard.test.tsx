@@ -1,9 +1,10 @@
 import React from "react";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { InputCard } from "./InputCard";
 import { ParsedMessage } from "./prettyMessagesTypes";
+import { setActiveLocale } from "@/i18n";
 
 describe("InputCard", () => {
   const mockWriteText = vi.fn().mockResolvedValue(undefined);
@@ -15,6 +16,7 @@ describe("InputCard", () => {
   ];
 
   beforeEach(() => {
+    setActiveLocale("en");
     vi.clearAllMocks();
     Object.defineProperty(navigator, "clipboard", {
       value: {
@@ -24,6 +26,7 @@ describe("InputCard", () => {
       configurable: true,
     });
   });
+  afterEach(() => setActiveLocale("en"));
 
   it("should render the InputCard component", () => {
     render(<InputCard messages={mockMessages} />);
@@ -87,8 +90,9 @@ describe("InputCard", () => {
   });
 
   it("should display cost when provided", () => {
-    render(<InputCard messages={mockMessages} inputCost={0.0015} />);
-    expect(screen.getByText(/Cost: \$0\.001500/)).toBeInTheDocument();
+    // 提供非零费用，验证共享标题的两位小数格式；组件由测试框架自动清理。
+    render(<InputCard messages={mockMessages} inputCost={1.0015} />);
+    expect(screen.getByText("Cost: $1.00")).toBeInTheDocument();
   });
 
   it("should copy last message content when copy button is clicked", async () => {
@@ -167,6 +171,16 @@ describe("InputCard", () => {
     render(<InputCard messages={messages} />);
     expect(screen.getByText("ASSISTANT")).toBeInTheDocument();
     expect(screen.getByText("Assistant response")).toBeInTheDocument();
+  });
+
+  /** 前置中文语言及系统、用户消息；验证两个 SimpleMessageBlock 消费端读取实时角色目录；恢复英文，无外部数据。 */
+  it("localizes system and user role labels", () => {
+    setActiveLocale("zh-CN");
+    render(<InputCard messages={[{ role: "system", content: "规则" }, { role: "user", content: "问题" }]} />);
+    expect(screen.getByText("系统")).toBeInTheDocument();
+    expect(screen.getByText("用户")).toBeInTheDocument();
+    expect(screen.queryByText("SYSTEM")).not.toBeInTheDocument();
+    expect(screen.queryByText("USER")).not.toBeInTheDocument();
   });
 
   it("should handle tool calls in last message", () => {

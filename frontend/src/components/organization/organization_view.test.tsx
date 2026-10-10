@@ -20,6 +20,11 @@ vi.mock("../networking", () => {
     organizationMemberUpdateCall: vi.fn(),
     organizationMemberDeleteCall: vi.fn(),
     organizationUpdateCall: vi.fn(),
+    getRouteTemplatesCall: vi.fn().mockResolvedValue([]),
+    getRouteTemplateBindingCall: vi.fn().mockResolvedValue({
+      route_template_id: "",
+      effective: { scope_type: "platform" },
+    }),
     serverRootPath: "",
   };
 });

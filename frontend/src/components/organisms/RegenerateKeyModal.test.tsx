@@ -422,7 +422,7 @@ describe("RegenerateKeyModal", () => {
     await waitFor(() => {
       expect(mockRegenerateKeyCall).toHaveBeenCalledWith(
         "123", // accessToken from mocked useAuthorized
-        "token-hash-123", // selectedToken.token
+        "token-id-123", // 真实接口使用 selectedToken.token_id 作为轮换目标
         expect.any(Object),
       );
     });

@@ -25,7 +25,7 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 | Test file | Scenario entry points |
 | --- | --- |
-| [files_test.go](files_test.go) | `TestEveryServerFileUsesLeveledLogger`, `TestRedactHidesBearerAndKey`, `TestRedactHidesCaseInsensitiveKeysAndURLCredentials` |
+| [files_test.go](files_test.go) | `TestLoggerDefinesLevels`, `TestRedactHidesBearerAndKey`, `TestRedactHidesCaseInsensitiveKeysAndURLCredentials` |
 
 ```bash
 go test ./internal/logx -count=1

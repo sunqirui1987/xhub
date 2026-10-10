@@ -115,7 +115,7 @@ describe("ModelInfoView reconstructed behavior", () => {
         "token",
         { model: "upstream-gpt", custom_llm_provider: "openai", litellm_credential_name: "supplier-a" },
         { id: "model-123", endpoint_types: ["chat"], transport: "bypass_openai_chat" },
-        "chat",
+        "bypass_openai_chat",
       ),
     );
     expect(await screen.findByText("连接正常，模型已响应。")).toBeInTheDocument();

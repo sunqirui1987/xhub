@@ -109,8 +109,16 @@ func TestModelWeightsLifecycle(t *testing.T) {
 		t.Fatalf("删除后模板仍有部署引用: %v", got)
 	}
 	groups = listField(h.ok("GET", "/model/groups?search=shared", admin, nil).json(), "data")
-	if len(groups) != 1 || groups[0]["default_weights"] != nil {
+	if len(groups) != 1 {
 		t.Fatalf("单部署仍保留默认分配: %v", groups)
+	}
+	if defaults, ok := groups[0]["default_weights"].(map[string]any); ok {
+		if allocations := defaults["allocations"]; allocations != nil {
+			rows, isList := allocations.([]any)
+			if !isList || len(rows) != 0 {
+				t.Fatalf("单部署仍保留非空默认分配: %v", groups)
+			}
+		}
 	}
 	checkCall("custom/alpha/model")
 	// 改名最后一条部署后旧默认不得残留；模板规则不再引用任何部署 ID。

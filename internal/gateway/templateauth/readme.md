@@ -26,7 +26,7 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 ## Verification and maintenance
 
-There are no direct test files here. Integration tests prove executed paths rather than every internal failure branch.
+[selection_test.go](selection_test.go) covers empty inheritance, trusted platform/organization/team ownership, authorization denial, missing templates and fail-closed storage errors. Ownership checks use real PostgreSQL in an isolated schema deleted at cleanup; they are service-boundary tests. Empty-input and canceled-context cases are deterministic unit checks. HTTP binding and browser flows are listed in [the verification matrix](../../../docs/development/product-fixes-20261010.md).
 
 ```bash
 go test ./internal/gateway/templateauth -count=1

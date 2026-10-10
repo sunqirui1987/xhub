@@ -30,43 +30,19 @@ model_info.endpoint_types 表示入口能力；未声明时默认为 chat，显�
 
 pricing_source 支持 catalog/manual。catalog 需要真实存在、有价格的 base_model。manual 需要至少一个明确费率/价格字段，非有限数和负价拒绝，明确 0 合法。rates 每个元素必须有效，不能只跳过坏行后保存剩下几行。支持 token/picture/second/query；窗口 all/offpeak/peak；输入输出、缓存读写及 batch 侧。实际使用维度取决于协议能提供的 usage。
 
-pricing_id / deployment_id 和命名凭据参与运行状态隔离。没有稳定 ID 的相同端点/模型/凭据可能合并状态。模板权重只使用稳定身份：优先 deployment_id（数据库部署的 model_info.id 或文件配置的 litellm_params.deployment_id），其次 pricing_id。没有稳定 ID 的部署保留自身权重，不能被模板覆盖。同端点不同部署有独立稳定 ID 时可分别设置份额。详见 [router](../../internal/router/readme_cn.md)。
+pricing_id / deployment_id 和命名凭据参与运行状态隔离。模板权重只使用 `deployment_id`：数据库部署使用 `model_info.id`，文件部署使用 `litellm_params.deployment_id`；没有稳定部署 ID 的部署保留自身权重，不能被模板覆盖。详见 [router](../../internal/router/readme_cn.md)。
 
 ## 模板执行字段
 
 | 字段 | 类型 | 未提供时 | 当前执行语义 |
 | --- | --- | --- | --- |
-| routing_strategy | string | simple-shuffle | 同公开模型部署排序，不扩大权限 |
-| model_routing | array | 无模型专属覆盖 | 精确匹配请求的公开模型名，只替换已选模板的策略和策略参数；其他字段仍由该模板提供 |
-| num_retries | number | 1 | 每条部署总尝试次数，非正转 1 |
-| timeout | number 秒 | 60 | 每次上游尝试时限，非正转 60 |
-| allowed_fails | number | 3 | 非正关闭冷却失败累计 |
-| cooldown_time | number 秒 | reader 返回 0 | 失败记录将非正转为 60 秒 |
-| routing_strategy_args.weights | list/map | 部署原始权重 | 只 split 使用，0 排除，无效负数忽略 |
+| `model_routes` | array | 必填 | 按公开模型匹配 `model`、`strategy` 和可选 `allocations`；模型规则优先于默认权重 |
+| `retry_policy` | object | 必填 | 完整包含 `max_attempts`、`timeout_seconds`、`failure_threshold`、`cooldown_seconds` |
+| `allocations` | array | 省略时继承默认，空数组时全为 1 | 仅 `traffic-split` 使用 `deployment_id` 与有限非负 `weight`；未列出部署为 1 |
 
-这些是 RouteSettings 对已选文档的读取默认；Config.Load 给平台默认预填重试 2，不应混淆。数字字符串不作为正式数字接受；零/false/null 在保存时不应被 UI 默认值吞掉。
+模板严格校验数字和字段；明确的 0、false、空数组和 null 必须保留。未知字段、字符串数字、重复模型、循环回退和无效部署 ID 会被拒绝。
 
-权重列表形状：
-
-```json
-{"routing_strategy":"weighted-split","routing_strategy_args":{"weights":[{"deployment_id":"model_123","weight":70}]}}
-```
-
-权重 map 形状：
-
-```json
-{"routing_strategy_args":{"weights":{"deployment:model_123":70}}}
-```
-
-同端点的部署必须使用稳定身份。列表行可写 `{"deployment_id":"model_123","weight":70}` 或 `{"pricing_id":"price_123","weight":70}`；映射键可写 `deployment:model_123` 或 `pricing:price_123`。没有稳定 ID 的行不能由模板覆盖。
-
-`model_routing` 示例：
-
-```json
-{"routing_strategy":"simple-shuffle","num_retries":2,"model_routing":[{"model_name":"public-chat","routing_strategy":"weighted-split","routing_strategy_args":{"weights":{"deployment:model_123":70}}}]}
-```
-
-`model_name` 必须非空且不能重复，策略必须有效，`routing_strategy_args` 如果提供则须为对象。匹配行未提供参数时使用空对象，不继承顶层策略参数；未匹配模型继续使用顶层策略。模板和平台设置写入时都会校验这些规则，其他未知字段可往返保存。
+权重配置使用 `model_routes[].allocations`，每项为 `deployment_id` 与有限非负 `weight`。省略 `allocations` 时继承模型管理的 `model_defaults`；显式空数组时所有匹配部署权重为 1；明细未列出的部署也为 1。权重总和不要求为 100，但至少有一个正值。模型管理默认权重通过 `GET /model/groups` 与 `PUT /model/default` 读写。模板更新是完整替换；`routing_groups`、三类 fallback 与 `retry_policy` 会进入编译和请求执行链。
 
 列表未匹配的部署使用自身权重。创建模板补齐平台基线，后续平台修改不改变旧模板；更新接口完整替换正文，缺失字段由运行 reader 默认决定。不是每字段与父级合并。
 

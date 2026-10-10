@@ -26,7 +26,7 @@ selection.go 是组织、团队、密钥普通保存与专用模板绑定共用�
 
 ## 验证与维护入口
 
-当前目录没有直接测试文件；上层集成测试仅证明被执行的链路，不代表所有内部失败分支均已覆盖。
+[selection_test.go](selection_test.go) 覆盖空白继承、平台/组织/团队真实归属、授权拒绝、模板缺失和存储故障关闭授权。归属测试使用真实 PostgreSQL 专用 schema，测试结束删除，属于服务边界验证；空输入和取消上下文属于确定性单元验证。真实 HTTP 绑定和浏览器流程见[验证矩阵](../../../docs/development/product-fixes-20261010.md)。
 
 ```bash
 go test ./internal/gateway/templateauth -count=1

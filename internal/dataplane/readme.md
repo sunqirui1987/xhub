@@ -66,10 +66,10 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 | [cache_scope_test.go](cache_scope_test.go) | `TestCacheScopeChangesWithConfigurationSessionAndQuery` |
 | [capability_test.go](capability_test.go) | `TestCapabilitySetsStaySeparate` |
 | [disabled_test.go](disabled_test.go) | `TestDropDisabledExcludesDisabled` |
-| [failure_log_test.go](failure_log_test.go) | `TestServeLogsBuildSkipAndTerminalAuth`, `TestServeLogsMissingCredential`, `TestServeLogsUnimplementedProvider`, `TestServeLogsEmptyStreamAndUpstreamStatus`, `TestServeLogsCacheHitAndStreamMetrics` |
+| [failure_log_test.go](failure_log_test.go) | `TestServeLogsBuildSkipAndTerminalAuth`, `TestServeLogsMissingCredential`, `TestServeLogsUnregisteredTransport`, `TestServeLogsEmptyStreamAndUpstreamStatus`, `TestServeLogsCacheHitAndStreamMetrics` |
 | [live_test.go](live_test.go) | `TestHotDeltasIncludesProject` |
 | [official_settlement_test.go](official_settlement_test.go) | `TestOfficialConcurrentCompletedPollsIsolateMetadata`, `TestOfficialSettlementRetriesAfterPersistenceFailure`, `TestOfficialZeroAndPendingPollsKeepUniqueIDs` |
-| [official_template_test.go](official_template_test.go) | `TestOfficialTemplateWeightsAndCredentialPin`, `TestOfficialTemplateRetriesHTTPFailure`, `TestOfficialTimeoutDoesNotReplayAmbiguousCreate`, `TestOfficialTaskScopesAndPendingUsage`, `TestOfficialForwardDoesNotLeakGatewayCredentials` |
+| [official_template_test.go](official_template_test.go) | `TestOfficialModelDefaultWeightsAndCredentialPin`, `TestOfficialTemplateTrafficSplitUsesLiveModelWeights`, `TestOfficialTemplateRetriesHTTPFailure`, `TestOfficialTimeoutDoesNotReplayAmbiguousCreate`, `TestOfficialTaskScopesAndPendingUsage`, `TestOfficialForwardDoesNotLeakGatewayCredentials` |
 | [prefer_test.go](prefer_test.go) | `TestPreferDeploymentMovesThePinnedOneFirst`, `TestPreferDeploymentLeavesAnUnknownPinAlone`, `TestOutputTokensCountsStreamedTextWhenUsageIsMissing`, `TestTTFTMillisOmitsAnUnmeasuredDelay` |
 | [stream_failure_regression_test.go](stream_failure_regression_test.go) | `TestStreamFailureAfterOutputDoesNotRetryOrPin`, `TestTemplateLookupFailureDoesNotContactUpstream` |
 | [usage_stream_test.go](usage_stream_test.go) | `TestCompleteUsagePreservesReportedZeroAndCacheInput`, `TestEstimateTokensDoesNotCountOutputLimitAsInput`, `TestStreamUsageMergesAnthropicFramesAndNestedProviders`, `TestPipeStreamParsesFragmentedSSEAndReturnsBodyError` |

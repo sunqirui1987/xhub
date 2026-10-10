@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DashboardShell } from "./layout";
@@ -12,6 +12,15 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({ accessToken: "test-access-token", authLoading: false }),
+}));
+
+/** 管理壳使用服务端能力而非 token 角色；固定平台管理员身份，无外部请求，夹具随测试卸载。 */
+vi.mock("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity")>(),
+  useSessionIdentity: () => ({
+    data: { user_id: "test-user-id", kind: "session", capabilities: ["platform.admin", "teams.read", "teams.manage", "teams.platform", "audit.read"], teams: [] },
+    isLoading: false,
+  }),
 }));
 
 vi.mock("@/contexts/PluginModeContext", () => ({
@@ -71,7 +80,7 @@ vi.mock("@/components/networking", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/networking")>();
   return {
     ...actual,
-    getUISettings: vi.fn().mockResolvedValue({ values: { enable_projects_ui: false } }),
+    getUISettings: vi.fn().mockResolvedValue({ values: { enable_projects_ui: true } }),
     getProxyBaseUrl: vi.fn().mockReturnValue("http://localhost:4000"),
   };
 });
@@ -84,17 +93,18 @@ const kept = [
   "Usage",
   "Logs",
   "Teams",
-  "Internal Users",
+  "Users",
   "Organizations",
-  "Settings",
+  "Admin Settings",
   "Projects",
-  "Access Groups",
+  "Routing & Load Balancing",
   "Guardrails Monitor",
 ];
 
 const removed = ["Agents", "MCP Servers", "Skills", "Policies", "Tools", "Developer Tools", "智能体", "Budgets", "Cost Optimization", "成本优化"];
 
 describe("ai-gateway admin shell", () => {
+  // 目的：项目入口开启时验证管理壳完整导航；前置为管理员和 enable_projects_ui，结束由渲染/查询夹具清理。
   it("renders a header, a vertical sidebar, and a padded content region", async () => {
     renderWithProviders(
       <DashboardShell>
@@ -118,12 +128,9 @@ describe("ai-gateway admin shell", () => {
     expect(shell).toContainElement(sidebar as HTMLElement);
     expect(content).toHaveTextContent("dashboard body");
     expect(content.className).toMatch(/\bp-6\b/);
-    expect(sidebar?.querySelector("a[aria-label='XHub home']")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "XHub home" })).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(sidebar?.querySelector('a[href*="projects"]')).not.toBeNull();
-      expect(sidebar).toHaveTextContent("Projects");
-    });
+    expect(await screen.findByRole("link", { name: "Projects" })).toBeInTheDocument();
     for (const label of kept) {
       expect(sidebar).toHaveTextContent(label);
     }

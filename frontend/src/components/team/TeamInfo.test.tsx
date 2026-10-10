@@ -46,6 +46,11 @@ vi.mock("@/components/networking", () => ({
   getTeamPermissionsCall: vi.fn(),
   organizationInfoCall: vi.fn(),
   getRouterSettingsCall: vi.fn().mockResolvedValue({ fields: [] }),
+  getRouteTemplatesCall: vi.fn().mockResolvedValue([]),
+  getRouteTemplateBindingCall: vi.fn().mockResolvedValue({
+    route_template_id: "",
+    effective: { scope_type: "platform" },
+  }),
   fetchMCPServers: vi.fn().mockResolvedValue([]),
   fetchMCPToolsets: vi.fn().mockResolvedValue([]),
   listMCPTools: vi.fn().mockResolvedValue({ tools: [] }),

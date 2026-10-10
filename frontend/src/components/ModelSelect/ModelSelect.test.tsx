@@ -6,6 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../../../tests/test-utils";
 import { ModelSelect } from "./ModelSelect";
 
+// 组件在模块加载时生成特殊选项文案；固定为英文，避免全局语言状态改变测试契约。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/app/(dashboard)/hooks/models/useModels", () => ({
   useAllProxyModels: vi.fn(),
 }));

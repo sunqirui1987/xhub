@@ -1,3 +1,5 @@
+import { t } from "@/i18n";
+
 /** 数据面请求参数；调用方传入网关、虚拟密钥、标签和取消信号。 */
 interface RequestOptions {
   baseUrl: string;
@@ -42,7 +44,7 @@ export async function postLLMRequest(path: string, body: unknown, options: Reque
 /** 共用 SSE 迭代器；参数为响应及取消信号，返回逐事件 JSON，供三个对话协议调用。
  * 支持 UTF-8 分片、CR/LF/CRLF、多行 data 和无末尾空行；错误/超限/取消抛出，结束释放 reader。 */
 export async function* readJSONStream(response: Response, signal?: AbortSignal): AsyncGenerator<any> {
-  if (!response.body) throw new Error("Streaming response has no body");
+  if (!response.body) throw new Error(t("Streaming response has no body"));
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "",
@@ -64,7 +66,7 @@ export async function* readJSONStream(response: Response, signal?: AbortSignal):
     }
     const value = JSON.parse(payload);
     if (type === "error" || value.error || value.type === "error" || value.type === "response.failed") {
-      throw new Error(value.error?.message || value.response?.error?.message || value.message || "Stream failed");
+      throw new Error(value.error?.message || value.response?.error?.message || value.message || t("Stream failed"));
     }
     return value;
   }
@@ -72,7 +74,7 @@ export async function* readJSONStream(response: Response, signal?: AbortSignal):
   function line(value: string): any {
     if (!value) return dispatch();
     size += value.length;
-    if (size > 8 * 1024 * 1024) throw new Error("SSE event exceeds limit");
+    if (size > 8 * 1024 * 1024) throw new Error(t("SSE event exceeds limit"));
     if (value.startsWith("data:")) data.push(value.slice(5).replace(/^ /, ""));
     else if (value.startsWith("event:")) eventType = value.slice(6).trim();
     return undefined;
@@ -97,7 +99,7 @@ export async function* readJSONStream(response: Response, signal?: AbortSignal):
         if (event !== undefined) yield event;
         if (finished) break;
       }
-      if (buffer.length + size > 8 * 1024 * 1024) throw new Error("SSE event exceeds limit");
+      if (buffer.length + size > 8 * 1024 * 1024) throw new Error(t("SSE event exceeds limit"));
       if (done) {
         if (buffer) line(buffer);
         const event = dispatch();

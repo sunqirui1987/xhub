@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Providers, providerLogoMap } from "@/components/provider_info_helpers";
 import {
   getProviderSpecificFields,
@@ -124,4 +124,9 @@ describe("getVectorStoreProviderLogoAndName", () => {
       displayName: "totally_unknown",
     });
   });
+});
+/** 固定目录字段初始化时的英文翻译；真实字段构造不变，结束由 Vitest 清理 mock。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
 });

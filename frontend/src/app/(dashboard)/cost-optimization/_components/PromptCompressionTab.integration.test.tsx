@@ -127,3 +127,9 @@ describe("PromptCompressionTab submit payload", () => {
     expect(screen.getByText("https://a.example.com")).toBeInTheDocument();
   });
 });
+
+/** 固定导入期英文翻译，验证表单和接口契约；本组不测试语言切换，DOM 由框架自动清理。 */
+vi.mock("@/i18n", async () => {
+  const { translate } = await import("@/i18n/translate");
+  return { t: (key: string, params?: Record<string, string | number>) => translate("en", key, params) };
+});

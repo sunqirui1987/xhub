@@ -330,13 +330,18 @@ def run_business_browser(directory, logger):
         "cancel and clear ignore delayed real responses; mobile chat remains usable",
         "错误日志详情完整显示上游正文并可返回普通日志",
         "异步任务原日志展示生命周期且轮询不增加日志：完成",
-        "remaining deployment exposes saved zero weight and recovers real inference",
+        "deployment deletion clears stale weights and preserves public inference",
+        "deployment deletion clears default and template weights for inherited routing",
+        "browser cache flush restores a billed miss after a free hit",
+        "inherited session and key preview matches inference without consuming rpm",
+        "every page route renders without a dashboard error",
         "the visibility chain holds at every tier",
     ]
     # 文件与精确标题同时约束，避免相近名称或参数化变体重复执行同一业务类型。
     files = ["writes.spec.ts", "user-edit.spec.ts", "guardrails.spec.ts", "xgo-guardrails.spec.ts",
              "playground-workspace.spec.ts", "error-logs.spec.ts", "task-request-logs.spec.ts",
-             "route-diagnostic.spec.ts", "visibility-chain.spec.ts"]
+             "route-diagnostic.spec.ts", "weighted-routing.spec.ts", "product-fixes.spec.ts",
+             "coverage.spec.ts", "visibility-chain.spec.ts"]
     pattern = "(" + "|".join(re.escape(title) + "$" for title in titles) + ")"
     env = dict(os.environ)
     for key in ("E2E_LIVE", "E2E_CREDENTIAL_SOURCE"):

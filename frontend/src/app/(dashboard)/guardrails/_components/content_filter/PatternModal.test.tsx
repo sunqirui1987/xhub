@@ -3,6 +3,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PatternModal from "./PatternModal";
 
+// 动作选项在模块加载时翻译；固定英文以验证预置模式对应的处理动作。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 describe("PatternModal", () => {
   const mockOnAdd = vi.fn();
   const mockOnCancel = vi.fn();

@@ -112,14 +112,16 @@ describe("SidebarUsageCard", () => {
     await waitFor(() => expect(screen.queryByText("Enterprise usage")).not.toBeInTheDocument());
   });
 
-  it("renders nothing without an enterprise license even when seat limits exist", async () => {
+  // 目的：无授权时不查询部署席位接口；前置为空许可证，验证空卡片和零请求，结束清理 QueryClient 与 mock。
+  it("renders nothing and does not request seat limits without an enterprise license", async () => {
     mockUseLicenseInfo.mockReturnValue(licenseResult(null));
 
     const { container } = renderWithClient(
       <SidebarUsageCard accessToken="token" collapsed={false} onExpandRail={() => {}} />,
     );
 
-    await waitFor(() => expect(mockGetRemainingUsers).toHaveBeenCalled());
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(mockGetRemainingUsers).not.toHaveBeenCalled();
     expect(screen.queryByText("Enterprise usage")).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot="meter"]')).toBeNull();
   });

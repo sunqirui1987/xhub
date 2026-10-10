@@ -9,6 +9,12 @@ import type { ToolRow } from "@/components/networking";
 import { ToolPoliciesPanel } from "./ToolPoliciesPanel";
 import { toast } from "@/lib/toast";
 
+// 组件在模块加载时生成策略标签；固定英文以稳定可访问名称和精确值断言。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 const fetchToolsList = vi.fn();
 const updateToolPolicy = vi.fn();
 

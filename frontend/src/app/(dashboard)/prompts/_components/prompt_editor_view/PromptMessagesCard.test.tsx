@@ -2,6 +2,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import PromptMessagesCard from "./PromptMessagesCard";
 
+// 角色选项在模块加载时翻译；固定英文以验证每种消息角色的可见标签。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("../variable_textarea", () => ({
   default: (props: any) => <textarea value={props.value} onChange={(event) => props.onChange(event.target.value)} />,
 }));

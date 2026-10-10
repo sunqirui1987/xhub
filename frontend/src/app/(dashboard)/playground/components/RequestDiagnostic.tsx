@@ -1,5 +1,5 @@
 "use client";
-import { getActiveLocale } from "@/i18n";
+import { getActiveLocale, t } from "@/i18n";
 import { uiHref } from "@/utils/uiHref";
 
 /** RequestFailure 是调试工作区的独立错误状态；不会作为模型输出进入后续上下文。 */
@@ -87,11 +87,11 @@ export function RequestDiagnostic({ failure }: { failure: RequestFailure }) {
       <p className="text-foreground break-words">{failure.message}</p>
       {failure.configure && (
         <a className="inline-block underline underline-offset-4" href={uiHref("/models-and-endpoints")}>
-          {zh ? "检查模型与端点配置" : "Check Models & endpoints"}
+          {t("Check Models & endpoints")}
         </a>
       )}
       <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">{zh ? "错误详情" : "Error details"}</summary>
+        <summary className="cursor-pointer">{t("Error details")}</summary>
         <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{failure.detail}</pre>
       </details>
     </div>

@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+/** 测试前置：在导入会缓存验证文案的模块前固定英文语言；只替换翻译边界，验证器与归一化逻辑使用真实实现，Vitest 在文件结束后清理 mock。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
+});
 
 import { estimateFields, estimateRules, withNormalizedEstimates } from "./estimatedOutputTokens";
 

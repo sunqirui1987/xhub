@@ -69,11 +69,11 @@ func redactLiteLLMParams(in map[string]any) map[string]any {
 	return out
 }
 
-// New creates a database model. A YAML model with the same name is then overridden by the database row.
-// 参数 s（Host）：新使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：authz/authz.go、authz/decide.go、cache/cache.go、dataplane/serve.go
-// 测试：activity_http_test.go、authz_test.go、builtin_providers_test.go
+// New 创建数据库部署，并在同一事务中清理因目录变化而失效的默认权重和模板引用。
+// 参数 s 提供模型锁、内存目录和配置存储；w 接收 HTTP 状态与 JSON；r 包含部署名称、上游参数和模型信息。
+// 返回：无。校验失败写 400，名称冲突写 409，事务失败写 500；只有事务提交后才发布新内存目录。
+// 调用场景：POST /model/new 管理接口。副作用是写 proxy_models、可能修复权重配置，并更新进程模型目录。
+// 边界：配置文件部署仍由 YAML 管理；任何持久化或清理错误都会回滚，且不会改变内存目录。
 func New(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -127,11 +127,11 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Public(entry))
 }
 
-// Update changes a database model. Only fields present on the request are changed.
-// 参数 s（Host）：更新使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/mount.go、gateway/prefs/mount.go
-// 测试：无直接单测
+// Update 修改数据库部署，并以修改后的完整目录原子清理改名或部署集合变化产生的失效权重。
+// 参数 s 提供模型锁、内存目录和配置存储；w 接收 HTTP 状态与 JSON；r 包含部署 ID 及待覆盖字段。
+// 返回：无。不存在、配置部署或非法字段写 400，名称或回退冲突写 409，事务失败写 500。
+// 调用场景：POST /model/update/{model_id} 管理接口。成功时持久化部署并替换对应内存条目。
+// 边界：遮罩后的密钥不覆盖原值；校验及事务失败时数据库回滚，原内存对象保持不变。
 func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -230,11 +230,11 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, 200, Public(m))
 }
 
-// Delete removes a database model. A model that exists only in YAML cannot be deleted.
-// 参数 s（Host）：删除使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
-// 返回：无。状态码和正文写进调用方的响应。
-// 调用：gateway/keys/generate.go、gateway/keys/mount.go、gateway/models/mount.go、iam/keys.go
-// 测试：无直接单测
+// Delete 删除数据库部署，并在同一事务中移除默认权重、历史路由组和客户模板里的悬空部署引用。
+// 参数 s 提供模型锁、内存目录和配置存储；w 接收 HTTP 状态与 JSON；r 通过 id 或 model_name 指定部署。
+// 返回：无。缺少或找不到 ID、删除配置部署时写 400，仍被回退策略引用时写 409，事务失败写 500。
+// 调用场景：POST /model/delete 管理接口。成功提交后才从进程目录删除部署并返回 deleted=true。
+// 边界：持久化清理失败会整笔回滚，内存目录不变；配置文件部署必须通过配置文件删除。
 func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 	if s.RequireManage(w, r) == nil {
 		return
@@ -455,11 +455,11 @@ func proxyModel(m config.ModelEntry) store.ProxyModel {
 	return store.ProxyModel{ID: id, ModelName: m.ModelName, Params: m.LiteLLMParams, Info: m.ModelInfo}
 }
 
-// LoadStored merges database models into this process's model table. Entries that exist only in the config file are not in this table, so after a restart they still come only from YAML and cannot be deleted from the page.
-// 参数 s（Host）：载入Stored使用的数据面宿主。
-// 返回：无。数据库里的模型已并进进程模型表。只存在于配置文件、不在这张表里的条目不会出现。
-// 调用：gateway/server.go
-// 测试：无直接单测
+// LoadStored 在启动阶段把数据库部署合并进进程目录，并按最终完整目录清理历史权重引用。
+// 参数 s 提供尚未对外服务的模型目录和配置存储；调用方必须保证此时没有并发请求修改目录。
+// 返回：无。成功时数据库部署带上稳定 ID 和 db_model 标记；读取失败时保留配置目录并直接返回。
+// 调用场景：gateway.Server 启动。副作用包括补齐旧部署字段、修复默认权重和模板中的悬空部署 ID。
+// 边界：单行字段迁移失败会记录日志并继续装载；历史权重清理失败只记录错误，事务会回滚且不阻止服务启动。
 func LoadStored(s Host) {
 	if s.RecordStore() == nil {
 		return
@@ -493,6 +493,10 @@ func LoadStored(s Host) {
 		*s.ModelTable() = append(*s.ModelTable(), config.ModelEntry{
 			ModelName: row.ModelName, LiteLLMParams: row.Params, ModelInfo: row.Info,
 		})
+	}
+	// 启动时目录已经包含 YAML 与数据库部署，可据此一次性删除停机期间遗留的部署引用。
+	if err := s.RecordStore().SaveModelDirectory(nil, "", append([]config.ModelEntry(nil), (*s.ModelTable())...)); err != nil {
+		logx.Error("clean stored model weights: %v", err)
 	}
 }
 

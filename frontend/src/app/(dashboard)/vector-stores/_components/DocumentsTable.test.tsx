@@ -6,6 +6,12 @@ import { DocumentUpload } from "@/components/vector_store_management/types";
 
 import DocumentsTable from "./DocumentsTable";
 
+// 状态列在模块加载时生成标签；固定英文以验证每种上传状态的可见文案。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 describe("DocumentsTable", () => {
   const mockDocuments: DocumentUpload[] = [
     {

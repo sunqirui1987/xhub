@@ -50,7 +50,7 @@ describe("AdvancedDatePicker", () => {
 
   it("should display formatted date range", () => {
     const { container } = render(<AdvancedDatePicker value={defaultValue} onValueChange={mockOnValueChange} />);
-    expect(getTrigger(container)).toHaveTextContent(/\d{1,2} \w{3}, \d{2}:\d{2} - \d{1,2} \w{3}, \d{2}:\d{2}/);
+    expect(getTrigger(container)).toHaveTextContent(/\w{3} \d{1,2}, \d{2}:\d{2} - \w{3} \d{1,2}, \d{2}:\d{2}/);
   });
 
   it("should open dropdown when clicked", () => {
@@ -235,4 +235,10 @@ describe("AdvancedDatePicker", () => {
       expect(applyButton).toBeDisabled();
     });
   });
+});
+
+/** 固定真实英文翻译及插值，避免模块加载阶段的中文标签污染契约；验证业务结果，mock 随测试清理。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, values?: Parameters<typeof original.translate>[2]) => original.translate("en", key, values) };
 });

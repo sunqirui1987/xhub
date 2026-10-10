@@ -5,6 +5,12 @@ import { renderWithProviders, testQueryClient } from "../../../../tests/test-uti
 
 const { useAuthorizedMock } = vi.hoisted(() => ({ useAuthorizedMock: vi.fn() }));
 
+/** 按服务器能力验证访问门禁；角色夹具只用于组织场景，能力不由页面自行推导。 */
+vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
+  default: (capability: string) => capability === "viewGuardrailUsage" &&
+    useAuthorizedMock().capabilities?.includes("platform_admin"),
+}));
+
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
   default: useAuthorizedMock,
 }));
@@ -30,7 +36,10 @@ const jsonResponse = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
 const renderAs = (userRole: string) => {
-  useAuthorizedMock.mockReturnValue({ accessToken: "sk-test", userId: "u1", userRole });
+  useAuthorizedMock.mockReturnValue({
+    accessToken: "sk-test", userId: "u1", userRole,
+    capabilities: userRole === "Admin" ? ["platform_admin"] : [],
+  });
   return renderWithProviders(<GuardrailsMonitor />);
 };
 
@@ -62,4 +71,10 @@ describe("Guardrails Monitor page access by role", () => {
       await waitFor(() => expect(requestedUrls().filter((url) => url.includes("/guardrails/usage"))).toEqual([]));
     },
   );
+});
+
+/** 固定导入期英文翻译，验证表单和接口契约；本组不测试语言切换，DOM 由框架自动清理。 */
+vi.mock("@/i18n", async () => {
+  const { translate } = await import("@/i18n/translate");
+  return { getActiveLocale: () => "en", t: (key: string, params?: Record<string, string | number>) => translate("en", key, params) };
 });

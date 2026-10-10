@@ -18,6 +18,17 @@ Configured api_base overrides supplier defaults. OfficialID strips one prefix wh
 
 ## Source responsibilities and entry points
 
+### candidates.go
+
+- [`func Candidates(list []config.ModelEntry, endpoint string, dialogue *llm.Dialogue) ([]config.ModelEntry, []CandidateDecision)`](candidates.go) — Candidates keeps deployments that explicitly allow the requested endpoint and, for dialogue requests, the declared protocol; it also returns a decision for every input deployment.
+
+### execution.go
+
+- [`func Execution(m config.ModelEntry) (Transport, bool)`](execution.go) — Execution resolves the deployment's registered transport; declarations that are absent or unknown do not invent a transport.
+- [`func DialogueProtocol(protocol string) bool`](execution.go) — DialogueProtocol reports whether a protocol uses the shared dialogue conversion path.
+- [`func AllowsEndpoint(m config.ModelEntry, endpoint string) error`](execution.go) — AllowsEndpoint validates that a deployment explicitly declares the requested endpoint.
+- [`func ResolveHit(hit Hit, m config.ModelEntry) (Hit, error)`](execution.go) — ResolveHit applies a deployment's selected transport to a matched bypass action.
+
 ### capability.go
 
 - [`func Capabilities() []Capability`](capability.go) — Capabilities 返回全部入口能力。
@@ -33,15 +44,12 @@ Exported types: `Model`, `ProviderField`, `Supplier`.
 - [`func RegisterTransport(t Transport)`](registry.go) — RegisterTransport 登记一个内置转发方式。供应商文件在 init 里调它。
 - [`func RegisterModel(m Model)`](registry.go) — RegisterModel 登记一条可选模型，并为表单记录默认执行传输 ID。
 - [`func RegisterSupplier(s Supplier)`](registry.go) — RegisterSupplier 记下默认 API 根；名字是新的时，连添加模型的凭据字段一起记下。
-- [`func APIBase(slug, configured string) string`](registry.go) — APIBase 返回部署上的根地址；部署没填时用供应商登记的默认根。
 - [`func Transports() []Transport`](registry.go) — Transports 返回已登记的内置转发方式。
 - [`func ModelEndpoints() map[string]string`](registry.go) — ModelEndpoints 把内置模型 id 映射到表单要预选的默认 transport ID。
 - [`func PublicBody() map[string]any`](registry.go) — PublicBody 是添加模型的载荷：公开能力、执行传输和模型默认值。endpoint_types 是公开协议能力，capabilities 是能力与路径说明，transports 是后端登记的执行传输，models 是模型到默认 transport 的映射。
 - [`func Match(method, path string, models []config.ModelEntry) (Hit, bool)`](registry.go) — Match 找出这个方法和路径命中的 bypass 动作，只在已登记的转发方式里找。 它刻意不读部署上的自定义文档：bypass 是后台登记的形状，不是运维在界面上 随手填的一份路径表。一份填错的路径表发不出请求，也就拿不到上游的返回值， 预选、日志和用量都无从谈起。 models（[]config.ModelEntry）：候选部署列表，当前不参与匹配，保留给调用方复用签名。
 - SelectedCapabilities (registry.go): reads only model_info.endpoint_types. Missing or empty declarations declare no capability; explicitly unknown nonempty declarations match no capability.
 - SelectedTransport (registry.go): reads only model_info.transport. A registered bypass ID selects that transport; otherwise the deployment uses adapted transport.
-- [`func IsAdapted(m config.ModelEntry) bool`](registry.go) — IsAdapted 报告这条部署走协议适配。Bypass 部署不能从能力门进适配路径： 方舟内容生成的入口是 /api/v3/contents/generations/tasks，不是 /v1/videos， 把它放进适配池会让 /v1/videos 选中它然后打错地址。
-- AdaptedPool (registry.go): filters adapted deployments by explicitly declared operation capability and returns an empty pool for unknown or empty operations.
 - [`func IncludesCapability(m config.ModelEntry, capability string) bool`](registry.go) — IncludesCapability 报告这条部署是否应答这个能力。
 - [`func Includes(m config.ModelEntry, typeID string) bool`](registry.go) — Includes 报告这条部署是否选中了这个转发方式 id。Bypass 选部署用它： 路径先命中转发方式，再按转发方式 id 挑部署，能力不参与。
 - [`func BoundTransports(m config.ModelEntry) []Transport`](registry.go) — BoundTransports 把这条部署声明的转发方式解析成登记好的条目。
@@ -66,9 +74,10 @@ This directory registers no direct HTTP route. Higher layers call its Go API; tr
 
 | Test file | Scenario entry points |
 | --- | --- |
-| [capability_test.go](capability_test.go) | `TestEveryDeclaredPathBelongsToItsOwnCapability`, `TestChatCoversThreeSpellings`, `TestCompletionIsNotPartOfChat`, `TestUnregisteredOpsAreNotCapabilities`, `TestImageCoversGenerationAndEdit`, `TestAdaptedPoolKeepsOnlyDeploymentsThatAnswerTheOp` |
+| [candidates_test.go](candidates_test.go) | `TestCandidatesUseDeclaredProtocols`, `TestDialogueBindingsUseEndpointDirectory` |
+| [capability_test.go](capability_test.go) | `TestEveryDeclaredPathBelongsToItsOwnCapability`, `TestChatCoversThreeSpellings`, `TestCompletionIsNotPartOfChat`, `TestUnregisteredOpsAreNotCapabilities`, `TestImageCoversGenerationAndEdit` |
 | [match_test.go](match_test.go) | `TestBypassPathsStayOnTheirProviders`, `TestRegisteredTransportsAreTheOnlyBypassSource`, `TestReadTaskID` |
-| [registry_test.go](registry_test.go) | `TestSelectedCapabilitiesUsesDeclaredIDs`, `TestTransportRequiresExplicitRegisteredID`, `TestOneModelCanAnswerSeveralCapabilities`, `TestBypassTypesStayWithTheirProvider`, `TestABypassIsNeverTakenFromADeploymentDocument` |
+| [registry_test.go](registry_test.go) | `TestSelectedCapabilitiesUsesDeclaredIDs`, `TestTransportRequiresExplicitRegisteredID`, `TestOneModelCanAnswerSeveralCapabilities`, `TestBypassTypesStayWithTheirProvider` |
 
 ```bash
 go test ./internal/provider -count=1

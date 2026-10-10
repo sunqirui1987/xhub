@@ -10,6 +10,7 @@ import {
 } from "./model_endpoints";
 import type { ModelEndpoint } from "./fetch_models";
 import { EndpointType } from "@/components/chat_ui/mode_endpoint_mapping";
+import { setActiveLocale } from "@/i18n";
 /** binding 建立无真实凭据的协议测试绑定；参数为路径和协议，返回明确绑定。 */
 const binding = (path: string, protocol = "openai-responses"): ModelEndpoint => ({
   path,
@@ -20,7 +21,10 @@ const binding = (path: string, protocol = "openai-responses"): ModelEndpoint => 
   endpoint_id: "test",
   family: "chat",
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setActiveLocale("en");
+});
 /** streamResponse 逐字节切分 UTF-8 和事件边界，验证解析器不依赖网络分块。 */
 const streamResponse = (events: string) => {
   const bytes = new TextEncoder().encode(events);
@@ -177,6 +181,38 @@ describe("explicit model endpoints", () => {
       ).rejects.toThrow("Stream ended before completion");
     },
   );
+  /** 前置中文语言与 Responses 流缺少终态；验证协议边界错误使用中文目录；恢复语言和 fetch，无持久化数据。 */
+  it("localizes a stream that ends before protocol completion", async () => {
+    setActiveLocale("zh-CN");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(streamResponse('data: {"type":"response.output_text.delta","delta":"partial"}\n\n')),
+    );
+    await expect(
+      callTextEndpoint({
+        endpoint: binding("/bypass/openai/v1/responses"),
+        base: "https://gateway.example",
+        key: "fake",
+        model: "public",
+        messages: [],
+        onText: vi.fn(),
+      }),
+    ).rejects.toThrow("流式响应在完成前结束");
+  });
+  /** 前置中文语言与非文本端点；验证在发起网络请求前返回本地化错误；恢复语言，无外部请求和清理。 */
+  it("localizes an unsupported text endpoint", async () => {
+    setActiveLocale("zh-CN");
+    await expect(
+      callTextEndpoint({
+        endpoint: binding("/v1/images/generations", "openai-images"),
+        base: "https://gateway.example",
+        key: "fake",
+        model: "image",
+        messages: [],
+        onText: vi.fn(),
+      }),
+    ).rejects.toThrow("不支持的文本端点");
+  });
 });
 
 /** 前置显式协议绑定；验证目录标签区分图片操作、Bypass 与 Google 路径，纯函数无需清理。 */

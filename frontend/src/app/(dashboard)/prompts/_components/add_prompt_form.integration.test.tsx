@@ -1,5 +1,6 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { translate } from "@/i18n/translate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { toast } from "@/lib/toast";
@@ -90,7 +91,7 @@ describe("AddPromptForm", () => {
     await submit();
 
     await waitFor(() => {
-      expect(mockFromBackend).toHaveBeenCalledWith("Please upload a .prompt file");
+      expect(mockFromBackend).toHaveBeenCalledWith(translate("en", "Please upload a .prompt file"));
     });
     expect(mockConvert).not.toHaveBeenCalled();
     expect(mockCreate).not.toHaveBeenCalled();
@@ -118,4 +119,10 @@ describe("AddPromptForm", () => {
     ).toBeInTheDocument();
     expect(mockCreate).not.toHaveBeenCalled();
   });
+});
+
+/** 固定导入期英文翻译，验证表单和接口契约；本组不测试语言切换，DOM 由框架自动清理。 */
+vi.mock("@/i18n", async () => {
+  const { translate } = await import("@/i18n/translate");
+  return { t: (key: string, params?: Record<string, string | number>) => translate("en", key, params) };
 });

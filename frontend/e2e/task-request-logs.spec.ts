@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto } from "./helpers";
+import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t } from "./helpers";
 
 /** 前置隔离数据库、真实浏览器和网关、本地 Ark 上游；验证创建到轮询、完成或失败、重复查询始终一条原请求日志与费用。
  * 浏览器刷新查看状态，按原 ID 复开输入与终态详情；失败转到错误日志。finally 恢复正文存储设置并删除部署，账单与任务由运行器清理，无外部凭据。 */
@@ -69,9 +69,17 @@ test("异步任务原日志展示生命周期且轮询不增加日志" + (failur
       // 续跑按创建 ID 打开完成后的同一条日志，原始输入和终态产物必须同时可读。
       await stableGoto(page, "/logs/?log_id=" + encodeURIComponent(original));
       await expect(page.getByRole("dialog")).toBeVisible();
-      await expect(page.getByTestId("media-request")).toContainText("e2e-task-lifecycle");
-      await expect(page.getByTestId("media-response")).toContainText(task);
-      await expect(page.getByTestId("media-response")).toContainText("succeeded");
+      const mediaRequest = page.getByTestId("media-request");
+      const mediaResponse = page.getByTestId("media-response");
+      // 在真实媒体日志详情中核对本轮产品翻译实际消费的字段，而非只检查目录中存在对应键。
+      await expect(mediaRequest.getByText(t("Media"), { exact: true })).toBeVisible();
+      await expect(mediaRequest.getByText(t("Prompt"), { exact: true })).toBeVisible();
+      await expect(mediaRequest.getByText(t("Resolution"), { exact: true })).toBeVisible();
+      await expect(mediaRequest).toContainText("e2e-task-lifecycle");
+      await expect(mediaResponse.getByText(t("Task ID"), { exact: true })).toBeVisible();
+      await expect(mediaResponse.getByText(t("Response URL"), { exact: true })).toBeVisible();
+      await expect(mediaResponse).toContainText(task);
+      await expect(mediaResponse).toContainText("succeeded");
       await expect(page.getByTestId("media-response-video")).toHaveAttribute("src", "https://example.invalid/ark-e2e.mp4");
       await expect(page.getByTestId("media-response-usage")).toContainText("100");
     }

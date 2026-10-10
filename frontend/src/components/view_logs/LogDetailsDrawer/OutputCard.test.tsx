@@ -1,9 +1,10 @@
 import React from "react";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { OutputCard } from "./OutputCard";
 import { ParsedMessage } from "./prettyMessagesTypes";
+import { setActiveLocale } from "@/i18n";
 
 describe("OutputCard", () => {
   const mockWriteText = vi.fn().mockResolvedValue(undefined);
@@ -13,6 +14,7 @@ describe("OutputCard", () => {
   };
 
   beforeEach(() => {
+    setActiveLocale("en");
     vi.clearAllMocks();
     Object.defineProperty(navigator, "clipboard", {
       value: {
@@ -22,6 +24,7 @@ describe("OutputCard", () => {
       configurable: true,
     });
   });
+  afterEach(() => setActiveLocale("en"));
 
   it("should render the OutputCard component", () => {
     render(<OutputCard message={mockMessage} />);
@@ -43,14 +46,23 @@ describe("OutputCard", () => {
     expect(screen.getByText("ASSISTANT")).toBeInTheDocument();
   });
 
+  /** 前置中文语言及助手响应；验证 SimpleMessageBlock 消费端读取实时角色目录；恢复英文，无后台或持久化数据。 */
+  it("localizes the assistant role label", () => {
+    setActiveLocale("zh-CN");
+    render(<OutputCard message={mockMessage} />);
+    expect(screen.getByText("助手")).toBeInTheDocument();
+    expect(screen.queryByText("ASSISTANT")).not.toBeInTheDocument();
+  });
+
   it("should display token count when provided", () => {
     render(<OutputCard message={mockMessage} completionTokens={250} />);
     expect(screen.getByText(/Tokens: 250/)).toBeInTheDocument();
   });
 
   it("should display cost when provided", () => {
-    render(<OutputCard message={mockMessage} outputCost={0.0025} />);
-    expect(screen.getByText(/Cost: \$0\.002500/)).toBeInTheDocument();
+    // 提供非零费用，验证共享标题的两位小数格式；组件由测试框架自动清理。
+    render(<OutputCard message={mockMessage} outputCost={2.0025} />);
+    expect(screen.getByText("Cost: $2.00")).toBeInTheDocument();
   });
 
   it("should copy message content when copy button is clicked", async () => {
@@ -129,9 +141,10 @@ describe("OutputCard", () => {
   });
 
   it("should display both token count and cost when both are provided", () => {
-    render(<OutputCard message={mockMessage} completionTokens={300} outputCost={0.003} />);
+    render(<OutputCard message={mockMessage} completionTokens={300} outputCost={3.003} />);
     expect(screen.getByText(/Tokens: 300/)).toBeInTheDocument();
-    expect(screen.getByText(/Cost: \$0\.003000/)).toBeInTheDocument();
+    // 同时提供 token 和费用，验证两个指标都展示；组件由测试框架自动清理。
+    expect(screen.getByText("Cost: $3.00")).toBeInTheDocument();
   });
 
   it("should handle collapse toggle when message is null", async () => {

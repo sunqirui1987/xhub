@@ -6,8 +6,6 @@ const removed = [
   "/agents",
   "/workflows",
   "/memory",
-  "/mcp-servers",
-  "/skills",
   "/policies",
   "/search-tools",
   "/vector-stores",
@@ -26,6 +24,14 @@ const removed = [
 ];
 
 describe("dashboardAppPath", () => {
+  /** 目的：退役 MCP/Skills 管理入口不能作为 Next 页面；前置为真实路由解析器，根路径和 /ui 别名均交给网关，无持久化数据清理。 */
+  it("leaves retired MCP and Skills surfaces to the gateway", () => {
+    for (const path of ["/mcp-servers", "/skills"]) {
+      expect(dashboardAppPath(path), path).toBeNull();
+      expect(dashboardAppPath(`/ui${path}`), `/ui${path}`).toBeNull();
+    }
+  });
+
   it("renders write pages and their /ui copies in Next", () => {
     for (const path of removed) {
       expect(dashboardAppPath(path), path).toBe(path);

@@ -7,6 +7,12 @@ import * as networking from "@/components/networking";
 import AddAttachmentForm from "./add_attachment_form";
 import { Policy } from "@/components/policies/types";
 
+// 表单校验文案依赖全局语言；固定英文以稳定校验周期和字段错误断言。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/components/networking");
 
 vi.mock("./impact_preview_alert", () => ({
@@ -140,9 +146,7 @@ describe("AddAttachmentForm", () => {
     await user.type(input, `${value}{Enter}`);
   };
 
-  // Submits and waits for the validation cycle to settle. No policy is selected, so
-  // the "select at least one policy" required error always appears - we use it as a
-  // synchronization point, then assert whether the teams validator also complained.
+  // 提交后等待校验周期结束；未选策略时必定出现必填错误，以此同步后再检查团队校验结果。
   const submitAndSettle = async (user: UserEvent) => {
     await user.click(screen.getByRole("button", { name: /create attachment/i }));
     await screen.findByText(/select at least one policy/i);

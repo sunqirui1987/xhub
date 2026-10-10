@@ -104,7 +104,7 @@ describe("GeneralSettings General tab", () => {
   });
 });
 
-// The five tabs here are proxy-wide settings. Auto-routers moved to Models + Endpoints.
+// 当前代理设置仅包含提示缓存和通用设置；模型分配在模型目录及路由模板中验证。
 describe("GeneralSettings tabs", () => {
   beforeEach(() => {
     vi.mocked(getGeneralSettingsCall).mockResolvedValue([]);
@@ -114,9 +114,6 @@ describe("GeneralSettings tabs", () => {
     renderWithProviders(<GeneralSettings accessToken="token" userRole="proxy_admin" userID="u" />);
 
     for (const key of [
-      "pages.routerSettings.loadbalancing",
-      "pages.routerSettings.routingGroups",
-      "pages.routerSettings.fallbacks",
       "pages.routerSettings.promptCaching",
       "pages.routerSettings.general",
     ] as const) {
@@ -132,9 +129,9 @@ describe("GeneralSettings tabs", () => {
         <GeneralSettings accessToken="token" userRole="proxy_admin" userID="u" />
       </I18nProvider>,
     );
-    expect(await screen.findByRole("tab", { name: translate("zh-CN", "pages.routerSettings.loadbalancing") })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: translate("zh-CN", "pages.routerSettings.routingGroups") })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: translate("en", "pages.routerSettings.loadbalancing") })).not.toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: translate("zh-CN", "pages.routerSettings.promptCaching") })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: translate("zh-CN", "pages.routerSettings.general") })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: translate("en", "pages.routerSettings.promptCaching") })).not.toBeInTheDocument();
     setActiveLocale("en");
   });
 });

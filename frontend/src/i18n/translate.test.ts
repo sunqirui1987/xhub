@@ -59,26 +59,51 @@ function keysUsedInProduction(): string[] {
           cursor += comma[0].length;
         }
         const key = readJsString(text, cursor);
-        if (key && !key.value.includes("${")) found.add(key.value);
+        // 只收集完整的静态键；"myModels." + value 这类动态前缀由其实际分支键覆盖，不能伪造成目录项。
+        if (key && !key.value.includes("${") && /^\s*(?:,|\))/.test(text.slice(key.end))) found.add(key.value);
       }
     }
   }
   return [...found];
 }
 
+// catalogEntries 展开目录叶子值；短语簿保留原句键，其他目录保留点分层级，供目录对称性测试直接比较。
+// 参数 tree 是单语言目录，prefix 是递归路径；返回键到实际文案的映射，不调用 translate，因此含点句子键不会被误当路径。
+function catalogEntries(tree: unknown, prefix = ""): Map<string, string> {
+  const entries = new Map<string, string>();
+  if (typeof tree === "string") {
+    if (prefix) entries.set(prefix, tree);
+    return entries;
+  }
+  if (tree == null || typeof tree !== "object") return entries;
+  for (const [key, value] of Object.entries(tree as Record<string, unknown>)) {
+    if (key === "phrases" && !prefix && value != null && typeof value === "object") {
+      for (const [phrase, message] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof message === "string") entries.set(phrase, message);
+      }
+      continue;
+    }
+    const childPrefix = prefix ? `${prefix}.${key}` : key;
+    for (const [childKey, message] of catalogEntries(value, childPrefix)) entries.set(childKey, message);
+  }
+  return entries;
+}
+
 describe("translate", () => {
+  // 验证默认语言会解析当前仍在使用的导航分组和页面文案，不依赖已退休的旧分组键。
   it("returns Simplified Chinese for the default locale", () => {
     expect(translate("zh-CN", "Search users by email…")).not.toBe("搜索用户由邮箱…");
     expect(translate("zh-CN", "Search users by email…")).toMatch(/邮箱/);
     expect(translate("zh-CN", "login.title")).toBe("登录");
     expect(translate("zh-CN", "nav.apiKeys")).toBe("虚拟密钥");
-    expect(translate("zh-CN", "nav.groups.gateway")).toBe("AI 网关");
+    expect(translate("zh-CN", "nav.groups.mine")).toBe("我的");
   });
 
+  // 验证英文语言会解析与中文相同的现行导航键，并返回准确英文文案。
   it("returns English when locale is en", () => {
     expect(translate("en", "login.title")).toBe("Login");
     expect(translate("en", "nav.apiKeys")).toBe("Virtual Keys");
-    expect(translate("en", "nav.groups.gateway")).toBe("AI GATEWAY");
+    expect(translate("en", "nav.groups.mine")).toBe("MY");
     expect(translate("en", "pages.apiKeys.create")).toBe("Create New Key");
   });
 
@@ -99,17 +124,22 @@ describe("interpolate", () => {
 });
 
 describe("catalogs", () => {
+  // 验证中英文目录键集合完全一致且文案非空，失败时直接列出单边缺失键。
   it("keeps the same non-empty sentence keys in zh-CN and en", () => {
+    const zhEntries = catalogEntries(catalogs["zh-CN"]);
+    const enEntries = catalogEntries(catalogs.en);
     const zhKeys = collectKeys(catalogs["zh-CN"]).sort();
     const enKeys = collectKeys(catalogs.en).sort();
-    expect(zhKeys).toEqual(enKeys);
+    expect(
+      zhKeys,
+      `仅中文存在：${zhKeys.filter((key) => !enKeys.includes(key)).join("\n")}\n仅英文存在：${enKeys.filter((key) => !zhKeys.includes(key)).join("\n")}`,
+    ).toEqual(enKeys);
     expect(zhKeys.length).toBeGreaterThan(20);
     for (const key of zhKeys) {
-      const zh = translate("zh-CN", key);
-      const en = translate("en", key);
+      const zh = zhEntries.get(key) ?? "";
+      const en = enEntries.get(key) ?? "";
       expect(zh.length, key).toBeGreaterThan(0);
       expect(en.length, key).toBeGreaterThan(0);
-      expect(zh === key && en === key, key).toBe(false);
     }
     expect(translate("zh-CN", "login.title")).not.toBe(translate("en", "login.title"));
     expect(translate("zh-CN", "pages.accessGroups.deleteTitle")).not.toBe(
@@ -119,6 +149,7 @@ describe("catalogs", () => {
 });
 
 describe("production call sites", () => {
+  // 扫描生产代码中的静态翻译调用，验证每个消费者在两种语言下均有真实目录文案。
   it("resolves every catalog key used by the UI in both locales", () => {
     const used = keysUsedInProduction();
     expect(used.length).toBeGreaterThan(100);
@@ -127,7 +158,7 @@ describe("production call sites", () => {
       const en = translate("en", key);
       return zh.length === 0 || en.length === 0 || (zh === key && en === key);
     });
-    expect(unresolved).toEqual([]);
+    expect(unresolved, `生产调用缺少双语目录项：${unresolved.join("\n")}`).toEqual([]);
     expect(translate("zh-CN", "pages.teams.title")).not.toBe(translate("en", "pages.teams.title"));
     expect(translate("en", "Edit Access Group")).toBe("Edit Access Group");
     expect(translate("zh-CN", "Edit Access Group")).not.toBe("Edit Access Group");
@@ -135,7 +166,9 @@ describe("production call sites", () => {
     expect(translate("en", "LiteLLM Slack community")).toBe("XHub Slack community");
     expect(translate("zh-CN", "LiteLLM Slack community")).toBe("XHub Slack 社区");
     expect(translate("en", "Access group updated successfully")).toBe("Access group updated successfully");
-    expect(translate("zh-CN", "Access group updated successfully")).not.toBe(translate("en", "Access group updated successfully"));
+    expect(translate("zh-CN", "Access group updated successfully")).not.toBe(
+      translate("en", "Access group updated successfully"),
+    );
     expect(translate("zh-CN", "Access group updated successfully")).toMatch(/[\u4e00-\u9fff]/);
   });
 });
@@ -234,7 +267,13 @@ describe("leftover user-visible English", () => {
 
   it("finds no English prose in production JSX, labels, toasts, or validation messages", () => {
     const hits = findUserVisibleEnglish(SRC);
-    expect(hits, hits.slice(0, 20).map((hit) => `${hit.file}:${hit.line} ${hit.template}`).join("\n")).toEqual([]);
+    expect(
+      hits,
+      hits
+        .slice(0, 20)
+        .map((hit) => `${hit.file}:${hit.line} ${hit.template}`)
+        .join("\n"),
+    ).toEqual([]);
   });
 });
 

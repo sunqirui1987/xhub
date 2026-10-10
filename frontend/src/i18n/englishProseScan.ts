@@ -7,7 +7,7 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const SKIP_FILE = /\.(test|spec|cases)\.[cm]?tsx?$|\.d\.ts$|\.md$/;
 
-const TRANSLATION_CALLEES = new Set(["t", "translate", "tDefault", "tRuntime"]);
+const TRANSLATION_CALLEES = new Set(["t", "translate", "tDefault", "tRuntime", "externalGuardrailText"]);
 
 const TECHNICAL_ATTRS = new Set([
   "className",
@@ -315,21 +315,128 @@ const UI_SINGLE_WORDS = new Set([
   "home",
   "logout",
   "login",
+  "system",
+  "user",
+  "assistant",
 ]);
 
+const TECHNICAL_LATIN_TOKENS = new Set(
+  [
+    "api",
+    "json",
+    "http",
+    "https",
+    "sse",
+    "jwt",
+    "aws",
+    "openai",
+    "github",
+    "litellm",
+    "xhub",
+    "xgo",
+    "go",
+    "re2",
+    "fal",
+    "post",
+    "get",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "key",
+    "model",
+    "metadata",
+    "texts",
+    "replacement",
+    "success",
+    "error",
+    "body",
+    "headers",
+    "timeout",
+    "tokens",
+    "token",
+    "flagged",
+    "lakera",
+    "hate",
+    "selfharm",
+    "sexual",
+    "violence",
+    "applyguardrail",
+    "guardrail_intervened",
+    "analyzer",
+    "anonymizer",
+    "detect-secrets",
+    "modelink",
+    "fal",
+    "id",
+    "null",
+    "nan",
+    "infinity",
+    "number",
+    "any",
+    "mib",
+    "rpm",
+    "tpm",
+    "qiniu",
+    "volcengine",
+    "simple-shuffle",
+    "traffic-split",
+    "bypass",
+  ],
+);
+
+/**
+ * 判断中英文混排文本中的拉丁字符是否全部属于可证明的技术标识符。
+ * 参数：text 为已折叠空白并解码实体的候选界面文案。
+ * 返回：仅当文本包含汉字、包含拉丁片段，且每个片段都是白名单技术词、代码形态或数值单位时返回 true。
+ * 调用场景：isEnglishProse 用它排除“调用 API，返回 status_code”一类中文技术说明。自然英文词只要有一个
+ * 无法证明为技术标识符，就继续按未翻译文案报告；因此“Please retry 中文”不会被跳过。
+ */
+function hasOnlyTechnicalLatinSegments(text: string): boolean {
+  if (!/[\u3400-\u9fff]/u.test(text)) return false;
+  // JSX/模板表达式使用花括号占位；占位名不是用户可见英文，不能让中文技术说明产生误报。
+  const visibleText = text.replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, "");
+  const segments = visibleText.match(/(?:\/[A-Za-z0-9._/-]+|\d+[A-Za-z]+|[A-Za-z][A-Za-z0-9_.:/-]*)/g) ?? [];
+  if (segments.length === 0) return false;
+  return segments.every((segment) => {
+    const normalized = segment.replace(/[.:]+$/g, "").toLowerCase();
+    if (TECHNICAL_LATIN_TOKENS.has(normalized)) return true;
+    if (/^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+$/.test(segment)) return true;
+    if (/^\/[A-Za-z0-9._-]+$/.test(segment)) return true;
+    if (/^\/?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/.test(segment)) return true;
+    if (/^[A-Za-z]+-\d+(?:-\d+)*$/.test(segment)) return true;
+    if (/^\d+(?:xx|[kmgt])$/i.test(segment)) return true;
+    return false;
+  });
+}
+
+/**
+ * 判断字符串是否像应接入翻译目录的英文界面文案。
+ * 参数：raw 为源码字符串；singleWordUi 表示调用位置可展示单词标签，anySingleWord 表示任意英文单词都应扫描。
+ * 返回：发现自然英文界面文本时返回 true；URL、代码、样式、单位及可证明的技术标识符返回 false。
+ * 调用场景：源码遍历器按 JSX、提示、错误和可见属性的上下文启用不同单词检测强度。函数不负责判断目录是否已有键。
+ */
 export function isEnglishProse(raw: string, opts?: { singleWordUi?: boolean; anySingleWord?: boolean }): boolean {
   const s = collapse(decodeEntities(raw));
   if (!s || s.length > 2000) return false;
   if (!/[A-Za-z]/.test(s.replace(/\{[A-Za-z0-9_]+\}/g, ""))) return false;
+  if (hasOnlyTechnicalLatinSegments(s)) return false;
+  // 品牌、协议、语言和计价单位可原样展示；这里只接受完整的已知技术标签，避免把含这些词的英文句子放过。
+  if (/^(?:XHub API|Vertex \/ Gemini|Claude \/ Anthropic|Python|JavaScript|cURL|OpenAI|Fal)$/i.test(s)) return false;
+  if (/^\{[A-Za-z0-9_]+\}\s*[·•-]?\s*USD$/i.test(s)) return false;
+  if (/^e\.g\.\s+[a-z0-9_.:/-]+$/i.test(s)) return false;
+  if (/^HTTP\s+\{[A-Za-z0-9_]+\}$/i.test(s)) return false;
   if (/^https?:\/\//i.test(s) || /^www\./i.test(s)) return false;
-  if (/^[A-Z][A-Z0-9_]{2,}$/.test(s)) return false;
+  // 只放过环境变量形态；普通大写词和短句仍可能是按钮或状态文案，必须进入扫描。
+  if (/^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(s)) return false;
   if (isCssLike(s)) return false;
   if (isCodeLike(s)) return false;
   const words = s.split(/[^A-Za-z]+/).filter((w) => w.length >= 2);
   if (words.length >= 2) {
     const hyphenLabel = /^[A-Z][A-Za-z]+(-[A-Za-z]+)+$/.test(s.replace(/[.!?…]+$/, ""));
     if (!/\s/.test(s) && !hyphenLabel) return false;
-    return words.some((w) => /[a-z]/.test(w));
+    return true;
   }
   const token = s.replace(/[.!?…]+$/g, "").trim();
   const bare = token.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "");
@@ -420,12 +527,136 @@ function inImport(node: ts.Node): boolean {
   return false;
 }
 
+/**
+ * 判断字符串节点是否作为翻译 helper 的直接首参。
+ * 参数 node 为候选字符串或其表达式子节点；返回是否由 t/translate/tRuntime 等明确消费，供源码扫描跳过目录键。
+ * 遍历在函数和 JSX 边界停止，非首参立即返回 false，避免把同一调用中的默认英文或相邻文案误判为已翻译。
+ */
 function isDirectTranslationKey(node: ts.Node): boolean {
-  const parent = node.parent;
-  if (!parent || !ts.isCallExpression(parent) || parent.arguments[0] !== node) return false;
-  const expr = parent.expression;
-  const name = ts.isIdentifier(expr) ? expr.text : ts.isPropertyAccessExpression(expr) ? expr.name.text : "";
-  return TRANSLATION_CALLEES.has(name);
+  let child: ts.Node = node;
+  let parent: ts.Node | undefined = node.parent;
+  while (parent) {
+    if (ts.isCallExpression(parent)) {
+      if (parent.arguments[0] !== child) return false;
+      const expr = parent.expression;
+      const name = ts.isIdentifier(expr) ? expr.text : ts.isPropertyAccessExpression(expr) ? expr.name.text : "";
+      return TRANSLATION_CALLEES.has(name);
+    }
+    if (isFunctionBoundary(parent) || ts.isJsxElement(parent) || ts.isJsxFragment(parent)) return false;
+    child = parent;
+    parent = parent.parent;
+  }
+  return false;
+}
+
+/**
+ * 判断字符串是否属于外部护栏的本地化配置目录。
+ * 参数：node 为字符串节点，file 为当前源码路径。
+ * 返回：仅对 externalProviders.ts 中 EXTERNAL_PROVIDERS 的 label/description 值返回 true。
+ * 调用场景：这些值由 ExternalGuardrailEditor 和 guardrail_garden 统一交给 externalGuardrailText；该 helper 内部调用 t，
+ * 同时保留 LiteLLM 品牌占位符。规则限定文件、常量和属性名，避免把普通对象里的英文展示字段误当成已翻译。
+ */
+function isExternalGuardrailCatalogValue(node: ts.Node, file: string): boolean {
+  if (path.basename(file) !== "externalProviders.ts") return false;
+  const property = node.parent;
+  if (!property || !ts.isPropertyAssignment(property) || property.initializer !== node) return false;
+  if (!new Set(["label", "description"]).has(propNameOf(property.name))) return false;
+  let current: ts.Node | undefined = property;
+  while (current) {
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) {
+      return current.name.text === "EXTERNAL_PROVIDERS";
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * 判断字符串是否是已由调用方逐项翻译的固定目录键。
+ * 参数：node 为目录字符串节点，file 为声明文件；返回值仅覆盖三个明确的目录/状态函数及其 label 字段。
+ * 调用场景：日志筛选器会对筛选目录执行 t/translate，状态函数的返回键由表格和抽屉执行 t。
+ * 边界：文件、声明名和字段名必须同时匹配，普通 label 对象仍会报告，避免按属性名宽泛跳过。
+ */
+function isTranslatedCatalogValue(node: ts.Node, file: string): boolean {
+  const property = node.parent;
+  if (!property || !ts.isPropertyAssignment(property) || property.initializer !== node || propNameOf(property.name) !== "label") {
+    return false;
+  }
+  const base = path.basename(file);
+  let current: ts.Node | undefined = property;
+  while (current) {
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) {
+      return (
+        base === "RequestLogsFilters.tsx" &&
+        (current.name.text === "STATUS_FILTER_KEYS" || current.name.text === "CACHE_FILTER_KEYS")
+      ) || (base === "constants.ts" && current.name.text === "ERROR_CODE_OPTIONS");
+    }
+    if (ts.isFunctionDeclaration(current) && current.name) {
+      return base === "taskStatus.ts" && current.name.text === "requestLogStatus";
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * 判断 JSX 内联 map 的字符串如何被回调消费。
+ * 参数 node 为字符串节点；返回 translated 表示参数进入明确翻译 helper 首参，rendered 表示参数直接展示，其余返回 null。
+ * 调用场景：定价模态和动态翻译页签用小写值拼接翻译键；扫描器只跳过 translated。
+ * 边界：普通比较、属性、toast 或其他函数调用都不足以证明已翻译；["pricing"].map(x => <span>{x}</span>) 必须继续命中。
+ */
+function mappedTokenUsage(node: ts.Node): "translated" | "rendered" | null {
+  const array = node.parent;
+  if (!array || !ts.isArrayLiteralExpression(array)) return null;
+  let owner: ts.Expression = array;
+  if (ts.isAsExpression(array.parent) && array.parent.expression === array) owner = array.parent;
+  if (ts.isParenthesizedExpression(owner.parent) && owner.parent.expression === owner) owner = owner.parent;
+  const access = owner.parent;
+  if (!access || !ts.isPropertyAccessExpression(access) || access.expression !== owner || access.name.text !== "map") return null;
+  const call = access.parent;
+  if (!call || !ts.isCallExpression(call) || call.expression !== access) return null;
+  const callback = call.arguments[0];
+  if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) || callback.parameters.length === 0) return null;
+  const names = new Set<string>();
+  /** 收集 map 首参的标识符；参数可为标识符或解构绑定，无返回值，仅服务当前回调分析。 */
+  const collectNames = (name: ts.BindingName) => {
+    if (ts.isIdentifier(name)) names.add(name.text);
+    else name.elements.forEach((element) => { if (ts.isBindingElement(element)) collectNames(element.name); });
+  };
+  collectNames(callback.parameters[0].name);
+  let directlyRendered = false;
+  let translated = false;
+  /** 遍历回调正文；参数为当前 AST 节点，无返回值，记录直接展示或翻译首参消费，其他调用不构成排除证据。 */
+  const inspect = (candidate: ts.Node) => {
+    if (
+      ts.isJsxExpression(candidate) &&
+      !ts.isJsxAttribute(candidate.parent) &&
+      candidate.expression &&
+      ts.isIdentifier(candidate.expression) &&
+      names.has(candidate.expression.text)
+    ) {
+      directlyRendered = true;
+      return;
+    }
+    if (ts.isCallExpression(candidate)) {
+      const callee = ts.isIdentifier(candidate.expression)
+        ? candidate.expression.text
+        : ts.isPropertyAccessExpression(candidate.expression)
+          ? candidate.expression.name.text
+          : "";
+      if (TRANSLATION_CALLEES.has(callee) && candidate.arguments[0]) {
+        const first = candidate.arguments[0];
+        /** 判断翻译首参是否引用 map 参数；参数为表达式节点，返回布尔值，只在当前翻译调用内部递归。 */
+        const usesMappedName = (part: ts.Node): boolean =>
+          (ts.isIdentifier(part) && names.has(part.text)) || part.getChildren().some(usesMappedName);
+        if (usesMappedName(first)) translated = true;
+      }
+    }
+    ts.forEachChild(candidate, inspect);
+  };
+  inspect(callback.body);
+  if (directlyRendered) return "rendered";
+  return translated ? "translated" : null;
 }
 
 function calleeName(expr: ts.Expression): { obj: string; method: string } {
@@ -651,13 +882,14 @@ export function findHitsInSource(file: string, text: string): ProseHit[] {
       push(node, node.getStart(sf) + lead, node.getEnd() - trail, "jsx-text", collapse(decodeEntities(inner)), [], false, true);
     }
 
-    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && !skipNode(node) && !technicalAttrContext(node)) {
+    const mappedUsage = mappedTokenUsage(node);
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) && !skipNode(node) && !technicalAttrContext(node) && !isExternalGuardrailCatalogValue(node, file) && !isTranslatedCatalogValue(node, file) && mappedUsage !== "translated") {
       const built = ts.isTemplateExpression(node) ? fromTemplate(node, sf) : fromTemplate(node as ts.StringLiteral, sf);
       const parent = node.parent;
       const asAttr = !!parent && ts.isJsxAttribute(parent) && parent.initializer === node;
       const asPropName = !!parent && ts.isPropertyAssignment(parent) && parent.name === node;
       const asDefault = isUiDefault(node);
-      const asTitle = isVisibleTitleList(node);
+      const asTitle = isVisibleTitleList(node) || mappedUsage === "rendered";
       const inHandler = isInsideEventHandler(node);
       const inJsx = !inHandler && (asAttr || isInsideJsx(node));
       const asProp = !!parent && ts.isPropertyAssignment(parent) && parent.initializer === node && USER_FACING_PROPS.has(propNameOf(parent.name));
@@ -668,7 +900,8 @@ export function findHitsInSource(file: string, text: string): ProseHit[] {
       const facingAttr = userFacingAttributeAncestor(node);
       const asVisibleProp = asProp && propNameOf((parent as ts.PropertyAssignment).name) !== "text";
       const singleWordUi = asAttr || asDefault || asTitle || renderedChild || facingAttr || asToast || asError || asVisibleProp;
-      const prose = isEnglishProse(built.probe, { singleWordUi, anySingleWord: asTitle });
+      const probe = /[\u3400-\u9fff]/u.test(built.template) ? built.template : built.probe;
+      const prose = isEnglishProse(probe, { singleWordUi, anySingleWord: asTitle });
       if (prose) {
         if (inJsx || asProp || asToast || asZod || asError || asDefault || asTitle) {
           if (!(asAttr && !userFacingAttr(parent as ts.JsxAttribute) && !isInsideJsxExpression(node))) {

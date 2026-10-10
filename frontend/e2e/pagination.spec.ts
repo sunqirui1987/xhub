@@ -16,6 +16,9 @@ async function changeSize(page: Page, size: number): Promise<void> {
   await page.getByRole("option", { name: String(size), exact: true }).click();
 }
 
+/** 生成中文分页范围文案；参数为首尾序号和总数，返回页面当前本地化文本，无数据副作用。 */
+const paginationRange = (start: number, end: number, count: number): string => `显示 ${start}-${end}，共 ${count} 条`;
+
 for (const failure of [false, true]) {
   /** 前置真实浏览器、网关、私有数据库和本地上游；成功请求两次一会话，失败请求同会话。
    * 验证完整合并后分页/失败逐条分页、首页末页边界、无重复遗漏、条数切换及空搜索。
@@ -69,14 +72,14 @@ for (const failure of [false, true]) {
       await stableGoto(page, "/logs");
       if (failure) await page.getByRole("tab", { name: t("Error Logs"), exact: true }).click();
       await filterModel(page, model);
-      await expect(page.getByTestId("pagination-range")).toHaveText(t("Showing {start}-{end} of {count}", { start: 1, end: 25, count: total }));
+      await expect(page.getByTestId("pagination-range")).toHaveText(paginationRange(1, 25, total));
       await expect(page.getByTestId("pagination-first")).toBeDisabled();
       const firstIds = await page.getByRole("row").filter({ hasText: model }).allTextContents();
       expect(firstIds).toHaveLength(25);
       const nextResponse = page.waitForResponse((res) => res.url().includes("/spend/logs/ui?") && new URL(res.url()).searchParams.get("page") === "2");
       await page.getByTestId("pagination-next").click();
       expect((await (await nextResponse).json()).page).toBe(2);
-      await expect(page.getByTestId("pagination-range")).toHaveText(t("Showing {start}-{end} of {count}", { start: 26, end: total, count: total }));
+      await expect(page.getByTestId("pagination-range")).toHaveText(paginationRange(26, total, total));
       await expect(page.getByTestId("pagination-next")).toBeDisabled();
       await expect(page.getByTestId("pagination-last")).toBeDisabled();
       await expect(page.getByRole("row").filter({ hasText: model })).toHaveCount(total - 25);
@@ -86,7 +89,7 @@ for (const failure of [false, true]) {
       await page.getByTestId("pagination-last").click();
       await expect(page.getByTestId("pagination-next")).toBeDisabled();
       await changeSize(page, 50);
-      await expect(page.getByTestId("pagination-range")).toHaveText(t("Showing {start}-{end} of {count}", { start: 1, end: total, count: total }));
+      await expect(page.getByTestId("pagination-range")).toHaveText(paginationRange(1, total, total));
       await expect(page.getByTestId("pagination-first")).toBeDisabled();
       await expect(page.getByRole("row").filter({ hasText: model })).toHaveCount(total);
       await page.getByTestId("datatable-search").fill("pagination-missing-request");
@@ -138,8 +141,12 @@ test("共享分页覆盖密钥、项目、项目密钥和审计", async ({ page 
     await stableGoto(page, "/api-keys?page_size=25");
     await page.getByPlaceholder(t("pages.apiKeys.searchPlaceholder")).fill(prefix + "-personal-");
     await expect(page.getByRole("row").filter({ hasText: prefix })).toHaveCount(25);
-    const keyResponse = page.waitForResponse((res) => res.url().includes("/key/list?") && new URL(res.url()).searchParams.get("page") === "2");
+    const keyResponse = page.waitForResponse((res) => {
+      const url = new URL(res.url());
+      return url.pathname === "/key/list" && url.searchParams.get("page") === "2" && url.searchParams.get("search") === prefix + "-personal-";
+    });
     await page.getByTestId("pagination-next").click();
+    // 页面已按本用例个人密钥前缀筛选，服务端总数必须只包含 26 条匹配项，不能混入项目密钥或共享管理员夹具。
     expect((await (await keyResponse).json()).total_count).toBe(26);
     await expect(page.getByRole("row").filter({ hasText: prefix })).toHaveCount(1);
     await expect(page.getByTestId("pagination-next")).toBeDisabled();

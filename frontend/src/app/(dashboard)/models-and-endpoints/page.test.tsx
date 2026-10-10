@@ -62,9 +62,9 @@ describe("ModelsAndEndpointsPage", () => {
     };
   });
 
-  it("renders the model list and Providers as the only primary tabs", () => {
+  it("renders the model list as the only primary tab", () => {
     renderPage();
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["All Models", "模型提供商"]);
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["All Models"]);
     expect(screen.queryByRole("tab", { name: "LLM Credentials" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Add Model" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Health Status" })).not.toBeInTheDocument();
@@ -72,10 +72,12 @@ describe("ModelsAndEndpointsPage", () => {
     expect(screen.getByTestId("panel-all-models")).toBeInTheDocument();
   });
 
-  it("titles the credential section 模型提供商 in zh-CN", () => {
+  /** 中文管理入口只呈现模型目录；供应商不再是同级页签。渲染由框架清理。 */
+  it("keeps model providers out of the primary tabs in zh-CN", () => {
     setActiveLocale("zh-CN");
     renderPage();
-    expect(screen.getByRole("tab", { name: "模型提供商" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "模型提供商" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.queryByRole("tab", { name: "LLM 凭据" })).not.toBeInTheDocument();
     expect(screen.queryByText("LLM 凭据")).not.toBeInTheDocument();
     expect(screen.queryByText("LLM Credentials")).not.toBeInTheDocument();
@@ -101,7 +103,7 @@ describe("ModelsAndEndpointsPage", () => {
   it("does not list the old ten labels as sibling tabs", () => {
     renderPage();
     const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent);
-    expect(tabs).toEqual(["All Models", "模型提供商"]);
+    expect(tabs).toEqual(["All Models"]);
     for (const label of [
       "Add Model",
       "Auto-Routers",

@@ -11,6 +11,7 @@ import { CollapsibleMessage } from "./CollapsibleMessage";
 import { HistoryTree } from "./HistoryTree";
 import { SimpleMessageBlock } from "./SimpleMessageBlock";
 import { t } from "@/i18n";
+import { ROLE_STYLES } from "./prettyMessagesUtils";
 
 interface InputCardProps {
   messages: ParsedMessage[];
@@ -18,6 +19,11 @@ interface InputCardProps {
   inputCost?: number;
 }
 
+/**
+ * 展示日志请求中的系统提示、历史消息和最后一条输入。
+ * 参数 messages 为已解析消息，promptTokens/inputCost 为可选计量；返回可折叠输入卡片，无消息时返回 null。
+ * PrettyMessagesView 调用；复制只处理最后一条非系统消息，已知角色从 ROLE_STYLES 读取当前语言标签，未知角色保留大写标识。
+ */
 export function InputCard({ messages, promptTokens, inputCost }: InputCardProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -69,7 +75,7 @@ export function InputCard({ messages, promptTokens, inputCost }: InputCardProps)
           {/* System Message - Collapsible with arrow */}
           {systemMessage && (
             <CollapsibleMessage
-              label="SYSTEM"
+              label={ROLE_STYLES.system.label}
               content={systemMessage.content}
               defaultExpanded={!!(systemMessage.content && systemMessage.content.length < 200)}
             />
@@ -81,7 +87,7 @@ export function InputCard({ messages, promptTokens, inputCost }: InputCardProps)
           {/* Last User Message - Always visible */}
           {lastMessage && (
             <SimpleMessageBlock
-              label={lastMessage.role.toUpperCase()}
+              label={ROLE_STYLES[lastMessage.role]?.label ?? lastMessage.role.toUpperCase()}
               content={lastMessage.content}
               toolCalls={lastMessage.toolCalls}
             />

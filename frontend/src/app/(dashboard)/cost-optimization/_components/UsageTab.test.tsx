@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolSpendResponse } from "@/components/networking";
 
@@ -17,6 +18,11 @@ vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
 // org-admin leg so role gating flows through hasCapability without a QueryClient
 vi.mock("@/app/(dashboard)/hooks/useIsOrgAdmin", () => ({
   default: () => false,
+}));
+
+// UsageTab 的代理级工具支出卡片由 useCan 控制；按测试角色返回能力，避免把权限判断退化成静态 mock。
+vi.mock("@/app/(dashboard)/hooks/useCan", () => ({
+  default: () => useAuthorizedMock().userRole === "Admin",
 }));
 
 vi.mock("@/components/networking", () => ({
@@ -112,20 +118,25 @@ const renderWith = (results: DailyData[], options: RenderOptions = {}) => {
   } = options;
   mockGetToolSpend.mockResolvedValue(toolSpend);
   useAuthorizedMock.mockReturnValue({ accessToken: "test-token", userId: "u1", userRole });
+  // UsageTab 的权限钩子会经过 React Query 读取会话身份；测试辅助必须提供真实 QueryClient，
+  // 才能验证图表和工具支出卡片在完整组件树中的可观察行为。
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <UsageTab
-      accessToken="test-token"
-      activity={{
-        dateValue: { from, to },
-        onDateChange: vi.fn(),
-        results,
-        loading: false,
-        isFetchingMore: false,
-        progress: { currentPage: 1, totalPages: 1 },
-        cancelled: false,
-        cancel: vi.fn(),
-      }}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <UsageTab
+        accessToken="test-token"
+        activity={{
+          dateValue: { from, to },
+          onDateChange: vi.fn(),
+          results,
+          loading: false,
+          isFetchingMore: false,
+          progress: { currentPage: 1, totalPages: 1 },
+          cancelled: false,
+          cancel: vi.fn(),
+        }}
+      />
+    </QueryClientProvider>,
   );
 };
 

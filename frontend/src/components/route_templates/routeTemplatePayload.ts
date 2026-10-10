@@ -7,6 +7,7 @@ import {
   type RouteTemplate,
   type RouteTemplateUsage,
 } from "@/components/networking";
+import { t } from "@/i18n";
 
 /**
  * What a template row looks like once it is on screen.
@@ -70,12 +71,9 @@ export const SCOPE_KINDS = ["organization", "team", "key"] as const;
 export type ScopeKind = (typeof SCOPE_KINDS)[number];
 
 /**
- * Saves a template, creating it when there is no id.
- *
- * The body is sent as the object the form holds. An empty document is allowed
- * here and rejected on the server side only if the name is missing: a template
- * whose settings are not filled in yet is a name the operator is about to use,
- * and refusing to save it would lose the name they just typed.
+ * 保存路由模板；参数 accessToken 为鉴权令牌，template 包含可选 id、名称、正文和新建归属，返回无值的 Promise。
+ * 模板页提交时调用：有 id 时更新且不转移归属，无 id 时创建；空正文允许保存，空白名称按当前语言在请求前拒绝。
+ * 副作用仅为一次后台创建或更新调用，校验失败不会发起请求。
  */
 export const saveRouteTemplate = async (
   accessToken: string,
@@ -94,7 +92,7 @@ export const saveRouteTemplate = async (
   },
 ): Promise<void> => {
   const name = template.name.trim();
-  if (!name) throw new Error("name is required");
+  if (!name) throw new Error(t("name is required"));
   if (template.id) {
     await updateRouteTemplateCall(accessToken, template.id, { name, body: template.body });
     return;

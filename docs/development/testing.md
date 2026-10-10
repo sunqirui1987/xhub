@@ -57,7 +57,7 @@ npm run test:types
 
 项目匹配由 `frontend/vitest.config.ts` 定义：unit 为 `.test.ts`，component 为 `.test.tsx`，integration 为 `.integration.test.tsx`，types 为 `.test-d.ts`。不要无路径执行整个 Vitest 套件；遵循 [frontend/CLAUDE.md](../../frontend/CLAUDE.md) 的范围与断言要求。
 
-修改后端接口后，若控制台使用该接口，运行 `npm run gen:api` 同步生成类型，避免手改 schema.d.ts。
+修改后端接口后，若控制台使用该接口，必须核对实际请求和响应，并同步验证消费者。`npm run gen:api` 当前仍从历史 Python LiteLLM/FastAPI 应用生成 `schema.d.ts`，并非从本项目 Go 网关生成；本轮执行因缺少 `litellm.proxy.proxy_server` 失败，不能宣称已同步 Go 接口类型。不要手改生成文件，也不要用其它版本的 LiteLLM 输出覆盖本项目接口契约。Go 接口在当前阶段以后台 HTTP regression、前端消费者测试和真实浏览器链核对，生成器迁移仍是明确待办。
 
 ## 浏览器 E2E
 
@@ -71,16 +71,19 @@ npx playwright install chromium
 然后从仓库根目录运行：
 
 ```bash
-make e2e
+make e2e-offline       # 本地假上游，免费
+make e2e-model-endpoints # 隔离 Redis、随机 schema、本地供应商，免费
+make e2e                # 共享验收基线，真实供应商，收费
+make e2e-all            # 完整隔离验收，真实供应商，收费
 ```
 
-`make e2e` 运行 `scripts/e2e-all.sh`：浏览器流程之后执行含真实供应商的严格后端回归，需要可用的真实供应商凭据并会产生费用。只运行本地模拟浏览器测试可执行 `make e2e-offline`。浏览器脚本默认使用独立的 `3100/4100/4110` 端口及 `.next-e2e` 构建目录；端口占用时直接失败，可用 `E2E_UI_PORT`、`E2E_GW_PORT`、`E2E_UP_PORT` 覆盖。Playwright 的 webServer 启动假上游、网关和控制台；网关使用独立 e2e schema。完整场景矩阵见[浏览器回归](e2e-regression.md)，后端场景和真实模型条件见[全链路回归](regression.md)。
+`make e2e-offline` 使用 `scripts/e2e.sh`，不读取真实供应商密钥。`make e2e-model-endpoints` 使用隔离 Redis、随机浏览器 schema 和本地供应商。`make e2e` 使用共享 `xhub/public` 与 Redis DB 1 的验收基线，读取真实供应商密钥并产生费用；`make testdata` 会重建该共享基线但不调用模型。`make e2e-all` 使用独立 Redis、随机 schema 和真实供应商并产生费用。浏览器默认使用独立端口和 `.next-e2e`；完整场景见[浏览器回归](e2e-regression.md)。
 
 权限界面重点看 `frontend/e2e/visibility-chain.spec.ts`；密钥与 Playground 看 `keys-playground.spec.ts`；创建和写操作看 wizards/writes 相关 spec。浏览器检查不代替数据库并发和故障测试。测试输出是临时产物，不加入正式文档。
 
 ## 隔离回归数据
 
-演示数据命令已删除。运行 bash scripts/regression.sh 时，每个测试通过真实后台接口创建组织、团队、项目、用户和密钥，并在测试结束后删除独立 PostgreSQL schema；不会写入已有租户的数据。
+`make regression` 为每个 Go 用例创建并清理独立 PostgreSQL schema；Redis 专项必须另行提供独立的 `XHUB_REGRESSION_REDIS_URL`。`make testdata` 使用共享 `xhub/public` 与 Redis DB 1，会清空并重建基线，不调用模型，也不是隔离 schema。E2E 报告位于 `.e2e/runs/<timestamp>-<pid>/`，并更新 `.e2e/latest`。
 
 启动只建表、按配置创建尚不存在的初始管理员，并登记内置供应商凭据；不会自动创建演示组织、团队、项目或账号。
 

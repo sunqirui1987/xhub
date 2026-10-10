@@ -52,11 +52,11 @@ func TestPersonalKeyVisible(t *testing.T) {
 	}
 }
 
-// TestPersonalPage 验证本人范围内搜索、精确用户筛选、排序、分页和错误输入；前置三条内存记录。
+// TestPersonalPage 验证授权范围内项目/别名/搜索/用户筛选、排序、分页和错误输入；前置三条内存记录。
 // 参数 t 为测试上下文，返回无；验证空集不回退全量、页数正确、坏参数拒绝及切片不被改写，无清理副作用。
 func TestPersonalPage(t *testing.T) {
-	me := "me"
-	rows := []iam.Key{{ID: "c", Name: "Charlie", UserID: &me}, {ID: "a", Name: "Alpha", UserID: &me}, {ID: "b", Name: "Beta", UserID: &me}}
+	me, projectA, projectB := "me", "project-a", "project-b"
+	rows := []iam.Key{{ID: "c", Name: "Charlie", ProjectID: &projectB, UserID: &me}, {ID: "a", Name: "Alpha", ProjectID: &projectA, UserID: &me}, {ID: "b", Name: "Beta", ProjectID: &projectA, UserID: &me}}
 	for _, tc := range []struct {
 		query        string
 		ids          []string
@@ -65,6 +65,9 @@ func TestPersonalPage(t *testing.T) {
 	}{
 		{"sort_by=key_alias&sort_order=asc&size=2&page=2", []string{"c"}, 3, 2, false},
 		{"search=ALPHA", []string{"a"}, 1, 1, false},
+		{"project_id=project-a&size=1&page=2&sort_by=key_alias&sort_order=asc", []string{"b"}, 2, 2, false},
+		{"key_alias=Alpha", []string{"a"}, 1, 1, false},
+		{"key_alias=alp&substring_matching=true", []string{"a"}, 1, 1, false},
 		{"user_id=other", []string{}, 0, 1, false},
 		{"user_id=m", []string{}, 0, 1, false},
 		{"key_hash=unknown", []string{}, 0, 1, false},

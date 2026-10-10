@@ -211,14 +211,14 @@ describe("RegenerateKeyModal submit payload", () => {
     });
   });
 
-  it("targets the key by its token hash", async () => {
+  it("targets the key by its token id", async () => {
     const user = userEvent.setup();
     renderModal();
 
     await regenerate(user);
 
     await waitFor(() => expect(mockRegenerateKeyCall).toHaveBeenCalledOnce());
-    expect(mockRegenerateKeyCall.mock.calls[0].slice(0, 2)).toStrictEqual(["123", "token-hash-123"]);
+    expect(mockRegenerateKeyCall.mock.calls[0].slice(0, 2)).toStrictEqual(["123", "token-id-123"]);
   });
 
   it("blocks submission and sends nothing when the duration is unparseable", async () => {

@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { deleteRefusalText, summarizeTemplate, toTemplateRows } from "./routeTemplatePayload";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRouteTemplateCall } from "@/components/networking";
+import { setActiveLocale } from "@/i18n";
+import { deleteRefusalText, saveRouteTemplate, summarizeTemplate, toTemplateRows } from "./routeTemplatePayload";
+
+vi.mock("@/components/networking", () => ({
+  createRouteTemplateCall: vi.fn(),
+  updateRouteTemplateCall: vi.fn(),
+  getRouteTemplatesCall: vi.fn(),
+  getRouteTemplateUsageCall: vi.fn(),
+  deleteRouteTemplateCall: vi.fn(),
+}));
+afterEach(() => {
+  setActiveLocale("en");
+  vi.clearAllMocks();
+});
 
 /**
  * The route template library's view logic.
@@ -17,6 +31,15 @@ const labels = {
   fallbacks: (value: number) => `${value} fallbacks`,
   none: "no fallbacks",
 };
+
+describe("saveRouteTemplate", () => {
+  /** 前置中文语言和空白名称；验证本地校验返回准确中文且不调用后台；恢复语言并清空 mock，无测试数据。 */
+  it("localizes the required-name failure before creating", async () => {
+    setActiveLocale("zh-CN");
+    await expect(saveRouteTemplate("token", { name: "   ", body: {} })).rejects.toThrow("名称为必填项");
+    expect(createRouteTemplateCall).not.toHaveBeenCalled();
+  });
+});
 
 describe("toTemplateRows", () => {
   it("carries the usage count onto the row", () => {

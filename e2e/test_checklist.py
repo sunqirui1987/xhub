@@ -77,24 +77,24 @@ class ChecklistTests(unittest.TestCase):
                 dataset.acceptance_keys()
 
     def test_business_browser_selection_and_failure(self):
-        """目的：去重流程必须完整执行且不能沿用旧报告；前置模拟报告，验证15项精确筛选、禁用live、跳过失败和异常传播，临时目录及补丁自动清理。"""
+        """目的：去重流程必须完整执行且不能沿用旧报告；前置模拟报告，验证19项精确筛选、禁用live、跳过失败和异常传播，临时目录及补丁自动清理。"""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             result = root / '.e2e/current/results.json'
             result.parent.mkdir(parents=True)
             report = root / 'report'
             report.mkdir()
-            stats = dict(expected=15, unexpected=0, flaky=0, skipped=0)
+            stats = dict(expected=19, unexpected=0, flaky=0, skipped=0)
             def execute(args, logger, **kwargs):
                 """用途：模拟本轮浏览器产物；参数为命令及环境，返回无；只写临时报告，供完整性断言使用。"""
                 self.assertIn('--grep', args)
-                self.assertEqual(args[-1].count('$'), 15)
+                self.assertEqual(args[-1].count('$'), 19)
                 self.assertNotIn('E2E_LIVE', kwargs['env'])
                 current = Path(kwargs['env']['E2E_BROWSER_REPORT_DIR']) / 'results.json'
                 current.parent.mkdir(parents=True, exist_ok=True)
                 current.write_text(json.dumps(dict(stats=stats)))
             with mock.patch.object(runner, 'ROOT', root), mock.patch.object(runner, 'command_stream', side_effect=execute):
-                self.assertEqual(runner.run_business_browser(report, mock.Mock())['cases'], 15)
+                self.assertEqual(runner.run_business_browser(report, mock.Mock())['cases'], 19)
                 stats['skipped'] = 1
                 with self.assertRaisesRegex(AssertionError, '未全部执行'):
                     runner.run_business_browser(report, mock.Mock())

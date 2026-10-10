@@ -105,3 +105,25 @@ func TestJSONOrTextPreservesRawResponse(t *testing.T) {
 		t.Fatalf("空响应边界错误: %#v", got)
 	}
 }
+
+// TestLogPaginationQuery 验证排序方向、未知列传递及安全偏移边界；前置内存请求，无数据库数据需要清理。
+// 排序列由 IAM 白名单处理，这里必须保留前端列名且只有 asc 启用升序。
+func TestLogPaginationQuery(t *testing.T) {
+	for _, c := range []struct {
+		raw, field string
+		asc        bool
+	}{{"", "", false}, {"sort_by=spend&sort_order=asc", "spend", true}, {"sort_by=unknown&sort_order=broken", "unknown", false}} {
+		q := logQuery(httptest.NewRequest("GET", "/?"+c.raw, nil), &authz.Scope{})
+		if q.SortBy != c.field || q.SortAsc != c.asc {
+			t.Fatalf("日志排序条件错误: %+v", q)
+		}
+	}
+	for _, c := range []struct {
+		raw  string
+		want int
+	}{{"", 0}, {"page=2", 5000}, {"page=-1", 0}, {"page=broken", 0}, {"page=9223372036854775807", int(^uint(0) >> 1)}} {
+		if got := pageOffset(httptest.NewRequest("GET", "/?"+c.raw, nil), 5000); got != c.want {
+			t.Fatalf("用量分页偏移%q: %d != %d", c.raw, got, c.want)
+		}
+	}
+}

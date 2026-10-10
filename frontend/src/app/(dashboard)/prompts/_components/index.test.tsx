@@ -7,6 +7,12 @@ import { deletePromptCall, getPromptsList } from "@/components/networking";
 import PromptsPanel from "./index";
 import { chooseSelectOption } from "../../../../../tests/test-utils";
 
+// 工具栏和环境选项在模块加载时翻译；固定英文以验证真实按钮及筛选标签。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/components/networking", () => ({
   getPromptsList: vi.fn(),
   deletePromptCall: vi.fn(),
@@ -91,7 +97,7 @@ describe("PromptsPanel toolbar", () => {
     renderPanel("Admin");
 
     expect(await screen.findByRole("button", { name: /add new prompt/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /upload \.prompt file/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /upload\.prompt file/i })).toBeEnabled();
   });
 
   it("should hide both create actions from a read-only viewer", async () => {
@@ -99,7 +105,7 @@ describe("PromptsPanel toolbar", () => {
 
     expect(await screen.findByText("table-loaded")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add new prompt/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /upload \.prompt file/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /upload\.prompt file/i })).not.toBeInTheDocument();
   });
 
   it("should open the editor view when the add action is used", async () => {
@@ -117,7 +123,7 @@ describe("PromptsPanel toolbar", () => {
     renderPanel("Admin");
 
     expect(screen.queryByText("add-prompt-form")).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: /upload \.prompt file/i }));
+    await user.click(await screen.findByRole("button", { name: /upload\.prompt file/i }));
 
     expect(screen.getByText("add-prompt-form")).toBeInTheDocument();
   });

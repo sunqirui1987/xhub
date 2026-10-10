@@ -80,3 +80,9 @@ describe("CoordinationRedisSettings value retention across redis types", () => {
     expect(JSON.stringify(updateSettings.mock.calls[0])).not.toContain("mymaster");
   });
 });
+
+/** 固定真实英文翻译及插值，避免模块加载阶段的中文标签污染契约；验证业务结果，mock 随测试清理。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, values?: Parameters<typeof original.translate>[2]) => original.translate("en", key, values) };
+});

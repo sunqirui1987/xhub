@@ -20,6 +20,12 @@ vi.mock("./content_filter/ContentFilterManager", () => ({
   formatContentFilterDataForAPI: () => ({ patterns: [], blocked_words: [], categories: [] }),
 }));
 
+/** 明确选择历史设置表单；现行编辑器由独立集成测试覆盖，本组验证旧表单的差量提交契约。 */
+vi.mock("./ModernGuardrailEditor", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ModernGuardrailEditor")>();
+  return { ...actual, supportsModernGuardrail: () => false };
+});
+
 const uiSettings = {
   supported_entities: [],
   supported_actions: [],
@@ -290,4 +296,10 @@ describe("GuardrailInfoView update payload characterization", () => {
     await user.click(await screen.findByText("Edit Settings"));
     expect(await screen.findByLabelText("Guardrail Name")).toHaveValue("Draft Name");
   });
+});
+
+/** 固定真实英文翻译及插值，避免模块加载阶段的中文标签污染契约；验证业务结果，mock 随测试清理。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, values?: Parameters<typeof original.translate>[2]) => original.translate("en", key, values) };
 });

@@ -36,9 +36,9 @@ func personalKeyVisible(p *auth.Principal, k *iam.Key) bool {
 	return p != nil && p.Kind == authz.KindSession && p.UserID != "" && k.OwnedBy(p.UserID)
 }
 
-// personalPage 在已通过 SQL 隔离的个人记录内筛选、排序及分页。
+// personalPage 在已通过 SQL 权限隔离的密钥记录内筛选、排序及分页。
 // 参数 rows 为授权后的数据库记录，q 为 URL 条件；返回当前页、总数、页码、页大小、总页数及错误。
-// 调用场景：List 的个人查询；非法分页或排序返回错误，越界页为空；不修改调用方切片。
+// 调用场景：List 的普通及个人查询；非法分页或排序返回错误，越界页为空；不修改调用方切片。
 func personalPage(rows []iam.Key, q url.Values) ([]iam.Key, int, int, int, int, error) {
 	page, size := 1, 50
 	for name, target := range map[string]*int{"page": &page, "size": &size} {
@@ -69,12 +69,18 @@ func personalPage(rows []iam.Key, q url.Values) ([]iam.Key, int, int, int, int, 
 	filtered := make([]iam.Key, 0, len(rows))
 	for _, k := range rows {
 		if (q.Get("team_id") != "" && q.Get("team_id") != k.TeamID) ||
+			(q.Get("project_id") != "" && (k.ProjectID == nil || q.Get("project_id") != *k.ProjectID)) ||
 			(q.Get("user_id") != "" && (k.UserID == nil || q.Get("user_id") != *k.UserID)) ||
 			(q.Get("key_hash") != "" && q.Get("key_hash") != k.ID) {
 			continue
 		}
 		search := strings.ToLower(strings.TrimSpace(q.Get("search")))
+		alias := strings.ToLower(strings.TrimSpace(q.Get("key_alias")))
+		substring := q.Get("substring_matching") == "true"
 		if search != "" && !strings.Contains(strings.ToLower(k.Name), search) && !strings.Contains(strings.ToLower(k.ID), search) {
+			continue
+		}
+		if alias != "" && ((!substring && strings.ToLower(k.Name) != alias) || (substring && !strings.Contains(strings.ToLower(k.Name), alias))) {
 			continue
 		}
 		filtered = append(filtered, k)

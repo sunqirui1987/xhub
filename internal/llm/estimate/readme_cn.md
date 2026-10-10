@@ -6,7 +6,7 @@
 
 tokencount.go 使用 tokenizer 对文本、消息等输入估算 token；cost.go 根据模型价格、倍率、折扣和服务档位提供 TokenCost 等费用辅助。估算为预检查和报价服务，不代替供应商返回的真实 usage。
 模型 tokenizer 不完全对应时只能近似；图像、音频、隐藏推理或缓存命中并不由普通文本计数完整涵盖。正式结算优先采用真实上游数量和 catalog 费率。
-函数没有独立 HTTP 路由，由 gateway/tokens 和 usage 的报价能力使用。新增估算支持需说明支持输入、缺失模型处理、输出单位以及与历史账务的区别。此目录当前没有直接测试文件，调用集成验证不能宣称覆盖每个估算分支。
+函数没有独立 HTTP 路由，由 gateway/tokens 和 usage 的报价能力使用。新增估算支持需说明支持输入、缺失模型处理、输出单位以及与历史账务的区别。独立单元和上层价格流程各自验证对应层级，不能用调用集成验证宣称覆盖每个估算分支。
 
 ## 源码职责与入口
 
@@ -36,7 +36,7 @@ tokencount.go 使用 tokenizer 对文本、消息等输入估算 token；cost.go
 
 ## 验证与维护入口
 
-当前目录没有直接测试文件；上层集成测试仅证明被执行的链路，不代表所有内部失败分支均已覆盖。
+直接单元测试 [cost_test.go](cost_test.go) 核对折扣、加价优先级、费用分解、每 token 量纲与服务档位；[tokencount_test.go](tokencount_test.go) 核对文本/消息计数、未知模型回退、支持参数和供应商前缀。上层 [价格回归](../../../cmd/regression/pricing_test.go)、[价格档位回归](../../../cmd/regression/pricing_units_test.go) 与 [价格页面 E2E](../../../frontend/e2e/price-model-selects.spec.ts) 验证对应用户结果；它们不证明图像/音频 token 估算或 tokenizer 本身的全部错误分支。
 
 ```bash
 go test ./internal/llm/estimate -count=1

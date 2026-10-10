@@ -22,7 +22,7 @@ import (
 // flushCache 在管理身份授权通过后清空当前进程的推理响应缓存；未授权请求不改变缓存。
 // 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 调用：仅在 access.go 内使用
-// 测试：无直接单测
+// 测试：access_cache_test.go；regression/consistency_test.go。
 // 返回：无。状态码和正文写进调用方的响应。
 func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
 	if s.requireManage(w, r) == nil {

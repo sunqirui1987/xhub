@@ -12,34 +12,48 @@ import {
   RoleStyle,
   ToolCall,
 } from "./prettyMessagesTypes";
+import { t } from "@/i18n";
 
 /**
- * Role color styles for message cards - minimal, professional design
- * Color only used for labels and left border accent
+ * 日志消息卡片的角色样式目录。
+ * 键为规范化角色，值提供背景、边框、标签和标签颜色，供 PrettyMessagesView 渲染请求与响应消息。
+ * label 使用 getter 在每次读取时按当前语言翻译，切换语言后无需重新加载模块；未知角色由解析器先归一化后再访问。
  */
 export const ROLE_STYLES: Record<string, RoleStyle> = {
   system: {
     background: "transparent",
     borderColor: "var(--color-muted-foreground)",
-    label: "SYSTEM",
+    /** 返回当前语言的系统角色标签；无参数，供消息卡片读取，不缓存语言状态。 */
+    get label() {
+      return t("SYSTEM");
+    },
     labelColor: "var(--color-muted-foreground)",
   },
   user: {
     background: "transparent",
     borderColor: "var(--color-info)",
-    label: "USER",
+    /** 返回当前语言的用户角色标签；无参数，供消息卡片读取，不缓存语言状态。 */
+    get label() {
+      return t("USER");
+    },
     labelColor: "var(--color-info)",
   },
   assistant: {
     background: "transparent",
     borderColor: "var(--color-success)",
-    label: "ASSISTANT",
+    /** 返回当前语言的助手角色标签；无参数，供消息卡片读取，不缓存语言状态。 */
+    get label() {
+      return t("ASSISTANT");
+    },
     labelColor: "var(--color-success)",
   },
   tool: {
     background: "transparent",
     borderColor: "var(--color-warning)",
-    label: "TOOL RESULT",
+    /** 返回当前语言的工具结果标签；无参数，供消息卡片读取，不缓存语言状态。 */
+    get label() {
+      return t("TOOL RESULT");
+    },
     labelColor: "var(--color-warning)",
   },
 };

@@ -72,7 +72,7 @@ export function PriceModelDialog({
       .get<{ transports?: PriceSelectOption[] }>("/public/endpoints")
       .then((body) => {
         if (canceled) return;
-        if (!Array.isArray(body?.transports)) throw new Error("Missing endpoint catalog");
+        if (!Array.isArray(body?.transports)) throw new Error(t("Missing endpoint catalog"));
         setEndpoints(priceSelectOptions(body.transports));
         setEndpointState("ready");
       })

@@ -137,7 +137,8 @@ describe("Navbar", () => {
   it("should render without crashing", () => {
     renderWithProviders(<Navbar {...defaultProps} />);
 
-    expect(screen.getByRole("button", { name: /^notifications$/i })).toBeInTheDocument();
+    // 当前导航栏以视图切换器作为已登录入口，通知按钮已从产品中移除。
+    expect(screen.getByRole("button", { name: /AI Gateway/i })).toBeInTheDocument();
     expect(screen.queryByText("Docs")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /open account menu/i })).toBeInTheDocument();
   });
@@ -241,12 +242,12 @@ describe("Navbar", () => {
     mockUseThemeImpl = () => ({ logoUrl: null });
   });
 
-  it("should hide user dropdown and notifications on public pages", () => {
+  it("should hide authenticated controls on public pages", () => {
     const publicPageProps = { ...defaultProps, isPublicPage: true };
     renderWithProviders(<Navbar {...publicPageProps} />);
 
     expect(screen.queryByRole("button", { name: /open account menu/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^notifications$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /AI Gateway/i })).not.toBeInTheDocument();
   });
 
   it("should handle hide new feature indicators toggle", async () => {

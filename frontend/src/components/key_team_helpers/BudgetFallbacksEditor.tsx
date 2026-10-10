@@ -36,6 +36,11 @@ const dictToEntries = (dict: Record<string, string[]>): FallbackEntry[] => {
   }));
 };
 
+/**
+ * 编辑按主模型配置的预算回退链。
+ * 参数 value 是已保存映射，availableModels 提供选择项，onChange 接收去除未完成行后的映射；返回可增删排序的表单。
+ * 密钥与团队设置页调用本组件；空行只保留在本地，不会写入 onChange，显示文案始终按当前语言读取。
+ */
 export function BudgetFallbacksEditor({ value, onChange, availableModels }: BudgetFallbacksEditorProps) {
   const [entries, setEntries] = useState<FallbackEntry[]>(() => dictToEntries(value));
 
@@ -110,7 +115,7 @@ export function BudgetFallbacksEditor({ value, onChange, availableModels }: Budg
             <div className="flex items-center justify-center -my-1 mb-2">
               <div className="bg-warning/10 text-warning px-3 py-0.5 rounded-full text-[10px] font-bold border border-warning/15 flex items-center gap-1">
                 <ArrowDown className="w-3 h-3" />
-                IF BUDGET EXCEEDED, TRY
+                {t("IF BUDGET EXCEEDED, TRY")}
               </div>
             </div>
 

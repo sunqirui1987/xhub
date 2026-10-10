@@ -1,8 +1,9 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { RealtimePrettyView, isRealtimeResponse } from "./RealtimePrettyView";
+import { setActiveLocale } from "@/i18n";
 
 const sampleRealtimeResponse = {
   usage: {
@@ -145,6 +146,7 @@ describe("RealtimePrettyView", () => {
   const mockWriteText = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
+    setActiveLocale("en");
     vi.clearAllMocks();
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: mockWriteText },
@@ -152,6 +154,7 @@ describe("RealtimePrettyView", () => {
       configurable: true,
     });
   });
+  afterEach(() => setActiveLocale("en"));
 
   it("should render the component successfully", () => {
     render(<RealtimePrettyView response={sampleRealtimeResponse} />);
@@ -283,6 +286,22 @@ describe("RealtimePrettyView", () => {
     expect(assistantLabels.length).toBe(2);
   });
 
+  // 前提：实时协议返回标准 assistant 角色且界面切换为中文；结果：消费端展示“助手”而非英文常量；render 与语言状态均在测试后清理。
+  it("should display the localized assistant label", () => {
+    setActiveLocale("zh-CN");
+    render(<RealtimePrettyView response={sampleRealtimeResponse} />);
+    expect(screen.getAllByText("助手")).toHaveLength(2);
+    expect(screen.queryByText("ASSISTANT")).not.toBeInTheDocument();
+  });
+
+  // 前提：上游协议返回目录未知的新角色；结果：为保留诊断语义而显示大写原值，不误套已知翻译；render 由测试框架清理。
+  it("should preserve an unknown protocol role as an uppercase identifier", () => {
+    const response = structuredClone(sampleRealtimeResponse);
+    response.results[1].response.output[0].role = "observer";
+    render(<RealtimePrettyView response={response} />);
+    expect(screen.getByText("OBSERVER")).toBeInTheDocument();
+  });
+
   it("should display fallback message when no recognized events exist", () => {
     const emptyResponse = {
       results: [{ type: "unknown.event" }],
@@ -313,7 +332,8 @@ describe("RealtimePrettyView", () => {
       <RealtimePrettyView response={sampleRealtimeResponse} metrics={{ completion_tokens: 500, output_cost: 0.005 }} />,
     );
     expect(screen.getByText(/Tokens: 500/)).toBeInTheDocument();
-    expect(screen.getByText(/Cost: \$0\.005000/)).toBeInTheDocument();
+    // 非零汇总费用按照共享标题的两位小数舍入；render 清理由测试框架完成。
+    expect(screen.getByText("Cost: $0.01")).toBeInTheDocument();
   });
 
   it("should toggle output section collapse when header is clicked", async () => {

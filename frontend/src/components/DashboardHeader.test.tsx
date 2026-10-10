@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { DashboardHeader } from "./DashboardHeader";
-import { NAV_PRODUCT_LINK_CLASS } from "@/components/Navbar/navProductLinkClass";
 
 const { mockUsePluginMode, mockUseUISettings, state } = vi.hoisted(() => {
   const state = {
@@ -73,14 +72,11 @@ describe("DashboardHeader breadcrumb", () => {
     expect(screen.queryByText("Observability")).not.toBeInTheDocument();
   });
 
-  it("styles Docs with the shared product-link class instead of a muted toolbar button", () => {
+  // 目的：核对当前控制台文档入口已隐藏的契约；前置为真实 DocsLink，验证无失效链接，结束清理渲染树。
+  it("does not expose a docs link while the console docs entry is disabled", () => {
     render(<DashboardHeader />);
 
-    const docs = screen.getByRole("link", { name: "Docs" });
-    for (const cls of NAV_PRODUCT_LINK_CLASS.trim().split(/\s+/)) {
-      expect(docs).toHaveClass(cls);
-    }
-    expect(docs).not.toHaveClass("text-muted-foreground");
+    expect(screen.queryByRole("link", { name: "Docs" })).not.toBeInTheDocument();
   });
 
   it("renders the tools divider centered rather than stretched to the top of the row", () => {

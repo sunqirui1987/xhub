@@ -25,7 +25,7 @@ log.go 提供 Trace/Debug/Info/Error 等 fmt 风格包装，底层使用标准 l
 
 | 测试文件 | 场景入口 |
 | --- | --- |
-| [files_test.go](files_test.go) | `TestEveryServerFileUsesLeveledLogger`, `TestRedactHidesBearerAndKey`, `TestRedactHidesCaseInsensitiveKeysAndURLCredentials` |
+| [files_test.go](files_test.go) | `TestLoggerDefinesLevels`, `TestRedactHidesBearerAndKey`, `TestRedactHidesCaseInsensitiveKeysAndURLCredentials` |
 
 ```bash
 go test ./internal/logx -count=1

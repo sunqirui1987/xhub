@@ -7,6 +7,12 @@ import { renderWithProviders } from "../../../tests/test-utils";
 import type { ToolRow } from "@/components/networking";
 import { ToolPoliciesTable } from "./ToolPoliciesTable";
 
+// 组件在模块加载时生成筛选标签；固定英文以验证用户实际看到的选项文案。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 const TOOLS: ToolRow[] = [
   {
     tool_id: "tool-1",

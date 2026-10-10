@@ -45,9 +45,10 @@ describe("getModelHubTableColumns", () => {
     expect(screen.getByText("+1")).toBeInTheDocument();
   });
 
+  // 目的：独立验证输入/输出 token 限额和每百万价格；前置为目录模型，允许本地化分隔空白，结束清理渲染树。
   it("formats token limits and per-million costs", () => {
     renderTable([mockModel]);
-    expect(screen.getByText("128.0K / 16.4K")).toBeInTheDocument();
+    expect(screen.getByText("128.0K/ 16.4K")).toBeInTheDocument();
     expect(screen.getByText("$2.50")).toBeInTheDocument();
     expect(screen.getByText("$10.00")).toBeInTheDocument();
   });

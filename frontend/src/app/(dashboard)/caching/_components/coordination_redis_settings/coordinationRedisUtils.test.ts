@@ -1,4 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+/** 测试前置：在加载来源标签常量前固定英文翻译，避免 beforeEach 晚于模块初始化；只替换语言边界，真实 Redis 配置转换及标签仍参与断言，文件结束由 Vitest 清理。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
+});
 import {
   buildCoordinationPayload,
   buildInitialValues,

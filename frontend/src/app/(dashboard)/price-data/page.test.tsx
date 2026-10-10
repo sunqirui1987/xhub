@@ -3,8 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import PriceDataPage from "./page";
 
-const mockUseAuthorized = vi.fn();
-const mockReplace = vi.fn();
+/** 在 mock 提升前创建身份和导航夹具，验证管理员、拒绝和只读边界；每次用例清理调用记录。 */
+const { mockUseAuthorized, mockReplace } = vi.hoisted(() => ({ mockUseAuthorized: vi.fn(), mockReplace: vi.fn() }));
 
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({ default: mockUseAuthorized }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: mockReplace }) }));

@@ -78,8 +78,8 @@ func (c *DualCache) Set(key string, value []byte) {
 
 // Flush removes every cached response. It does not write spend or talk to Redis.
 // 参数：无。
-// 调用：dataplane/live.go、dataplane/stream.go、gateway/engine.go、gateway/ingress.go
-// 测试：无直接单测
+// 调用：gateway/access.go 的管理端清空缓存接口。
+// 测试：cache_test.go TestFlush；regression/consistency_test.go。
 // 返回：无。进程内的响应缓存已清空。不写用量，也不访问 Redis。
 func (c *DualCache) Flush() {
 	c.c.Purge()

@@ -12,7 +12,6 @@ session/onboarding 处理登录与一次性 bootstrap；limits 和 route_setting
 
 | 目录 | 职责 |
 | --- | --- |
-| [audit_test.go](audit_test.go) | TestAuditLogsConsoleFiltersAndPagination、TestAuditLogsOnlyPlatformAdmin：HTTP 审计查询筛选、分页及平台管理员权限。 |
 | [family](family/readme_cn.md) | API 家族处理与资源隔离 |
 | [guard](guard/readme_cn.md) | 正文护栏 |
 | [identity](identity/readme_cn.md) | 身份资源、成员与模板管理 |
@@ -179,7 +178,6 @@ session/onboarding 处理登录与一次性 bootstrap；limits 和 route_setting
 
 | Method / path | 注册文件 |
 | --- | --- |
-| [audit_test.go](audit_test.go) | TestAuditLogsConsoleFiltersAndPagination、TestAuditLogsOnlyPlatformAdmin：HTTP 审计查询筛选、分页及平台管理员权限。 |
 | `POST /compliance/eu-ai-act` | [compliance.go](compliance.go) |
 | `POST /compliance/gdpr` | [compliance.go](compliance.go) |
 | `GET /health/liveliness` | [routes.go](routes.go) |
@@ -243,12 +241,20 @@ session/onboarding 处理登录与一次性 bootstrap；limits 和 route_setting
 
 | 测试文件 | 场景入口 |
 | --- | --- |
+| [access_cache_test.go](access_cache_test.go) | `TestFlushCacheHandler` |
+| [audit_test.go](audit_test.go) | `TestAuditLogsConsoleFiltersAndPagination`, `TestAuditLogsOnlyPlatformAdmin` |
+| [credential_catalog_test.go](credential_catalog_test.go) | `TestCredentialCatalogHydration` |
+| [early_error_log_test.go](early_error_log_test.go) | `TestStatusRecorderCapturesOnlyCompleteFailures`, `TestRecordEarlyErrorExcludesRemovedRoutes`, `TestRecordEarlyErrorSkipsNonDataPlane` |
+| [error_log_persistence_test.go](error_log_persistence_test.go) | `TestPersistSpendKeepsFailureResponseWithoutPrompts` |
+| [limits_personal_test.go](limits_personal_test.go) | `TestTeamlessKeyBudget` |
+| [responses_context_test.go](responses_context_test.go) | `TestResponsesContextIsolationAndExpiry` |
+| [route_identity_test.go](route_identity_test.go) | `TestSelectRouteTemplate`, `TestPreviewIdentityUnavailable`, `TestPreviewIdentityInheritance` |
+| [upstream_diagnostics_test.go](upstream_diagnostics_test.go) | `TestUpstreamDiagnosticsPersistence` |
 | [access_log_test.go](access_log_test.go) | `TestHandlerLogsMethodPathStatusAndDuration`, `TestHandlerLogsErrorLineForFailure` |
 | [activity_http_test.go](activity_http_test.go) | `TestDailyActivityHTTPReadsRecordedUsage`, `TestUsageViewsFollowTheCallerScope` |
-| [affinity_pin_test.go](affinity_pin_test.go) | `TestOfficialTaskPinLastsSevenDays` |
+| [affinity_pin_test.go](affinity_pin_test.go) | `TestOfficialTaskPinLastsSevenDays`, `TestOfficialContextSurvivesHostReplacement`, `TestOfficialContextSurvivesRedisHostReplacement` |
 | [affinity_test.go](affinity_test.go) | `TestSessionIDSticksToThePromptPrefix`, `TestContinuationPinsDoNotCrossCallerOrModel`, `TestSessionIDPrefersAnExplicitHeader`, `TestSessionIDReadsClaudeMetadataAndClientHeaders`, `TestContentSessionStaysStableAsTheTranscriptGrows`, `TestAffinityPinIsReused` |
-| [builtin_providers_test.go](builtin_providers_test.go) | `TestBuiltinProvidersInstallOnStartup`, `TestBuiltinProvidersStayOutWhenDisabled` |
-| [call_cost_test.go](call_cost_test.go) | `TestDeploymentCostUsesWindowsCacheImagesAndSeconds`, `TestCallCostUsesCatalogBaseModelAndManualDoesNotFallThrough` |
+| [call_cost_test.go](call_cost_test.go) | `TestDeploymentCostUsesWindowsCacheImagesAndSeconds`, `TestCallCostUsesCatalogBaseModelAndManualDoesNotFallThrough`, `TestMeasuredVideoBandDoesNotFallThroughExplicitRates`, `TestCallCostKeepsOriginalTaskModelAfterDeploymentEdit` |
 | [catalog_reads_test.go](catalog_reads_test.go) | `TestCatalogReads` |
 | [chains_test.go](chains_test.go) | `TestMain`, `TestLiveChains`, `TestPlaygroundCompletionReachesUpstream` |
 | [compliance_test.go](compliance_test.go) | `TestEUAIActWithoutGuardrailsFailsClosed`, `TestCompliancePassesWhenPreCallSucceeds`, `TestMixedGuardrailModeDoesNotCountAsPreCall`, `TestSingleGuardrailObjectIsAccepted`, `TestComplianceEndpointsReturnChecks` |
@@ -260,15 +266,16 @@ session/onboarding 处理登录与一次性 bootstrap；limits 和 route_setting
 | [log_completeness_test.go](log_completeness_test.go) | `TestLogRecordRoundTripKeepsTheFactsTheConsoleReads`, `TestPlanRoutePinsTheSameDeploymentForOnePrompt` |
 | [official_settlement_test.go](official_settlement_test.go) | `TestOfficialSettlementSkipsRouteTPMAndConsumesOwnMetadata` |
 | [permission_test.go](permission_test.go) | `TestMasterCannotEnumerateTenants`, `TestMasterCannotWrite`, `TestListingsRespectTeamScope`, `TestTeamReadRequiresMembership`, `TestTeamAdminBoundary`, `TestMemberAdministrationNeedsTeamAdmin`, `TestMemberMustBeInTheTeam` |
-| [prompt_log_test.go](prompt_log_test.go) | `TestPromptJSONKeepsHeadersBodyAndResponse`, `TestSpendLogRoundTripReturnsPromptPayload` |
+| [prompt_log_test.go](prompt_log_test.go) | `TestRememberExchangeKeepsFailureCandidateWhenPromptStorageOff`, `TestPromptJSONKeepsHeadersBodyAndResponse`, `TestSpendLogRoundTripReturnsPromptPayload` |
 | [prompt_response_test.go](prompt_response_test.go) | `TestAssembleLoggedResponseReadsCompletedEvent`, `TestAssembleLoggedResponseKeepsStreamedToolCalls`, `TestAssembleLoggedResponseJoinsChatDeltas` |
 | [removed_test.go](removed_test.go) | `TestRemovedColumnsStayUnregistered`, `TestRetiredMoreToolsRoutesAreRemoved`, `TestRetiredPathsAreRefused`, `TestRemovedColumnWinsOverRetired` |
 | [retired_preferences_test.go](retired_preferences_test.go) | `TestRetiredRouterPreferencesReturnBadRequest` |
-| [route_template_test.go](route_template_test.go) | `TestTemplatesAreThePlatformAdministratorsToEdit`, `TestSelectingATemplateRespectsTheScope`, `TestAnOrganizationAdministratorPointsTheirOwnOrganization`, `TestDeletingATemplateStillInUseIsRefusedWithTheList`, `TestClearingASelectionIsNotTheSameAsLeavingItOut`, `TestTheEffectiveTemplateNamesWhereItCameFrom`, `TestAnUnknownScopeIsRefused`, `TestATeamAdministratorSelectsThroughTheTeamRoute`, `TestTheTeamReadExposesTheSelection`, `TestANewTemplateIsSeededFromThePlatformDefault`, `TestASuppliedBodyIsNotSecondGuessed`, `TestASingleTeamSessionPicksUpItsTeamsTemplate` |
+| [route_template_test.go](route_template_test.go) | `TestTemplatesAreThePlatformAdministratorsToEdit`, `TestSelectingATemplateRespectsTheScope`, `TestAnOrganizationAdministratorPointsTheirOwnOrganization`, `TestDeletingATemplateStillInUseIsRefusedWithTheList`, `TestClearingASelectionIsNotTheSameAsLeavingItOut`, `TestTheEffectiveTemplateNamesWhereItCameFrom`, `TestAnUnknownScopeIsRefused`, `TestATeamAdministratorSelectsThroughTheTeamRoute`, `TestTheTeamReadExposesTheSelection`, `TestANewTemplateUsesTheBuiltinDocument`, `TestASuppliedDocumentIsStoredExactly`, `TestRouteTemplateWritesValidateTheNewDocument`, `TestASingleTeamSessionPicksUpItsTeamsTemplate` |
 | [spend_session_test.go](spend_session_test.go) | `TestSessionLogBindingFilesASingleMembership`, `TestSessionLogBindingDoesNotGuessAmongTeams` |
 | [template_selection_regression_test.go](template_selection_regression_test.go) | `TestTemplateVisibilityOrdinaryWrites` |
-| [testdb_test.go](testdb_test.go) | fixture/辅助函数，无顶层 Test |
+| [testdb_test.go](testdb_test.go) | `TestGatewayStoresIsolateConfigurationAndSpend` |
 | [visibility_chain_test.go](visibility_chain_test.go) | `TestVisibilityChainPlatformAdminSeesEverything`, `TestVisibilityChainOrgAdminSeesOwnOrganization`, `TestVisibilityChainTeamAdminSeesOwnTeam`, `TestVisibilityChainMemberSeesOnlySelf`, `TestVisibilityChainOrgAdminCannotCrossOrganizations`, `TestVisibilityChainTeamAdminCannotCrossTeams`, `TestVisibilityChainPasswordResetFollowsTheChain`, `TestVisibilityChainCreateAccountCarriesItsScope`, `TestVisibilityChainRejectsScopeTheCallerMayNotGrant`, `TestVisibilityChainUsageAndLogsFollowTheChain`, `TestVisibilityChainNothingLeaksThroughTheAccountPicker`, `TestVisibilityChainBlockTakesEffectImmediately` |
+
 
 ```bash
 go test ./internal/gateway -count=1

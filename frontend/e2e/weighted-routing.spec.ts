@@ -1,233 +1,100 @@
 import { expect, test } from "@playwright/test";
-import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t, watchGateway } from "./helpers";
+import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, watchGateway } from "./helpers";
 
-/** 验证同名模型行权重保存回读、模板模型规则、恢复继承与单部署隐藏。
- * 前置隔离数据库及本地协议服务；使用真实浏览器和网关核对原生响应型号与账单。
- * finally 删除本测试创建的密钥、模板与部署；隔离 schema 由运行器清理。
+/**
+ * 目的：验证删除模板与默认权重共同指向的部署时，两处失效分配在同一模型事务内清理，绑定密钥继续继承模板并路由剩余部署。
+ * 前置：隔离数据库、本地协议上游和真实浏览器；建立双部署、A0/B1 默认与模板，并把虚拟密钥绑定到模板。
+ * 结果：删除 beta 前真实请求落 beta；删除后默认分配为空、模板 allocations 字段移除、单部署页面隐藏权重，密钥自动落 alpha 且精确计费。
+ * 清理：finally 先解绑并删除密钥，再删除模板和仍存在的部署；隔离 schema 由运行器销毁。
  */
-test("relative row weights and customer inheritance", async ({ page }) => {
+test("deployment deletion clears default and template weights for inherited routing", async ({ page }) => {
+  test.setTimeout(120_000);
   const guard = watchGateway(page);
   await loginAdmin(page);
   const headers = { Authorization: "Bearer " + (await sessionBearer(page)) };
-  const suffix = Date.now().toString(),
-    model = "weights-" + suffix;
-  const ids = ["weight-a-" + suffix, "weight-b-" + suffix],
-    upstreams = ["custom/alpha/model", "custom/beta/model"];
-  let templateID = "",
-    key = "";
+  const suffix = Date.now().toString();
+  const model = "weights-" + suffix;
+  const ids = ["weight-a-" + suffix, "weight-b-" + suffix];
+  const upstreams = ["custom/alpha/model", "custom/beta/model"];
+  let templateID = "";
+  let key = "";
   try {
-    for (let i = 0; i < 2; i++) {
-      const r = await page.request.post(GATEWAY + "/model/new", {
-        headers,
-        data: {
-          model_name: model,
-          litellm_params: {
-            model: upstreams[i],
-            api_base: UPSTREAM,
-            api_key: "sk-fake",
-            deployment_id: ids[i],
-            custom_llm_provider: "custom",
-            input_cost_per_token: i === 0 ? 0.000003 : 0.000001,
-            output_cost_per_token: 0.000002,
-          },
-          model_info: {
-            id: ids[i],
-            transport: "bypass_openai_chat",
-            endpoint_types: ["chat", "bypass:openai-chat"],
-            pricing_source: "manual",
-          },
-        },
-      });
-      expect(r.status(), await r.text()).toBe(200);
+    for (let index = 0; index < ids.length; index++) {
+      const created = await page.request.post(GATEWAY + "/model/new", { headers, data: {
+        model_name: model,
+        litellm_params: { model: upstreams[index], api_base: UPSTREAM, api_key: "sk-fake", deployment_id: ids[index], custom_llm_provider: "custom", input_cost_per_token: index === 0 ? 0.000003 : 0.000001, output_cost_per_token: 0.000002 },
+        model_info: { id: ids[index], transport: "bypass_openai_chat", endpoint_types: ["chat", "bypass:openai-chat"], pricing_source: "manual" },
+      } });
+      expect(created.status(), await created.text()).toBe(200);
     }
-    await stableGoto(page, "/models-and-endpoints");
-    await page.getByLabel("搜索模型").fill(model);
-    const group = page.getByRole("region", { name: "公开模型 " + model, exact: true });
-    await group.getByRole("button", { name: "编辑权重" }).click();
-    await group.getByLabel("部署 " + ids[0] + " 权重").fill("3");
-    await group.getByLabel("部署 " + ids[1] + " 权重").fill("7");
-    let saved = page.waitForResponse(
-      (r) => new URL(r.url()).pathname === "/model/default" && r.request().method() === "PUT",
-    );
-    await group.getByRole("button", { name: "保存权重" }).click();
-    expect((await saved).status()).toBe(200);
-    await page.reload();
-    await page.getByLabel("搜索模型").fill(model);
-    await group.getByRole("button", { name: "编辑权重" }).click();
-    await expect(group.getByLabel("部署 " + ids[0] + " 权重")).toHaveValue("3");
-    await expect(group.getByLabel("部署 " + ids[1] + " 权重")).toHaveValue("7");
-    await group.getByLabel("部署 " + ids[0] + " 权重").fill("1");
-    await group.getByLabel("部署 " + ids[1] + " 权重").fill("0");
-    saved = page.waitForResponse(
-      (r) => new URL(r.url()).pathname === "/model/default" && r.request().method() === "PUT",
-    );
-    await group.getByRole("button", { name: "保存权重" }).click();
-    expect((await saved).status()).toBe(200);
+    const defaults = await page.request.put(GATEWAY + "/model/default", { headers, data: {
+      model_name: model, weights: { allocations: [{ deployment_id: ids[0], weight: 0 }, { deployment_id: ids[1], weight: 1 }] },
+    } });
+    expect(defaults.status(), await defaults.text()).toBe(200);
+
+    const body = {
+      model_routes: [{ model, strategy: "traffic-split", allocations: [{ deployment_id: ids[0], weight: 0 }, { deployment_id: ids[1], weight: 1 }] }],
+      routing_groups: [], fallbacks: [], context_window_fallbacks: [], content_policy_fallbacks: [],
+      retry_policy: { max_attempts: 1, timeout_seconds: 60, failure_threshold: 3, cooldown_seconds: 60 },
+    };
+    const saved = await page.request.post(GATEWAY + "/route_template/new", { headers, data: { name: "customer-weights-" + suffix, body } });
+    expect(saved.status(), await saved.text()).toBe(200);
+    templateID = (await saved.json()).id;
+
     const teams = await (await page.request.get(GATEWAY + "/v2/team/list?page=1&page_size=500", { headers })).json();
     const team = teams.teams.find((row: any) => row.team_alias === "e2e-fixture-team");
-    const jwt = (await page.context().cookies()).find((c) => c.name === "token")!.value;
+    const jwt = (await page.context().cookies()).find((cookie) => cookie.name === "token")!.value;
     const userID = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).user_id;
-    const minted = await page.request.post(GATEWAY + "/key/generate", {
-      headers,
-      data: { key_alias: "weights-" + suffix, key_type: "llm_api", team_id: team.team_id, user_id: userID },
-    });
+    const minted = await page.request.post(GATEWAY + "/key/generate", { headers, data: { key_alias: "weights-" + suffix, key_type: "llm_api", team_id: team.team_id, user_id: userID, route_template_id: templateID } });
     expect(minted.status(), await minted.text()).toBe(200);
     key = (await minted.json()).key;
-    /** 原生响应保留实际上游型号；实测用量经真实网关计费，零权重使断言确定。 */
-    const call = async (want: string) => {
-      const r = await page.request.post(GATEWAY + "/bypass/openai/v1/chat/completions", {
-        headers: { Authorization: "Bearer " + key },
-        data: { model, messages: [{ role: "user", content: "verify " + want }] },
-      });
-      expect(r.status(), await r.text()).toBe(200);
-      expect((await r.json()).model).toBe(want);
-      const callID = r.headers()["x-litellm-call-id"];
+
+    /**
+     * 用途：通过绕过适配层的真实 Chat 路径确认实际部署，并等待该请求的持久化费用。
+     * 参数：want 为预期上游模型，cost 为按固定 8/2 token 计算的预期费用；返回无。
+     * 调用：删除 beta 前后各一次；错误状态、部署或费用不匹配时由 Playwright 断言失败。
+     * 副作用：产生一条真实推理及账单日志，finally 不删除审计日志，随隔离 schema 一并销毁。
+     */
+    const call = async (want: string, cost: number) => {
+      const response = await page.request.post(GATEWAY + "/bypass/openai/v1/chat/completions", { headers: { Authorization: "Bearer " + key }, data: { model, messages: [{ role: "user", content: "verify inherited routing" }] } });
+      expect(response.status(), await response.text()).toBe(200);
+      expect((await response.json()).model).toBe(want);
+      const callID = response.headers()["x-litellm-call-id"];
       expect(callID).toBeTruthy();
-      await expect
-        .poll(async () => {
-          const log = await page.request.get(GATEWAY + "/spend/logs/ui/" + callID, { headers });
-          return log.ok() ? Number((await log.json()).spend) : 0;
-        })
-        .toBeGreaterThan(0);
+      await expect.poll(async () => {
+        const log = await page.request.get(GATEWAY + "/spend/logs/ui/" + callID, { headers });
+        return log.ok() ? Number((await log.json()).spend) : 0;
+      }).toBeCloseTo(cost, 10);
     };
-    await call(upstreams[0]);
-    await stableGoto(page, "/route-templates");
-    await page
-      .getByRole("button", { name: t("pages.routeTemplates.create"), exact: true })
-      .first()
-      .click();
-    const editor = page.getByRole("region", { name: t("pages.routeTemplates.create"), exact: true });
-    await editor.getByLabel(t("pages.routeTemplates.name"), { exact: true }).fill("customer-weights-" + suffix);
-    await editor.getByLabel("公开模型", { exact: true }).selectOption(model);
-    await editor.getByRole("button", { name: "添加模型规则" }).click();
-    await editor.getByLabel(model + " 路由逻辑").selectOption("traffic-split");
-    await editor.getByLabel("模板部署 " + ids[0] + " 权重").fill("0");
-    await editor.getByLabel("模板部署 " + ids[1] + " 权重").fill("1");
-    await expect(editor.getByText("custom · " + upstreams[0], { exact: true })).toBeVisible();
-    await expect(editor.getByText("custom · " + upstreams[1], { exact: true })).toBeVisible();
-    await editor.getByLabel("模板部署 " + ids[0] + " 权重").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: "../.e2e/routing-redesign/independent-weights.png", fullPage: true });
-    await page.getByRole("button", { name: "完整 JSON 配置指南" }).click();
-    const guide = page.getByRole("dialog");
-    await expect(guide.getByRole("cell", { name: "model_routes", exact: true })).toBeVisible();
-    await guide.getByRole("tab", { name: "可导入示例" }).click();
-    await expect(guide.getByRole("region", { name: "完整模板示例" })).toContainText('"max_attempts": 2');
-    await guide.getByRole("tab", { name: "LiteLLM 对照" }).click();
-    await expect(guide.getByText(/max_attempts 包含首次调用/)).toBeVisible();
-    await guide.getByRole("tab", { name: "完整字段" }).click();
-    await page.screenshot({ path: "../.e2e/routing-redesign/json-guide.png", fullPage: true });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect(guide.getByRole("cell", { name: "model_routes", exact: true })).toBeVisible();
-    const dialogBox = await guide.boundingBox();
-    expect(dialogBox!.width).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: "../.e2e/routing-redesign/json-guide-mobile.png", fullPage: true });
-    await page.setViewportSize({ width: 1280, height: 720 });
-    await page.keyboard.press("Escape");
-    await expect(editor.getByRole("tab")).toHaveCount(4);
-    for (const removed of ["自动路由", "供应商预算", "健康检查"]) {
-      await expect(editor.getByRole("tab", { name: removed })).toHaveCount(0);
-    }
-    await expect(editor.getByRole("complementary")).toHaveCount(0);
-    await expect(editor.getByRole("region", { name: "真实路由预览" })).toHaveCount(0);
-    await editor.getByRole("tab", { name: "故障转移" }).click();
-    await expect(editor.getByRole("button", { name: "添加故障转移" })).toBeVisible();
-    await editor.getByRole("tab", { name: "负载均衡" }).click();
-    // 页面移除预览入口后，仍通过真实接口验证策略解析契约。
-    const preview = await page.request.post(GATEWAY + "/route_template/preview", {
-      headers,
-      data: {
-        model_name: model,
-        endpoint_id: "chat",
-        body: {
-          model_routes: [
-            {
-              model,
-              strategy: "traffic-split",
-              allocations: [
-                { deployment_id: ids[0], weight: 0 },
-                { deployment_id: ids[1], weight: 1 },
-              ],
-            },
-          ],
-          routing_groups: [],
-          fallbacks: [],
-          context_window_fallbacks: [],
-          content_policy_fallbacks: [],
-          retry_policy: { max_attempts: 1, timeout_seconds: 60, failure_threshold: 3, cooldown_seconds: 60 },
-        },
-      },
-    });
-    expect(preview.status(), await preview.text()).toBe(200);
-    expect(await preview.json()).toMatchObject({
-      rule_source: "template-model",
-      routing_strategy: "traffic-split",
-    });
-    await page.evaluate(() => {
-      // 控制台使用内部滚动容器，重置各容器后截图才包含模板标题与完整分区。
-      for (const element of document.querySelectorAll<HTMLElement>("*")) {
-        if (element.scrollTop) element.scrollTop = 0;
-      }
-      window.scrollTo(0, 0);
-    });
-    await page.screenshot({ path: "../.e2e/routing-redesign/editor.png", fullPage: true });
-    const templateSaved = page.waitForResponse(
-      (r) => new URL(r.url()).pathname === "/route_template/new" && r.request().method() === "POST",
-    );
-    await editor.getByRole("button", { name: "保存模板", exact: true }).click();
-    const response = await templateSaved;
-    expect(response.status(), await response.text()).toBe(200);
-    templateID = (await response.json()).id;
-    const persisted = await (await page.request.get(GATEWAY + "/route_template/" + templateID, { headers })).json();
-    expect(persisted.body).toMatchObject({
-      model_routes: [
-        {
-          model,
-          strategy: "traffic-split",
-          allocations: expect.arrayContaining([
-            { deployment_id: ids[0], weight: 0 },
-            { deployment_id: ids[1], weight: 1 },
-          ]),
-        },
-      ],
-      routing_groups: [],
-      fallbacks: [],
-    });
-    // 权重按部署 ID 匹配，编辑顺序不影响分流；仍要求恰好两项，避免遗漏或额外配置。
-    expect(persisted.body.model_routes[0].allocations).toHaveLength(2);
-    expect(
-      (
-        await page.request.post(GATEWAY + "/key/update", { headers, data: { key, route_template_id: templateID } })
-      ).status(),
-    ).toBe(200);
-    await call(upstreams[1]);
-    await page.reload();
-    const row = page.getByRole("row").filter({ has: page.getByText("customer-weights-" + suffix, { exact: true }) });
-    await row.getByRole("button", { name: t("pages.routeTemplates.edit"), exact: true }).click();
-    const editing = page.getByRole("region", { name: t("pages.routeTemplates.edit"), exact: true });
-    await expect(editing.getByLabel(model + " 路由逻辑")).toHaveValue("traffic-split");
-    await expect(editing.getByLabel("模板部署 " + ids[0] + " 权重")).toHaveValue("0");
-    await expect(editing.getByLabel("模板部署 " + ids[1] + " 权重")).toHaveValue("1");
-    await editing.getByRole("button", { name: "删除规则" }).click();
-    const updated = page.waitForResponse(
-      (r) => r.url().includes("/route_template/" + templateID + "/update") && r.request().method() === "POST",
-    );
-    await editing.getByRole("button", { name: "保存模板", exact: true }).click();
-    expect((await updated).status()).toBe(200);
-    await call(upstreams[0]);
-    expect((await page.request.post(GATEWAY + "/model/delete", { headers, data: { id: ids[1] } })).status()).toBe(200);
+
+    await call(upstreams[1], 0.000012);
+    const removed = await page.request.post(GATEWAY + "/model/delete", { headers, data: { id: ids[1] } });
+    expect(removed.status(), await removed.text()).toBe(200);
+
+    const groups = await page.request.get(GATEWAY + "/model/groups?model_name=" + encodeURIComponent(model), { headers });
+    expect(groups.status(), await groups.text()).toBe(200);
+    const group = (await groups.json()).data.find((row: any) => row.model_name === model);
+    expect(group.default_weights?.allocations ?? []).toEqual([]);
+    const stored = await page.request.get(GATEWAY + "/route_template/" + templateID, { headers });
+    expect(stored.status(), await stored.text()).toBe(200);
+    const rule = (await stored.json()).body.model_routes.find((row: any) => row.model === model);
+    expect(rule).toBeTruthy();
+    expect(rule).not.toHaveProperty("allocations");
+
     await stableGoto(page, "/models-and-endpoints");
     await page.getByLabel("搜索模型").fill(model);
-    await expect(group).toBeVisible();
-    await expect(group.getByRole("button", { name: "编辑权重" })).toHaveCount(0);
-    await expect(group.getByRole("columnheader", { name: "默认权重" })).toHaveCount(0);
+    const modelGroup = page.getByRole("region", { name: "公开模型 " + model, exact: true });
+    await expect(modelGroup).toBeVisible();
+    await expect(modelGroup.getByRole("button", { name: "编辑权重" })).toHaveCount(0);
+    await expect(modelGroup.getByRole("columnheader", { name: "默认权重" })).toHaveCount(0);
+    await call(upstreams[0], 0.000028);
     guard.assertOk();
   } finally {
     if (key) {
-      await page.request.post(GATEWAY + "/key/update", { headers, data: { key, route_template_id: null } });
+      await page.request.post(GATEWAY + "/key/update", { headers, data: { key, route_template_id: "" } });
       await page.request.post(GATEWAY + "/key/delete", { headers, data: { keys: [key] } });
     }
-    if (templateID)
-      await page.request.post(GATEWAY + "/route_template/" + templateID + "/delete", { headers, data: {} });
+    if (templateID) await page.request.post(GATEWAY + "/route_template/" + templateID + "/delete", { headers, data: {} });
     for (const id of ids) await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } });
   }
 });

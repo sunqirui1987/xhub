@@ -1,23 +1,27 @@
 import { expect, test } from "@playwright/test";
 import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t } from "./helpers";
 
-/** 前置隔离 PostgreSQL、真实网关/浏览器和本地协议服务；创建双部署并保存100:0，删除正权重部署。
- * 验证剩余部署的权重仍可见、真实请求有明确503原因，页面修复后Playground实调及账单恢复。
- * finally 删除本测试部署，运行器删除隔离schema内的默认分配、会话和账单，不读取用户数据。 */
-test("remaining deployment exposes saved zero weight and recovers real inference", async ({ page }) => {
+/**
+ * 目的：验证删除正权重部署后，默认分配会在同一事务内自动清理，剩余单部署可直接服务两条公开 Chat 路径和 Playground。
+ * 前置：隔离数据库、真实浏览器、网关与本地协议上游；创建同名双部署并保存 100:0 默认权重。
+ * 结果：单部署页面隐藏权重列和编辑入口，两条公开路径及 Playground 均成功，并留下按真实 token 计费的可关联日志。
+ * 清理：finally 删除仍存在的测试部署；隔离 schema 由运行器销毁。
+ */
+test("deployment deletion clears stale weights and preserves public inference", async ({ page }) => {
+  test.setTimeout(120_000);
   await loginAdmin(page);
-  const headers = { Authorization: "Bearer " + await sessionBearer(page) };
-  const model = "route-diagnostic-" + Date.now();
-  const ids: string[] = [];
+  const headers = { Authorization: "Bearer " + (await sessionBearer(page)) };
+  const suffix = Date.now().toString();
+  const model = "route-diagnostic-" + suffix;
+  const ids = ["route-diagnostic-a-" + suffix, "route-diagnostic-b-" + suffix];
   try {
-    for (let i = 0; i < 2; i++) {
+    for (let index = 0; index < ids.length; index++) {
       const created = await page.request.post(GATEWAY + "/model/new", { headers, data: {
         model_name: model,
-        litellm_params: { model: "route-diagnostic-real-" + i, api_base: UPSTREAM, api_key: "sk-fake", custom_llm_provider: "custom", input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 },
-        model_info: { transport: "bypass_openai_chat", pricing_source: "manual" },
+        litellm_params: { model: "route-diagnostic-real-" + index, api_base: UPSTREAM, api_key: "sk-fake", deployment_id: ids[index], custom_llm_provider: "custom", input_cost_per_token: 0.000001, output_cost_per_token: 0.000002 },
+        model_info: { id: ids[index], transport: "bypass_openai_chat", endpoint_types: ["chat"], pricing_source: "manual" },
       } });
       expect(created.status(), await created.text()).toBe(200);
-      ids.push((await created.json()).model_info.id);
     }
     const saved = await page.request.put(GATEWAY + "/model/default", { headers, data: {
       model_name: model, weights: { allocations: [{ deployment_id: ids[0], weight: 100 }, { deployment_id: ids[1], weight: 0 }] },
@@ -25,49 +29,53 @@ test("remaining deployment exposes saved zero weight and recovers real inference
     expect(saved.status(), await saved.text()).toBe(200);
     const removed = await page.request.post(GATEWAY + "/model/delete", { headers, data: { id: ids[0] } });
     expect(removed.status(), await removed.text()).toBe(200);
-    ids.shift();
+
+    const groups = await page.request.get(GATEWAY + "/model/groups?model_name=" + encodeURIComponent(model), { headers });
+    expect(groups.status(), await groups.text()).toBe(200);
+    const groupData = (await groups.json()).data.find((row: any) => row.model_name === model);
+    expect(groupData.default_weights?.allocations ?? []).toEqual([]);
+
     await stableGoto(page, "/models-and-endpoints");
     await page.getByRole("tab", { name: t("pages.models.all") }).click();
     await page.getByLabel("搜索模型").fill(model);
     const group = page.getByRole("region", { name: "公开模型 " + model, exact: true });
-    await expect(group.getByRole("columnheader", { name: "默认权重" })).toBeVisible();
-    await expect(group.getByRole("cell", { name: "0", exact: true })).toBeVisible();
-    // 两种公开路径均走真实数据面，确认同一错误契约和可关联的请求日志。
+    await expect(group).toBeVisible();
+    await expect(group.getByRole("button", { name: "编辑权重" })).toHaveCount(0);
+    await expect(group.getByRole("columnheader", { name: "默认权重" })).toHaveCount(0);
+
+    // 两种公开路径都必须在自动清理后直接恢复，并各自留下正费用日志。
     for (const path of ["/chat/completions", "/v1/chat/completions"]) {
-      const denied = await page.request.post(GATEWAY + path, { headers, data: { model, messages: [{ role: "user", content: "你好" }] } });
-      expect(denied.status(), await denied.text()).toBe(503);
-      expect((await denied.json()).error).toMatchObject({ type: "model_unavailable", message: expect.stringContaining("no allocated traffic") });
-      expect(denied.headers()["x-litellm-call-id"]).toBeTruthy();
+      // 两条接口使用不同正文，避免响应缓存把第二条变成免费命中，确保两条都验证真实计费。
+      const call = await page.request.post(GATEWAY + path, { headers, data: { model, messages: [{ role: "user", content: "自动清理权重 " + path }] } });
+      expect(call.status(), await call.text()).toBe(200);
+      expect((await call.json()).choices[0].message.content).toBe("e2e-ok");
+      const callID = call.headers()["x-litellm-call-id"];
+      expect(callID).toBeTruthy();
+      await expect.poll(async () => {
+        const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callID, { headers });
+        return detail.ok() ? Number((await detail.json()).spend) : 0;
+      }, { message: path + " 应记录8输入2输出的真实费用" }).toBeCloseTo(0.000012, 10);
     }
-    await group.getByRole("button", { name: "编辑权重" }).click();
-    await expect(group.getByRole("button", { name: "保存权重" })).toBeDisabled();
-    await group.getByLabel("部署 " + ids[0] + " 权重").fill("1");
-    const updated = page.waitForResponse(r => new URL(r.url()).pathname === "/model/default" && r.request().method() === "PUT");
-    await group.getByRole("button", { name: "保存权重" }).click();
-    const update = await updated;
-    expect(update.status(), await update.text()).toBe(200);
-    expect(update.request().postDataJSON().weights.allocations).toEqual([{ deployment_id: ids[0], weight: 1 }]);
-    await page.reload();
-    await page.getByLabel("搜索模型").fill(model);
-    await group.getByRole("button", { name: "编辑权重" }).click();
-    await expect(group.getByLabel("部署 " + ids[0] + " 权重")).toHaveValue("1");
-    await group.getByRole("button", { name: "取消", exact: true }).click();
+
     await stableGoto(page, "/playground");
     await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
     await page.getByRole("option", { name: model, exact: true }).click();
-    await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("修复权重后实调");
-    const called = page.waitForResponse(r => /^(\/v1)?\/chat\/completions$/.test(new URL(r.url()).pathname) && r.request().method() === "POST");
+    await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("自动清理后实调");
+    const called = page.waitForResponse((response) => /^(\/v1)?\/chat\/completions$/.test(new URL(response.url()).pathname) && response.request().method() === "POST");
     await page.getByRole("button", { name: t("Send message") }).click();
     const response = await called;
+    // 页面在流式完成后会更新对话区；此时 Chromium 可能已释放导航响应正文，因此这里只读取稳定的状态码和响应头。
     expect(response.status()).toBe(200);
     await expect(page.getByText("e2e-ok", { exact: true })).toBeVisible();
-    const callID = response.headers()["x-litellm-call-id"];
-    expect(callID).toBeTruthy();
+    const playgroundCallID = response.headers()["x-litellm-call-id"];
     await expect.poll(async () => {
-      const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callID, { headers });
+      const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + playgroundCallID, { headers });
       return detail.ok() ? Number((await detail.json()).spend) : 0;
-    }, { message: "恢复请求应记录8输入2输出的真实费用" }).toBeCloseTo(0.000012, 10);
+    }, { message: "Playground 请求应进入同一真实计费链" }).toBeCloseTo(0.000012, 10);
   } finally {
-    for (const id of ids) expect((await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } })).status()).toBe(200);
+    for (const id of ids) {
+      const deleted = await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } });
+      expect([200, 400, 404]).toContain(deleted.status());
+    }
   }
 });

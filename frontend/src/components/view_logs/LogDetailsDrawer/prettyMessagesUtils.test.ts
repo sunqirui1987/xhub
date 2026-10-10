@@ -1,5 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { loggedResponse, parseMediaPayload, parseMessages, requestBody, requestHeaders } from "./prettyMessagesUtils";
+import { afterEach, describe, expect, it } from "vitest";
+import { setActiveLocale } from "@/i18n";
+import { ROLE_STYLES, loggedResponse, parseMediaPayload, parseMessages, requestBody, requestHeaders } from "./prettyMessagesUtils";
+
+afterEach(() => setActiveLocale("en"));
+
+describe("ROLE_STYLES", () => {
+  /** 前置同一模块已加载并切换中英文；验证 getter 每次按当前语言返回四种角色；恢复英文，无外部数据。 */
+  it("reads role labels from the active locale without freezing module state", () => {
+    expect([ROLE_STYLES.system.label, ROLE_STYLES.user.label, ROLE_STYLES.assistant.label, ROLE_STYLES.tool.label]).toEqual([
+      "SYSTEM", "USER", "ASSISTANT", "TOOL RESULT",
+    ]);
+    setActiveLocale("zh-CN");
+    expect([ROLE_STYLES.system.label, ROLE_STYLES.user.label, ROLE_STYLES.assistant.label, ROLE_STYLES.tool.label]).toEqual([
+      "系统", "用户", "助手", "工具结果",
+    ]);
+  });
+});
 
 const completed = {
   type: "response.completed",

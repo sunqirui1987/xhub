@@ -10,9 +10,9 @@ import (
 	"github.com/sunqirui1987/xhub/internal/router"
 )
 
-// RouteSettingsFor 读取预算链已经选定的客户模板，并合并公开模型的默认权重与回退配置。
+// RouteSettingsFor 读取身份归属链已经选定的客户模板，并合并公开模型的默认权重与回退配置。
 // 不缓存模板和模型策略，确保控制台保存后下一次请求立即使用最新配置；无模板时使用内置设置。
-// 参数 p（*auth.Principal）：已经解析的调用方，其 RouteTemplateID 由预算链填入。
+// 参数 p（*auth.Principal）：已经解析的调用方；密钥预算检查或会话只读归属解析填入 RouteTemplateID。
 // 返回 prefs.RouteSettings：本次生效的设置和来源；读取或解析失败通过 Err 返回，数据面应拒绝执行。
 // 调用：gateway 的请求路径。
 // 测试：route_settings_test.go

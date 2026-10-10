@@ -1,9 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BudgetFallbacksEditor } from "./BudgetFallbacksEditor";
+import { setActiveLocale } from "@/i18n";
 
 const MODELS = ["gpt-4", "gpt-3.5-turbo", "claude-3", "claude-haiku"];
+afterEach(() => setActiveLocale("en"));
 
 describe("BudgetFallbacksEditor", () => {
   it("renders empty state with add button", () => {
@@ -25,6 +27,15 @@ describe("BudgetFallbacksEditor", () => {
     expect(screen.getByText("IF BUDGET EXCEEDED, TRY")).toBeInTheDocument();
     expect(screen.getByText("Primary Model")).toBeInTheDocument();
     expect(screen.getByText("Fallback Models")).toBeInTheDocument();
+  });
+
+  /** 前置中文语言和已有预算回退；验证链路提示使用中文目录值；组件卸载后恢复英文，无后台或持久化清理。 */
+  it("localizes the exceeded-budget transition", () => {
+    setActiveLocale("zh-CN");
+    render(
+      <BudgetFallbacksEditor value={{ "gpt-4": ["claude-3"] }} onChange={vi.fn()} availableModels={MODELS} />,
+    );
+    expect(screen.getByText("超出预算后尝试")).toBeInTheDocument();
   });
 
   it("adds a new empty entry when clicking add button", async () => {

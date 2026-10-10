@@ -54,6 +54,10 @@ model_routes、retry_policy 必填，可靠性四字段必须完整。max_attemp
 
 身份选模板：个人 API 密钥 → 团队 → 组织 → 内置默认。第一份有效绑定整份选用，不混合多层模板。账号和项目没有独立模板层。模型规则优先于成员组策略；组名调用展开组成员部署。旧 routing_strategy 仅为已有文档兼容读取，没有新建表单控件；旧模板缺少 routing_groups 时兼容历史全局组，新模板显式 [] 与历史组隔离。
 
+会话仅在恰有一个成员团队时继承该团队及其组织；零团队或多团队会话使用平台默认。未绑定团队的个人密钥不继承属主的成员团队。只读预览通过可信身份链选模板，不检查或消耗预算和 RPM/TPM 窗口，不请求上游、不记推理账单；模型允许名单仍生效。密钥可以隐式预览自身绑定的安全部署投影，但不能显式读取任意 template_id 或编辑草稿。显式模板与草稿分别保留模板读取和写入权限。归属或模板读取失败返回错误，已删除绑定模板按推理行为回到平台默认。
+
+删除或改名部署时，数据库部署、模型默认分配和客户模板中的失效部署引用在同一事务中更新；失败回滚后内存目录保持原状。清理后仅剩一条部署或剩余权重全部为零时恢复默认分配，避免合法删除导致后续请求无流量。启动时按配置文件与数据库合并后的完整目录清理历史悬空引用。
+
 有效会话固定部署优先，但必须兼容、可用且非零权重。模型权限与预算沿身份链独立检查；组名及实际成员都检查权限和预算，实际部署用于计费。模板不能扩大调用权限。
 
 ## 故障转移
@@ -78,5 +82,7 @@ fallbacks、context_window_fallbacks、content_policy_fallbacks 分别配置通�
 ## 验证边界
 
 回归与 E2E 使用隔离 PostgreSQL schema、真实网关、真实浏览器及本地协议上游，验证独立权重、组与回退、身份绑定、账单、非法保存与数据清理。不依赖付费供应商凭据；真实供应商限流/故障、跨实例 Redis 观测与生产大流量分布仍需部署环境验证。
+
+身份解析细节见 internal/gateway/route_identity_test.go；真实预览与推理对照见 cmd/regression/route_preview_test.go；浏览器对应 frontend/e2e/product-fixes.spec.ts。目录事务回滚与行锁见 internal/store/model_weights_test.go，删除后推理见 cmd/regression/model_weights_test.go 和 frontend/e2e/route-diagnostic.spec.ts。实际执行结果在本轮项目复核报告中单列，不以测试文件存在替代通过证据。
 
 参考 LiteLLM 的 routing、load_balancing、reliability，以及本地 RoutingGroupModal、FallbackSelectionForm 交互。当前 JSON 是 xhub 契约，不能直接导入 LiteLLM router_settings 或 YAML；num_retries 与 max_attempts 计数不同。

@@ -47,13 +47,13 @@ class DatasetTests(unittest.TestCase):
                     if mode != "missing":
                         path.mkdir()
                         (path / "results.json").write_text(json.dumps({"stats": {
-                            "expected": 15 if mode == "passed" else 14,
+                            "expected": 19 if mode == "passed" else 18,
                             "unexpected": 0 if mode == "passed" else 1, "flaky": 0, "skipped": 0}}))
 
                 with mock.patch.object(RUNNER, "command_stream", side_effect=command):
                     if mode == "passed":
                         result = RUNNER.run_business_browser(report_dir, mock.Mock())
-                        self.assertEqual(result["cases"], 15)
+                        self.assertEqual(result["cases"], 19)
                     else:
                         with self.assertRaisesRegex(AssertionError, "缺少本轮浏览器报告" if mode == "missing" else "未全部执行通过"):
                             RUNNER.run_business_browser(report_dir, mock.Mock())

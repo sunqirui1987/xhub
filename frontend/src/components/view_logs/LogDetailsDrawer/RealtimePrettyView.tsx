@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SectionHeader } from "./SectionHeader";
 import { t } from "@/i18n";
+import { ROLE_STYLES } from "./prettyMessagesUtils";
 
 interface RealtimeEvent {
   type: string;
@@ -370,6 +371,11 @@ function ResponseTurn({ response, index }: { response: RealtimeResponse; index: 
   );
 }
 
+/**
+ * 展示单条实时响应中的文本或音频转写内容。
+ * 参数 output 为实时协议输出项；返回带当前语言角色标签的消息块，无可展示内容时返回 null。
+ * RealtimePrettyView 遍历 response.done 输出时调用；已知角色读取 ROLE_STYLES，未知协议角色保留大写原值且不修改响应。
+ */
 function OutputMessage({ output }: { output: RealtimeOutputItem }) {
   const contents = output.content || [];
   const hasTranscripts = contents.some((c) => c.transcript || c.text);
@@ -388,7 +394,7 @@ function OutputMessage({ output }: { output: RealtimeOutputItem }) {
           marginBottom: 3,
         }}
       >
-        {output.role?.toUpperCase() || "ASSISTANT"}
+        {ROLE_STYLES[output.role]?.label ?? (output.role ? output.role.toUpperCase() : ROLE_STYLES.assistant.label)}
       </span>
       {contents.map((c, cIdx) => {
         const text = c.transcript || c.text;

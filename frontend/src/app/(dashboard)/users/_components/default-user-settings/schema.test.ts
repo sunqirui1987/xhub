@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+/** 测试前置：导入 Zod schema 前固定英文翻译，保留错误路径与真实校验规则；正常、空团队、重复团队和非法预算仍由 schema 执行，语言 mock 由 Vitest 自动清理。 */
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string) => original.translate("en", key) };
+});
 
 import { defaultUserSettingsSchema, type DefaultUserSettingsFormValues } from "./schema";
 

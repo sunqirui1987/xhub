@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { ReactNode } from "react";
@@ -10,6 +10,7 @@ import {
   useIsTeamAdminForAnyTeam,
   useSessionTeamRole,
 } from "./useSessionIdentity";
+import { setActiveLocale } from "@/i18n";
 
 const mockUseAuthorized = vi.fn();
 vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
@@ -19,7 +20,7 @@ vi.mock("@/app/(dashboard)/hooks/useAuthorized", () => ({
 vi.mock("@/components/networking", () => ({
   getProxyBaseUrl: vi.fn(() => ""),
   getGlobalLitellmHeaderName: vi.fn(() => "Authorization"),
-  deriveErrorMessage: vi.fn((data: { error?: string }) => data?.error || "Error"),
+  deriveErrorMessage: vi.fn((data: { error?: string }) => data?.error || ""),
 }));
 
 const wrapper = ({ children }: { children: ReactNode }) =>
@@ -60,6 +61,7 @@ describe("useSessionIdentity", () => {
     vi.clearAllMocks();
     mockUseAuthorized.mockReturnValue({ accessToken: "sess-abc" });
   });
+  afterEach(() => setActiveLocale("en"));
 
   it("reads the session's capabilities from the gateway, not from a role claim", async () => {
     const fetchMock = stubIdentity(platformAdmin);
@@ -101,6 +103,15 @@ describe("useSessionIdentity", () => {
     // cannot tell, the other means the session genuinely holds none. Collapsing
     // them would hide pages for an operator whose request merely failed.
     expect(result.current.data).toBeUndefined();
+  });
+
+  /** 前置中文语言与无后台错误正文的 403；验证状态码兜底按当前语言返回；查询缓存随组件卸载清理，无持久化数据。 */
+  it("localizes the fallback refusal when the server has no error detail", async () => {
+    setActiveLocale("zh-CN");
+    stubIdentity({}, false);
+    const { result } = renderHook(() => useSessionIdentity(), { wrapper });
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    expect(result.current.error?.message).toBe("身份信息请求失败（403）");
   });
 
   it("treats a missing capability list as empty rather than undefined", async () => {

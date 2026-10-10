@@ -102,7 +102,15 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if row != nil {
-			if s.WriteAuthz(w, r, templateauth.Selection(s, r, p, id)) {
+			// 密钥只能预览可信归属链选出的自身推理配置；不因此获得读取任意模板的管理权限。
+			// 显式 template_id 仍走上方的模板可见性校验，草稿仍要求写权限。
+			var permission error
+			if p.Kind == authz.KindKey {
+				permission = s.Authorize(r, p, authz.ActionInfer, authz.Object{Type: authz.ObjectModel, ID: input.Model})
+			} else {
+				permission = templateauth.Selection(s, r, p, id)
+			}
+			if s.WriteAuthz(w, r, permission) {
 				return
 			}
 			settings = prefs.RouteSettings{Settings: row.Settings(), TemplateID: row.ID, TemplateName: row.Name, Source: p.RouteTemplateSource}

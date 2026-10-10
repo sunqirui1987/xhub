@@ -6,6 +6,12 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders, screen, fireEvent } from "../../../tests/test-utils";
 import LoggingSettings from "./LoggingSettings";
 
+// 回调类型选项在模块加载时翻译；固定语言以稳定可访问名称和交互断言。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 const SOURCE_PATH = resolve(process.cwd(), "src/components/team/LoggingSettings.tsx");
 
 const HARDCODED_PALETTE =

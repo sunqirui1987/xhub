@@ -126,10 +126,19 @@ list.go/available.go 提供按身份可见的模型；admin.go 和 validate.go �
 
 | 测试文件 | 场景入口 |
 | --- | --- |
-| [admin_test.go](admin_test.go) | `TestFailedModelUpdateDoesNotMutateStoredEntry`, `TestModelIDSearchFiltersBeforePagination`, `TestPublicDefaultsEnabledAndReportsDisabled`, `TestStripModelOwnership`, `TestManagementInfoIgnoresTeamFilterAndShowsDisabled` |
-| [builtin_test.go](builtin_test.go) | `TestAddedModelMatchesHandAdded`, `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestBuiltinsEnabled`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL`, `TestSlashedModelIDStaysTheModelName` |
-| [list_test.go](list_test.go) | `TestProxyModelNamesSkipsProviderShells`, `TestProxyModelNamesSkipsLegacyProviderNamesWithoutRole`, `TestNonModelEntryKeepsOrdinaryModels`, `TestProxyModelNamesOmitsOnlyFullyDisabledNames` |
+| [admin_test.go](admin_test.go) | `TestAvailableCategoryUsesExecution`, `TestFailedModelUpdateDoesNotMutateStoredEntry`, `TestValidateDeploymentRejectsMissingUpstreamAndZeroBilling`, `TestModelIDSearchFiltersBeforePagination`, `TestPublicDefaultsEnabledAndReportsDisabled`, `TestStripModelOwnership`, `TestManagementInfoIgnoresTeamFilterAndShowsDisabled` |
+| [available_test.go](available_test.go) | `TestAvailableCardEndpoints` |
+| [discovery_test.go](discovery_test.go) | `TestCatalogURLs`, `TestFetchCatalogFallback`, `TestFetchCatalogInvalidResponseFallback`, `TestFetchCatalogCanceled`, `TestMergeCatalogModels` |
+| [fallback_test.go](fallback_test.go) | `TestSetFallbackInvalidAndUnavailable`, `TestFallbackRemovalWithoutPolicy` |
+| [groups_test.go](groups_test.go) | `TestGroupedModelWeights` |
+| [price_selection_test.go](price_selection_test.go) | `TestPriceSelectionSurvivesReload` |
+| [routing_groups_test.go](routing_groups_test.go) | `TestRoutingGroupsStrictBody` |
+| [schedule_test.go](schedule_test.go) | `TestReloadDefaultFeed`, `TestLocalCatalogRefreshPersistence` |
+| [validate_credential_test.go](validate_credential_test.go) | `TestGoogleDeploymentAlias`, `TestCredentialProtocolMatches`, `TestOpenAICompatibleProtocol` |
+| [builtin_test.go](builtin_test.go) | `TestPlaygroundGroupSkipsProviderShellsAndUsesChat`, `TestPlaygroundGroupsExcludeDisabledDeployments`, `TestParseModelIDs`, `TestParseCatalogKeepsCategoryAndPrices`, `TestFillFromCostMapUsesPriceData`, `TestModelsURL` |
+| [list_test.go](list_test.go) | `TestProxyModelNamesSkipsProviderShells`, `TestProxyModelNamesDoesNotInferRolesFromNames`, `TestNonModelEntryKeepsOrdinaryModels`, `TestProxyModelNamesOmitsOnlyFullyDisabledNames` |
 | [price_test.go](price_test.go) | `TestPricePartialUpdatePreservesQualifiedAndUntouchedRates`, `TestPriceCatalogServesTheEmbeddedBaseline`, `TestInvalidPriceDoesNotOverwriteStoredRates`, `TestPriceModelWriteIsStoredAndSurvivesAReload`, `TestPriceModelEditOverridesTheBaselineAndResetRestoresIt`, `TestPriceModelDeleteOfABaselineRowIsRemembered`, `TestPriceModelRejectsAMissingIdOrProvider`, `TestPriceWritesNeedManage`, `TestPriceProviderAddEditAndDeleteReachesTheDropdown`, `TestPriceProviderDeleteOfABaselineSupplierIsRemembered` |
+
 
 ```bash
 go test ./internal/gateway/models -count=1

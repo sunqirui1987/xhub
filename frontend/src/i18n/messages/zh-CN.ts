@@ -83,7 +83,6 @@ export const zhCN = {
       bound: "设置路由模板",
     },
   },
-  "Choose the API used to call this model.": "选择调用此模型使用的 API。",
   myModels: {
     howToCall: "如何调用",
     pricing: "模型价格",
@@ -108,7 +107,8 @@ export const zhCN = {
     exampleHint: "先设置 XHUB_API_KEY 环境变量，再运行示例。请求使用上方对外模型名称。",
     specialized: "该接口使用专用请求格式。请按供应商协议文档构造参数，再前往调试台测试。",
     actions: "任务后续操作",
-    priceNote: "以下为当前网关返回的 Token 参考费率，单位为美元 / 100 万 tokens。未提供价格不代表免费；媒体专用计费与最终费用以网关实际账单为准。",
+    priceNote:
+      "以下为当前网关返回的 Token 参考费率，单位为美元 / 100 万 tokens。未提供价格不代表免费；媒体专用计费与最终费用以网关实际账单为准。",
     item: "计费项目",
     rate: "费率 / 100 万 tokens",
     stepKey: "1. 准备 API Key",
@@ -117,9 +117,11 @@ export const zhCN = {
     stepCall: "2. 选择接口并调用",
     stepCallHint: "在 API 接入中选择实际开放的协议，复制对应示例。不同协议的请求格式不同，请勿混用参数。",
     stepResult: "3. 检查结果与用量",
-    stepResultHint: "先在调试台验证响应，再在用量和日志中核对消耗。视频等异步任务使用「API 接入」中的任务后续操作查询状态和获取结果。",
+    stepResultHint:
+      "先在调试台验证响应，再在用量和日志中核对消耗。视频等异步任务使用「API 接入」中的任务后续操作查询状态和获取结果。",
     errors: "常见错误",
-    errorHint: "401：检查 API Key；403：检查模型权限；404：检查路径和模型名称；429：检查额度或限流；5xx：检查供应商服务或联系管理员。",
+    errorHint:
+      "401：检查 API Key；403：检查模型权限；404：检查路径和模型名称；429：检查额度或限流；5xx：检查供应商服务或联系管理员。",
     eyebrow: "你的可用模型",
     title: "我的模型",
     description: "查看当前账号可用的模型、能力和价格，并选择模型前往调试台开始测试。",
@@ -818,6 +820,7 @@ export const zhCN = {
       savedProviderPlaceholder: "选择已保存的供应商",
       savedProviderHelp: "选择已保存的供应商，或在下面填写新的密钥。",
       backToModels: "返回模型列表",
+      priceData: "价格数据重载",
     },
     guardrails: {
       title: "护栏",

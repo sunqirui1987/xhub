@@ -82,8 +82,12 @@ func idsFrom(body map[string]any, plural, singular string) []string {
 // 参数 list（[]map[string]any）：slice表使用的map[string]any；page（int）：页码，从 1 开始；size（int）：最多返回的条数。零或负数表示用默认页大小。
 // 返回 []map[string]any（[]map[string]any）：一组map[string]any。没有匹配时为空切片，不是 nil 分页。
 // 调用：gateway/family/handlers.go。
-// 测试：无直接单测
+// 测试：pagination_test.go；内部边界由 internal/pagination 单元测试覆盖。
 func sliceMaps(list []map[string]any, page, size int) []map[string]any {
+	// 空目录返回数组而非 JSON null，保持列表接口及浏览器空状态契约。
+	if len(list) == 0 {
+		return []map[string]any{}
+	}
 	if size < 1 {
 		size = 50
 	}

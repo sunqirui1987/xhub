@@ -7,6 +7,12 @@ import { getMajorAirlines } from "@/components/networking";
 
 import CompetitorIntentConfiguration, { type CompetitorIntentConfig } from "./CompetitorIntentConfiguration";
 
+// 配置选项在模块加载时翻译；固定英文以验证类型和策略的完整人类可读标签。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/components/networking", () => ({ getMajorAirlines: vi.fn() }));
 
 const mockAirlines = vi.mocked(getMajorAirlines);

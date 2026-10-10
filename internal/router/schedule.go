@@ -2,9 +2,10 @@ package router
 
 import "github.com/sunqirui1987/xhub/internal/config"
 
-// Schedule 共用实际请求调度：先匹配、健康/权重过滤，再处理粘性，最后推进策略。
-// 参数为已兼容筛选的部署、公开型号、策略、隔离状态及粘性 ID；返回尝试列表。
-// 调用：统一与原生入口；有效粘性命中不推进分流计数，冷却或零份额部署不参与粘性。
+// Schedule 为适配与官方数据面生成本次请求的部署尝试顺序。
+// 参数 list 是完整部署目录，alias 是公开模型或路由组名，strategy 是已校验策略，
+// st 是运行状态，pinned 是会话固定的运行身份；返回已过滤、排序的新切片。
+// 粘性只可置顶兼容、未冷却且正权重的候选；本函数不修改部署目录或共享配置。
 func Schedule(list []config.ModelEntry, alias, strategy string, st State, pinned string) []config.ModelEntry {
 	pool := candidatesForState(list, alias, st)
 	pool = Available(pool, strategy, st)
@@ -22,9 +23,9 @@ func Schedule(list []config.ModelEntry, alias, strategy string, st State, pinned
 	return Order(pool, alias, strategy, st)
 }
 
-// Available 共用健康与模板权重筛选，不排序、不推进计数器。
-// 参数 pool：兼容候选；strategy：已解析策略；st：只读状态。返回可选部署。
-// 调用：真实调度和预览；非加权策略保持全部冷却时的既有回退规则。
+// Available 按策略过滤当前可选部署，不排序也不抽样。
+// 参数 pool 是已匹配候选，strategy 是已校验策略，st 是运行状态；返回新切片。
+// traffic-split 还排除非正或非法权重，其他策略只排除冷却部署；没有健康候选时返回空。
 func Available(pool []config.ModelEntry, strategy string, st State) []config.ModelEntry {
 	if IsSplitStrategy(strategy) {
 		return splitCandidates(pool, st)

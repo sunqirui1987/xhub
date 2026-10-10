@@ -146,10 +146,9 @@ Capability 将 chat、completion、embedding、image、video、audio、rerank、
 
 ## 08 策略、权重、重试、超时与冷却
 
-num_retries 是每部署总尝试次数，包含首次，至少 1；timeout 是每次尝试时限，默认 60 秒。allowed_fails 默认 3，非正值关闭冷却；cooldown_time 非正时实际记录使用 60 秒。修改所选模板后下一请求读取新文档。
-普通排序支持忙碌、延迟、费用、用量等策略；simple-shuffle 当前偏向最高权重。weighted-split 用平滑加权调度，模板覆盖只按 deployment_id 或 pricing_id 的稳定身份匹配；0 排除，负数和非有限值忽略。ApplyWeights 不修改共享原始参数。
-每次尝试重新检查身份及限制。429/5xx 按策略重试，普通其它 4xx 不自动换部署。流输出后不重试。普通策略全冷却仍可尝试，split 无正权重开放候选为空。
-fallbacks、context_window_fallbacks、content_policy_fallbacks、retry_policy、model_group_alias、stream_timeout 等当前主要是保存和往返；跨公开模型名回退没有完整执行能力。
+新模板使用 `retry_policy.max_attempts`、`timeout_seconds`、`failure_threshold` 和 `cooldown_seconds`；默认值分别为 1、60、3、0。`max_attempts` 包含首次调用，`cooldown_seconds` 为 0 时使用运行时默认冷却时长。
+`simple-shuffle` 与 `random` 均匀随机并忽略权重；`traffic-split` 按正权重的相对比例独立随机抽样，有限样本不保证精确比例。模型规则优先于路由组和模型管理默认权重；显式分配只按 `deployment_id` 匹配，未列出部署默认为 1，空列表使所有匹配部署为 1。零权重、非法权重、禁用和冷却候选不会进入分流池。
+每次尝试重新检查身份及限制。429/5xx 按执行策略重试，普通其它 4xx 不自动换部署；流输出后不重试。所有候选冷却时当前返回空池。`fallbacks`、`context_window_fallbacks`、`content_policy_fallbacks`、`retry_policy` 和 `routing_groups` 已由编译器及数据面执行。
 
 ### 实现位置
 

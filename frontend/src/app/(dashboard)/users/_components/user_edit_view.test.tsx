@@ -586,24 +586,8 @@ describe("UserEditView", () => {
       expect(budgetInput.closest("form")).not.toHaveAttribute("novalidate");
     });
 
-    it("shows the tool matrix for servers the user reaches only through an access group or toolset", async () => {
-      vi.mocked(networking.fetchMCPServers).mockResolvedValue([
-        { server_id: "srv-group", server_name: "Group Server", alias: "Group Server", mcp_access_groups: ["group-a"] },
-        { server_id: "srv-toolset", server_name: "Toolset Server", alias: "Toolset Server" },
-      ]);
-      vi.mocked(networking.fetchMCPAccessGroups).mockResolvedValue(["group-a"]);
-      vi.mocked(networking.fetchMCPToolsets).mockResolvedValue([
-        {
-          toolset_id: "toolset-a",
-          toolset_name: "Toolset A",
-          tools: [{ server_id: "srv-toolset", tool_name: "list_issues" }],
-        } as never,
-      ]);
-      vi.mocked(networking.listMCPTools).mockResolvedValue({
-        tools: [{ name: "list_issues", description: "List issues" }],
-        error: false,
-      });
-
+    it("does not render the retired MCP permission matrix", async () => {
+      // 用户编辑页已移除 MCP 入口；旧对象权限仍可随数据加载，但页面不再请求或展示工具矩阵。
       renderWithProviders(
         <UserEditView
           {...defaultProps}
@@ -618,10 +602,10 @@ describe("UserEditView", () => {
         />,
       );
 
-      expect(await screen.findByText("Via access group: group-a")).toBeInTheDocument();
-      expect(await screen.findByText("Via toolset: Toolset A")).toBeInTheDocument();
-      expect(networking.listMCPTools).toHaveBeenCalledWith("test-token", "srv-group");
-      expect(networking.listMCPTools).toHaveBeenCalledWith("test-token", "srv-toolset");
+      expect(await screen.findByRole("button", { name: /save changes/i })).toBeInTheDocument();
+      expect(screen.queryByText(/Via access group:/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Via toolset:/)).not.toBeInTheDocument();
+      expect(networking.listMCPTools).not.toHaveBeenCalled();
     });
 
     it("should send objects for the mcp keys seeded from objectPermission", async () => {

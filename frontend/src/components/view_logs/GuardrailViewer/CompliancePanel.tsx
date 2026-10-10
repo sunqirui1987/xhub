@@ -44,20 +44,27 @@ const SpinnerIcon = () => (
 
 // -- Sub-components --
 
-// The catalog stub for these routes is a JSON object with no checks array.
-// Mapping that value crashes the whole logs page, so a response that is not
-// the compliance shape is an error instead of a result.
+/**
+ * 校验合规接口的运行时响应。
+ * 参数 value 是 EU AI Act 或 GDPR 接口返回值；返回可供卡片展示的 ComplianceResponse，供加载流程调用。
+ * 缺少 checks 或 compliant 的目录桩、空值和其他协议形态均按当前语言抛错，避免日志页映射异常。
+ */
 const asComplianceResponse = (value: unknown): ComplianceResponse => {
   if (!value || typeof value !== "object") {
-    throw new Error("Compliance check returned an unexpected response");
+    throw new Error(t("Compliance check returned an unexpected response"));
   }
   const data = value as Partial<ComplianceResponse>;
   if (!Array.isArray(data.checks) || typeof data.compliant !== "boolean") {
-    throw new Error("Compliance check returned an unexpected response");
+    throw new Error(t("Compliance check returned an unexpected response"));
   }
   return data as ComplianceResponse;
 };
 
+/**
+ * 展示一项法规的合规加载、失败或检查结果。
+ * 参数 title 为法规名，data 为已校验响应，loading/error 表示请求状态；返回可展开的合规卡片。
+ * CompliancePanel 分别为 EU AI Act 与 GDPR 调用；失败时只展示错误提示，不读取 data，合规状态按当前语言读取。
+ */
 const ComplianceCard = ({
   title,
   data,
@@ -103,7 +110,7 @@ const ComplianceCard = ({
                   : "bg-destructive/15 text-destructive border border-destructive/20"
               }`}
             >
-              {data.compliant ? "COMPLIANT" : "NON-COMPLIANT"}
+              {data.compliant ? t("COMPLIANT") : t("NON-COMPLIANT")}
             </span>
           )}
           {error && (

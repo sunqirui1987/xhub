@@ -4,6 +4,12 @@ import userEvent from "@testing-library/user-event";
 import React from "react";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+// 只读摘要的选项标签在模块加载时生成；固定英文，避免测试受其他套件的全局语言影响。
+vi.mock("@/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/i18n")>();
+  return { ...original, t: (key: string, vars?: Record<string, unknown>) => original.translate("en", key, vars) };
+});
+
 vi.mock("@/app/(dashboard)/hooks/teams/useTeams", () => ({
   useInfiniteTeams: () => ({
     data: {

@@ -67,7 +67,7 @@ func Generate(s Host, w http.ResponseWriter, r *http.Request) {
 // 参数 s（Host）：列出使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/keys/mount.go、gateway/models/list.go、gateway/models/mount.go、gateway/prefs/mount.go
-// 测试：personal_test.go、regression/personal_keys_test.go。个人查询在 SQL 收窄后再筛选、分页，不返回明文。
+// 测试：personal_test.go、regression/personal_keys_test.go、regression/pagination_test.go。查询先按权限在 SQL 收窄，再应用客户端筛选和分页，不返回明文。
 func List(s Host, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := s.RequireUser(w, r)
@@ -90,32 +90,26 @@ func List(s Host, w http.ResponseWriter, r *http.Request) {
 		s.WriteIAMError(w, r, err)
 		return
 	}
-	if personal {
-		rows, total, page, size, pages, err := personalPage(rows, r.URL.Query())
-		if err != nil {
-			httpx.WriteError(w, 400, "invalid_request", err.Error())
-			return
-		}
-		out := make([]map[string]any, 0, len(rows))
-		for _, k := range rows {
-			item := Response(k, "", false)
-			// 个人列表用公开记录 ID 导航详情，遮罩前缀不是有效查询标识。
-			item["token"] = k.ID
-			out = append(out, item)
-		}
-		httpx.WriteJSON(w, 200, map[string]any{"keys": out, "total_count": total, "current_page": page, "total_pages": pages, "size": size})
+	rows, total, page, size, pages, err := personalPage(rows, r.URL.Query())
+	if err != nil {
+		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, k := range rows {
-		out = append(out, Response(k, "", false))
+		item := Response(k, "", false)
+		if personal {
+			// 个人列表用公开记录 ID 导航详情，遮罩前缀不是有效查询标识。
+			item["token"] = k.ID
+		}
+		out = append(out, item)
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
 		"keys":         out,
-		"total_count":  len(out),
-		"current_page": 1,
-		"total_pages":  1,
-		"size":         len(out),
+		"total_count":  total,
+		"current_page": page,
+		"total_pages":  pages,
+		"size":         size,
 	})
 }
 

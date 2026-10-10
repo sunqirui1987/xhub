@@ -1,64 +1,49 @@
 # Deployment filtering, ordering, and weighted split
 
-[简体中文](readme_cn.md) · [Feature implementation reference](../../docs/development/implementation.md)
+[简体中文](readme_cn.md) · [Feature implementation reference](../../docs/development/implementation.md) · [Routing contract](../../docs/development/routing.md)
 
 ## Responsibilities and behavior
 
-router.go filters and orders deployments for a public name; adapter.go reads runtime state; split.go performs smooth weighted scheduling. Disabled entries are excluded. Runtime lookup uses the current deployment identity.
-WeightID uses a stable deployment ID, then pricing ID; without either it is empty and the template cannot override that row. CooldownID combines endpoint, model, pricing/deployment IDs and named credentials without raw secrets. ApplyWeights copies parameters and matches only stable keys. simple-shuffle favors maximum weight; weighted-split performs proportional scheduling with equal defaults and explicit-zero exclusion.
-Routing never grants model access. Ordinary strategies may try an entirely cooled pool; split returns no pool without eligible positive-weight entries. Cost ordering compares current input-token prices, not total predicted request cost. Affinity only reorders eligible candidates.
+The router matches a public model or routing group, removes disabled and cooled deployments, and orders the remaining candidates. It does not grant model access. `simple-shuffle` and `random` select uniformly and ignore weights. `traffic-split` performs an independent random draw from relative positive weights; it is not smooth weighted round-robin and finite samples do not promise an exact ratio.
+
+Explicit allocations are keyed by `deployment_id`; a deployment absent from the allocation list has weight `1`. An empty allocation list gives every matching deployment weight `1`. Weights must be finite and non-negative, and at least one candidate must remain positive. Zero, cooled, disabled, and invalid-weight candidates are excluded from `traffic-split`. Other strategies exclude cooled candidates; if none remain, the result is empty. A pinned deployment can move to the front only when it is still compatible, open, and eligible.
+
+`cost-based-routing` compares the current input-token price, with unpriced candidates ordered last. Runtime identities use `pricing_id`, then `deployment_id`, then `model_info.id` for cooldown and metrics isolation. Public deployment identity uses `litellm_params.deployment_id`, then `model_info.id`; `pricing_id` is not a deployment ID.
 
 ## Source responsibilities and entry points
 
-### adapter.go
+- [`router.go`](router.go) matches candidates, validates strategies, filters disabled deployments, and orders or picks them.
+- [`schedule.go`](schedule.go) combines matching, health and weight filtering, and session pinning for request attempts.
+- [`policy.go`](policy.go) parses and validates allocation policies.
+- [`settings.go`](settings.go) reads the template contract and retry policy defaults.
+- [`compile.go`](compile.go) combines model rules with platform defaults and fallback settings.
+- [`groups.go`](groups.go) validates and expands routing groups.
+- [`fallback.go`](fallback.go) validates fallback graphs.
+- [`template.go`](template.go) validates template references and fallback configuration.
+- [`weight_cleanup.go`](weight_cleanup.go) removes stale allocation rows when deployment catalogs change.
 
-- [`func DecodeResponse(op, provider, alias string, raw []byte) []byte`](adapter.go) — DecodeResponse turns an upstream response into the public shape and puts the caller's model alias back into the model field.
+The package exports the scheduling API used by gateway and dataplane callers. It registers no HTTP route directly.
 
-### router.go
+## Template contract
 
-Exported types: `State`.
+New documents use `model_routes` and a complete `retry_policy`. A model rule contains `model`, `strategy`, and optional `allocations`; allocations are accepted only for `traffic-split` and contain `deployment_id` plus `weight`. `max_attempts`, `timeout_seconds`, `failure_threshold`, and `cooldown_seconds` are read from `retry_policy`. Routing groups and general, context-window, and content-policy fallbacks are validated and executed by the request path.
 
-- [`func All(list []config.ModelEntry, alias string) []config.ModelEntry`](router.go) — All returns every deployment under one public model name, before a strategy orders them.
-- [`func Order(list []config.ModelEntry, alias, strategy string, st State) []config.ModelEntry`](router.go) — Order sorts usable deployments into attempt order for a strategy. A cooling deployment is not placed first when another deployment exists.
-- [`func Pick(list []config.ModelEntry, alias, strategy string, st State) *config.ModelEntry`](router.go) — Pick returns the first deployment from Order. It returns nil when no deployment is usable.
-- [`func WeightID(e config.ModelEntry) string`](router.go) — Weight identity: deployment:<id> from the configured deployment, then pricing:<id>. Returns empty without a stable ID.
-- [`func CooldownID(e config.ModelEntry) string`](router.go) — CooldownID is the runtime deployment identity. It isolates cooldown, busy, latency, usage, session pinning, and billing state for named credentials that share one physical endpoint. A configured pricing_id or deployment_id is included when present so rows with the same endpoint, model, and credential name remain distinct. No API key is included.
-- [`func IsSplitStrategy(strategy string) bool`](router.go) — IsSplitStrategy reports whether strategy divides traffic by weight. Hyphens and underscores are the same name. Anything else, including simple-shuffle, is not a split: simple-shuffle still picks the heaviest deployment, and treating it as a split would change that.
-- [`func ApplyWeights(list []config.ModelEntry, overrides map[string]float64) []config.ModelEntry`](router.go) — Copies list and applies only a WeightID match. Unmatched deployments retain their own weight (default 1 in split); an empty map returns the input. Copying prevents one request's template from changing shared ModelList.
-- [`func AdapterURL(provider, apiBase, realModel string) string`](router.go) — AdapterURL is the upstream address for chat completions. Other operations use AdapterURLOp.
-- [`func AdapterURLOp(op, provider, apiBase, realModel string) string`](router.go) — AdapterURLOp returns the full URL for an operation and a provider. The rules live in internal/llm.Endpoint.
-- [`func ValidateStrategy(strategy string) error`](router.go) — ValidateStrategy accepts the strategy names from the catalog and the hyphenated spellings the gateway config already uses. An unknown name returns an error and is not treated as simple-shuffle.
+## Verification and maintenance
 
-### split.go
+| Test file | Scenario entry points |
+| --- | --- |
+| [`allocation_test.go`](allocation_test.go) | `TestRandomAndTrafficIntervals`, `TestStickySchedulingDoesNotDraw`, `TestAllocationPolicyValidation`, `TestRelativeDefaultWeights`, `TestSimpleShuffleIsUniformRandom` |
+| [`compile_test.go`](compile_test.go) | `TestCompileOverrides`, `TestCompileFailures`, `TestCompileGroupIsolation`, `TestCompileModelWeights` |
+| [`compile_fallback_test.go`](compile_fallback_test.go) | `TestCompileFallbackPrecedence`, `TestCompileFallbackFailures` |
+| [`groups_test.go`](groups_test.go) | `TestGroupContract`, `TestGroupScheduleIdentity` |
+| [`fallback_test.go`](fallback_test.go) | `TestFallbackPolicy`, `TestFallbackGraph` |
+| [`fallback_boundary_test.go`](fallback_boundary_test.go) | `TestFallbackPolicyCategoryBoundaries`, `TestFallbackGraphSharedAndDisconnected` |
+| [`cost_regression_test.go`](cost_regression_test.go) | `TestCostRoutingUsesSettlementRatePrecedenceAndWindow`, `TestCostRoutingAcceptsValidNumericRates` |
+| [`disabled_test.go`](disabled_test.go) | `TestAllExcludesDisabledExactAndWildcardDeployments` |
+| [`weight_cleanup_test.go`](weight_cleanup_test.go) | `TestCleanAllocations`, `TestCleanTemplateWeights` |
 
-Exported types: `SplitState`.
-
-- [`func NewSplitState() *SplitState`](split.go) — NewSplitState returns an empty split state. One instance is shared by a process. The counters are per-process, so several replicas each converge on the configured ratio independently rather than coordinating one global schedule; the aggregate ratio is right either way.
-- [`func SharedSplit() *SplitState`](split.go) — SharedSplit returns the process-wide split cursors. The router State is rebuilt for every request, so the cursors cannot live on it - a split that forgot where it was would send every request to the same deployment. One shared instance is what makes the ratio hold across requests.
-- [`func (s *SplitState) PickWeighted(ids []string, weights []float64, available []bool) int`](split.go) — PickWeighted chooses the deployment that is furthest behind its share. This is smooth weighted round-robin: each turn every candidate's score grows by its weight, the highest score wins, and the winner's score drops by the total. Over any ten draws a 3:7 split lands exactly 3 and 7 rather than merely averaging that over a long run, which matters because a caller that watches ten consecutive requests should see the ratio they configured. A candidate that is not available has its score forgotten, so it re-enters at zero rather than immediately claiming the share it accrued while it was cooling down. That would otherwise send the first requests after a recovery all to the deployment that just came back. available（[]bool）：每条候选此刻是否可以接流量。
-- [`func (s *SplitState) Forget(id string)`](split.go) — Forget drops a deployment's cursor. A deployment that is removed or renamed would otherwise leave its score behind forever, which is a slow leak in a process that runs for weeks.
-
-## External HTTP boundary
-
-This directory registers no direct HTTP route. Higher layers call its Go API; trace catalog dispatch or host calls through the dependency chain.
+Run the focused package tests when implementation changes require them. Database, Redis, and live-provider coverage needs the corresponding configured environment; it is not implied by this package-level suite.
 
 ## Dependencies
 
 [internal/catalog](../catalog/readme.md), [internal/config](../config/readme.md), [internal/llm](../llm/readme.md), [internal/logx](../logx/readme.md).
-
-## Verification and maintenance
-
-
-| Test file | Scenario entry points |
-| --- | --- |
-| [runtime_identity_test.go](runtime_identity_test.go) | TestDatabaseRuntimeIdentityKeepsRetryAndSplitRowsDistinct, TestDatabaseRuntimeIdentityIsolatesCooldown, TestDatabaseRuntimeIdentityIsolatesMetrics, TestCooldownIDPreservesParameterIdentityPrecedence: independent database deployment state. |
-| [cost_regression_test.go](cost_regression_test.go) | `TestCostRoutingUsesSettlementRatePrecedenceAndWindow`, `TestCostRoutingAcceptsValidNumericRates` |
-| [disabled_test.go](disabled_test.go) | `TestAllExcludesDisabledExactAndWildcardDeployments` |
-| [split_test.go](split_test.go) | `TestWeightedSplitFollowsTheConfiguredRatio`, `TestWeightedSplitDoesNotRequireHundred`, `TestSplitWithoutWeightsIsEven`, `TestSplitSkipsACoolingDeployment`, `TestSplitIsEvenAfterACoolingDeploymentReturns`, `TestSplitWithOneDeploymentDoesNotDisturbIt`, `TestSplitWithoutStateFallsBackToHighestWeight`, `TestApplyWeightsUsesTheDocumentWithoutTouchingThePool`, `TestWeightedSplitIsItsOwnStrategy`, `TestSplitKeepsRatioAcrossManyDraws`, `TestCostStrategyDoesNotLetAnUnpricedDeploymentWin` |
-| [template_regression_test.go](template_regression_test.go) | `TestSplitExclusionsApplyToEveryAttempt`, `TestNamedCredentialCooldownAndRetryIsolation`, `TestCooldownIDUsesConfiguredStablePricingIdentity`, `TestRuntimeMetricsUseCredentialAwareIDs`, `TestRuntimeMetricsRejectPhysicalIDForNamedCredentials` |
-
-```bash
-go test ./internal/router -count=1
-```
-
-Use XHUB_REGRESSION_STRICT=1 for database acceptance and inspect skips. Redis and live providers require separate configuration. Update this reference and feature documentation after contract changes.

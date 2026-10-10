@@ -267,6 +267,11 @@ interface StepCardProps {
   availableGuardrails: Guardrail[];
 }
 
+/**
+ * 渲染并编辑策略流水线中的单个步骤。
+ * 参数包含步骤值、序号、总数、护栏目录及修改/删除回调；返回带通过、失败和 API 失败分支的步骤卡片。
+ * PipelineFlowBuilder 为每个步骤调用；唯一步骤禁用删除，分支标签按当前语言读取，回调只提交当前步骤的局部变更。
+ */
 const StepCard: React.FC<StepCardProps> = ({
   step,
   stepIndex,
@@ -354,7 +359,7 @@ const StepCard: React.FC<StepCardProps> = ({
       <div style={{ borderTop: "1px solid var(--color-border)", padding: "14px 20px" }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
           <PassIcon />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>ON PASS</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>{t("ON PASS")}</span>
         </div>
         <label
           style={{
@@ -405,7 +410,7 @@ const StepCard: React.FC<StepCardProps> = ({
       <div style={{ borderTop: "1px solid var(--color-border)", padding: "14px 20px" }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
           <FailIcon />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>ON FAIL</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>{t("ON FAIL")}</span>
         </div>
         <label
           style={{
@@ -456,7 +461,7 @@ const StepCard: React.FC<StepCardProps> = ({
       <div style={{ borderTop: "1px solid var(--color-border)", padding: "14px 20px" }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
           <ApiFailureIcon />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>ON API FAILURE</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-foreground)" }}>{t("ON API FAILURE")}</span>
         </div>
         <label
           style={{
@@ -1233,6 +1238,11 @@ interface PolicyVersionsSidebarProps {
   onPromoteToProduction?: () => void;
 }
 
+/**
+ * 展示策略版本列表及发布操作侧栏。
+ * 参数包含当前策略与版本、鉴权令牌、加载状态和新建/选择/发布回调；返回编辑页左侧版本导航。
+ * 策略编辑页调用；未授权或更新中禁用状态变更，草稿/已发布版本只显示当前阶段允许的操作，预告标签按当前语言读取。
+ */
 const PolicyVersionsSidebar: React.FC<PolicyVersionsSidebarProps> = ({
   policyName,
   editingPolicyId,
@@ -1423,7 +1433,7 @@ const PolicyVersionsSidebar: React.FC<PolicyVersionsSidebarProps> = ({
                 borderRadius: 4,
               }}
             >
-              COMING SOON
+              {t("COMING SOON")}
             </span>
           </div>
           <span

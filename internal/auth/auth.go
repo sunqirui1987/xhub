@@ -86,8 +86,8 @@ type Principal struct {
 	KeyID string
 	Key   *iam.Key
 	Hash  string
-	// TeamID, ProjectID and OwnerType describe a key's binding. Only a key has
-	// them; a session reaches teams through its memberships.
+	// TeamID 描述密钥绑定的团队，或会话唯一成员团队；多团队会话不猜测归属。
+	// ProjectID 和 OwnerType 描述密钥绑定，会话不携带密钥项目或所有权。
 	TeamID    string
 	ProjectID string
 	OwnerType string
@@ -100,11 +100,9 @@ type Principal struct {
 	// already resolved to the narrowest scope that selects one, and
 	// RouteTemplateSource names that scope: "key", "team" or "organization".
 	//
-	// Both are filled by the walk the budget check already makes - key, then
-	// team, then organization - so resolving them costs no extra read. The
-	// source is recorded as the walk goes rather than reconstructed afterwards,
-	// because reconstructing it means asking the same three rows the same
-	// question twice and hoping the answers agree.
+	// 密钥推理沿预算链按密钥、团队、组织填入；会话推理与只读预览通过
+	// 专用归属解析填入，不消耗 RPM/TPM 窗口。解析时同时记录来源，避免
+	// 后续调用再次猜测绑定层级。
 	//
 	// An empty id means no scope in the chain selected one, so the platform
 	// default applies.

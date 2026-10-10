@@ -17,7 +17,6 @@ Exported types: `Config`, `ModelEntry`, `RouterSettings`, `GeneralSettings`.
 - [`func (m ModelEntry) Disabled() bool`](config.go) — Disabled reports whether this deployment is excluded from model discovery and runtime routing.
 - [`func Load(path string) (*Config, error)`](config.go) — Load reads YAML and requires a postgres:// or postgresql:// database URL.
 - [`func (e ModelEntry) ParamString(key, fallback string) string`](config.go) — ParamString 从一条部署的 litellm_params 里按名字读字符串。缺键或类型不对时返回 fallback。
-- [`func SplitProviderModel(raw string) (provider, model string)`](config.go) — SplitProviderModel splits provider/model. With no slash the provider is empty and the model name is the whole string.
 
 ## External HTTP boundary
 

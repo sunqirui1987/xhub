@@ -1,6 +1,7 @@
 import type { ModelEndpoint, ModelGroup } from "./fetch_models";
 import type { TokenUsage } from "@/components/chat_ui/ResponseMetrics";
 import { EndpointType } from "@/components/chat_ui/mode_endpoint_mapping";
+import { t } from "@/i18n";
 
 const UI_ENDPOINTS: Record<string, EndpointType> = {
   "/v1/chat/completions": EndpointType.CHAT,
@@ -99,7 +100,7 @@ export async function callTextEndpoint({
   const messagesAPI = endpoint.path.endsWith("/messages");
   const responsesAPI = endpoint.path.endsWith("/responses");
   if (!textEndpoints({ model_group: model, endpoints: [endpoint] }).length)
-    throw new Error("Unsupported text endpoint");
+    throw new Error(t("Unsupported text endpoint"));
   const start = performance.now();
   let firstText = false;
   /** emitText 把一段文本增量交给界面，并记录首字延迟。
@@ -193,11 +194,11 @@ export async function callTextEndpoint({
     signal,
   });
   if (!response.ok) throw new Error(await response.text());
-  if (!response.body) throw new Error("Missing response body");
+  if (!response.body) throw new Error(t("Missing response body"));
   if (!response.headers.get("content-type")?.includes("text/event-stream")) {
     const doc = await response.json();
-    if (doc.error) throw new Error(doc.error.message ?? "Upstream error");
-    if (responsesAPI && doc.status !== "completed") throw new Error("Response did not complete");
+    if (doc.error) throw new Error(doc.error.message ?? t("Upstream error"));
+    if (responsesAPI && doc.status !== "completed") throw new Error(t("Response did not complete"));
     emitUsage(doc.usage);
     const text =
       doc.choices?.[0]?.message?.content ??
@@ -243,7 +244,7 @@ export async function callTextEndpoint({
       .trim();
     if (!doc.type && eventType) doc.type = eventType;
     if (doc.error || ["error", "response.failed", "response.incomplete"].includes(doc.type))
-      throw new Error(doc.error?.message ?? "Upstream stream failed");
+      throw new Error(doc.error?.message ?? t("Upstream stream failed"));
     // 只能由当前协议的业务终态确认成功，其他协议的事件不能完成这次请求。
     if ((responsesAPI && doc.type === "response.completed") || (messagesAPI && doc.type === "message_stop"))
       completed = true;
@@ -262,10 +263,10 @@ export async function callTextEndpoint({
         dispatch(buffer.slice(0, match.index));
         buffer = buffer.slice(match.index + match[0].length);
       }
-      if (buffer.length > 8 * 1024 * 1024) throw new Error("SSE event exceeds limit");
+      if (buffer.length > 8 * 1024 * 1024) throw new Error(t("SSE event exceeds limit"));
       if (done) break;
     }
-    if (!completed) throw new Error("Stream ended before completion");
+    if (!completed) throw new Error(t("Stream ended before completion"));
     onLatency?.((performance.now() - start) / 1000);
   } finally {
     await reader.cancel();

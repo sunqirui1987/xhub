@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import PerUserUsage from "./per_user_usage";
 import * as networking from "./networking";
-import { tDefault } from "@/i18n/translate";
+import { setActiveLocale } from "@/i18n/runtime";
 
 vi.mock("./networking", () => ({
   perUserAnalyticsCall: vi.fn(),
@@ -98,9 +98,11 @@ describe("PerUserUsage", () => {
 
   /** 前置加载失败，验证可观察错误及导航恢复到禁用空页状态；mock 和组件自动清理，不写后台。 */
   it("shows an error when loading usage fails", async () => {
+    // 组件使用运行期语言；显式固定英文，避免把默认语言翻译误当成当前界面语言。
+    setActiveLocale("en");
     mockPerUserAnalyticsCall.mockRejectedValueOnce(new Error("offline"));
     render(<PerUserUsage {...defaultProps} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(tDefault("Unable to load usage data"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load usage data");
     expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
   });
 

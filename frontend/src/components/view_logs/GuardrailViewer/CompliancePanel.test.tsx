@@ -1,9 +1,10 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProviders } from "../../../../tests/test-utils";
 import CompliancePanel from "./CompliancePanel";
+import { setActiveLocale } from "@/i18n";
 
 const compliance = vi.hoisted(() => ({
   eu: vi.fn(),
@@ -27,6 +28,7 @@ describe("CompliancePanel", () => {
     compliance.eu.mockReset();
     compliance.gdpr.mockReset();
   });
+  afterEach(() => setActiveLocale("en"));
 
   it("shows an unavailable state when the response has no checks array", async () => {
     compliance.eu.mockResolvedValue({ status: "ok", exported_count: 0 });
@@ -59,5 +61,20 @@ describe("CompliancePanel", () => {
     await userEvent.click(screen.getByText("EU AI Act"));
     expect(screen.getByText("Guardrails applied")).toBeInTheDocument();
     expect(screen.getByText("1 guardrail(s) applied")).toBeInTheDocument();
+  });
+
+  /** 前置中文语言、一个不合规响应及一个损坏响应；验证状态和失败详情均本地化；恢复语言，mock 无持久化数据。 */
+  it("localizes non-compliant status and malformed-response errors", async () => {
+    setActiveLocale("zh-CN");
+    compliance.eu.mockResolvedValue({
+      compliant: false,
+      regulation: "EU AI Act",
+      checks: [{ check_name: "规则", article: "Art. 9", passed: false, detail: "失败" }],
+    });
+    compliance.gdpr.mockResolvedValue({ status: "bad" });
+    renderWithProviders(<CompliancePanel accessToken="token" logEntry={logEntry} />);
+    await waitFor(() => expect(screen.getByText("不合规")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("GDPR"));
+    expect(screen.getByText("合规检查返回了非预期响应")).toBeInTheDocument();
   });
 });

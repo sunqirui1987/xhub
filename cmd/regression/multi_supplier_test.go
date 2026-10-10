@@ -751,6 +751,9 @@ func TestMultiSupplierDatabaseDuplicateDeployments(t *testing.T) {
 	}
 }
 
+// TestMultiSupplierCooldownIsolation 验证同地址供应商按稳定部署身份隔离冷却，并在解除冷却后恢复随机分流。
+// 前置私有 PostgreSQL、本地供应商和显式 Redis；先把专用会话固定到 A，避免随机首选使失败路径未执行。
+// 结果验证 A 失败后回退 B、A 的独立 TTL、冷却期间 B 独占和恢复后权重；专用冷却键与 schema 自动清理。
 func TestMultiSupplierCooldownIsolation(t *testing.T) {
 	redisURL := os.Getenv("XHUB_REGRESSION_REDIS_URL")
 	if redisURL == "" {
@@ -764,12 +767,6 @@ func TestMultiSupplierCooldownIsolation(t *testing.T) {
 		"model": s.ModelName, "strategy": "traffic-split", "allocations": routeAllocations(map[string]float64{"sol-a": 7, "sol-b": 3}),
 	}}, 1, 60, 1, 120))
 	bindTemplate(t, f.h, admin, "team", c.teamID, id)
-	f.fail("SUPPLIER_A", 500)
-	r := f.h.ok(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(s.ModelName, "trip supplier A"))
-	f.checkBill(t, admin, s.ModelName, r, f.selected(t, c.key, s.ModelName, r))
-	if !reflect.DeepEqual(f.attempts(), []supplierAttempt{{"SUPPLIER_A", s.ModelName, 500}, {"SUPPLIER_B", s.ModelName, 0}}) {
-		t.Fatalf("trip order %v", f.attempts())
-	}
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
 		t.Fatal(err)
@@ -778,6 +775,32 @@ func TestMultiSupplierCooldownIsolation(t *testing.T) {
 	keyA := "xhub:cooldown:" + router.CooldownID(f.entries[0])
 	keyB := "xhub:cooldown:" + router.CooldownID(f.entries[1])
 	defer func() { client.Del(t.Context(), keyA, keyB); client.Close() }()
+	if err := client.Del(t.Context(), keyA, keyB).Err(); err != nil {
+		t.Fatal(err)
+	}
+	// 先通过独占 A 的合法模板建立粘性，再恢复双供应商权重；故障请求必定先尝试 A。
+	f.h.ok(http.MethodPost, "/route_template/"+id+"/update", admin, map[string]any{"body": routeTemplateBody([]any{map[string]any{
+		"model": s.ModelName, "strategy": "traffic-split", "allocations": routeAllocations(map[string]float64{"sol-a": 1, "sol-b": 0}),
+	}}, 1, 60, 1, 120)})
+	sticky := map[string]string{"X-Session-Id": "cooldown-prime"}
+	prime := f.h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(s.ModelName, "prime supplier A"), sticky)
+	if prime.status != http.StatusOK {
+		t.Fatalf("建立 A 粘性失败: %s", prime.describe())
+	}
+	f.checkBill(t, admin, s.ModelName, prime, f.selected(t, c.key, s.ModelName, prime))
+	f.h.ok(http.MethodPost, "/route_template/"+id+"/update", admin, map[string]any{"body": routeTemplateBody([]any{map[string]any{
+		"model": s.ModelName, "strategy": "traffic-split", "allocations": routeAllocations(map[string]float64{"sol-a": 7, "sol-b": 3}),
+	}}, 1, 60, 1, 120)})
+	f.reset()
+	f.fail("SUPPLIER_A", 500)
+	r := f.h.doHeaders(http.MethodPost, "/v1/chat/completions", c.key, chatRequest(s.ModelName, "trip supplier A"), sticky)
+	if r.status != http.StatusOK {
+		t.Fatalf("A 故障后未恢复到 B: %s", r.describe())
+	}
+	f.checkBill(t, admin, s.ModelName, r, f.selected(t, c.key, s.ModelName, r))
+	if !reflect.DeepEqual(f.attempts(), []supplierAttempt{{"SUPPLIER_A", s.ModelName, 500}, {"SUPPLIER_B", s.ModelName, 0}}) {
+		t.Fatalf("trip order %v", f.attempts())
+	}
 	ttl, err := client.PTTL(t.Context(), keyA).Result()
 	if err != nil || ttl <= 0 || ttl > 120*time.Second {
 		t.Fatalf("supplier A cooldown TTL=%v err=%v", ttl, err)
