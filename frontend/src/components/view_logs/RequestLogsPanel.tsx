@@ -159,7 +159,7 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
   const rowsThroughThisPage = pagination.pageIndex * pagination.pageSize + rows.length;
   const isLastPage =
     filteredLogs.has_more === false || (filteredLogs.has_more === undefined && rows.length < pagination.pageSize);
-  const rowCount = isLastPage ? rowsThroughThisPage : Math.max(filteredLogs.total, rowsThroughThisPage);
+  const rowCount = !usesSessionCursor ? filteredLogs.total : isLastPage ? rowsThroughThisPage : Math.max(filteredLogs.total, rowsThroughThisPage);
 
   const handleSearchChange = useCallback((value: string) => {
     setColumnFilters((previous) => {
@@ -187,9 +187,11 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
     setPagination((previous) => ({ ...previous, pageIndex: 0 }));
   }, []);
 
+  /** 接收表格页码更新并返回 void；页码接口直接翻页，游标接口缓存下一页游标，加载占位数据期间拒绝导航。 */
   const handlePaginationChange = useCallback<OnChangeFn<PaginationState>>(
     (updaterOrValue) => {
       const requested = typeof updaterOrValue === "function" ? updaterOrValue(pagination) : updaterOrValue;
+      if (logsQuery.isPlaceholderData) return;
       if (!usesSessionCursor) {
         setPagination(requested);
         return;
@@ -268,7 +270,7 @@ export default function RequestLogsPanel({ accessToken, token, userRole, userID,
       <RequestLogsTable
         data={rows}
         rowCount={rowCount}
-        isLoading={logsQuery.isLoading}
+        isLoading={logsQuery.isLoading || logsQuery.isPlaceholderData}
         isRefreshing={logsQuery.isFetching}
         pagination={pagination}
         onPaginationChange={handlePaginationChange}

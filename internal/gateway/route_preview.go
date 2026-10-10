@@ -58,6 +58,11 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteTypedError(w, r.URL.Path, 400, "invalid_request", "exactly one JSON object is required")
 		return
 	}
+	// 补齐可信归属后再检查可见性，不调用会消耗窗口计数的推理额度检查。
+	if err := s.resolvePreviewIdentity(r.Context(), p); err != nil {
+		httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "template binding unavailable")
+		return
+	}
 	if !models.AllowsModel(s, r.Context(), p, p.TeamID, input.Model) {
 		httpx.WriteTypedError(w, r.URL.Path, 403, "forbidden", "model is not allowed")
 		return
@@ -89,32 +94,18 @@ func (s *Server) routePreview(w http.ResponseWriter, r *http.Request) {
 			object.TeamID = ""
 		}
 		settings = prefs.RouteSettings{Settings: row.Settings(), TemplateID: row.ID, TemplateName: row.Name, Source: "selected"}
-	} else {
-		// 只读继承解析直接读取绑定，不进入会修改速率计数的预算检查。
-		for _, scope := range prefs.RequestChain(p.KeyID, p.TeamID, p.OrgID) {
-			if s.IAM == nil {
-				break
-			}
-			id, err := s.IAM.ScopeRouteTemplate(r.Context(), scope.Kind, scope.ID)
-			if err != nil {
-				httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "template binding unavailable")
-				return
-			}
-			if id == "" {
-				continue
-			}
+	} else if id := p.RouteTemplateID; id != "" {
+		// 复用最窄绑定；指定模板被删除时与推理一致，回到平台默认，不猜测父级。
+		row, err := s.IAM.GetRouteTemplate(r.Context(), id)
+		if err != nil {
+			httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "template unavailable")
+			return
+		}
+		if row != nil {
 			if s.WriteAuthz(w, r, templateauth.Selection(s, r, p, id)) {
 				return
 			}
-			row, err := s.IAM.GetRouteTemplate(r.Context(), id)
-			if err != nil {
-				httpx.WriteTypedError(w, r.URL.Path, 503, "unavailable", "template unavailable")
-				return
-			}
-			if row != nil {
-				settings = prefs.RouteSettings{Settings: row.Settings(), TemplateID: row.ID, TemplateName: row.Name, Source: scope.Kind}
-			}
-			break
+			settings = prefs.RouteSettings{Settings: row.Settings(), TemplateID: row.ID, TemplateName: row.Name, Source: p.RouteTemplateSource}
 		}
 	}
 	if input.Body != nil {

@@ -100,4 +100,22 @@ func TestModelWeightsLifecycle(t *testing.T) {
 	if r := h.do(http.MethodGet, "/model/groups", "", nil); r.status != 401 {
 		t.Fatalf("匿名目录未拒绝: %s", r.describe())
 	}
+	// 保留与默认相反的模板，删除默认正权重部署；两份持久化分配均须清理。
+	doc["model_routes"] = []any{customRule}
+	h.ok("POST", "/route_template/"+templateID+"/update", admin, map[string]any{"body": doc})
+	h.ok("POST", "/model/delete", admin, map[string]any{"id": ids[1]})
+	ids = ids[:1]
+	if got := templateBody(t, h, admin, templateID)["model_routes"].([]any)[0].(map[string]any); got["allocations"] != nil {
+		t.Fatalf("删除后模板仍有部署引用: %v", got)
+	}
+	groups = listField(h.ok("GET", "/model/groups?search=shared", admin, nil).json(), "data")
+	if len(groups) != 1 || groups[0]["default_weights"] != nil {
+		t.Fatalf("单部署仍保留默认分配: %v", groups)
+	}
+	checkCall("custom/alpha/model")
+	// 改名最后一条部署后旧默认不得残留；模板规则不再引用任何部署 ID。
+	h.ok("POST", "/model/update", admin, map[string]any{"model_info": map[string]any{"id": ids[0]}, "model_name": "renamed-shared"})
+	if r := h.do("POST", "/model/delete", owner.session, map[string]any{"id": ids[0]}); r.status != 403 {
+		t.Fatalf("客户可删除部署: %s", r.describe())
+	}
 }

@@ -5,6 +5,8 @@ package identity
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/iam"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"io"
 	"net/http"
 	"strconv"
@@ -182,18 +184,11 @@ func queryInt(r *http.Request, key string, fallback int) int {
 
 // pageOffset turns a 1-based page into a row offset for a page size. A missing or non-positive page reads as the first one, so a bad value never skips rows.
 // 参数 r（*http.Request）：入站 HTTP 请求；limit（int）：最多返回的条数。
-// 返回 int（int）：(page-1)*limit 的行偏移。页码缺失、不是数字或小于 1 时为 0。limit 小于 1 时也是 0。
+// 返回：非负行偏移；页码缺失/非法或 limit 非正返回零，乘法溢出返回最大整数以表示越界。
 // 调用：gateway/identity/handlers.go。
 // 测试：无直接单测
 func pageOffset(r *http.Request, limit int) int {
-	if limit < 1 {
-		return 0
-	}
-	off := (queryInt(r, "page", 1) - 1) * limit
-	if off < 0 {
-		return 0
-	}
-	return off
+	return pagination.Offset(queryInt(r, "page", 1), limit)
 }
 
 // idsFrom reads an id list from the body. The plural key wins, and a non-empty singular field is appended.
@@ -277,4 +272,25 @@ func intJSON(v *int) any {
 		return nil
 	}
 	return *v
+}
+
+// stringListCSV 解析目录筛选的逗号分隔标识；参数 raw 是 URL 值，返回去空白的非空元素。
+// 用户列表路由调用，缺失返回空切片表示不额外筛选，无副作用。
+func stringListCSV(raw string) []string {
+	out := []string{}
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+// listRole 保留空角色筛选，非空值转换为库存角色；参数 raw 是控制台角色，返回筛选值。
+// 用户目录调用；避免 StoreRole 的默认角色把未筛选目录缩成普通用户，无副作用。
+func listRole(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	return iam.StoreRole(raw)
 }

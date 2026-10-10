@@ -27,6 +27,7 @@ interface AuditLogsResponse {
   total_pages: number;
 }
 
+/** 参数为登录和活跃状态，返回审计列表；日志页调用，占位旧页期间暂停分页校正，接口错误由查询状态返回。 */
 export default function AuditLogsPanel({ userID, userRole, token, accessToken, isActive }: AuditLogsProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -104,7 +105,7 @@ export default function AuditLogsPanel({ userID, userRole, token, accessToken, i
       <AuditLogsTable
         data={query.data?.audit_logs ?? []}
         rowCount={query.data?.total ?? 0}
-        isLoading={query.isLoading}
+        isLoading={query.isLoading || query.isPlaceholderData}
         isRefreshing={query.isFetching}
         pagination={pagination}
         onPaginationChange={setPagination}

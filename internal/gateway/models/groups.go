@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"github.com/sunqirui1987/xhub/internal/config"
 	"github.com/sunqirui1987/xhub/internal/httpx"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"github.com/sunqirui1987/xhub/internal/router"
 	"io"
 	"net/http"
@@ -110,14 +111,8 @@ func Groups(s Host, w http.ResponseWriter, r *http.Request) {
 		size = 200
 	}
 	total := len(groups)
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(total, page, size)
 	pages := 1
 	if total > 0 {
 		pages = (total + size - 1) / size

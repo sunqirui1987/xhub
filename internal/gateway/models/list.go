@@ -3,6 +3,7 @@ package models
 
 import (
 	"fmt"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"net/http"
 	"strconv"
 	"strings"
@@ -407,14 +408,8 @@ func Info(s Host, w http.ResponseWriter, r *http.Request) {
 		size = 50
 	}
 	total := len(rows)
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(total, page, size)
 	pages := 1
 	if total > 0 {
 		pages = (total + size - 1) / size

@@ -1,3 +1,4 @@
+import { fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { renderWithProviders, screen } from "../../../../../tests/test-utils";
 import { ProjectKeysSection } from "./ProjectKeysSection";
@@ -69,4 +70,21 @@ describe("ProjectKeysSection", () => {
       expect.objectContaining({ selectedKeyAlias: null }),
     );
   });
+});
+
+/** 前置旧页占位响应；验证禁止翻页，组件卸载清理，无后台数据。 */
+it("disables project key pagination for placeholder rows", () => {
+  mockUseKeys.mockReturnValue({ ...emptyKeysResponse, data: { ...emptyKeysResponse.data, total_count: 42 }, isPlaceholderData: true });
+  renderWithProviders(<ProjectKeysSection projectId="proj-1" />);
+  expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
+});
+
+/** 前置项目 A 第二页，切换项目 B 应重新查询第一页；只 mock 查询边界，组件卸载清理。 */
+it("resets the page when switching project", () => {
+  mockUseKeys.mockReturnValue({ ...emptyKeysResponse, data: { ...emptyKeysResponse.data, total_count: 42 } });
+  const view = renderWithProviders(<ProjectKeysSection projectId="proj-1" />);
+  fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+  expect(mockUseKeys).toHaveBeenLastCalledWith(2, 5, expect.objectContaining({ projectID: "proj-1" }));
+  view.rerender(<ProjectKeysSection projectId="proj-2" />);
+  expect(mockUseKeys).toHaveBeenLastCalledWith(1, 5, expect.objectContaining({ projectID: "proj-2" }));
 });

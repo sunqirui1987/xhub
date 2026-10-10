@@ -1,7 +1,8 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t, watchGateway } from "./helpers";
+import { verifyGuardrailMonitor } from "../../e2e/guardrail_monitor_browser.cjs";
 
-const guardrailNames = ["acceptance-ui-block", "acceptance-ui-redact", "acceptance-ui-flag"];
+const guardrailNames = ["acceptance-ui-XGo-敏感信息拦截", "acceptance-ui-redact", "acceptance-ui-flag"];
 const deploymentName = "acceptance-ui-lifecycle";
 const deploymentId = "acceptance-ui-lifecycle-id";
 
@@ -63,6 +64,8 @@ test.describe("真实监控与模型生命周期验收", () => {
     await cleanupDeployment(page.request, headers);
   });
 
+  /** 目的：真实数据面完成拦截、脱敏和标记后，复用真实验收监控流程验证中文护栏按钮、同时间窗详情和日志。
+   * 前置：隔离网关、数据库和本地上游；验证接口结果与浏览器显示，afterEach 删除三条护栏，schema 由入口清理。 */
   test("护栏真实拦截、脱敏和标记后在监控总览、详情与日志可见", async ({ page }) => {
     const guard = watchGateway(page);
     const blockId = await createGuardrail(page, guardrailNames[0], {
@@ -99,13 +102,10 @@ test.describe("真实监控与模型生命周期验收", () => {
     await expect(page.getByRole("heading", { name: t("pages.guardrailsMonitor.title") })).toBeVisible();
     const totalCard = page.getByRole("group", { name: t("Total Evaluations") });
     await expect(totalCard.locator(".text-3xl")).toHaveText(/[1-9][0-9,]*/);
-    for (const name of guardrailNames) await expect(page.getByText(name, { exact: true })).toBeVisible();
+    for (const name of guardrailNames) await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
 
-    await page.getByText(guardrailNames[0], { exact: true }).click();
-    await expect(page.getByText(guardrailNames[0], { exact: true }).first()).toBeVisible();
-    const requestsCard = page.getByRole("group", { name: t("Requests Evaluated") });
-    await expect(requestsCard.locator(".text-3xl")).toHaveText(/[1-9][0-9,]*/);
-    await page.getByRole("tab", { name: t("Logs"), exact: true }).click();
+    const monitor = await verifyGuardrailMonitor(page, new URL(page.url()).origin, guardrailNames[0]);
+    expect(monitor.guardrail_id, "共享验收流程应打开同一条持久化护栏").toBe(blockId);
     await expect(page.getByText(t("Blocked"), { exact: true }).first()).toBeVisible();
     const blockedLog = page.getByRole("button", { name: new RegExp(`Guardrail blocked the request: ${guardrailNames[0]}`) });
     await expect(blockedLog).toContainText("执行器：blocked_words");

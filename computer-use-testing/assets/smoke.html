@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Computer Use 工具连通性测试</title>
+  </head>
+  <body>
+    <main>
+      <h1>Computer Use 工具连通性测试</h1>
+      <p>仅验证真实浏览器操作与原生表单行为，不代表业务后台或数据面已通过。请使用虚构测试数据。</p>
+      <!-- 用途：原生必填表单；参数：name 查询字段；返回：GET 导航到当前页。供工具连通性验收使用，不创建持久化资源。 -->
+      <form method="get">
+        <label for="name">测试名称（必填）</label>
+        <input id="name" name="name" required autocomplete="off">
+        <button type="submit">提交测试</button>
+        <button type="reset">清空草稿</button>
+      </form>
+      <details>
+        <summary>查看验证说明</summary>
+        <p>合法提交后核对地址中的 name 参数；空值提交应由浏览器拒绝；清空草稿后输入应为空。</p>
+      </details>
+    </main>
+  </body>
+</html>

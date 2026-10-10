@@ -5,6 +5,7 @@
 package identity
 
 import (
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"net/http"
 	"strings"
 	"sync"
@@ -77,7 +78,7 @@ func UserNew(g Gate, w http.ResponseWriter, r *http.Request) {
 // 参数 g（Gate）：带当前操作者的鉴权守卫。允许时返回 nil，拒绝时返回禁止或未找到；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。
 // 调用：gateway/identity/mount.go
-// 测试：无直接单测
+// 测试：cmd/regression/pagination_test.go；完整总数与排序由 iam.ListUsersPage 计算。
 func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 	httpx.SetCallID(w, httpx.CallID())
 	p := g.RequireUser(w, r)
@@ -85,21 +86,30 @@ func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := queryInt(r, "page_size", 100)
-	offset := pageOffset(r, limit)
-	search := r.URL.Query().Get("search")
-	var rows []iam.User
-	var err error
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	page := queryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
 	var watch []string
-	if p.PlatformAdmin() {
-		rows, err = g.Identity().ListUsers(r.Context(), search, limit, offset)
-	} else {
+	var err error
+	if !p.PlatformAdmin() {
 		watch, err = g.Identity().OversightTeamIDs(r.Context(), p.UserID)
 		if err != nil {
 			g.WriteIAMError(w, r, err)
 			return
 		}
-		rows, err = g.Identity().ListScopedUsers(r.Context(), p.UserID, watch, search, limit, offset)
 	}
+	q := r.URL.Query()
+	rows, total, err := g.Identity().ListUsersPage(r.Context(), iam.UserListQuery{
+		PlatformAdmin: p.PlatformAdmin(), Self: p.UserID, TeamIDs: watch,
+		Search: q.Get("search"), Email: q.Get("user_email"), UserIDs: stringListCSV(q.Get("user_ids")),
+		Role: listRole(q.Get("role")), TeamID: q.Get("team"), SSOID: q.Get("sso_user_ids"),
+		OrganizationIDs: stringListCSV(q.Get("organization_ids")), SortBy: q.Get("sort_by"),
+		SortAsc: q.Get("sort_order") == "asc", Limit: limit, Offset: pageOffset(r, limit),
+	})
 	if err != nil {
 		g.WriteIAMError(w, r, err)
 		return
@@ -132,11 +142,11 @@ func UserList(g Gate, w http.ResponseWriter, r *http.Request) {
 		out = append(out, userPublic(&rows[i], roles[rows[i].ID]))
 	}
 	httpx.WriteJSON(w, 200, map[string]any{
-		"users":        out,
-		"total_count":  len(out),
-		"current_page": 1,
-		"total_pages":  1,
-		"size":         len(out),
+		"users": out,
+		"total": total, "total_count": total,
+		"page": page, "current_page": page,
+		"total_pages": (total + int64(limit) - 1) / int64(limit),
+		"page_size":   limit, "size": limit,
 	})
 }
 
@@ -761,14 +771,8 @@ func TeamListV2(g Gate, w http.ResponseWriter, r *http.Request) {
 		size = 500
 	}
 	total := len(out)
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(total, page, size)
 	pageRows := out[start:end]
 	if pageRows == nil {
 		pageRows = []map[string]any{}

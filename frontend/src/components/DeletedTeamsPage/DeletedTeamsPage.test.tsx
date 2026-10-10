@@ -107,3 +107,11 @@ it("should show skeleton rows while the initial load is pending", () => {
 
   expect(screen.getAllByTestId("skeleton-row").length).toBeGreaterThan(0);
 });
+
+/** 前置查询保留旧页且当前页未完成；验证导航和页大小暂时禁用，禁止按旧总数翻页；组件与 mock 自动清理。 */
+it("disables pagination while showing placeholder rows", () => {
+  mockUseDeletedTeams.mockReturnValue({ data: { teams: [mockDeletedTeam], total: 137 }, isLoading: false, isPlaceholderData: true } as unknown as ReturnType<typeof mockUseDeletedTeams>);
+  renderWithProviders(<DeletedTeamsPage />);
+  expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDisabled();
+});

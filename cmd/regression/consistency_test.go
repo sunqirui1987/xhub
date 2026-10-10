@@ -188,6 +188,32 @@ func TestCacheHitIsFreeAndLoggedAsOne(t *testing.T) {
 	if !nearlyEqual(user.Spend, firstCost) {
 		t.Fatalf("user spend %v, want only the miss at %v", user.Spend, firstCost)
 	}
+	// 非管理身份不得清理响应；管理员清理后相同请求应再次外发并按真实用量收费。
+	for _, token := range []string{"", tn.key} {
+		if denied := h.do(http.MethodPost, "/flushall", token, nil); denied.status < 400 {
+			t.Fatalf("非管理身份成功清理缓存: %s", denied.describe())
+		}
+	}
+	if third := h.ok(http.MethodPost, "/v1/chat/completions", tn.key, request); !isCacheHit(third) {
+		t.Fatalf("拒绝清理仍改变缓存: %s", third.describe())
+	}
+	flushed := h.ok(http.MethodPost, "/flushall", admin, nil)
+	if flushed.json()["message"] != "cache flushed" {
+		t.Fatalf("清理接口契约变化: %s", flushed.describe())
+	}
+	h.ok(http.MethodPost, "/flushall", admin, nil)
+	fresh := h.ok(http.MethodPost, "/v1/chat/completions", tn.key, request)
+	if isCacheHit(fresh) || len(h.upstreamCalls()) != 2 || !nearlyEqual(parseFloatOrZero(fresh.header("x-litellm-response-cost")), firstCost) {
+		t.Fatalf("清理后相同请求未恢复上游和计费: %s calls=%d", fresh.describe(), len(h.upstreamCalls()))
+	}
+	h.flushSpend()
+	rows = logsFor(h.spendLogs(t, admin), "regression-cache")
+	if len(rows) != 4 {
+		t.Fatalf("清理前后四次推理应留下四条日志，实际%d", len(rows))
+	}
+	if after, err := h.db.GetUser(t.Context(), tn.userID); err != nil || !nearlyEqual(after.Spend, 2*firstCost) {
+		t.Fatalf("清理后累计费用应为两次未命中: user=%+v err=%v", after, err)
+	}
 }
 
 // TestFailedCallIsLoggedButNotCharged 证明上游失败会被记成一条不带钱的观测记录。

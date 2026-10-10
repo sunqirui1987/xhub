@@ -173,6 +173,22 @@ describe("RequestLogsPanel", () => {
     expect(screen.getByRole("heading", { name: "Error Logs" })).toBeInTheDocument();
   });
 
+  /** 前置页码接口返回不足一页的行但总数为 40；验证不能把短页当末页且 Next 无游标可翻页；测试框架清理缓存和组件。 */
+  it("uses the offset server total and advances without a session cursor", async () => {
+    vi.mocked(uiSpendLogsCall).mockImplementation(async ({ page }) => ({
+      data: [logEntry({ request_id: "offset-" + page })], total: 40,
+      page: page ?? 1, page_size: 25, total_pages: 2,
+    }));
+    renderPanel();
+    await waitFor(() => expect(row("offset-1")).not.toBeNull());
+    expect(screen.getByTestId("pagination-range")).toHaveTextContent("Showing 1-25 of 40");
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(row("offset-2")).not.toBeNull());
+    expect(lastCall()?.page).toBe(2);
+    expect(lastCall()?.params?.session_cursor).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
+  });
+
   describe("server-grouped session pagination (#38060)", () => {
     it("requests session-grouped pages of 25 rows by default without a cursor", async () => {
       renderPanel();

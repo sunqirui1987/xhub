@@ -6051,6 +6051,7 @@ export const zhPhrases: Record<string, string> = {
   "Unable to load MCP servers": "Unable 到负载 MCP 服务器",
   "Unable to load category content": "Unable 到负载类别内容",
   "Unable to load tools": "Unable 到负载工具",
+  "Unable to load usage data": "无法加载用量数据",
   "Unable to load toolsets": "Unable 到负载 toolsets",
   "Unblock Key": "Unblock 密钥",
   "Uncached input tokens": "Uncached 输入令牌",

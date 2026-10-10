@@ -31,6 +31,7 @@ interface PerUserUsageProps {
   formatAbbreviatedNumber: (value: number, decimalPlaces?: number) => string;
 }
 
+/** 参数提供登录凭据、标签及数字格式，返回用户用量表和图表；用量页调用，只读请求，失败显示错误，过期响应不覆盖当前页。 */
 const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, formatAbbreviatedNumber }) => {
   // Maximum number of user agent categories to show in charts to prevent color palette overflow
   const MAX_USER_AGENTS = 8;
@@ -43,6 +44,10 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
   });
 
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
+  const [loadedRequest, setLoadedRequest] = useState<string>("");
+  const [loadError, setLoadError] = useState(false);
+  const requestKey = JSON.stringify([accessToken, selectedTags, pagination]);
+  const isLoading = !!accessToken && loadedRequest !== requestKey;
   const [pagedTags, setPagedTags] = useState(selectedTags);
 
   if (pagedTags !== selectedTags) {
@@ -54,6 +59,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
     if (!accessToken) return;
 
     let stale = false;
+    setLoadError(false);
     perUserAnalyticsCall(
       accessToken,
       pagination.pageIndex + 1,
@@ -64,12 +70,13 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
         if (stale) return;
         setPerUserData(response);
       })
-      .catch((error) => console.error("Failed to fetch per-user data:", error));
+      .catch(() => { if (!stale) setLoadError(true); })
+      .finally(() => { if (!stale) setLoadedRequest(requestKey); });
 
     return () => {
       stale = true;
     };
-  }, [accessToken, pagedTags, pagination]);
+  }, [accessToken, pagedTags, pagination, requestKey]);
 
   const handlePaginationChange = useCallback<OnChangeFn<PaginationState>>((updaterOrValue) => {
     setPagination((prev) => {
@@ -137,6 +144,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
 
         {/* Tab 1: Existing User Details Table */}
         <TabsContent value="details" keepMounted>
+          {loadError && <p role="alert">{t("Unable to load usage data")}</p>}
           <DataTable
             columns={columns}
             data={perUserData.results}
@@ -145,6 +153,7 @@ const PerUserUsage: React.FC<PerUserUsageProps> = ({ accessToken, selectedTags, 
             pagination={pagination}
             onPaginationChange={handlePaginationChange}
             rowCount={perUserData.total_count}
+            isLoading={isLoading}
             noDataMessage="No per-user usage data"
             size="compact"
           />

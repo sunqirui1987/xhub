@@ -3,6 +3,7 @@ package usage
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"io"
 	"net/http"
 	"strconv"
@@ -58,18 +59,11 @@ func queryInt(r *http.Request, key string, fallback int) int {
 
 // pageOffset turns a 1-based page into a row offset for a page size. A missing or nonsensical page returns the first row.
 // 参数 r（*http.Request）：入站 HTTP 请求；limit（int）：最多返回的条数。
-// 返回 int（int）：(page-1)*limit 的行偏移。页码缺失、不是数字或小于 1 时为 0。limit 小于 1 时也是 0。
+// 返回：非负行偏移；页码缺失/非法或 limit 非正返回零，乘法溢出返回最大整数以表示越界。
 // 调用：gateway/usage/activity.go。
 // 测试：无直接单测
 func pageOffset(r *http.Request, limit int) int {
-	if limit < 1 {
-		return 0
-	}
-	off := (queryInt(r, "page", 1) - 1) * limit
-	if off < 0 {
-		return 0
-	}
-	return off
+	return pagination.Offset(queryInt(r, "page", 1), limit)
 }
 
 // asFloat converts a JSON number to float64. An int is accepted. Any other type returns 0.

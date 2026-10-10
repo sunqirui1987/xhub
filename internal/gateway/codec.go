@@ -7,6 +7,7 @@ package gateway
 import (
 	"encoding/json"
 	"github.com/sunqirui1987/xhub/internal/logx"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"io"
 	"net/http"
 	"sync"
@@ -130,13 +131,7 @@ func sliceMaps(list []map[string]any, page, size int) []map[string]any {
 	if page < 1 {
 		page = 1
 	}
-	start := (page - 1) * size
-	if start >= len(list) {
-		return []map[string]any{}
-	}
-	end := start + size
-	if end > len(list) {
-		end = len(list)
-	}
+	// 统一边界先比较页码，避免超大页码回绕为负数导致切片崩溃。
+	start, end := pagination.Bounds(len(list), page, size)
 	return list[start:end]
 }

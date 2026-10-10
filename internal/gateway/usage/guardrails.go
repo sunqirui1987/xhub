@@ -2,6 +2,7 @@ package usage
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"net/http"
 	"sort"
 	"strings"
@@ -113,14 +114,8 @@ func GuardrailLogs(s Host, w http.ResponseWriter, r *http.Request) {
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 50
 	}
-	start := (page - 1) * pageSize
-	if start > len(filtered) {
-		start = len(filtered)
-	}
-	end := start + pageSize
-	if end > len(filtered) {
-		end = len(filtered)
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(len(filtered), page, pageSize)
 	logs := make([]any, 0, end-start)
 	for _, finding := range filtered[start:end] {
 		logs = append(logs, map[string]any{

@@ -5,6 +5,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,14 +54,8 @@ func (s *Server) publicModelHub(w http.ResponseWriter, r *http.Request) {
 			pages = 1
 		}
 	}
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(total, page, size)
 	slice := rows[start:end]
 	if slice == nil {
 		slice = []publicModelRow{}
@@ -196,14 +191,8 @@ func (s *Server) publicModelHubFacet(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(values)
 	page, size := pageQuery(r, 100, 100)
 	total := len(values)
-	start := (page - 1) * size
-	if start > total {
-		start = total
-	}
-	end := start + size
-	if end > total {
-		end = total
-	}
+	// 超大页码返回空页，避免整数溢出造成切片崩溃。
+	start, end := pagination.Bounds(total, page, size)
 	slice := values[start:end]
 	if slice == nil {
 		slice = []string{}

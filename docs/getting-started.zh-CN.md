@@ -19,6 +19,10 @@ XHub 包含两个服务：Go API 网关默认监听 `4000`，Next.js 控制台�
 
 ## Docker Compose 部署
 
+[![Docker 部署示意：控制台 3000、网关 4000、PostgreSQL 与 Redis](assets/guide-docker.zh-CN.svg)](assets/guide-docker.zh-CN.svg)
+
+*图 1：部署入口与各服务职责。浏览器打开控制台，应用直接请求网关；连接关系以正文配置为准。*
+
 克隆仓库，在本机构建服务，再启动：
 
 ```bash
@@ -92,10 +96,18 @@ make ui
 
 新安装没有已配置的供应商或部署。
 
+[![首次配置流程：接入模型、配置工作空间、发放虚拟密钥、调用与核对](assets/guide-setup.zh-CN.svg)](assets/guide-setup.zh-CN.svg)
+
+*图 2：第一次配置的推荐顺序。完成团队成员关系和密钥授权后再测试调用。*
+
 1. 打开“模型与端点”，选择供应商类型并填写对应连接与认证字段。
 2. 手动或从供应商目录添加部署，设置公开模型名、上游模型及端点类型。
 3. 创建组织和团队，配置团队模型范围并添加成员。个人推理也需要团队成员关系；项目按需创建。
 4. 创建个人或服务虚拟密钥，在 Playground 测试模型，再从应用调用。
+
+[![模型与端点控制台：供应商标签、添加模型按钮和部署列表](assets/console-deployments.png)](assets/console-deployments.png)
+
+*图 3：模型与端点页面。先在 Providers 标签配置凭证，再通过 Add Model 添加部署，核对公开模型名、上游模型及端点能力。点击截图可打开原图；示例中的模型和价格不代表新安装的默认配置。*
 
 完整操作与权限说明见[客户使用与管理手册](user-guide.zh-CN.md)。通过 `pip install openai` 安装客户端，再使用虚拟密钥和公开模型名：
 

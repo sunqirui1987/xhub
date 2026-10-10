@@ -11,7 +11,7 @@ import (
 // acceptanceDaily 是用户 daily 聚合接口中与计费原子性有关的总计。
 // 它只保存可由调用方观察到的金额、真实响应 token 和请求数，便于比较成功调用的增量以及拒绝前后的不变性。
 type acceptanceDaily struct {
-	spend, prompt, completion, total, requests float64
+	spend, prompt, completion, total, requests, success, failed float64
 }
 
 // acceptanceSnapshot 保存一次限制请求之前的持久化可观察状态。
@@ -44,6 +44,9 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 	setAcceptanceBudgets(t, h, admin, c, room)
 
 	t.Run("真实响应用量贯穿事件日报和五级金额", func(t *testing.T) {
+		previousT := h.t
+		h.t = t
+		t.Cleanup(func() { h.t = previousT })
 		beforeMoney := h.moneyOf(t, c)
 		beforeDaily := acceptanceDailyOf(t, h, admin, c.userID)
 		beforeEvents := acceptanceEventCount(t, h, admin, modelA)
@@ -86,11 +89,16 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 		}
 		afterDaily := acceptanceDailyOf(t, h, admin, c.userID)
 		assertAcceptanceDailyDelta(t, beforeDaily, afterDaily, acceptanceDaily{
-			spend: cost, prompt: 37, completion: 13, total: 50, requests: 1,
+			spend: cost, prompt: 37, completion: 13, total: 50, requests: 1, success: 1,
 		})
 	})
 
 	t.Run("五级预算共同到顶时拒绝原子且放宽后恢复", func(t *testing.T) {
+		previousT := h.t
+		h.t = t
+		t.Cleanup(func() { h.t = previousT })
+		// 即使断言终止子测试也恢复共享归属链预算，让后续限流场景独立执行。
+		t.Cleanup(func() { setAcceptanceBudgets(t, h, admin, c, room) })
 		spent := h.moneyOf(t, c)
 		setAcceptanceBudgetsAtSpend(t, h, admin, c, spent)
 		assertAcceptanceRejected(t, h, admin, c, modelA, "budget-refused", http.StatusTooManyRequests, "User budget has been exceeded")
@@ -99,6 +107,9 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 	})
 
 	t.Run("RPM拒绝不外发不计费且提高窗口后恢复", func(t *testing.T) {
+		previousT := h.t
+		h.t = t
+		t.Cleanup(func() { h.t = previousT })
 		rpm := acceptanceKey(t, h, c, "acceptance-rpm")
 		h.ok(http.MethodPost, "/key/update", admin, map[string]any{"key": rpm.key, "rpm_limit": 1})
 		h.assertBilled(t, rpm, admin, modelA, "rpm-first", []string{modelA})
@@ -108,6 +119,9 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 	})
 
 	t.Run("TPM按请求估算拒绝但账单仍取真实响应且放宽后恢复", func(t *testing.T) {
+		previousT := h.t
+		h.t = t
+		t.Cleanup(func() { h.t = previousT })
 		tpm := acceptanceKey(t, h, c, "acceptance-tpm")
 		h.ok(http.MethodPost, "/key/update", admin, map[string]any{"key": tpm.key, "tpm_limit": 40})
 		h.assertBilled(t, tpm, admin, modelA, "tpm-first", []string{modelA})
@@ -117,6 +131,9 @@ func TestAcceptanceLimitsAndAccountingContract(t *testing.T) {
 	})
 
 	t.Run("模型白名单拒绝原子且原密钥放宽后恢复", func(t *testing.T) {
+		previousT := h.t
+		h.t = t
+		t.Cleanup(func() { h.t = previousT })
 		h.ok(http.MethodPost, "/team/update", admin, map[string]any{
 			"team_id": c.teamID, "models": []string{modelA, modelB},
 		})
@@ -187,11 +204,13 @@ func acceptanceDailyOf(t *testing.T, h *harness, admin, userID string) acceptanc
 		completion: firstFloat(meta, "total_completion_tokens"),
 		total:      firstFloat(meta, "total_tokens"),
 		requests:   firstFloat(meta, "total_api_requests"),
+		success:    firstFloat(meta, "total_successful_requests"),
+		failed:     firstFloat(meta, "total_failed_requests"),
 	}
 }
 
 // acceptanceEventCount 读取控制台事件接口并统计指定模型的全部事件行。
-// 参数 model 将共享 schema 中的其他模型排除；返回事件数，调用场景是证明限制拒绝没有留下零价或失败事件，读取前会 flush Redis 热数据但不会新建账单。
+// 参数 model 将共享 schema 中的其他模型排除；返回事件数，验证拒绝留下零费用失败事件，读取前 flush 热数据。
 func acceptanceEventCount(t *testing.T, h *harness, admin, model string) int {
 	t.Helper()
 	total := 0
@@ -216,7 +235,8 @@ func acceptanceState(t *testing.T, h *harness, admin string, c chained, model st
 }
 
 // assertAcceptanceRejected 验证一次限制拒绝的完整原子性契约。
-// 参数给出密钥归属、请求模型、唯一内容、期望状态码和错误片段；函数断言请求未到本地上游，五级金额、事件数及 daily 汇总完全不变。RPM/TPM 拒绝仍会增加 Redis 窗口计数，这是限流器的预期副作用。
+// 参数给出归属、模型、唯一内容、状态码及错误片段；拒绝不外发、不计费，记录一条零 token 失败事件。
+// daily 请求与失败各增加一，成功、token 和金额不变；RPM/TPM 拒绝允许递增速率窗口。
 func assertAcceptanceRejected(t *testing.T, h *harness, admin string, c chained, model, content string, status int, messagePart string) {
 	t.Helper()
 	before := acceptanceState(t, h, admin, c, model)
@@ -231,19 +251,24 @@ func assertAcceptanceRejected(t *testing.T, h *harness, admin string, c chained,
 	if !after.money.same(before.money) {
 		t.Fatalf("拒绝后五级金额变化: before=%+v after=%+v", before.money, after.money)
 	}
-	if after.events != before.events {
+	if after.events != before.events+1 {
 		t.Fatalf("拒绝后事件数从 %d 变为 %d", before.events, after.events)
 	}
-	if !after.daily.same(before.daily) {
-		t.Fatalf("拒绝后 daily 变化: before=%+v after=%+v", before.daily, after.daily)
+	row := findLogByRequestID(h.spendLogs(t, admin), r.header("x-litellm-call-id"))
+	if row == nil || stringField(row, "status") != "error" {
+		t.Fatalf("拒绝未记录可关联失败事件: %v", row)
 	}
+	for _, field := range []string{"spend", "prompt_tokens", "completion_tokens"} {
+		assertAcceptanceNumber(t, row, field, 0)
+	}
+	assertAcceptanceDailyDelta(t, before.daily, after.daily, acceptanceDaily{requests: 1, failed: 1})
 }
 
 // same 判断两份 daily 总计在金额浮点误差范围内且 token、请求数完全一致。
 // 参数 other 是比较对象；返回 true 表示拒绝没有改变报表，函数无副作用。
 func (d acceptanceDaily) same(other acceptanceDaily) bool {
 	return nearlyEqual(d.spend, other.spend) && d.prompt == other.prompt &&
-		d.completion == other.completion && d.total == other.total && d.requests == other.requests
+		d.completion == other.completion && d.total == other.total && d.requests == other.requests && d.success == other.success && d.failed == other.failed
 }
 
 // assertAcceptanceDailyDelta 断言一次成功调用给 daily 带来的精确增量。
@@ -256,6 +281,8 @@ func assertAcceptanceDailyDelta(t *testing.T, before, after, want acceptanceDail
 		completion: after.completion - before.completion,
 		total:      after.total - before.total,
 		requests:   after.requests - before.requests,
+		success:    after.success - before.success,
+		failed:     after.failed - before.failed,
 	}
 	if !got.same(want) {
 		t.Fatalf("daily 增量为 %+v，期望 %+v", got, want)

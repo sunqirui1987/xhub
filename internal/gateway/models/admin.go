@@ -116,11 +116,14 @@ func New(s Host, w http.ResponseWriter, r *http.Request) {
 		info["created_at"] = time.Now().UTC().Format(time.RFC3339)
 	}
 	entry := config.ModelEntry{ModelName: name, LiteLLMParams: params, ModelInfo: info}
-	if err := s.RecordStore().UpsertProxyModel(proxyModel(entry)); err != nil {
+	// 同一事务保存部署和有效分配，提交后才发布目录，避免失败时内存与数据库分叉。
+	directory := append(append([]config.ModelEntry(nil), (*s.ModelTable())...), entry)
+	record := proxyModel(entry)
+	if err := s.RecordStore().SaveModelDirectory(&record, "", directory); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
-	*s.ModelTable() = append(*s.ModelTable(), entry)
+	*s.ModelTable() = directory
 	httpx.WriteJSON(w, 200, Public(entry))
 }
 
@@ -215,11 +218,15 @@ func Update(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 400, "invalid_request", err.Error())
 		return
 	}
-	if err := s.RecordStore().UpsertProxyModel(proxyModel(m)); err != nil {
+	// 改名会改变两个公开模型的部署集合，清理默认与模板分配后再更新内存。
+	directory := append([]config.ModelEntry(nil), (*s.ModelTable())...)
+	directory[i] = m
+	record := proxyModel(m)
+	if err := s.RecordStore().SaveModelDirectory(&record, "", directory); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
-	(*s.ModelTable())[i] = m
+	*s.ModelTable() = directory
 	httpx.WriteJSON(w, 200, Public(m))
 }
 
@@ -257,11 +264,14 @@ func Delete(s Host, w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, 409, "fallback_conflict", err.Error())
 		return
 	}
-	if err := s.RecordStore().DeleteProxyModel(str(m.ModelInfo["id"])); err != nil {
+	// 复制目录，事务同时移除部署及悬空权重；回滚时保留原目录和原分配。
+	directory := append([]config.ModelEntry(nil), (*s.ModelTable())[:i]...)
+	directory = append(directory, (*s.ModelTable())[i+1:]...)
+	if err := s.RecordStore().SaveModelDirectory(nil, str(m.ModelInfo["id"]), directory); err != nil {
 		httpx.WriteError(w, 500, "internal", err.Error())
 		return
 	}
-	*s.ModelTable() = append((*s.ModelTable())[:i], (*s.ModelTable())[i+1:]...)
+	*s.ModelTable() = directory
 	out := Public(m)
 	out["id"] = id
 	out["deleted"] = true

@@ -99,7 +99,7 @@ export const getFilterValue = (columnFilters: ColumnFiltersState, columnId: stri
   return trimmed === "" ? undefined : trimmed;
 };
 
-/** 根据凭据、日期和分页查询日志；errorsOnly 强制失败状态并关闭会话合并，普通视图只允许非失败状态；缓存隔离两种视图，接口失败由查询状态返回调用面板。 */
+/** 参数为凭据、筛选、分页和排序，返回查询状态、结果、团队及响应声明的游标能力；日志面板调用，查询只读。根据凭据、日期和分页查询日志；errorsOnly 强制失败状态并关闭会话合并，普通视图只允许非失败状态；缓存隔离两种视图，接口失败由查询状态返回调用面板。 */
 export function useLogFilterLogic({
   accessToken,
   token,
@@ -137,8 +137,8 @@ export function useLogFilterLogic({
   const activeSort = sorting[0] ?? DEFAULT_LOGS_SORTING[0];
   const sortBy: LogsSortField = isSortField(activeSort.id) ? activeSort.id : "startTime";
   const sortOrder: "asc" | "desc" = activeSort.desc ? "desc" : "asc";
-  const usesSessionCursor = !errorsOnly && sortBy === "startTime";
-  const sessionCursor = usesSessionCursor ? sessionCursors[pagination.pageIndex] : undefined;
+  const canUseSessionCursor = !errorsOnly && sortBy === "startTime";
+  const sessionCursor = canUseSessionCursor ? sessionCursors[pagination.pageIndex] : undefined;
 
   const logsQueryOptions: UseQueryOptions<PaginatedResponse> = {
     queryKey: [
@@ -242,6 +242,7 @@ export function useLogFilterLogic({
     logsQuery,
     filteredLogs,
     allTeams,
-    usesSessionCursor,
+    // 游标能力由响应显式声明，页码接口不能按排序方式猜测。
+    usesSessionCursor: canUseSessionCursor && filteredLogs.has_more !== undefined,
   };
 }

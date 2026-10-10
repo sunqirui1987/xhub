@@ -14,6 +14,7 @@ package usage
 
 import (
 	"encoding/json"
+	"github.com/sunqirui1987/xhub/internal/pagination"
 	"net/http"
 	"sort"
 	"strings"
@@ -62,25 +63,46 @@ func LogsV2(s Host, w http.ResponseWriter, r *http.Request) {
 	}
 	q := logQuery(r, sc)
 	q.Limit = pageSize
-	q.Offset = (page - 1) * pageSize
+	q.Offset = pagination.Offset(page, pageSize)
+
 	db := s.Identity()
 	if db == nil {
 		httpx.WriteJSON(w, 200, logPageResponse(nil, 0, page, pageSize))
 		return
 	}
-	events, err := db.ListUsage(r.Context(), q)
-	if err != nil {
-		s.WriteIAMError(w, r, err)
-		return
-	}
-	total, err := db.CountUsage(r.Context(), q)
-	if err != nil {
-		s.WriteIAMError(w, r, err)
-		return
-	}
-	rows := eventRows(events)
+	var rows []map[string]any
+	var total int64
 	if r.URL.Query().Get("group_by_session") == "true" {
-		rows = collapseSessions(rows)
+		// SQL 在合并会话之后分页，保证行数、总数和会话汇总采用同一粒度。
+		groups, count, readErr := db.ListUsageSessions(r.Context(), q)
+		if readErr != nil {
+			s.WriteIAMError(w, r, readErr)
+			return
+		}
+		total = count
+		rows = make([]map[string]any, 0, len(groups))
+		for _, group := range groups {
+			row := eventRows([]iam.UsageEvent{group.UsageEvent})[0]
+			if group.SessionID != "" && (group.KeyID != "" || group.UserID != "") {
+				row["session_total_count"] = group.SessionCount
+				row["session_llm_count"] = group.SessionCount
+				row["session_total_spend"] = group.SessionSpend
+				row["session_total_tokens"] = group.SessionTokens
+			}
+			rows = append(rows, row)
+		}
+	} else {
+		events, readErr := db.ListUsage(r.Context(), q)
+		if readErr != nil {
+			s.WriteIAMError(w, r, readErr)
+			return
+		}
+		total, err = db.CountUsage(r.Context(), q)
+		if err != nil {
+			s.WriteIAMError(w, r, err)
+			return
+		}
+		rows = eventRows(events)
 	}
 	httpx.WriteJSON(w, 200, logPageResponse(rows, total, page, pageSize))
 }
@@ -171,7 +193,7 @@ func collapseSessions(rows []map[string]any) []map[string]any {
 // 参数 r（*http.Request）：入站 HTTP 请求；sc（*authz.Scope）：日志查询使用的权限范围。
 // 返回 UsageQuery（iam.UsageQuery）：在权限范围之内、再按请求筛选收窄的日志查询。筛选不能把范围扩大。
 // 调用：仅在 reports.go 内使用
-// 测试：无直接单测
+// 测试：reports_test.go；排序字段由 iam 白名单处理，未知方向使用降序。
 func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	q := iam.UsageQuery{
@@ -185,6 +207,8 @@ func logQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 		SessionID: raw.Get("session_id"),
 		RequestID: raw.Get("request_id"),
 		Search:    raw.Get("search"),
+		SortBy:    raw.Get("sort_by"),
+		SortAsc:   raw.Get("sort_order") == "asc",
 	}
 	switch raw.Get("status_filter") {
 	case "success", "completed", "executing", "polling", "non_error":
@@ -487,8 +511,8 @@ func intOrZero(v *int) int {
 	return *v
 }
 
-// logPageResponse wraps rows in the paging envelope. total_pages is at least 1 for an empty result, matching the audit table the console renders beside this.
-// 参数 rows（[]map[string]any）：从用量或目录读出的map[string]any；total（int64）：这一次的总费用；page（int）：页码，从 1 开始；pageSize（int）：日志页响应使用的整数。零表示没有这项或尚未计数。
+// logPageResponse 返回分页信封；total 表示当前行粒度的总行数，空结果的 total_pages 为 0。
+// 参数 rows 为当前页，total 为筛选后的总行数，page 从 1 开始，pageSize 必须为正数。
 // 返回 map[string]any（map[string]any）：给响应或报表用的 JSON 对象。键是前端已经约定的字段，缺键表示这项没有数据。
 // 调用：仅在 reports.go 内使用
 // 测试：无直接单测

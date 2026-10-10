@@ -535,6 +535,7 @@ function useDataTableInstance<TData extends RowData, TValue>(
   return useReactTable(tableOptions);
 }
 
+/** 根据列、数据及受控状态渲染表格；返回表格与分页，管理页面调用。页大小变化回首，服务器总数校正在加载完成后运行；回调可能触发请求。 */
 export function DataTable<TData extends RowData, TValue>(props: DataTableProps<TData, TValue>) {
   const resolved: DataTableResolvedProps<TData, TValue> = props;
 
@@ -582,7 +583,7 @@ export function DataTable<TData extends RowData, TValue>(props: DataTableProps<T
         pageSize={current.pageSize}
         rowCount={total}
         onPageChange={(next) => table.setPageIndex(next)}
-        onPageSizeChange={(next) => table.setPageSize(next)}
+        onPageSizeChange={(next) => table.setPagination({ pageIndex: 0, pageSize: next })}
         pageSizeOptions={pageSizeOptions}
         isLoading={isLoading}
       />

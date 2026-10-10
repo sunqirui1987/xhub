@@ -132,3 +132,11 @@ it("should request the next page from the hook when the pagination next button i
   await user.click(screen.getByTestId("pagination-next"));
   expect(mockUseDeletedKeys).toHaveBeenLastCalledWith(2, 50);
 });
+
+/** 前置查询保留旧页且当前页未完成；验证导航和页大小暂时禁用，禁止按旧总数翻页；组件与 mock 自动清理。 */
+it("disables pagination while showing placeholder rows", () => {
+  mockUseDeletedKeys.mockReturnValue({ data: { keys: [mockDeletedKey], total_count: 137 }, isLoading: false, isPlaceholderData: true } as unknown as ReturnType<typeof mockUseDeletedKeys>);
+  renderWithProviders(<DeletedKeysPage />);
+  expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDisabled();
+});

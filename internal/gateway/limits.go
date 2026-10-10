@@ -127,7 +127,10 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 		// key does not run for it. The console's playground is a session caller,
 		// and it would otherwise always route by the platform default no matter
 		// what its team selected.
-		s.resolveSessionRouteTemplate(ctx, p)
+		if err := s.resolveSessionRouteTemplate(ctx, p); err != nil {
+			httpx.WriteTypedError(w, path, 503, "unavailable", "template binding unavailable")
+			return false
+		}
 	}
 	if p.Key != nil {
 		if err := s.keyBudgetOK(ctx, p); err != nil {
@@ -142,46 +145,66 @@ func (s *Server) enforceIdentityLimits(w http.ResponseWriter, path string, p *au
 	return p.Key == nil || s.enforceRateLimits(w, path, p, est)
 }
 
-// resolveSessionRouteTemplate records the router template a console session runs
-// under, on the same principal fields the key path fills.
-//
-// A session has memberships rather than one team. The rule for choosing is the
-// one the usage row already uses: a caller in exactly one team is filed there,
-// and a caller in several is left alone rather than guessed at. Applying a
-// template from an arbitrarily picked team would route one person's requests by
-// another team's settings, which is worse than falling back to the platform
-// default - the fallback is at least a setting somebody chose deliberately.
-//
-// The team row is read here rather than reusing the memberships list because the
-// memberships carry the organization but not the team's template column.
-// 参数 ctx（context.Context）：上下文，取消时停止；p（*auth.Principal）：已经解析的会话调用方。
-// 返回：无。写进 Principal 的 OrgID、RouteTemplateID 和 RouteTemplateSource。
-// 调用：enforceIdentityLimits。
-// 测试：route_settings_test.go
-func (s *Server) resolveSessionRouteTemplate(ctx context.Context, p *auth.Principal) {
-	memberships, err := s.IAM.MemberTeams(ctx, p.UserID)
-	if err != nil || len(memberships) != 1 {
+// resolveSessionRouteTemplate 为控制台推理解析会话的唯一团队及继承模板。
+// 参数 ctx 为读取上下文、p 为会话主体；返回身份链读取错误，成功补齐主体归属。
+// 调用：enforceIdentityLimits；零或多团队不猜测归属，不消耗速率窗口。
+// 存储失败必须让调用方停止推理，防止错误地使用另一套路由规则。
+func (s *Server) resolveSessionRouteTemplate(ctx context.Context, p *auth.Principal) error {
+	return s.resolvePreviewIdentity(ctx, p)
+}
+
+// selectRouteTemplate 选择最窄的非空模板；参数 p 为主体、id 为范围选择、source 为来源。
+// 返回无；预算链和只读预览共用，空白继续继承，已有选择不覆盖，无外部副作用。
+func selectRouteTemplate(p *auth.Principal, id *string, source string) {
+	if p.RouteTemplateID != "" || id == nil {
 		return
 	}
-	team, err := s.IAM.GetTeam(ctx, memberships[0].TeamID)
-	if err != nil || team == nil {
-		return
+	if value := strings.TrimSpace(*id); value != "" {
+		p.RouteTemplateID, p.RouteTemplateSource = value, source
 	}
-	p.TeamID = team.ID
+}
+
+// resolvePreviewIdentity 只读补齐预览主体的团队、组织及继承模板，与推理共用模板选择规则。
+// 参数 ctx 为读取上下文、p 为鉴权主体；返回身份链读取错误，零或多团队会话使用默认。
+// 调用：路由预览；不检查预算、不消耗速率窗口，个人密钥不继承用户所在团队。
+func (s *Server) resolvePreviewIdentity(ctx context.Context, p *auth.Principal) error {
+	if s.IAM == nil {
+		return errors.New("identity store unavailable")
+	}
+	p.RouteTemplateID, p.RouteTemplateSource, p.OrgID = "", "", ""
+	if p.Kind == authz.KindSession {
+		p.TeamID = ""
+		memberships, err := s.IAM.MemberTeams(ctx, p.UserID)
+		if err != nil {
+			return err
+		}
+		if len(memberships) != 1 {
+			return nil
+		}
+		p.TeamID = memberships[0].TeamID
+	} else if p.KeyID != "" {
+		k, err := s.IAM.GetKey(ctx, p.KeyID)
+		if err != nil {
+			return err
+		}
+		p.TeamID = k.TeamID
+		selectRouteTemplate(p, k.RouteTemplateID, "key")
+	}
+	if p.TeamID == "" {
+		return nil
+	}
+	team, err := s.IAM.GetTeam(ctx, p.TeamID)
+	if err != nil {
+		return err
+	}
 	p.OrgID = team.OrganizationID
-	if team.RouteTemplateID != nil {
-		p.RouteTemplateID = strings.TrimSpace(*team.RouteTemplateID)
-		p.RouteTemplateSource = "team"
+	selectRouteTemplate(p, team.RouteTemplateID, "team")
+	org, err := s.IAM.GetOrg(ctx, p.OrgID)
+	if err != nil {
+		return err
 	}
-	if p.RouteTemplateID != "" {
-		return
-	}
-	org, err := s.IAM.GetOrg(ctx, team.OrganizationID)
-	if err != nil || org == nil || org.RouteTemplateID == nil {
-		return
-	}
-	p.RouteTemplateID = strings.TrimSpace(*org.RouteTemplateID)
-	p.RouteTemplateSource = "organization"
+	selectRouteTemplate(p, org.RouteTemplateID, "organization")
+	return nil
 }
 
 // keyBudgetOK 沿密钥归属链检查实时额度；独立个人密钥检查用户与密钥额度，团队密钥继续检查项目、团队和组织。
@@ -205,10 +228,8 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	}
 	// The key is the narrowest scope, so its selection is tried first and the
 	// levels below only fill in when it names none.
-	if k.RouteTemplateID != nil {
-		p.RouteTemplateID = strings.TrimSpace(*k.RouteTemplateID)
-		p.RouteTemplateSource = "key"
-	}
+	p.RouteTemplateID, p.RouteTemplateSource = "", ""
+	selectRouteTemplate(p, k.RouteTemplateID, "key")
 	if k.UserID != nil {
 		owner, err := s.IAM.GetUser(ctx, *k.UserID)
 		if err != nil {
@@ -249,10 +270,7 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 	p.OrgID = team.OrganizationID
 	// The team is the next scope up. A key that named no template leaves the
 	// field empty, so this only takes effect when the key named none.
-	if p.RouteTemplateID == "" && team.RouteTemplateID != nil {
-		p.RouteTemplateID = strings.TrimSpace(*team.RouteTemplateID)
-		p.RouteTemplateSource = "team"
-	}
+	selectRouteTemplate(p, team.RouteTemplateID, "team")
 	org, err := s.IAM.GetOrg(ctx, team.OrganizationID)
 	if err != nil {
 		return errKeyGone
@@ -261,10 +279,7 @@ func (s *Server) keyBudgetOK(ctx context.Context, p *auth.Principal) error {
 		return errBudget{scope: "Organization"}
 	}
 	// And the organization is the widest scope in the chain.
-	if p.RouteTemplateID == "" && org.RouteTemplateID != nil {
-		p.RouteTemplateID = strings.TrimSpace(*org.RouteTemplateID)
-		p.RouteTemplateSource = "organization"
-	}
+	selectRouteTemplate(p, org.RouteTemplateID, "organization")
 	return nil
 }
 

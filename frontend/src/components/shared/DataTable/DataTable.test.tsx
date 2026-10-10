@@ -241,6 +241,19 @@ describe("DataTable layout", () => {
 describe("DataTable pagination", () => {
   const fivePeople: Person[] = Array.from({ length: 5 }, (_, i) => person(String(i), `P${i}`));
 
+  /** 前置客户端第三页和两种页大小；验证换大小回到第一页而非保留旧页行偏移；组件自动卸载。 */
+  it("returns to the first page when changing page size", async () => {
+    const user = userEvent.setup();
+    render(<DataTable data={fivePeople} columns={nameCellColumns} paginationMode="client" pageSizeOptions={[1, 2]} />);
+    await user.click(screen.getByRole("button", { name: "Go to next page" }));
+    await user.click(screen.getByRole("button", { name: "Go to next page" }));
+    expect(names()).toEqual(["P2"]);
+    await user.click(screen.getByRole("combobox", { name: "Rows per page" }));
+    await user.click(screen.getByRole("option", { name: "2", exact: true }));
+    expect(names()).toEqual(["P0", "P1"]);
+    expect(screen.getByTestId("pagination-page")).toHaveTextContent("Page 1 of 3");
+  });
+
   it("client mode slices rows and advances pages", async () => {
     const user = userEvent.setup();
     render(<DataTable data={fivePeople} columns={nameCellColumns} paginationMode="client" pageSizeOptions={[2]} />);

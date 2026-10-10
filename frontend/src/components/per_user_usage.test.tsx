@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import PerUserUsage from "./per_user_usage";
 import * as networking from "./networking";
+import { tDefault } from "@/i18n/translate";
 
 vi.mock("./networking", () => ({
   perUserAnalyticsCall: vi.fn(),
@@ -93,6 +94,14 @@ describe("PerUserUsage", () => {
 
     // And the details panel survives the switch rather than unmounting.
     expect(screen.getByText("u1")).toBeInTheDocument();
+  });
+
+  /** 前置加载失败，验证可观察错误及导航恢复到禁用空页状态；mock 和组件自动清理，不写后台。 */
+  it("shows an error when loading usage fails", async () => {
+    mockPerUserAnalyticsCall.mockRejectedValueOnce(new Error("offline"));
+    render(<PerUserUsage {...defaultProps} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(tDefault("Unable to load usage data"));
+    expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled();
   });
 
   describe("server pagination", () => {

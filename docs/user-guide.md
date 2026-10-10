@@ -8,6 +8,10 @@ This guide takes a workspace from its first model to everyday administration. In
 
 Complete these steps with a platform administrator account:
 
+[![Workspace setup: models, organization and team membership, virtual keys, calls and usage](assets/guide-setup.svg)](assets/guide-setup.svg)
+
+*Figure 1: Set up models and access before issuing keys, testing requests and inspecting usage. The steps below follow these four stages.*
+
 1. Sign in at `/login`. The local Compose setup starts with `admin@xhub.local` / `admin-pass-1234`. Change the password in your profile before exposing the instance.
 2. Open **Models + Endpoints** (`/models-and-endpoints`). Add a provider credential, then a model deployment. Check its public model name, upstream model ID, supported operation, API base, and price.
 3. Create an organization at `/organizations`, then a team at `/teams`. Set the team's model scope and budget. The creator becomes its first team administrator unless another administrator is supplied.
@@ -30,6 +34,10 @@ Platform administration and inference access are separate. A platform administra
 
 Several deployments can share a public model name. This gives routing a choice of upstreams without changing the application's model name.
 
+[![Models and Endpoints with Providers, Add Model and model deployment rows](assets/console-deployments.png)](assets/console-deployments.png)
+
+*Figure 2: Configure credentials in Providers, then return to All Models and use Add Model. Inspect the model, associated credential and price in the table. Click to open the full screenshot. This is an existing demonstration environment; its models and prices are examples. Labels can differ by console language and version.*
+
 
 ## 3. Assign the right administrators
 
@@ -49,6 +57,10 @@ The last team administrator cannot be removed or demoted. Assign a replacement b
 ## 4. Organize access and budgets
 
 Resources follow **organization → team → project**. Use teams for a shared access boundary and projects for applications within that boundary.
+
+[![Access example: a team allows chat-a and chat-b, while its project and key narrow access to chat-a](assets/guide-access.svg)](assets/guide-access.svg)
+
+*Figure 3: A scope diagram, rather than a console screenshot. Projects and keys inherit or narrow access; they cannot grant a model outside the team's scope.*
 
 - The team establishes the available model scope. An empty team model list means no restriction at that level.
 - An empty project or key model list inherits its parent scope. A nonempty list narrows it and cannot grant models outside that parent.
@@ -71,6 +83,12 @@ Give each application a recognizable key name. The create dialog keeps its optio
 Use XHub virtual keys in applications. Provider secrets connect XHub to upstreams; master credentials are for bootstrap/emergency administration; session tokens serve console sessions. Virtual keys do not grant console administration.
 
 ## 6. Make an application request
+
+Open `/models-and-endpoints/mine` (**My models**) to inspect models available to your account, then select **Use in Playground** on a card to test it. A configured deployment does not automatically grant access to every account; check team membership and model scope.
+
+[![My models with model filters, capabilities, prices and Use in Playground](assets/console-models.png)](assets/console-models.png)
+
+*Figure 4: Open the Playground from an available model card. The model, price and capability labels come from demonstration configuration and do not imply that every model supports them. Click to open the full screenshot.*
 
 Install the OpenAI Python client with `pip install openai`. Set your virtual key and public model name:
 
@@ -100,15 +118,19 @@ Replace the gateway URL for your deployment. A URL on port `3000` points to the 
 
 Manage templates at `/route-templates` with an account authorized for the target scope. Selection precedence is **key → team → organization → platform**. Clearing a selection restores inheritance. The selected template replaces the parent template as a whole; fields do not merge across scopes. Projects and accounts do not have a separate template assignment.
 
+[![Routing template resolution: key, team, organization, platform; stop at the first assignment](assets/guide-routing.svg)](assets/guide-routing.svg)
+
+*Figure 5: Check assignments from left to right. Clearing a key's selection restores the team or higher-level selection.*
+
 | Setting | Current behavior |
 | --- | --- |
-| `simple-shuffle` | Prefers the highest configured deployment weight; the name does not mean random shuffling |
-| `weighted-split` | Smooth weighted round-robin; zero weight excludes a deployment. Affinity and cooldown can change observed ratios. |
+| `simple-shuffle` / `random` | Uniform random selection, independent of deployment weights |
+| `traffic-split` | Relative weighted traffic allocation; zero weight excludes a deployment. Affinity and cooldown can change observed ratios. |
 | Cost selection | Compares input-token price, rather than estimating the full request bill |
-| `num_retries` | Total attempts per deployment, including the first; missing or below one means one attempt. The console/global configuration can supply a different default. |
+| Template `retry_policy.max_attempts` | Total attempts per deployment, including the first. All four reliability fields are required; counting differs from legacy `num_retries`. |
 | Timeout | Per upstream attempt; default 60 seconds, rather than a deadline for the entire request |
 
-Deployments of the same public model can fail over. Cross-public-model fallback is not implemented. Some advanced fields can be saved without having runtime behavior; consult the [routing reference](development/routing.md) before depending on them. Once a stream has emitted response bytes, XHub does not switch providers for that response.
+Deployments of the same public model can fail over. Configure cross-public-model or model-group fallback chains for general errors, context limits, and provider content-policy errors. Templates cannot expand model access or bypass budgets; local guardrail blocks do not trigger provider content-policy fallback. See the [routing reference](development/routing.md) for fields and inheritance semantics. Once a stream has emitted response bytes, XHub does not switch providers for that response.
 
 ## 8. Read usage, costs, and logs
 

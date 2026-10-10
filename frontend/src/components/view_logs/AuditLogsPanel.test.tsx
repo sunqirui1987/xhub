@@ -81,6 +81,20 @@ describe("AuditLogsPanel", () => {
     respondWith(0);
   });
 
+  /** 前置第一页响应，下一页请求延迟；验证旧页占位期间禁用导航和页大小，完成后恢复；测试客户端和组件自动清理。 */
+  it("blocks pagination until the requested audit page arrives", async () => {
+    respondWith(120);
+    renderPanel();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go to next page" })).toBeEnabled());
+    let complete!: (value: Awaited<ReturnType<typeof uiAuditLogsCall>>) => void;
+    vi.mocked(uiAuditLogsCall).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "Go to next page" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go to next page" })).toBeDisabled());
+    expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDisabled();
+    complete({ audit_logs: [], total: 120, page: 2, page_size: 50, total_pages: 3 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Go to next page" })).toBeEnabled());
+  });
+
   it("shows a load failure instead of silently presenting an empty audit trail", async () => {
     vi.mocked(uiAuditLogsCall).mockRejectedValue(new Error("Not Found"));
     renderPanel();

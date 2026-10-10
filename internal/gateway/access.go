@@ -19,7 +19,7 @@ import (
 // "proxy_admin" without consulting any account. Authentication is now
 // username-plus-password against the users table and nothing else.
 
-// flushCache clears the in-process response cache. It requires a management identity.
+// flushCache 在管理身份授权通过后清空当前进程的推理响应缓存；未授权请求不改变缓存。
 // 参数 w（http.ResponseWriter）：调用方的 HTTP 响应，状态码和正文写在这里；r（*http.Request）：入站 HTTP 请求，用来读路径、头和正文。
 // 调用：仅在 access.go 内使用
 // 测试：无直接单测
@@ -29,6 +29,7 @@ func (s *Server) flushCache(w http.ResponseWriter, r *http.Request) {
 		logx.Debug("access denied method=%s path=%s operation=cache_flush", r.Method, r.URL.Path)
 		return
 	}
+	s.Cache.Flush()
 	httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "message": "cache flushed"})
 }
 

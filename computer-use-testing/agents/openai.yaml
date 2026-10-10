@@ -1,0 +1,4 @@
+interface:
+  display_name: "Computer Use 自动测试"
+  short_description: "让 Codex 操作真实浏览器与桌面界面，自主验证用户流程并保存测试证据"
+  default_prompt: "使用 $computer-use-testing 操作当前项目的真实界面，验证指定用户流程，记录结果并清理本次测试数据。"

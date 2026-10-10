@@ -3,6 +3,7 @@ package iam
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,9 @@ type UsageQuery struct {
 	OrganizationIDs []string
 	Limit           int
 	Offset          int
+	// SortBy 和 SortAsc 控制日志排序；字段通过白名单映射，ID 始终打破同值排序。
+	SortBy  string
+	SortAsc bool
 }
 
 // scopedSession builds a session with the scope and the shared filters applied.
@@ -125,6 +129,80 @@ func (q UsageQuery) applyLists(s *xorm.Session) *xorm.Session {
 // for the whole window it will fold; a log page asks for far fewer.
 const maxUsageRead = 5000
 
+// logOrder 为日志列表构造稳定排序。参数来自 UsageQuery，返回白名单 SQL 排序片段；
+// ListUsage 和 ListUsageSessions 调用，未知字段回退时间排序，不拼接用户输入。
+func (q UsageQuery) logOrder() string {
+	column := map[string]string{"startTime": "ts", "spend": "cost", "total_tokens": "(prompt_tokens + completion_tokens)", "request_duration_ms": "duration_ms", "model": "model", "ttft_ms": "ttft_ms"}[q.SortBy]
+	if column == "" {
+		column = "ts"
+	}
+	direction := " DESC"
+	if q.SortAsc {
+		direction = " ASC"
+	}
+	return column + direction + ", id" + direction
+}
+
+// UsageSession 是分页后的会话代表请求与完整筛选范围内的统计，仅用于读取，不创建数据库表。
+type UsageSession struct {
+	UsageEvent    `xorm:"extends"`
+	SessionCount  int64   `xorm:"session_count"`
+	SessionSpend  float64 `xorm:"session_spend"`
+	SessionTokens int64   `xorm:"session_tokens"`
+}
+
+// ListUsageSessions 在授权和筛选之后先合并会话，再计数和分页。参数 ctx 控制取消，q 指定
+// 权限、筛选、排序和页范围；返回代表请求、会话总数及数据库错误。LogsV2 调用，无写入副作用。
+// 无会话或无调用方的事件独立成行，密钥身份优先于用户；统计仅包含当前授权范围的事件。
+func (db *DB) ListUsageSessions(ctx context.Context, q UsageQuery) ([]UsageSession, int64, error) {
+	scope := q.scopedSession(db, ctx, "usage_events")
+	defer scope.Close()
+	where, args, err := builder.ToSQL(scope.Conds())
+	if err != nil {
+		return nil, 0, err
+	}
+	if where == "" {
+		where = "1=1"
+	}
+	// 分组键拆成独立字段，避免分隔符碰撞；缺少身份的请求以数据库主键保持独立。
+	partition := `CASE WHEN session_id = '' OR (key_id = '' AND user_id = '') THEN id ELSE 0 END,
+	CASE WHEN key_id <> '' THEN 'key' ELSE 'user' END,
+	CASE WHEN key_id <> '' THEN key_id ELSE user_id END, session_id`
+	cte := `WITH scoped AS (SELECT * FROM usage_events WHERE ` + where + `), ranked AS (SELECT scoped.*,
+	ROW_NUMBER() OVER (PARTITION BY ` + partition + ` ORDER BY ts DESC, id DESC) AS session_rank,
+	COUNT(*) OVER (PARTITION BY ` + partition + `) AS session_count,
+	SUM(cost) OVER (PARTITION BY ` + partition + `) AS session_spend,
+	SUM(prompt_tokens + completion_tokens) OVER (PARTITION BY ` + partition + `) AS session_tokens
+	FROM scoped) `
+	var count struct{ Total int64 }
+	_, err = db.session(ctx).SQL(cte+"SELECT COUNT(*) AS total FROM ranked WHERE session_rank = 1", args...).Get(&count)
+	if err != nil {
+		return nil, 0, mapErr(err)
+	}
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > maxUsageRead {
+		limit = maxUsageRead
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	pageArgs := append(append([]interface{}{}, args...), limit, offset)
+	order := q.logOrder()
+	// 表格展示会话合计，因此金额和令牌排序使用同一合计，避免按代表请求排序。
+	if q.SortBy == "spend" {
+		order = strings.Replace(order, "cost", "session_spend", 1)
+	} else if q.SortBy == "total_tokens" {
+		order = strings.Replace(order, "(prompt_tokens + completion_tokens)", "session_tokens", 1)
+	}
+	var rows []UsageSession
+	err = db.session(ctx).SQL(cte+"SELECT * FROM ranked WHERE session_rank = 1 ORDER BY "+order+" LIMIT ? OFFSET ?", pageArgs...).Find(&rows)
+	return rows, count.Total, mapErr(err)
+}
+
 // ListUsage returns usage events inside the scope, newest first. A missing limit is a page of logs. A caller that names a limit gets that many rows, capped here. Clamping an over-large limit down to a small page would make the usage screen report a sample as the whole window.
 // 参数 ctx（context.Context）：上下文，取消时停止；q（UsageQuery）：用量查询条件，含时间范围、团队和分页。
 // 返回 []UsageEvent（[]UsageEvent）：符合过滤条件的用量；error（error）：失败原因，nil 表示成功。
@@ -140,7 +218,7 @@ func (db *DB) ListUsage(ctx context.Context, q UsageQuery) ([]UsageEvent, error)
 		limit = maxUsageRead
 	}
 	var out []UsageEvent
-	err := q.scopedSession(db, ctx, "usage_events").Desc("ts").Limit(limit, q.Offset).Find(&out)
+	err := q.scopedSession(db, ctx, "usage_events").OrderBy(q.logOrder()).Limit(limit, q.Offset).Find(&out)
 	if err != nil {
 		return nil, mapErr(err)
 	}

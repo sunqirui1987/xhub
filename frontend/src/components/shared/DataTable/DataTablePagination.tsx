@@ -20,6 +20,7 @@ export interface DataTablePaginationProps {
   className?: string;
 }
 
+/** 展示分页范围与导航；参数指定页码、总数和回调，返回控件。表格调用；加载时禁用导航和页大小，回调由宿主管理请求。 */
 export function DataTablePagination({
   page,
   pageSize,
@@ -42,6 +43,7 @@ export function DataTablePagination({
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>{t("Rows per page")}</span>
         <Select
+          disabled={isLoading}
           value={String(pageSize)}
           onValueChange={(value) => {
             if (typeof value === "string") {
@@ -49,7 +51,7 @@ export function DataTablePagination({
             }
           }}
         >
-          <SelectTrigger size="sm" data-testid="pagination-page-size" className="w-[4.5rem]">
+          <SelectTrigger size="sm" aria-label={t("Rows per page")} data-testid="pagination-page-size" className="w-[4.5rem]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

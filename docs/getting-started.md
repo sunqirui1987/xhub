@@ -19,6 +19,10 @@ Use a **fresh PostgreSQL database**. The current identity schema has no migratio
 
 ## Docker Compose
 
+[![Docker deployment overview: console on 3000, gateway on 4000, PostgreSQL and Redis](assets/guide-docker.svg)](assets/guide-docker.svg)
+
+*Figure 1: Entry points and service responsibilities. Browsers use the console; applications call the gateway directly. See the configuration below for connections.*
+
 Clone the repository and build the gateway and console locally:
 
 ```bash
@@ -92,10 +96,18 @@ Open http://localhost:3000/login and sign in with the credentials you set above.
 
 A new installation starts without configured providers or deployments.
 
+[![First setup: connect models, configure a workspace, issue a virtual key, then call and inspect](assets/guide-setup.svg)](assets/guide-setup.svg)
+
+*Figure 2: Recommended setup order. Configure team membership and key access before testing a request.*
+
 1. Open **Models + Endpoints**, choose a provider type, and enter its connection and authentication fields.
 2. Add a model deployment manually or from a provider catalog. Set its public model name, upstream model, and endpoint types.
 3. Create an organization and team, set the team model scope, and add members. Personal inference also requires team membership. Projects are optional.
 4. Issue a personal or service virtual key within that scope, then test in the **Playground** or call the gateway.
+
+[![Models and Endpoints console showing provider tabs, Add Model and deployment rows](assets/console-deployments.png)](assets/console-deployments.png)
+
+*Figure 3: Configure credentials in Providers, then use Add Model to add a deployment. Check the public name, upstream model and operation capability. Click the screenshot to open the full image. Example models and prices are not installation defaults.*
 
 Follow the [user and administration guide](user-guide.md) for the complete workflow and permission boundaries.
 

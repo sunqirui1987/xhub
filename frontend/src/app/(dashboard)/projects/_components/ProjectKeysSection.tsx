@@ -13,18 +13,19 @@ interface ProjectKeysSectionProps {
 
 const PAGE_SIZE = 5;
 
+/** 参数 projectId 指定项目，返回密钥列表；筛选或项目变化回首，占位旧页期间禁用分页，项目详情调用，无写入副作用。 */
 export function ProjectKeysSection({ projectId }: ProjectKeysSectionProps) {
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: PAGE_SIZE });
   const [keyAlias, setKeyAlias] = useState<string>("");
 
-  const { data, isLoading } = useKeys(pagination.pageIndex + 1, pagination.pageSize, {
+  const { data, isLoading, isPlaceholderData } = useKeys(pagination.pageIndex + 1, pagination.pageSize, {
     projectID: projectId,
     selectedKeyAlias: keyAlias || null,
   });
 
   useEffect(() => {
     setPagination((current) => ({ ...current, pageIndex: 0 }));
-  }, [keyAlias]);
+  }, [keyAlias, projectId]);
 
   const keys = data?.keys ?? [];
   const totalCount = data?.total_count ?? 0;
@@ -60,7 +61,7 @@ export function ProjectKeysSection({ projectId }: ProjectKeysSectionProps) {
         <ProjectKeysTable
           keys={keys}
           totalCount={totalCount}
-          isLoading={isLoading}
+          isLoading={isLoading || isPlaceholderData}
           pagination={pagination}
           onPaginationChange={setPagination}
         />

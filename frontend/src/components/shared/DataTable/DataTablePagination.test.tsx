@@ -60,9 +60,11 @@ describe("DataTablePagination", () => {
     expect(screen.getByTestId("pagination-prev")).toBeDisabled();
   });
 
+  /** 前置加载状态，验证全部导航及页大小禁用，避免旧页数据参与新请求；组件自动卸载，无持久化数据。 */
   it("disables navigation while loading", () => {
     render(<DataTablePagination {...baseProps} page={1} isLoading />);
     expect(screen.getByTestId("pagination-next")).toBeDisabled();
     expect(screen.getByTestId("pagination-prev")).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDisabled();
   });
 });

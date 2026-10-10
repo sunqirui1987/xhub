@@ -90,7 +90,9 @@ class ChecklistTests(unittest.TestCase):
                 self.assertIn('--grep', args)
                 self.assertEqual(args[-1].count('$'), 15)
                 self.assertNotIn('E2E_LIVE', kwargs['env'])
-                result.write_text(json.dumps(dict(stats=stats)))
+                current = Path(kwargs['env']['E2E_BROWSER_REPORT_DIR']) / 'results.json'
+                current.parent.mkdir(parents=True, exist_ok=True)
+                current.write_text(json.dumps(dict(stats=stats)))
             with mock.patch.object(runner, 'ROOT', root), mock.patch.object(runner, 'command_stream', side_effect=execute):
                 self.assertEqual(runner.run_business_browser(report, mock.Mock())['cases'], 15)
                 stats['skipped'] = 1
