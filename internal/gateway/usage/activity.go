@@ -209,11 +209,22 @@ func loadActivityQuery(s Host, r *http.Request, q iam.UsageQuery) ([]activityRow
 	if db == nil {
 		return nil, nil
 	}
-	events, err := db.ListUsage(r.Context(), q)
-	if err != nil {
-		return nil, err
+	// 日报按日期分页，不能同时对原始事件使用页面偏移，否则超过批次上限时会漏计或重复。
+	// 每批有固定上限；读取失败或请求取消时返回错误，避免展示不完整的总数。
+	q.Offset = 0
+	q.Limit = activityScanLimit
+	var rows []activityRow
+	for {
+		events, err := db.ListUsage(r.Context(), q)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, eventsToActivity(events, uiTimezone(r))...)
+		if len(events) < activityScanLimit {
+			return rows, nil
+		}
+		q.Offset += len(events)
 	}
-	return eventsToActivity(events, uiTimezone(r)), nil
 }
 
 // activityQuery builds the scoped query from the request. The scope comes from authz and is never nil, so an actor who may see nothing gets a filter that matches nothing rather than no filter at all.
@@ -225,16 +236,16 @@ func activityQuery(r *http.Request, sc *authz.Scope) iam.UsageQuery {
 	raw := r.URL.Query()
 	return iam.UsageQuery{
 		Cond: sc.Cond,
-		From: parseDay(raw.Get("start_date")),
+		From: activityDateBound(raw.Get("start_date"), uiTimezone(r), false),
 		// The end date covers the whole day. The console sends the same date for
 		// start and end when the user picks a single day, and a bare midnight
 		// bound would leave that day's calls out of the window.
-		To:     parseDayEnd(raw.Get("end_date")),
+		To:     activityDateBound(raw.Get("end_date"), uiTimezone(r), true),
 		UserID: raw.Get("user_id"),
 		TeamID: raw.Get("team_id"),
 		KeyID:  raw.Get("api_key"),
 		Limit:  activityScanLimit,
-		Offset: pageOffset(r, activityScanLimit),
+		Offset: 0,
 	}
 }
 
@@ -249,6 +260,10 @@ func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 	prices := catalog.CostMap()
 	out := make([]activityRow, 0, len(events))
 	for _, e := range events {
+		// 异步任务尚未结算时不算失败；只把终态记录纳入费用、请求和 token 统计。
+		if e.Status == "executing" || e.Status == "polling" {
+			continue
+		}
 		model := e.Model
 		if model == "" {
 			model = "unknown"
@@ -272,7 +287,7 @@ func eventsToActivity(events []iam.UsageEvent, tzMinutes int) []activityRow {
 			completion:     e.CompletionTokens,
 			cacheRead:      e.CachedTokens,
 			spend:          e.Cost,
-			success:        e.Status == "" || e.Status == "success" || e.Status == "succeeded",
+			success:        e.HTTPStatus < 400 && (e.Status == "" || e.Status == "success" || e.Status == "succeeded" || e.Status == "completed"),
 		})
 	}
 	return out
@@ -307,8 +322,22 @@ func parseDay(v string) time.Time {
 	return t
 }
 
-// activityScanLimit bounds how many events one request folds. It is a request
-// bound, not an authorization one: the scope already decided what is visible.
+// activityDateBound 将浏览器本地日边界转换为 UTC，供全部用量筛选使用。
+// 参数 v 为 YYYY-MM-DD，tzMinutes 为向东的时区偏移，end 表示包含整天的结束边界；返回 UTC 时间。
+// 空值或无效日期保留开放边界；activityQuery 调用，无持久化副作用，测试覆盖跨日与无效输入。
+func activityDateBound(v string, tzMinutes int, end bool) time.Time {
+	t := parseDay(v)
+	if t.IsZero() {
+		return t
+	}
+	t = t.Add(-time.Duration(tzMinutes) * time.Minute)
+	if end {
+		t = t.Add(24*time.Hour - time.Nanosecond)
+	}
+	return t
+}
+
+// activityScanLimit 限制单次数据库扫描批量；完整日报持续读取所有授权事件。
 const activityScanLimit = 5000
 
 // 把用量行收成按天的活动报表。

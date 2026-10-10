@@ -316,7 +316,7 @@ def run_browser(directory, env, gateway, ui_port, processes, handles, logger):
 
 
 def run_business_browser(directory, logger):
-    """用途：补齐去重浏览器业务；参数为报告目录和日志器，返回本轮统计；等待共享浏览器锁并在释放前保存专属证据，隔离库和模拟供应商由 e2e.sh 清理，失败或缺报告抛异常。"""
+    """用途：补齐去重浏览器业务；参数为报告目录和日志器，返回本轮统计；精确标题与浏览器用例同步，等待共享锁并保存专属证据，隔离库和模拟供应商由 e2e.sh 清理，失败、缺报告或选中数量不符抛异常。"""
     titles = [
         "virtual key update, regenerate, block, and delete",
         "model update, test connection, and delete",
@@ -333,7 +333,7 @@ def run_business_browser(directory, logger):
         "deployment deletion clears stale weights and preserves public inference",
         "deployment deletion clears default and template weights for inherited routing",
         "browser cache flush restores a billed miss after a free hit",
-        "inherited session and key preview matches inference without consuming rpm",
+        "team session inheritance and explicitly bound key preview match inference without consuming rpm",
         "every page route renders without a dashboard error",
         "the visibility chain holds at every tier",
     ]

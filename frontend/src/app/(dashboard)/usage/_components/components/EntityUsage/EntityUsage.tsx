@@ -3,7 +3,6 @@ import { BarChart, DonutChart } from "@/components/shared/charts";
 import { DataTable } from "@/components/shared/DataTable";
 import {
   getProviderSpend,
-  getTopAgents,
   getTopAPIKeys,
   getTopModels,
   type ExtendedDailyData,
@@ -111,6 +110,12 @@ const ENTITY_CAPABILITIES: Partial<Record<EntityType, Capability>> = {
   agent: "viewAgentUsage",
 };
 
+/**
+ * 渲染所选实体的费用、模型、密钥和接口用量，供用量页面的实体视图调用。
+ * 参数为实体类型、日期范围、访问令牌、筛选列表和用户权限；返回统计面板。
+ * 请求在令牌、日期和权限就绪后执行，失败由分页钩子处理；切换实体或日期会重新读取。
+ * 团队视图只读取团队统计，Agent 产品已移除，因此不发起 Agent 请求或展示其入口。
+ */
 const EntityUsage: React.FC<EntityUsageProps> = ({
   accessToken,
   entityType,
@@ -125,7 +130,6 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
   const [modelViewType, setModelViewType] = useState<ModelViewType>("groups");
   const [topKeysLimit, setTopKeysLimit] = useState<number>(5);
   const [topModelsLimit, setTopModelsLimit] = useState<number>(5);
-  const [topAgentsLimit, setTopAgentsLimit] = useState<number>(5);
   const [showCostBreakdown, setShowCostBreakdown] = useState(false);
 
   const startTime = useMemo(() => (dateValue.from ? new Date(dateValue.from) : null), [dateValue.from]);
@@ -140,7 +144,6 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
   const aggregatedFetchFn = ENTITY_AGGREGATED_FETCH_FNS[entityType];
   const entityCapability = ENTITY_CAPABILITIES[entityType];
   const canViewEntity = entityCapability === undefined || hasCapability(userRole, entityCapability, isOrgAdmin);
-  const showAgentBreakdown = entityType === "team" && hasCapability(userRole, "viewAgentUsage");
   const hasRequestWindow = !!accessToken && !!startTime && !!endTime;
   const enabled = hasRequestWindow && canViewEntity;
 
@@ -159,24 +162,9 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
 
   const spendData = spendDataRaw as unknown as EntitySpendData;
 
-  const {
-    data: agentSpendDataRaw,
-    isFetchingMore: agentIsFetchingMore,
-    progress: agentProgress,
-    cancelled: agentCancelled,
-    cancel: agentCancel,
-  } = usePaginatedDailyActivity({
-    fetchFn: agentDailyActivityCall,
-    args: [accessToken, startTime, endTime, null],
-    enabled: enabled && showAgentBreakdown,
-  });
-
-  const agentSpendData = agentSpendDataRaw as unknown as EntitySpendData;
-
   const modelBreakdownKey = modelViewType === "groups" ? "model_groups" : "models";
   const modelMetrics = processActivityData(spendData, modelBreakdownKey, teams || []);
   const keyMetrics = processActivityData(spendData, "api_keys", teams || []);
-  const agentMetrics = showAgentBreakdown ? processActivityData(agentSpendData, "entities", teams || []) : {};
 
   const getAllTags = () => {
     if (entityList) {
@@ -528,7 +516,8 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
               <div>
                 <DataTable
                   columns={entityBreakdownColumns}
-                  data={getEntityBreakdown().filter((entity) => entity.metrics.spend > 0)}
+                  // 零费用调用和失败调用仍有请求及 Token，明细必须与顶部汇总保持一致。
+                  data={getEntityBreakdown()}
                   getRowId={(row) => row.metadata.id}
                   maxBodyHeight={208}
                   noDataMessage={t("No {entityType} spend data", { entityType })}
@@ -586,21 +575,6 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
         </ShadcnCard>
       </div>
 
-      {showAgentBreakdown && (
-        <div className="col-span-2">
-          <ShadcnCard>
-            <CardContent>
-              <h3 className="text-lg font-medium text-foreground">{t("Top Agents Driving Spend")}</h3>
-              <TopModelView
-                topModels={getTopAgents(agentSpendData.results, topAgentsLimit)}
-                topModelsLimit={topAgentsLimit}
-                setTopModelsLimit={setTopAgentsLimit}
-              />
-            </CardContent>
-          </ShadcnCard>
-        </div>
-      )}
-
       {/* Spend by Provider */}
       <div className="col-span-2">
         <ShadcnCard>
@@ -650,9 +624,6 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
         </>
       ),
     },
-    ...(showAgentBreakdown
-      ? [{ key: "agents", label: t("pages.usage.agentActivity"), content: <ActivityMetrics modelMetrics={agentMetrics} /> }]
-      : []),
     {
       key: "keys",
       label: t("Key Activity"),
@@ -669,15 +640,6 @@ const EntityUsage: React.FC<EntityUsageProps> = ({
         progress={progress}
         cancel={cancel}
       />
-      {showAgentBreakdown && (
-        <PaginationStatusAlerts
-          isFetchingMore={agentIsFetchingMore}
-          cancelled={agentCancelled}
-          progress={agentProgress}
-          cancel={agentCancel}
-          subject="agent data"
-        />
-      )}
       <UsageExportHeader
         dateValue={dateValue}
         entityType={entityType}

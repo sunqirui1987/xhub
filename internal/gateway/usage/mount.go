@@ -54,6 +54,9 @@ func Module(h mountHost) httpx.Module {
 		reg.Handle("GET /team/daily/activity/aggregated", func(w http.ResponseWriter, r *http.Request) { TeamDailyActivityAggregated(h, w, r) })
 		reg.Handle("GET /team/spend/by_user", func(w http.ResponseWriter, r *http.Request) { TeamSpendByUser(h, w, r) })
 		reg.Handle("GET /organization/daily/activity", func(w http.ResponseWriter, r *http.Request) { OrganizationDailyActivity(h, w, r) })
+		// 标签及客户归属不在当前账单结构中；覆盖目录占位路由，明确返回不支持。
+		reg.Handle("GET /tag/daily/activity", func(w http.ResponseWriter, r *http.Request) { UnsupportedDailyActivity(h, w, r) })
+		reg.Handle("GET /customer/daily/activity", func(w http.ResponseWriter, r *http.Request) { UnsupportedDailyActivity(h, w, r) })
 		reg.Handle("GET /gateway/daily/activity", func(w http.ResponseWriter, r *http.Request) { GatewayDailyActivity(h, w, r) })
 		reg.Handle("GET /global/activity", func(w http.ResponseWriter, r *http.Request) { Activity(h, w, r) })
 		reg.Handle("GET /global/activity/model", func(w http.ResponseWriter, r *http.Request) { ActivityModel(h, w, r) })

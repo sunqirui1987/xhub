@@ -30,6 +30,11 @@ const SUMMABLE_METADATA_KEYS = [
   "total_cache_read_input_tokens",
   "total_cache_creation_input_tokens",
   "total_flat_cost",
+  "total_compression_saved_tokens",
+  "total_compression_savings_spend",
+  "total_prompt_caching_savings_spend",
+  "total_gateway_injected_caching_savings_spend",
+  "total_autorouter_savings_spend",
 ] as const;
 
 interface DailyActivityResponse {
@@ -177,6 +182,8 @@ export function mergeDailyResults(existing: readonly DailyData[], incoming: read
 }
 
 /**
+ * 用量页使用的自动分页钩子；参数为读取函数、参数、启用状态和可选聚合函数，返回当前请求数据及进度。
+ * 失败保留当前请求已完成页面并记录错误；切换筛选隐藏旧值，取消和卸载停止后续更新，无写入副作用。
  * Hook that auto-paginates daily activity endpoints, updating state in batches
  * so charts render progressively. Cancels on unmount, param changes, or
  * manual cancel().
@@ -193,6 +200,8 @@ export function usePaginatedDailyActivity({
   aggregatedFetchFn,
 }: UsePaginatedDailyActivityParams): UsePaginatedDailyActivityReturn {
   const [data, setData] = useState<DailyActivityResponse>(EMPTY_DATA);
+  // 结果与请求参数绑定，在切换筛选的第一帧就隐藏旧值；读取失败也不会退回旧账户数据。
+  const [dataKey, setDataKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [progress, setProgress] = useState<PaginationProgress>({
@@ -234,6 +243,8 @@ export function usePaginatedDailyActivity({
     }
 
     const currentFetchId = ++fetchIdRef.current;
+    setDataKey(null);
+    setData(EMPTY_DATA);
     cancelledRef.current = false;
     setCancelled(false);
 
@@ -259,6 +270,7 @@ export function usePaginatedDailyActivity({
           const aggregated = await aggregatedFetchFn(...currentArgs);
           if (isStale()) return;
           setData(aggregated);
+          setDataKey(argsKey);
           setProgress({ currentPage: 1, totalPages: 1 });
           setLoading(false);
           return;
@@ -275,6 +287,7 @@ export function usePaginatedDailyActivity({
         if (isStale()) return;
 
         setData(firstPage);
+        setDataKey(argsKey);
 
         const totalPages = firstPage.metadata?.total_pages || 1;
 
@@ -349,5 +362,5 @@ export function usePaginatedDailyActivity({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, fetchFn, aggregatedFetchFn, argsKey]);
 
-  return { data, loading, isFetchingMore, progress, cancelled, cancel };
+  return { data: enabled && dataKey === argsKey ? data : EMPTY_DATA, loading, isFetchingMore, progress, cancelled, cancel };
 }

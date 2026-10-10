@@ -55,7 +55,7 @@ it("从卡片直接打开四标签详情并复制实际接口示例", async () =
   expect(within(dialog).getByRole("link", { name: "管理虚拟密钥" })).toHaveAttribute("href", expect.stringContaining("api-keys"));
   await user.selectOptions(screen.getByRole("combobox", { name: "选择调用接口" }), "/v1/responses");
   const code = screen.getByLabelText("复制调用示例", { selector: "pre" });
-  expect(code).toHaveTextContent('"input": "你好"');
+  expect(code).toHaveTextContent('"input": "Hello"');
   expect(code).toHaveTextContent("https://gateway.test/v1/responses");
   await user.click(screen.getByRole("button", { name: "复制调用示例" }));
   expect(await navigator.clipboard.readText()).toBe(code.textContent);
@@ -105,28 +105,15 @@ it.each([undefined, [], model.endpoints])("未开放或配置失败时保留说�
   expect(screen.queryByRole("button", { name: "复制调用示例" })).not.toBeInTheDocument();
 });
 
-/** 前置专用视频绑定与轮询契约；验证真实创建/查询路径、供应商文档提示及不存在的公共定义入口已移除，无虚构请求，DOM自动清理。 */
-it("视频协议展示任务动作与专用格式降级", () => {
-  render(
-    <MyModelDetail
-      model={{
-        ...model,
-        endpoints: [
-          {
-            ...model.endpoints![0],
-            protocol: "fal",
-            family: "video",
-            path: "/queue/video",
-            actions: [{ name: "status", method: "GET", public_path: "/queue/requests/{request_id}/status" }],
-          },
-        ],
-      }}
-      initialTab="api"
-      onClose={vi.fn()}
-    />,
-  );
-  expect(screen.getByText(/该接口使用专用请求格式/)).toBeInTheDocument();
-  expect(screen.getByText("status · GET /queue/requests/{request_id}/status")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "查看 API 接口定义" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "复制调用示例" })).not.toBeInTheDocument();
+/** 前置视频绑定；验证创建、任务 ID、查询、下载和参数文档完整可复制；DOM 自动清理。 */
+it("视频协议展示顺序 curl 和参数说明", async () => {
+  const user = userEvent.setup();
+  render(<MyModelDetail model={{ ...model, endpoints: [{ ...model.endpoints![0], kind: "bypass", protocol: "ark", family: "video", path: "/v3/contents/generations/tasks", actions: [{ name: "get", method: "GET", public_path: "/v3/contents/generations/tasks/{id}" }] }] }} initialTab="api" onClose={vi.fn()} />);
+  expect(screen.getByLabelText("复制调用示例", { selector: "pre" })).toHaveTextContent('"content"');
+  expect(screen.getByLabelText("复制结果查询", { selector: "pre" })).toHaveTextContent('"$TASK_ID"');
+  expect(screen.getByLabelText("复制下载命令", { selector: "pre" })).toHaveTextContent("--output ./video.mp4");
+  await user.click(screen.getByRole("button", { name: "查看协议参数" }));
+  expect(screen.getByRole("table", { name: "协议参数说明" })).toHaveTextContent("content.video_url");
+  await user.click(screen.getByRole("button", { name: "返回 curl 步骤" }));
+  expect(screen.getByRole("heading", { name: "2. 创建生成任务" })).toBeInTheDocument();
 });

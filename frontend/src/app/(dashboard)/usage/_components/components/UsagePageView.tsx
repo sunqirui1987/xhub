@@ -1,31 +1,23 @@
-/**
- * New Usage Page
- *
- * Uses the new `/user/daily/activity` endpoint to get daily activity data for a user.
- *
- * Works at 1m+ spend logs, by querying an aggregate table instead.
- */
+/** 用量页面读取真实账单的费用、Token 与请求结果；日期及用户筛选需在所有统计中保持一致。 */
 
-import { ChevronDown, ChevronRight, Download, Info, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Info } from "lucide-react";
 import type { DateRangePickerValue } from "@/components/shared/date_picker_types";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BarChart, CustomLegend } from "@/components/shared/charts";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/shared/Alert";
 import PaginationStatusAlerts from "@/components/shared/PaginationStatusAlerts";
 import { Button } from "@/components/ui/button";
 import { Card as ShadcnCard, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { useCustomers } from "@/app/(dashboard)/hooks/customers/useCustomers";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import useIsOrgAdmin from "@/app/(dashboard)/hooks/useIsOrgAdmin";
 import { useIsTeamAdminForAnyTeam } from "@/app/(dashboard)/hooks/sessionIdentity/useSessionIdentity";
 import { useCurrentUser } from "@/app/(dashboard)/hooks/users/useCurrentUser";
 import { hasCapability } from "@/utils/capabilities";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
-import { all_admin_roles, internalUserRoles } from "@/utils/roles";
+import { all_admin_roles } from "@/utils/roles";
 import { t } from "@/i18n";
 import { formatClosedRangeLabel } from "@/components/shared/advanced_date_picker";
 import { ActivityMetrics, processActivityData } from "@/components/activity_metrics";
@@ -36,13 +28,11 @@ import { Team } from "@/components/key_team_helpers/key_list";
 import {
   gatewayDailyActivityCall,
   Organization,
-  tagListCall,
   userDailyActivityAggregatedCall,
   userDailyActivityCall,
 } from "@/components/networking";
 import AdvancedDatePicker from "@/components/shared/advanced_date_picker";
 import { ChartLoader } from "@/components/shared/chart_loader";
-import { Tag } from "@/components/tag_management/types";
 import ViewUserSpend from "@/components/view_user_spend";
 import { usePaginatedDailyActivity } from "../hooks/usePaginatedDailyActivity";
 import { keyActivityLabel } from "@/components/UsagePage/keyActivityLabel";
@@ -70,6 +60,7 @@ interface UsagePageProps {
   organizations: Organization[];
 }
 
+/** 用量路由调用的页面组件；参数为可见团队及组织，返回按日期与身份隔离的统计视图；读取失败回退分页，禁止沿用旧筛选数据。 */
 const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   const { accessToken, userRole, userId: userID, premiumUser } = useAuthorized();
   // Aggregated endpoint: try first, fall back to paginated if unavailable
@@ -98,13 +89,8 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
     to: initialToDate,
   });
 
-  const [fetchedTags, setFetchedTags] = useState<FetchedForRange<EntityList[]> | null>(null);
-  // No [] default: an unresolved query must stay undefined so the customer
-  // filter reads as loading rather than as a range with no customers.
-  const { data: customers } = useCustomers();
   const { data: currentUser } = useCurrentUser();
   const isAdmin = all_admin_roles.includes(userRole || "");
-  const canViewTagUsage = isAdmin || internalUserRoles.includes(userRole || "");
   const isOrgAdmin = useIsOrgAdmin();
   const isTeamAdmin = useIsTeamAdminForAnyTeam();
   const canViewOrganizationUsage = hasCapability(userRole, "viewOrganizationUsage", isOrgAdmin);
@@ -122,7 +108,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
   const usageView: UsageOption =
     selectedUsageView === "organization" && !canViewOrganizationUsage ? "global" : selectedUsageView;
 
-  const [showCredentialBanner, setShowCredentialBanner] = useState(true);
   const [topKeysLimit, setTopKeysLimit] = useState<number>(5);
   const [topModelsLimit, setTopModelsLimit] = useState<number>(5);
   const [showTokenBreakdown, setShowTokenBreakdown] = useState(false);
@@ -138,37 +123,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
 
   const startTime = useMemo(() => (dateValue.from ? new Date(dateValue.from) : null), [dateValue.from]);
   const endTime = useMemo(() => (dateValue.to ? new Date(dateValue.to) : null), [dateValue.to]);
-
-  // Stamped and selected during render like the request tiles below: the tag
-  // filter reads "no tags" from an empty list, so a list left over from the
-  // previous range would state that about a range nobody has measured yet.
-  const currentTagRangeKey = fetchedRangeKey(startTime, endTime);
-  const allTags = selectForRange(fetchedTags, currentTagRangeKey);
-
-  useEffect(() => {
-    if (!accessToken) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const tags = await tagListCall(accessToken, startTime, endTime);
-        if (cancelled) return;
-        setFetchedTags({
-          rangeKey: currentTagRangeKey,
-          value: Object.values(tags).map((tag: Tag) => ({
-            label: tag.name,
-            value: tag.name,
-          })),
-        });
-      } catch (e) {
-        if (!cancelled) {
-          console.error("Failed to fetch tag list", e);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [accessToken, startTime, endTime, currentTagRangeKey]);
 
   // Everything the request tiles read is stamped with the range it answers and
   // selected during render, rather than cleared in an effect. An effect runs
@@ -202,15 +156,14 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
       });
   }, [accessToken, startTime, endTime, effectiveUserId, currentAggregatedRangeKey]);
 
-  // Gateway request counts (SGR). Admin-only: the source table is
-  // deployment-wide, so a non-admin must not see it.
+  // 用户筛选后停用全局计数，保证请求数与费用、Token 使用相同的数据范围。
   const gatewayRequest = useMemo(
     () => (accessToken && startTime && endTime ? { accessToken, startTime, endTime } : null),
     [accessToken, startTime, endTime],
   );
   const gatewayFetchIdRef = useRef(0);
   useEffect(() => {
-    if (!isAdmin || !gatewayRequest) return;
+    if (!isAdmin || effectiveUserId || !gatewayRequest) return;
     const fetchId = ++gatewayFetchIdRef.current;
     gatewayDailyActivityCall(gatewayRequest.accessToken, gatewayRequest.startTime, gatewayRequest.endTime)
       .then((data) => {
@@ -221,9 +174,9 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
         if (gatewayFetchIdRef.current !== fetchId) return;
         setGatewayActivityData(null);
       });
-  }, [isAdmin, gatewayRequest, currentGatewayRangeKey]);
+  }, [isAdmin, effectiveUserId, gatewayRequest, currentGatewayRangeKey]);
 
-  const gatewayActivity = selectGatewayActivity(isAdmin, gatewayActivityData, currentGatewayRangeKey);
+  const gatewayActivity = selectGatewayActivity(isAdmin && !effectiveUserId, gatewayActivityData, currentGatewayRangeKey);
   const activeAggregated = selectForRange(aggregatedData, currentAggregatedRangeKey);
   // A failure belongs to the range it happened on. Reading it through the same
   // rule keeps the paginated hook disabled while a new range is in flight, and
@@ -479,7 +432,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
         value={usageView}
         onChange={(value) => setUsageView(value)}
         userRole={userRole}
-        canViewTagUsage={canViewTagUsage}
         isOrgAdmin={isOrgAdmin}
         isTeamAdmin={isTeamAdmin}
       />
@@ -558,7 +510,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                                   render={<Info className="size-4 text-muted-foreground hover:text-foreground" />}
                                 />
                                 <TooltipContent>
-                                  {t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")}
+                                  {t("Counts recorded calls in the selected period, using the same usage records as cost, key and model breakdowns.")}
                                 </TooltipContent>
                               </Tooltip>
                             )}
@@ -579,7 +531,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                               />
                               <TooltipContent>
                                 {gatewayActivity
-                                  ? t("Counted by the gateway when it answers a request, independent of spend logging. Deployment-wide, so it will not match the per-key or per-model breakdowns below.")
+                                  ? t("Counts recorded calls in the selected period, using the same usage records as cost, key and model breakdowns.")
                                   : t("Includes requests that failed to route to a provider, tool usage failures, and other request errors where the provider cannot be determined.")}
                               </TooltipContent>
                             </Tooltip>
@@ -712,7 +664,7 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
                                   }
                                 />
                                 <TooltipContent>
-                                  {t("Counted by the gateway middleware as each request is answered. Covers LLM, MCP and A2A endpoints across the whole deployment.")}
+                                  {t("Recorded calls grouped by endpoint for the selected period. Running asynchronous tasks are included after completion.")}
                                 </TooltipContent>
                               </Tooltip>
                             </CardTitle>
@@ -891,59 +843,6 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
             />
           )}
 
-          {/* Customer Usage Panel */}
-          {usageView === "customer" && (
-            <EntityUsage
-              accessToken={accessToken}
-              entityType="customer"
-              userID={userID}
-              userRole={userRole}
-              entityList={
-                Array.isArray(customers)
-                  ? customers.map((customer) => ({
-                      label: customer.alias || customer.user_id,
-                      value: customer.user_id,
-                    }))
-                  : null
-              }
-              premiumUser={premiumUser}
-              dateValue={dateValue}
-            />
-          )}
-          {/* Tag Usage Panel */}
-          {usageView === "tag" && (
-            <>
-              {showCredentialBanner && (
-                <Alert variant="info" className="mb-5">
-                  <AlertTitle>{t("Reusable credentials are automatically tracked as tags")}</AlertTitle>
-                  <AlertDescription className="text-inherit">
-                    {t("When a reusable credential is used, it will appear as a tag prefixed with")}{" "}
-                    <code className="rounded bg-black/5 px-1 py-0.5 font-mono text-xs">Credential: </code>
-                    {t("in this view.")}
-                  </AlertDescription>
-                  <AlertAction>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label={t("Close")}
-                      onClick={() => setShowCredentialBanner(false)}
-                    >
-                      <X />
-                    </Button>
-                  </AlertAction>
-                </Alert>
-              )}
-              <EntityUsage
-                accessToken={accessToken}
-                entityType="tag"
-                userID={userID}
-                userRole={userRole}
-                entityList={allTags}
-                premiumUser={premiumUser}
-                dateValue={dateValue}
-              />
-            </>
-          )}
           {/* User Usage Panel */}
           {usageView === "user" && (
             <EntityUsage

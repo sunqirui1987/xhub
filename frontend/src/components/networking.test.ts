@@ -909,3 +909,28 @@ describe("fetchMemoryList search serialization", () => {
     expect(lastParams(mockFetch).has("search")).toBe(false);
   });
 });
+
+/** 前置本地日期与 fetch 替身；验证网关和团队用户接口同传日期/时区、保留团队筛选且失败抛错。
+ * 参数为测试上下文闭包，无返回值；每例恢复 fetch，不写入数据库或调用外部服务。 */
+describe("usage date contracts", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+  it.each(["gateway", "team-user"])("%s carries browser timezone and exact date bounds", async (kind) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: [] }), { headers: { "Content-Type": "application/json" } }));
+    global.fetch = fetcher;
+    const from = new Date(2025, 2, 1), to = new Date(2025, 2, 1, 23, 59);
+    if (kind === "gateway") await Networking.gatewayDailyActivityCall("token", from, to);
+    else await Networking.teamSpendByUserCall("token", from, to, ["team-a", "team-b"]);
+    const request = fetcher.mock.calls[0][0];
+    const url = new URL(request instanceof Request ? request.url : request, "http://test.local");
+    expect(url.searchParams.get("timezone")).toBe(String(new Date().getTimezoneOffset()));
+    expect(url.searchParams.get("start_date")).toBe("2025-03-01");
+    expect(url.searchParams.get("end_date")).toBe("2025-03-01");
+    if (kind === "team-user") expect(url.searchParams.get("team_ids")).toBe("team-a,team-b");
+  });
+  it.each(["gateway", "team-user"])("%s propagates server errors", async (kind) => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { message: "usage unavailable" } }), text: async () => JSON.stringify({ error: { message: "usage unavailable" } }) });
+    const from = new Date(2025, 2, 1);
+    await expect(kind === "gateway" ? Networking.gatewayDailyActivityCall("token", from, from) : Networking.teamSpendByUserCall("token", from, from, [])).rejects.toThrow();
+  });
+});

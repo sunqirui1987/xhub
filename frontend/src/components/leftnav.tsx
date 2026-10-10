@@ -164,7 +164,7 @@ const menuGroups: MenuGroup[] = [
         label: "nav.models",
         icon: <Network {...ICON} />,
       },
-      { key: "model-providers", page: "model-providers", label: "模型提供商", icon: <Building2 {...ICON} /> },
+      { key: "model-providers", page: "model-providers", label: "nav.modelProviders", icon: <Building2 {...ICON} /> },
       { key: "audit-logs", page: "audit-logs", label: "nav.auditLogs", icon: <ScrollText {...ICON} /> },
       { key: "price-data", page: "price-data", label: "nav.priceData", icon: <Tags {...ICON} /> },
       { key: "guardrails", page: "guardrails", label: "nav.guardrails", icon: <Shield {...ICON} /> },

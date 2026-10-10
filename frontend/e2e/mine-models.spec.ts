@@ -66,7 +66,7 @@ test("my models exposes prices, access, executable API examples and call guide",
     await expect(dialog.getByRole("link", { name: "查看 API 接口定义" })).toHaveCount(0);
     await dialog.getByRole("combobox", { name: "选择调用接口" }).selectOption("/v1/responses");
     await expect(dialog.getByLabel("复制调用示例", { exact: true }).filter({ hasText: "curl" })).toContainText(
-      '"input": "你好"',
+      '"input": "Hello"',
     );
     await dialog.getByRole("combobox", { name: "选择调用接口" }).selectOption("/v1/chat/completions");
     await dialog.getByRole("button", { name: "复制调用示例", exact: true }).click();

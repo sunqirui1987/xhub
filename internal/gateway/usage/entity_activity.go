@@ -42,6 +42,18 @@ type entityLabels struct {
 
 var logTraceOnceEntity sync.Once
 
+// UnsupportedDailyActivity 明确拒绝未持久化的标签和客户维度，避免目录占位响应被误读成真实零用量。
+// 参数为网关宿主、响应和请求；返回 JSON 501，匿名请求返回 401；无数据库写入。
+// 调用：usage.Module 的兼容日报路由；回归测试验证契约及登录要求。
+func UnsupportedDailyActivity(s Host, w http.ResponseWriter, r *http.Request) {
+	if s.RequireUser(w, r) == nil {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusNotImplemented, map[string]any{
+		"error": map[string]any{"message": "Tag and customer usage attribution is not recorded", "type": "unsupported_usage_dimension"},
+	})
+}
+
 // TeamDailyActivity is GET /team/daily/activity. The breakdown is per team, paged by day, and limited to the teams the caller may see.
 // 参数 s（Host）：团队按天活动使用的数据面宿主；w（http.ResponseWriter）：调用方的 HTTP 响应，状态和正文写在这里；r（*http.Request）：入站 HTTP 请求。
 // 返回：无。状态码和正文写进调用方的响应。

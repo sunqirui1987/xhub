@@ -156,3 +156,19 @@ describe("usePaginatedDailyActivity page accumulation", () => {
     expect(result.current.data.metadata.total_spend).toBe(5.5);
   });
 });
+
+/** 前置成功旧查询与失败的新查询；验证切换筛选立即隐藏旧值，错误不回退旧数据，DOM 和 mock 自动清理。 */
+it("does not retain previous filter data when replacement fails", async () => {
+  const fetchFn = vi.fn().mockResolvedValueOnce({ results: [], metadata: { total_api_requests: 9 } }).mockRejectedValueOnce(new Error("offline"));
+  const { result, rerender } = renderHook(({ filter }) => usePaginatedDailyActivity({ fetchFn, args: ["token", null, null, filter], enabled: true }), { initialProps: { filter: "old" } });
+  await waitFor(() => expect(result.current.data.metadata.total_api_requests).toBe(9));
+  rerender({ filter: "new" });
+  expect(result.current.data.metadata.total_api_requests).toBe(0);
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.data.metadata.total_api_requests).toBe(0);
+});
+
+/** 前置跨页节省费用字段；验证每页合计且缺字段按零处理，参数无返回，仅内存数据无需清理。 */
+it("sums savings metadata across all pages", () => {
+  expect(sumMetadata({ total_compression_saved_tokens: 4, total_prompt_caching_savings_spend: 0.5 }, { total_compression_saved_tokens: 3 })).toMatchObject({ total_compression_saved_tokens: 7, total_prompt_caching_savings_spend: 0.5 });
+});

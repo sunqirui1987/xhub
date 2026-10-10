@@ -63,10 +63,12 @@ const columns: ColumnDef<TeamUserSpendRow>[] = [
   },
 ];
 
+/** 团队用户用量及 CSV 面板；参数为令牌、日期和团队，返回可访问表格。
+ * 团队页调用；缓存按身份隔离，读取失败显示提示并禁止导出，不写入数据。 */
 const TeamUserSpendCard: React.FC<TeamUserSpendCardProps> = ({ accessToken, startTime, endTime, teamIds }) => {
   const hasTeams = teamIds.length > 0;
-  const { data, isLoading } = useQuery({
-    queryKey: ["teamSpendByUser", startTime?.toISOString(), endTime?.toISOString(), teamIds],
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["teamSpendByUser", accessToken, startTime?.toISOString(), endTime?.toISOString(), teamIds],
     queryFn: () =>
       accessToken && startTime && endTime ? teamSpendByUserCall(accessToken, startTime, endTime, teamIds) : null,
     enabled: Boolean(accessToken && startTime && endTime) && hasTeams,
@@ -93,6 +95,7 @@ const TeamUserSpendCard: React.FC<TeamUserSpendCardProps> = ({ accessToken, star
             {t("Download CSV")}
           </Button>
         </div>
+        {isError && <p role="alert">{t("Failed to load team user usage")}</p>}
         <DataTable
           columns={columns}
           data={rows}

@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { uiHref } from "@/utils/uiHref";
 import type { MyModelCard } from "./grantedModelCards";
-import { invocationCurl } from "./modelInvocation";
+import { invocationSteps } from "./modelInvocation";
+import { protocolParameters } from "./protocolParameters";
 
 export type ModelDetailTab = "pricing" | "access" | "api" | "docs";
 
@@ -51,7 +52,7 @@ function CopyValue({ value, label }: { value: string; label: string }) {
 
 /** 我的模型调用详情；参数为授权模型、首次打开的标签及关闭回调，返回四标签弹窗。
  * 仅使用 /model/available 的公开绑定和参考费率，无额外管理接口请求；无绑定或错误配置不生成示例。
- * 专用媒体协议展示真实方法、路径和任务动作，已知 JSON 协议提供可复制 curl；关闭后由列表恢复焦点。
+ * 普通及 Bypass 协议统一展示分步 curl 和参数文档；关闭后由列表恢复焦点。
  * 接入信息直接来自模型绑定，不请求公共接口定义，也不提供不存在的文档入口。 */
 export function MyModelDetail({
   model,
@@ -69,7 +70,7 @@ export function MyModelDetail({
   const rawBase = getProxyBaseUrl();
   const base =
     typeof window === "undefined" ? rawBase : new URL(rawBase || "/", window.location.origin).href.replace(/\/$/, "");
-  const example = endpoint ? invocationCurl(model.id, endpoint, base) : null;
+  const steps = endpoint ? invocationSteps(model.id, endpoint, base) : [];
   const unavailable = !endpoints.length;
   return (
     <Dialog
@@ -188,38 +189,41 @@ export function MyModelDetail({
                     ))}
                   </select>
                 </label>
-                <div className="min-w-0 overflow-hidden rounded-lg border">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
-                    <code className="min-w-0 break-all text-xs">
-                      {endpoint?.method} {endpoint?.path}
-                    </code>
-                    {example && <CopyValue key={example} value={example} label={t("myModels.copyExample")} />}
-                  </div>
-                  {example ? (
-                    <pre
-                      aria-label={t("myModels.copyExample")}
-                      className="max-h-80 overflow-auto bg-slate-950 p-5 text-xs leading-6 text-slate-100"
-                    >
-                      <code>{example}</code>
-                    </pre>
-                  ) : (
-                    <p className="p-5 leading-6 text-muted-foreground">{t("myModels.specialized")}</p>
-                  )}
-                </div>
-                {!!endpoint?.actions?.length && (
-                  <div className="space-y-2">
-                    <h3 className="font-medium">{t("myModels.actions")}</h3>
-                    {endpoint.actions.map((action) => (
-                      <p
-                        key={action.name + action.public_path}
-                        className="break-all rounded border p-3 font-mono text-xs"
-                      >
-                        {action.name} · {action.method} {action.public_path}
-                        {action.task_query ? " · " + action.task_query : ""}
-                      </p>
+                <code className="block break-all text-xs">
+                  {endpoint?.method} {endpoint?.path}
+                </code>
+                <Button variant="outline" size="sm" onClick={() => setTab("docs")}>
+                  {t("myModels.viewParameters")}
+                </Button>
+                {steps.length ? (
+                  <ol className="min-w-0 space-y-4">
+                    {steps.map((step, index) => (
+                      <li key={step.command} className="min-w-0 overflow-hidden rounded-lg border">
+                        <div className="space-y-2 bg-muted/30 px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h3 className="font-medium">
+                              {index + 1}. {t("myModels." + step.title)}
+                            </h3>
+                            <CopyValue value={step.command} label={t("myModels." + step.copy)} />
+                          </div>
+                          <p className="text-sm leading-6 text-muted-foreground">{t("myModels." + step.hint)}</p>
+                        </div>
+                        <pre
+                          aria-label={t("myModels." + step.copy)}
+                          className="max-h-96 overflow-auto bg-slate-950 p-5 text-xs leading-6 text-slate-100"
+                        >
+                          <code>{step.command}</code>
+                        </pre>
+                      </li>
                     ))}
-                  </div>
+                  </ol>
+                ) : (
+                  <p role="alert">{t("myModels.invalidExample")}</p>
                 )}
+                <div className="rounded-lg border p-4 text-sm leading-6">
+                  <h3 className="font-medium">{t("myModels.checkUsage")}</h3>
+                  <p className="text-muted-foreground">{t("myModels.checkUsageHint")}</p>
+                </div>
               </>
             )}
             <div className="flex flex-wrap gap-3">
@@ -229,6 +233,35 @@ export function MyModelDetail({
             </div>
           </TabsContent>
           <TabsContent value="docs" className="space-y-4">
+            {endpoint && (
+              <section className="min-w-0 space-y-3 rounded-lg border p-4">
+                <h3 className="font-medium">{t("myModels.parameterGuide")}</h3>
+                <p className="break-all text-sm text-muted-foreground">{endpointLabel(endpoint)}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{t("myModels.parameterGuideHint")}</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <caption className="sr-only">{t("myModels.parameterGuide")}</caption>
+                    <thead>
+                      <tr>
+                        <th className="p-2">{t("myModels.parameter")}</th>
+                        <th className="p-2">{t("myModels.parameterMeaning")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {protocolParameters(endpoint).map((row) => (
+                        <tr key={row.field} className="border-t">
+                          <td className="p-2 font-mono">{row.field}</td>
+                          <td className="p-2 leading-6">{t("myModels." + row.description)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setTab("api")}>
+                  {t("myModels.backToCurl")}
+                </Button>
+              </section>
+            )}
             <div className="rounded-lg border p-4">
               <h3 className="mb-2 font-medium">{t("myModels.stepKey")}</h3>
               <p className="leading-6 text-muted-foreground">{t("myModels.stepKeyHint")}</p>

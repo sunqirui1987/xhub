@@ -103,12 +103,15 @@ describe("parseMediaPayload", () => {
     expect(media?.response.imageDataUrls).toEqual(["data:image/png;base64,iVBORw=="]);
   });
 
+  /** 目的：Ark 产物地址与 FAL 队列查询地址不能混用；前置两种终态回执，验证视频解析正确且不伪造队列字段，纯解析无需清理。 */
   it("parses Ark content and FAL result video response shapes", () => {
     const ark = parseMediaPayload(
       { method: "GET", url: "/v3/contents/generations/tasks/qvideo-1" },
       { id: "qvideo-1", status: "succeeded", content: { video_url: "https://example.invalid/ark.mp4" }, duration: 4 },
     );
     expect(ark?.response).toMatchObject({ kind: "video", taskId: "qvideo-1", status: "succeeded", videoUrl: "https://example.invalid/ark.mp4", duration: 4 });
+    expect(ark?.response.responseUrl).toBeUndefined();
+    expect(ark?.response.statusUrl).toBeUndefined();
 
     const fal = parseMediaPayload(
       { method: "GET", url: "/queue/fal-ai/kling-video/requests/qvideo-2" },

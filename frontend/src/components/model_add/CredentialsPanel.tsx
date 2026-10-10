@@ -19,7 +19,7 @@ import DeleteResourceModal from "../common_components/DeleteResourceModal";
 import { toast } from "@/lib/toast";
 import CredentialModal from "./CredentialModal";
 import CredentialsTable from "./CredentialsTable";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 const restrictedFields = ["credential_name", "custom_llm_provider", "provider_id", "catalog_id"];
 
@@ -38,7 +38,9 @@ const buildCredential = (values: Record<string, unknown>, credentialValues: Reco
 const withoutRestrictedFields = (values: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(Object.entries(values).filter(([key]) => !restrictedFields.includes(key)));
 
+/** 管理供应商连接列表和增删改弹窗；无参数，返回按权限显示的界面，语言切换同步文案；保存或删除成功刷新列表。 */
 export default function CredentialsPanel() {
+  const t = useT();
   const { accessToken, userRole, isViewOnly } = useAuthorized();
   // Admin Viewer follows the read-parity rule: see credentials, do not modify.
   const canModifyCredentials = !isViewOnly && isProxyAdminRole(userRole ?? "");
@@ -125,13 +127,13 @@ export default function CredentialsPanel() {
     <div className="mx-auto flex w-full flex-auto flex-col gap-4 overflow-y-auto p-2">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">模型提供商</h2>
-          <p className="text-sm text-muted-foreground">统一管理连接地址与 API 凭据，添加模型时先选择这里的提供商。</p>
+          <h2 className="text-lg font-semibold text-foreground">{t("modelProviders.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("modelProviders.listHint")}</p>
         </div>
         {canModifyCredentials && (
           <Button onClick={() => setIsAddModalOpen(true)}>
             <Plus className="size-4" />
-            添加提供商
+            {t("modelProviders.add")}
           </Button>
         )}
       </div>
@@ -171,7 +173,7 @@ export default function CredentialsPanel() {
         message={t(
           "Are you sure you want to delete this credential? This action cannot be undone and may break existing integrations.",
         )}
-        resourceInformationTitle="Credential Information"
+        resourceInformationTitle={t("Credential Information")}
         resourceInformation={[
           { label: t("Credential Name"), value: credentialToDelete?.credential_name },
           { label: t("Provider"), value: credentialToDelete?.credential_info?.custom_llm_provider || "-" },

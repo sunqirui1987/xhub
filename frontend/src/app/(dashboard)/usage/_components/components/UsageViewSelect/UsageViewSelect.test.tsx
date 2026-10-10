@@ -34,22 +34,11 @@ describe("UsageViewSelect", () => {
     expect(mockOnChange.mock.calls[0][0]).toBe("team");
   });
 
-  it("should show Tag Usage for non-admin users with tag usage permission", async () => {
-    const user = userEvent.setup();
-    render(
-      <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
-    );
-
+  /** 前置管理员或普通用户；验证客户和标签入口均已删除，参数为角色，无返回值；组件自动卸载，无数据写入。 */
+  it.each(["Admin", "Internal User"])("removed dimensions are unavailable to %s", (userRole) => {
+    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole={userRole} />);
+    expect(offers(translate("en", "pages.usage.customer"))).toBe(false);
     expect(offers(translate("en", "pages.usage.tag"))).toBe(false);
-    void user;
-  });
-
-  it("should hide Tag Usage for non-admin users without tag usage permission", async () => {
-    const user = userEvent.setup();
-    render(<UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" />);
-
-    expect(offers(translate("en", "pages.usage.tag"))).toBe(false);
-    void user;
   });
 
   it.each(["pages.usage.organization"] as const)("should show %s to an admin", async (key) => {
@@ -65,7 +54,7 @@ describe("UsageViewSelect", () => {
     async (key) => {
     const user = userEvent.setup();
     render(
-      <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" canViewTagUsage={true} />,
+      <UsageViewSelect value="global" onChange={mockOnChange} userRole="Internal User" />,
     );
 
     expect(offers(translate("en", key))).toBe(false);

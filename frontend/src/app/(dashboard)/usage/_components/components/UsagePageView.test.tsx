@@ -67,8 +67,7 @@ vi.mock("./EndpointUsage/EndpointUsage", () => ({
 
 vi.mock("./UsageViewSelect/UsageViewSelect", async () => {
   const React = await import("react");
-  const UsageViewSelect = ({ value, onChange, canViewTagUsage = false }: any) => {
-    const tagOption = canViewTagUsage ? React.createElement("option", { value: "tag" }, "Tag Usage") : null;
+  const UsageViewSelect = ({ value, onChange }: any) => {
     return React.createElement(
       "select",
       {
@@ -80,8 +79,6 @@ vi.mock("./UsageViewSelect/UsageViewSelect", async () => {
       React.createElement("option", { value: "global" }, "Global Usage"),
       React.createElement("option", { value: "team" }, "Team Usage"),
       React.createElement("option", { value: "organization" }, "Organization Usage"),
-      React.createElement("option", { value: "customer" }, "Customer Usage"),
-      tagOption,
       React.createElement("option", { value: "agent" }, "Agent Usage"),
       React.createElement("option", { value: "user" }, "User Usage"),
       React.createElement("option", { value: "user-agent-activity" }, "User Agent Activity"),
@@ -588,99 +585,9 @@ describe("UsagePage", () => {
       expect(entityUsageElements.length).toBeGreaterThan(0);
     });
 
-    // Switch to Tag Usage view (admin only)
-    act(() => {
-      fireEvent.change(usageSelect, { target: { value: "tag" } });
-    });
-
-    // Should still render EntityUsage component for tags
-    await waitFor(() => {
-      const entityUsageElements = screen.getAllByText("Entity Usage");
-      expect(entityUsageElements.length).toBeGreaterThan(0);
-    });
-  });
-
-  it("should withhold the tag list until it resolves so no empty state is shown while loading", async () => {
-    let resolveTagList: (tags: Record<string, unknown>) => void = () => {};
-    mockTagListCall.mockReturnValue(
-      new Promise((resolve) => {
-        resolveTagList = resolve;
-      }) as ReturnType<typeof networking.tagListCall>,
-    );
-
-    renderWithProviders(<UsagePage {...defaultProps} />);
-
-    act(() => {
-      fireEvent.change(screen.getByTestId("usage-view-select"), { target: { value: "tag" } });
-    });
-
-    const entityUsage = await screen.findByTestId("entity-usage");
-    expect(entityUsage).toHaveAttribute("data-entity-list", "null");
-
-    await act(async () => {
-      resolveTagList({});
-    });
-
-    expect(screen.getByTestId("entity-usage")).toHaveAttribute("data-entity-list", "[]");
-  });
-
-  it("should drop the previous range's tags as soon as the range changes", async () => {
-    mockTagListCall.mockResolvedValue({ "old-range-tag": { name: "old-range-tag" } } as never);
-
-    renderWithProviders(<UsagePage {...defaultProps} />);
-
-    act(() => {
-      fireEvent.change(screen.getByTestId("usage-view-select"), { target: { value: "tag" } });
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("entity-usage")).toHaveAttribute(
-        "data-entity-list",
-        JSON.stringify([{ label: "old-range-tag", value: "old-range-tag" }]),
-      );
-    });
-
-    let resolveNewRange: (tags: Record<string, unknown>) => void = () => {};
-    mockTagListCall.mockReturnValue(
-      new Promise((resolve) => {
-        resolveNewRange = resolve;
-      }) as ReturnType<typeof networking.tagListCall>,
-    );
-
-    act(() => {
-      fireEvent.click(screen.getByTestId("pick-a-different-range"));
-    });
-
-    expect(screen.getByTestId("entity-usage")).toHaveAttribute("data-entity-list", "null");
-
-    await act(async () => {
-      resolveNewRange({});
-    });
-
-    expect(screen.getByTestId("entity-usage")).toHaveAttribute("data-entity-list", "[]");
-  });
-
-  it("should show tag usage selector option for internal users", async () => {
-    mockUseAuthorized.mockReturnValue({
-      isLoading: false,
-      isAuthorized: true,
-      token: "mock-token",
-      accessToken: "test-token",
-      userId: "user-123",
-      userEmail: "test@example.com",
-      userRole: "internal_user",
-      premiumUser: true,
-      disabledPersonalKeyCreation: false,
-      showSSOBanner: false,
-    });
-
-    renderWithProviders(<UsagePage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    expect(screen.getByRole("option", { name: "Tag Usage" })).toBeInTheDocument();
+    // 组织视图与团队视图使用同一账单边界。
+    fireEvent.change(usageSelect, { target: { value: "organization" } });
+    expect(screen.getAllByText("Entity Usage").length).toBeGreaterThan(0);
   });
 
   it("should show organization usage banner and view for admins", async () => {
@@ -744,41 +651,14 @@ describe("UsagePage", () => {
     });
   });
 
-  it("should show customer usage view for admins", async () => {
-    mockUseCustomers.mockReturnValue({
-      data: mockCustomers,
-      isLoading: false,
-      error: null,
-    } as any);
-
+  /** 前置管理员会话；验证已删除入口与对应请求均不存在，返回无；渲染夹具自动清理，不写数据。 */
+  it("removed customer and tag modules are absent and never fetch data", async () => {
     renderWithProviders(<UsagePage {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    const usageSelect = screen.getByTestId("usage-view-select");
-    act(() => {
-      fireEvent.change(usageSelect, { target: { value: "customer" } });
-    });
-
-    await waitFor(() => {
-      const entityUsageElements = screen.getAllByText("Entity Usage");
-      expect(entityUsageElements.length).toBeGreaterThan(0);
-    });
-  });
-
-  it("should withhold the customer list while it is still loading", async () => {
-    mockUseCustomers.mockReturnValue({ data: undefined, isLoading: true, error: null } as any);
-
-    renderWithProviders(<UsagePage {...defaultProps} />);
-
-    act(() => {
-      fireEvent.change(screen.getByTestId("usage-view-select"), { target: { value: "customer" } });
-    });
-
-    const entityUsage = await screen.findByTestId("entity-usage");
-    expect(entityUsage).toHaveAttribute("data-entity-list", "null");
+    await waitFor(() => expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled());
+    expect(screen.queryByRole("option", { name: "Customer Usage" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Tag Usage" })).toBeNull();
+    expect(mockTagListCall).not.toHaveBeenCalled();
+    expect(mockUseCustomers).not.toHaveBeenCalled();
   });
 
   it.each(["organization"])("should not render the %s usage view for an internal user", async (usageView) => {
@@ -903,6 +783,18 @@ describe("UsagePage", () => {
       expect(dupElements).toHaveLength(1);
       // Unique user should also appear
       expect(screen.getByText("UniqueUser (user-unique)")).toBeInTheDocument();
+    });
+
+    /** 前置全局与个人返回不同数值；选择用户后只展示个人请求数，禁止全局计数混入，自动清理 DOM。 */
+    it("selected user request tiles use the filtered aggregate", async () => {
+      renderWithProviders(<UsagePage {...defaultProps} />);
+      await screen.findByText("424,242");
+      await openUserSelect();
+      await userEvent.setup().click(screen.getByRole("option", { name: "Alice (user-001)" }));
+      await waitFor(() => expect(mockUserDailyActivityAggregatedCall).toHaveBeenLastCalledWith(
+        "test-token", expect.any(Date), expect.any(Date), "user-001"));
+      expect(screen.queryByText("424,242")).toBeNull();
+      expect(screen.getAllByText("1,500").length).toBeGreaterThan(0);
     });
 
     it("should pass selected userId to aggregated call", async () => {
@@ -1229,32 +1121,6 @@ describe("UsagePage", () => {
         expect(screen.getByText("activity-source:models")).toBeInTheDocument();
       });
       expect(screen.queryByText("activity-source:model_groups")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("customer usage banner", () => {
-    it("should show and be dismissible in customer view", async () => {
-      mockUseCustomers.mockReturnValue({
-        data: mockCustomers,
-        isLoading: false,
-        error: null,
-      } as any);
-
-      renderWithProviders(<UsagePage {...defaultProps} />);
-
-      await waitFor(() => {
-        expect(mockUserDailyActivityAggregatedCall).toHaveBeenCalled();
-      });
-
-      const usageSelect = screen.getByTestId("usage-view-select");
-      act(() => {
-        fireEvent.change(usageSelect, { target: { value: "customer" } });
-      });
-
-      await waitFor(() => {
-        const entityUsageElements = screen.getAllByText("Entity Usage");
-        expect(entityUsageElements.length).toBeGreaterThan(0);
-      });
     });
   });
 

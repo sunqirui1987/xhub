@@ -9,6 +9,21 @@ from e2e.fake_upstream import Handler, ERROR_LOG_JSON_DIAGNOSTIC, ERROR_LOG_TEXT
 
 
 class ArkUpstreamTest(unittest.TestCase):
+    def test_native_image_size_and_preview(self):
+        """前置本地图片服务；验证空尺寸和渠道不支持尺寸400、合法尺寸返回真实 PNG 与用量、缺鉴权401；tearDown关闭服务清理。"""
+        body = {"model": "e2e-native-real-image_generation", "prompt": "hello", "n": 1}
+        for size in (None, "", "2048x2048"):
+            with self.assertRaises(HTTPError) as error:
+                self.request("/v1/images/generations", {**body, "size": size})
+            self.assertEqual(error.exception.code, 400)
+        result = self.request("/v1/images/generations", {**body, "size": "1024x1024"})
+        import base64
+        self.assertTrue(base64.b64decode(result["data"][0]["b64_json"]).startswith(bytes([137, 80, 78, 71])))
+        self.assertEqual(result["usage"], {"input_tokens": 8, "output_tokens": 2})
+        with self.assertRaises(HTTPError) as error:
+            self.request("/v1/images/generations", {**body, "size": "1024x1024"}, key="")
+        self.assertEqual(error.exception.code, 401)
+
     def test_fallback_rate_limit_is_scoped_to_test_models(self):
         """目的：为浏览器回退流程提供可控429；前置本地HTTP服务，验证故障型号返回限流码、普通型号正常及相邻前缀不误伤，tearDown关闭服务清理。"""
         with self.assertRaises(HTTPError) as error:

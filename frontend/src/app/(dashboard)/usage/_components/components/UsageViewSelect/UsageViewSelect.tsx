@@ -7,14 +7,12 @@ export type UsageOption =
   | "my-usage"
   | "organization"
   | "team"
-  | "customer"
-  | "tag"
   | "user";
+/** 用量选择器参数：当前视图、切换回调、会话角色及组织/团队管理权限；仅支持实际存储的归属维度。 */
 export interface UsageViewSelectProps {
   value: UsageOption;
   onChange: (value: UsageOption) => void;
   userRole: string | null;
-  canViewTagUsage?: boolean;
   isOrgAdmin?: boolean;
   isTeamAdmin?: boolean;
   title?: string;
@@ -61,29 +59,17 @@ const OPTIONS: OptionConfig[] = [
     descriptionKey: "pages.usage.teamDesc",
   },
   {
-    value: "customer",
-    labelKey: "pages.usage.customer",
-    descriptionKey: "pages.usage.customerDesc",
-    adminOnly: true,
-  },
-  {
-    value: "tag",
-    labelKey: "pages.usage.tag",
-    descriptionKey: "pages.usage.tagDesc",
-    adminOnly: true,
-  },
-  {
     value: "user",
     labelKey: "pages.usage.user",
     descriptionKey: "pages.usage.userDesc",
     adminOnly: true,
   },
 ];
+/** 用量页调用的视图入口；根据角色与成员权限显示可选项，返回可访问页签，点击调用 onChange；无外部写入。 */
 export const UsageViewSelect: React.FC<UsageViewSelectProps> = ({
   value,
   onChange,
   userRole,
-  canViewTagUsage = false,
   isOrgAdmin = false,
   isTeamAdmin = false,
   title,
@@ -93,13 +79,13 @@ export const UsageViewSelect: React.FC<UsageViewSelectProps> = ({
   const isAdmin = all_admin_roles.includes(userRole ?? "");
   const canFilterByOrganization = isAdmin || isOrgAdmin;
   const canFilterByTeam = isAdmin || isOrgAdmin || isTeamAdmin;
+  /** 根据当前管理权限筛选并本地化视图；无参数，返回选项数组，供渲染调用；不查询已移除的客户或标签维度。 */
   const getFilteredOptions = () => {
     return OPTIONS.filter((option) => {
       if (option.value === "global") return isAdmin;
       if (option.value === "my-usage") return !isAdmin;
       if (option.value === "organization") return canFilterByOrganization;
       if (option.value === "team" || option.value === "user") return canFilterByTeam;
-      if (option.value === "tag" && canViewTagUsage && isAdmin) return true;
       if (option.adminOnly && !isAdmin) return false;
       if (option.capability) return hasCapability(userRole, option.capability, isOrgAdmin);
       return isAdmin;

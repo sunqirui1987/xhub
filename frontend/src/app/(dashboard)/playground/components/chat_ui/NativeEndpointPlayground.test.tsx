@@ -3,6 +3,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import NativeEndpointPlayground from "./NativeEndpointPlayground";
 import type { ModelEndpoint } from "@/components/llm_calls/fetch_models";
 import { act } from "@testing-library/react";
+import { setActiveLocale } from "@/i18n/runtime";
+import { beforeEach } from "vitest";
+beforeEach(() => setActiveLocale("zh-CN"));
 
 vi.mock("@/components/networking", () => ({ getProxyBaseUrl: () => "http://localhost:4100" }));
 const endpoint: ModelEndpoint = {
@@ -21,6 +24,106 @@ const endpoint: ModelEndpoint = {
 
 /** 每个用例结束恢复全局 fetch；参数/返回无，组件由测试环境卸载，无外部数据。 */
 afterEach(() => vi.unstubAllGlobals());
+
+const imageEndpoint: ModelEndpoint = {
+  ...endpoint,
+  protocol: "openai-images",
+  family: "image",
+  path: "/bypass/openai/v1/images/generations",
+  actions: [],
+};
+
+/** 前置原生编辑器和真实正文；验证 curl 同步编辑、公开别名和任务 ID、无密钥泄漏；无请求，DOM 自动清理。 */
+it("原生调试显示当前参数和任务查询 curl", () => {
+  render(<NativeEndpointPlayground endpoint={endpoint} model="video-public" apiKey="sk-private-secret" />);
+  fireEvent.change(screen.getByLabelText("原生请求参数"), { target: { value: '{"prompt":"A cinematic cat", "duration":5}' } });
+  fireEvent.click(screen.getByText("完整 curl 调用"));
+  const code = screen.getByLabelText("复制调用示例", { selector: "pre" });
+  expect(code).toHaveTextContent('"duration": 5');
+  expect(code).toHaveTextContent('"model": "video-public"');
+  expect(code).not.toHaveTextContent("sk-private-secret");
+  fireEvent.change(screen.getByLabelText("任务 ID"), { target: { value: "task-live" } });
+  expect(screen.getByLabelText("复制任务 ID 设置", { selector: "pre" })).toHaveTextContent("export TASK_ID='task-live'");
+});
+
+/** 前置图片绑定和离线响应；验证默认尺寸、双向草稿、扩展字段、模型注入及预览；恢复 fetch，自动卸载。 */
+it("图片表单同步 JSON 并发送完整参数和显示预览", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: "AAAA" }] })));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<NativeEndpointPlayground endpoint={imageEndpoint} model="gpt-image-2" apiKey="session" />);
+  expect(screen.getByLabelText("图片尺寸")).toHaveValue("1024x1024");
+  fireEvent.click(screen.getByText("JSON 参数", { exact: true }));
+  const input = screen.getByLabelText("原生请求参数");
+  fireEvent.change(input, {
+    target: {
+      value: JSON.stringify({
+        prompt: "一只狗",
+        size: "1536x1024",
+        n: 2,
+        seed: 42,
+        model: "wrong",
+        output_format: "webp",
+      }),
+    },
+  });
+  expect(screen.getByLabelText("图片提示词")).toHaveValue("一只狗");
+  fireEvent.change(screen.getByLabelText("图片质量"), { target: { value: "high" } });
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByRole("img", { name: "生成图片 1" })).toHaveAttribute("src", "data:image/webp;base64,AAAA");
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    prompt: "一只狗",
+    size: "1536x1024",
+    n: 2,
+    seed: 42,
+    model: "gpt-image-2",
+    quality: "high",
+    output_format: "webp",
+  });
+});
+
+/** 前置图片草稿；验证空提示词、空尺寸、非法 JSON 不触发 fetch，重置恢复；自动卸载，无数据。 */
+it("图片参数错误阻止提交且可重置恢复", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  render(<NativeEndpointPlayground endpoint={imageEndpoint} model="image" apiKey="session" />);
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("图片提示词");
+  fireEvent.change(screen.getByLabelText("图片提示词"), { target: { value: "猫" } });
+  fireEvent.change(screen.getByLabelText("图片尺寸"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("图片尺寸");
+  fireEvent.click(screen.getByText("JSON 参数", { exact: true }));
+  fireEvent.change(screen.getByLabelText("原生请求参数"), { target: { value: "[]" } });
+  expect(screen.getByText(/JSON 参数无效/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "重置参数" }));
+  expect(screen.getByLabelText("图片尺寸")).toHaveValue("1024x1024");
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+/** 前置编辑绑定与本地 File；验证缺图失败、上传后 multipart 完整，无图片响应明确降级；恢复 fetch。 */
+it("图片编辑校验上传并保留 multipart 参数", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "queued" })));
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <NativeEndpointPlayground
+      endpoint={{ ...imageEndpoint, path: "/v1/images/edits" }}
+      model="image"
+      apiKey="session"
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("图片提示词"), { target: { value: "猫" } });
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("请选择需要编辑的图片");
+  fireEvent.change(screen.getByLabelText("编辑图片"), {
+    target: { files: [new File(["png"], "test.png", { type: "image/png" })] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "提交请求" }));
+  expect(await screen.findByText(/响应中没有可预览图片/)).toBeVisible();
+  const body = fetchMock.mock.calls[0][1].body as FormData;
+  expect(body.get("size")).toBe("1024x1024");
+  expect(body.get("n")).toBe("1");
+  expect(body.get("image")).toBeInstanceOf(File);
+});
 
 /** 前置不响应 abort 的延迟传输；验证停止立即解锁、迟到任务不回填，新请求仍可成功；恢复 fetch，无外部数据。 */
 it("停止不等待底层响应且隔离迟到任务", async () => {

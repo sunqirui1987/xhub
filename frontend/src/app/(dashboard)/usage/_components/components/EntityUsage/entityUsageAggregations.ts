@@ -1,5 +1,5 @@
 import { keyActivityLabel } from "@/components/UsagePage/keyActivityLabel";
-import { BreakdownMetrics, DailyData, KeyMetricWithMetadata, TagUsage } from "@/components/UsagePage/types";
+import { BreakdownMetrics, DailyData, KeyMetricWithMetadata } from "@/components/UsagePage/types";
 
 export type ExtendedDailyData = DailyData & {
   breakdown: BreakdownMetrics;
@@ -16,6 +16,8 @@ export interface ProviderSpendRow extends Record<string, unknown> {
   tokens: number;
 }
 
+/** 按模型或模型组合并日报，返回按费用排序的前 N 项；空集合返回空数组。
+ * 参数为有效日报以及可选维度和数量限制；实体用量页调用，无写入副作用。 */
 export const getTopModels = (
   results: ExtendedDailyData[],
   modelBreakdownKey: ModelBreakdownKey,
@@ -54,6 +56,8 @@ export const getTopModels = (
     .slice(0, topModelsLimit);
 };
 
+/** 合并显式 Agent 日报，返回前 N 项；仅旧实体调用方使用。
+ * 参数为有效日报以及可选维度和数量限制；实体用量页调用，无写入副作用。 */
 export const getTopAgents = (results: ExtendedDailyData[], topAgentsLimit: number) => {
   const agentSpend: { [key: string]: any } = {};
   results.forEach((day) => {
@@ -85,23 +89,11 @@ export const getTopAgents = (results: ExtendedDailyData[], topAgentsLimit: numbe
     .slice(0, topAgentsLimit);
 };
 
+/** 合并密钥费用及明确的标签元数据，返回前 N 项；缺少实体明细也可处理。
+ * 参数为有效日报以及可选维度和数量限制；实体用量页调用，无写入副作用。 */
 export const getTopAPIKeys = (results: ExtendedDailyData[], topKeysLimit: number) => {
   const keySpend: { [key: string]: KeyMetricWithMetadata } = {};
   results.forEach((day) => {
-    const { breakdown } = day;
-    const { entities } = breakdown;
-    const tagDictionary = Object.keys(entities).reduce((acc: { [key: string]: TagUsage[] }, entity) => {
-      const { api_key_breakdown } = entities[entity];
-      Object.keys(api_key_breakdown).forEach((key) => {
-        const tagUsage = { tag: entity, usage: api_key_breakdown[key].metrics.spend };
-        if (acc[key]) {
-          acc[key].push(tagUsage);
-        } else {
-          acc[key] = [tagUsage];
-        }
-      });
-      return acc;
-    }, {});
     Object.entries(day.breakdown.api_keys || {}).forEach(([key, metrics]) => {
       if (!keySpend[key]) {
         keySpend[key] = {
@@ -120,9 +112,15 @@ export const getTopAPIKeys = (results: ExtendedDailyData[], topKeysLimit: number
             key_alias: metrics.metadata.key_alias,
             team_id: metrics.metadata.team_id || null,
             user_email: metrics.metadata.user_email,
-            tags: tagDictionary[key] || [],
+            tags: [],
           },
         };
+      }
+      // 只使用接口明确提供的标签，不把团队、用户或组织 ID 当成标签；跨日按标签累加。
+      for (const tag of metrics.metadata.tags ?? []) {
+        const existing = keySpend[key].metadata.tags!.find((item) => item.tag === tag.tag);
+        if (existing) existing.usage += tag.usage;
+        else keySpend[key].metadata.tags!.push({ ...tag });
       }
       keySpend[key].metrics.spend += metrics.metrics.spend;
       keySpend[key].metrics.prompt_tokens += metrics.metrics.prompt_tokens;
@@ -147,6 +145,8 @@ export const getTopAPIKeys = (results: ExtendedDailyData[], topKeysLimit: number
     .slice(0, topKeysLimit);
 };
 
+/** 合并供应商费用、请求和 Token，保留零费用及失败调用，返回按费用排序的全部行。
+ * 参数为有效日报以及可选维度和数量限制；实体用量页调用，无写入副作用。 */
 export const getProviderSpend = (results: ExtendedDailyData[]): ProviderSpendRow[] => {
   const providerSpend: Record<string, ProviderSpendRow> = {};
   results.forEach((day) => {
@@ -174,6 +174,5 @@ export const getProviderSpend = (results: ExtendedDailyData[]): ProviderSpendRow
   });
 
   return Object.values(providerSpend)
-    .filter((provider) => provider.spend > 0)
     .sort((a, b) => b.spend - a.spend);
 };

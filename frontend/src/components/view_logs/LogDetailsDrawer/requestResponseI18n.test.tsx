@@ -72,6 +72,51 @@ describe("请求日志详情双语组件", () => {
     expect(screen.queryByTestId("media-response-video")).not.toBeInTheDocument();
   });
 
+  /** 目的：真实 Ark 终态只展示产物链接，FAL 创建态展示队列地址；前置中英文协议回执，验证各自字段和视频 src，渲染内存数据、卸载与 afterEach 恢复语言完成清理。 */
+  it.each(["zh-CN", "en"] as const)("媒体地址按 Ark 与 FAL 协议展示：%s", (locale) => {
+    setActiveLocale(locale);
+    const responseLabel = locale === "zh-CN" ? "响应地址" : "Response URL";
+    const statusLabel = locale === "zh-CN" ? "状态查询地址" : "Status URL";
+    const videoUrl = "https://example.invalid/ark.mp4";
+    const { rerender } = render(
+      <PrettyMessagesView
+        request={{ method: "GET", url: "/api/v3/contents/generations/tasks/ark-1" }}
+        response={{ id: "ark-1", status: "succeeded", content: { video_url: videoUrl } }}
+      />,
+    );
+    expect(screen.getByRole("link", { name: videoUrl })).toHaveAttribute("href", videoUrl);
+    expect(screen.getByTestId("media-response-video")).toHaveAttribute("src", videoUrl);
+    expect(screen.queryByText(responseLabel, { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText(statusLabel, { exact: true })).not.toBeInTheDocument();
+
+    rerender(
+      <PrettyMessagesView
+        request={{ method: "POST", url: "/queue/fal-ai/kling-video" }}
+        response={{ request_id: "fal-1", status: "IN_QUEUE", response_url: "/queue/fal-ai/kling-video/requests/fal-1", status_url: "/queue/fal-ai/kling-video/requests/fal-1/status" }}
+      />,
+    );
+    expect(screen.getByText(responseLabel, { exact: true })).toBeVisible();
+    expect(screen.getByText(statusLabel, { exact: true })).toBeVisible();
+    expect(screen.getByText("/queue/fal-ai/kling-video/requests/fal-1", { exact: true })).toBeVisible();
+    expect(screen.queryByTestId("media-response-video")).not.toBeInTheDocument();
+  });
+
+  /** 目的：Ark 未完成或失败不能出现成功产物或队列地址；前置真实 queued/failed 回执，验证任务 ID 与状态可见、媒体链接为空，纯组件卸载自动清理。 */
+  it.each(["queued", "failed"])("Ark 无产物状态保留任务信息：%s", (status) => {
+    setActiveLocale("zh-CN");
+    render(
+      <PrettyMessagesView
+        request={{ method: "GET", url: "/api/v3/contents/generations/tasks/ark-1" }}
+        response={{ id: "ark-1", status }}
+      />,
+    );
+    expect(screen.getByText("ark-1", { exact: true })).toBeVisible();
+    expect(screen.getByText(status, { exact: true })).toBeVisible();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("media-response-video")).not.toBeInTheDocument();
+    expect(screen.queryByText("响应地址", { exact: true })).not.toBeInTheDocument();
+  });
+
   /** 前提：成功日志切换到 JSON 协议视图；结果：三块英文标题及复制动作可访问；仅操作组件状态，卸载后自动清理。 */
   it("LogDetailContent 在 JSON 视图显示英文请求响应标签", async () => {
     setActiveLocale("en");

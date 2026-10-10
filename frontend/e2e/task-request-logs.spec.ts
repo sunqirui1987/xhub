@@ -77,7 +77,9 @@ test("异步任务原日志展示生命周期且轮询不增加日志" + (failur
       await expect(mediaRequest.getByText(t("Resolution"), { exact: true })).toBeVisible();
       await expect(mediaRequest).toContainText("e2e-task-lifecycle");
       await expect(mediaResponse.getByText(t("Task ID"), { exact: true })).toBeVisible();
-      await expect(mediaResponse.getByText(t("Response URL"), { exact: true })).toBeVisible();
+      // Ark 终态通过 content.video_url 返回产物；response_url/status_url 是 FAL 队列字段，不能要求 Ark 日志显示。
+      await expect(mediaResponse.getByRole("link", { name: "https://example.invalid/ark-e2e.mp4", exact: true })).toHaveAttribute("href", "https://example.invalid/ark-e2e.mp4");
+      await expect(mediaResponse.getByText(t("Response URL"), { exact: true })).toHaveCount(0);
       await expect(mediaResponse).toContainText(task);
       await expect(mediaResponse).toContainText("succeeded");
       await expect(page.getByTestId("media-response-video")).toHaveAttribute("src", "https://example.invalid/ark-e2e.mp4");

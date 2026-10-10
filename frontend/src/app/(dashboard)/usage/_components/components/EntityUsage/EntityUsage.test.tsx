@@ -615,11 +615,11 @@ describe("EntityUsage", () => {
   const TEAM_PANELS: [string, string][] = [
     ["Cost", "Team Spend Overview"],
     ["Model Activity", "metrics-source:model_groups"],
-    ["Agent Activity", "metrics-source:entities"],
     ["Key Activity", "metrics-source:api_keys"],
     ["Endpoint Activity", "Endpoint Usage Panel"],
   ];
 
+  /** 前置团队聚合接口成功；逐个点击保留页签，验证仅对应面板可见；组件和请求替身由框架清理。 */
   it.each(TEAM_PANELS)("shows only the %s panel for the team entity type", async (tabLabel, marker) => {
     render(<EntityUsage {...defaultProps} entityType="team" />);
 
@@ -636,6 +636,18 @@ describe("EntityUsage", () => {
       if (otherLabel === tabLabel) continue;
       expect(showingCount(otherMarker)).toBe(0);
     }
+  });
+
+  /** 前置团队真实账单格式的零价调用；验证费用为零时仍展示明细中的成功和令牌，组件自动卸载，无数据写入。 */
+  it("zero-price recorded calls remain visible in entity details", async () => {
+    const data = structuredClone(mockSpendData);
+    data.metadata.total_spend = 0;
+    data.results[0].metrics.spend = 0;
+    data.results[0].breakdown.entities["tag-1"].metrics.spend = 0;
+    mockTeamDailyActivityAggregatedCall.mockResolvedValue(data);
+    render(<EntityUsage {...defaultProps} entityType="team" />);
+    const row = await screen.findByRole("row", { name: /Tag 1.*570.*30.*30,000/ });
+    expect(row).toBeVisible();
   });
 
   it("should handle empty data gracefully", async () => {
@@ -793,85 +805,35 @@ describe("EntityUsage", () => {
     expect(screen.getByText("show-filters:false")).toBeInTheDocument();
   });
 
-  it("should display Agent Activity tab for team entity type", async () => {
-    render(<EntityUsage {...defaultProps} entityType="team" />);
-
-    await waitFor(() => {
-      expect(mockTeamDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    expect(screen.getByText("Agent Activity")).toBeInTheDocument();
-  });
-
-  it("should not display Agent Activity tab for non-team entity types", async () => {
-    render(<EntityUsage {...defaultProps} entityType="tag" />);
-
-    await waitFor(() => {
-      expect(mockTagDailyActivityCall).toHaveBeenCalled();
-    });
-
+  /** 前置管理员或普通用户访问团队用量且聚合接口成功；验证核心面板与页签可用、无已移除的 Agent 请求及入口。
+   * 参数为测试闭包，无返回值；组件和请求替身由测试框架清理，不产生持久数据。 */
+  it.each(["Admin", "Internal User"])("团队用量不请求已移除的 Agent 接口：%s", async (userRole) => {
+    render(<EntityUsage {...defaultProps} entityType="team" userRole={userRole} />);
+    await waitFor(() => expect(mockTeamDailyActivityAggregatedCall).toHaveBeenCalled());
+    expect(screen.getByText("Team Spend Overview")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Model Activity" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Key Activity" })).toBeInTheDocument();
+    expect(mockAgentDailyActivityCall).not.toHaveBeenCalled();
     expect(screen.queryByText("Agent Activity")).not.toBeInTheDocument();
-  });
-
-  it("should display Top Agents Driving Spend card for team entity type", async () => {
-    render(<EntityUsage {...defaultProps} entityType="team" />);
-
-    await waitFor(() => {
-      expect(mockTeamDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    expect(screen.getByText("Top Agents Driving Spend")).toBeInTheDocument();
-  });
-
-  it("should not display Top Agents Driving Spend card for non-team entity types", async () => {
-    render(<EntityUsage {...defaultProps} entityType="tag" />);
-
-    await waitFor(() => {
-      expect(mockTagDailyActivityCall).toHaveBeenCalled();
-    });
-
     expect(screen.queryByText("Top Agents Driving Spend")).not.toBeInTheDocument();
   });
 
-  it("should fetch agent activity data when entity type is team", async () => {
+  /** 前置团队聚合接口失败但分页接口成功；验证降级展示团队指标且不请求 Agent。
+   * 无持久数据，组件与替身在测试结束清理。 */
+  it("团队用量分页降级不请求 Agent", async () => {
+    mockTeamDailyActivityAggregatedCall.mockRejectedValue(new Error("aggregated unavailable"));
     render(<EntityUsage {...defaultProps} entityType="team" />);
-
-    await waitFor(() => {
-      expect(mockAgentDailyActivityCall).toHaveBeenCalledWith(
-        "test-token",
-        expect.any(Date),
-        expect.any(Date),
-        1,
-        null,
-      );
-    });
-  });
-
-  it("should not fetch agent activity data for non-team entity types", async () => {
-    render(<EntityUsage {...defaultProps} entityType="tag" />);
-
-    await waitFor(() => {
-      expect(mockTagDailyActivityCall).toHaveBeenCalled();
-    });
-
+    await waitFor(() => expect(mockTeamDailyActivityCall).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText("$100.50").length).toBeGreaterThan(0));
     expect(mockAgentDailyActivityCall).not.toHaveBeenCalled();
   });
 
-  it("should switch to Agent Activity tab for team entity type", async () => {
-    render(<EntityUsage {...defaultProps} entityType="team" />);
-
-    await waitFor(() => {
-      expect(mockTeamDailyActivityAggregatedCall).toHaveBeenCalled();
-    });
-
-    const agentActivityTab = screen.getByText("Agent Activity");
-    act(() => {
-      fireEvent.click(agentActivityTab);
-    });
-
-    await waitFor(() => {
-      expect(screen.getAllByText("Activity Metrics").length).toBeGreaterThan(0);
-    });
+  /** 前置访问令牌缺失；验证团队和 Agent 请求均不执行，组件和替身由测试框架清理。 */
+  it("团队用量缺少访问令牌时不发起请求", () => {
+    render(<EntityUsage {...defaultProps} entityType="team" accessToken={null} />);
+    expect(mockTeamDailyActivityAggregatedCall).not.toHaveBeenCalled();
+    expect(mockTeamDailyActivityCall).not.toHaveBeenCalled();
+    expect(mockAgentDailyActivityCall).not.toHaveBeenCalled();
   });
 
   it("should fallback to entity value when no entityList and no team_alias", async () => {
@@ -1062,7 +1024,8 @@ describe("EntityUsage", () => {
     expect(screen.getByText("z")).toBeInTheDocument();
   });
 
-  it("feeds the key, model and agent tables from their own breakdowns", async () => {
+  /** 前置模型与密钥使用不同费用夹具；验证各表读取独立统计，已移除的 Agent 表不出现；无持久数据。 */
+  it("feeds the key and model tables from their own breakdowns", async () => {
     const usageMetrics = {
       spend: 30.75,
       api_requests: 300,
@@ -1094,7 +1057,7 @@ describe("EntityUsage", () => {
       expect(screen.getByText("top-keys:sk-abc=30.75")).toBeInTheDocument();
     });
     expect(screen.getByText("top-models:gpt-4o=70.25")).toBeInTheDocument();
-    expect(screen.getByText(/^top-models:Code Review Agent=/)).toBeInTheDocument();
+    expect(screen.queryByText(/^top-models:Code Review Agent=/)).not.toBeInTheDocument();
   });
 
   it("uses the aggregated team endpoint and never drains paginated pages for teams", async () => {

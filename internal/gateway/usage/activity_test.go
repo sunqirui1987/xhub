@@ -248,3 +248,35 @@ func TestParseDayRejectsGarbageWithoutWideningTheWindow(t *testing.T) {
 		t.Fatalf("end of day: %v", end)
 	}
 }
+
+// TestActivityLocalDateBounds 验证用量筛选的本地日边界；前置东八区、西五区及无效日期。
+// 参数 t 为单测上下文；返回无；验证 UTC 转换和包含式结束日期，仅内存数据无需清理。
+func TestActivityLocalDateBounds(t *testing.T) {
+	for _, offset := range []int{480, -300, 0} {
+		start := activityDateBound("2026-10-10", offset, false)
+		want := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC).Add(-time.Duration(offset) * time.Minute)
+		if !start.Equal(want) || !activityDateBound("2026-10-10", offset, true).Equal(want.Add(24*time.Hour-time.Nanosecond)) {
+			t.Fatalf("本地日期边界不一致 offset=%d start=%v", offset, start)
+		}
+	}
+	for _, invalid := range []string{"", "bad", "2026-13-01"} {
+		if !activityDateBound(invalid, 480, false).IsZero() {
+			t.Fatalf("无效日期应保留开放边界：%s", invalid)
+		}
+	}
+}
+
+// TestActivityTaskOutcomes 验证异步完成、运行中及 HTTP 失败的统计口径。
+// 参数 t 为单测上下文，无返回；前置各任务状态，完成算成功、运行中暂不计入、HTTP 错误算失败；无持久数据。
+func TestActivityTaskOutcomes(t *testing.T) {
+	events := []iam.UsageEvent{
+		{Status: "completed", HTTPStatus: 200}, {Status: "executing", HTTPStatus: 202},
+		{Status: "polling", HTTPStatus: 202}, {Status: "failed", HTTPStatus: 502}, {Status: "success", HTTPStatus: 400},
+	}
+	rows := eventsToActivity(events, 0)
+	body := dailyActivityResponse(rows, 1, true)
+	meta := body["metadata"].(map[string]any)
+	if meta["total_api_requests"] != 3 || meta["total_successful_requests"] != 1 || meta["total_failed_requests"] != 2 {
+		t.Fatalf("任务结果统计不一致：%v", meta)
+	}
+}

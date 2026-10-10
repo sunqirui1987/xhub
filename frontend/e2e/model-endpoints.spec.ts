@@ -6,7 +6,7 @@ import { GATEWAY, UPSTREAM, loginAdmin, sessionBearer, stableGoto, t, watchGatew
 test("unbound model explains configuration and valid model restores a callable endpoint", async ({ page }) => {
   test.skip(process.env.E2E_ENDPOINT_UNBOUND !== "1", "需要隔离的无端点测试配置");
   await loginAdmin(page);
-  const headers = { Authorization: "Bearer " + await sessionBearer(page) };
+  const headers = { Authorization: "Bearer " + (await sessionBearer(page)) };
   const models = await page.request.get(GATEWAY + "/model/available", { headers });
   expect(models.status()).toBe(200);
   const unbound = (await models.json()).data.find((model: { id: string }) => model.id === "e2e-unbound");
@@ -20,8 +20,13 @@ test("unbound model explains configuration and valid model restores a callable e
   await expect(page.getByRole("button", { name: t("Send message") })).toHaveCount(0);
   await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
   await page.getByRole("option", { name: "gpt-4o-mini", exact: true }).click();
-  await page.getByPlaceholder(t("Type your message... (Shift+Enter for new line)")).filter({ visible: true }).fill("hello");
-  const called = page.waitForResponse(r => /^(\/v1)?\/chat\/completions$/.test(new URL(r.url()).pathname) && r.request().method() === "POST");
+  await page
+    .getByPlaceholder(t("Type your message... (Shift+Enter for new line)"))
+    .filter({ visible: true })
+    .fill("hello");
+  const called = page.waitForResponse(
+    (r) => /^(\/v1)?\/chat\/completions$/.test(new URL(r.url()).pathname) && r.request().method() === "POST",
+  );
   await page.getByRole("button", { name: t("Send message") }).click();
   expect((await called).status()).toBe(200);
   await expect(page.getByText("e2e-ok", { exact: true })).toBeVisible();
@@ -30,10 +35,34 @@ test("unbound model explains configuration and valid model restores a callable e
 // 前置真实浏览器、隔离网关和本地原厂协议服务；创建、回显、Playground 实调、禁用及删除。
 // 验证分组、独立图片操作与精确 Google 路径，数据在 finally 和 schema 结束时清理。
 for (const native of [
-  { id: "gemini", transport: "gemini_generate_content", label: "Gemini · Generate Content", root: "/v1beta/models/", google: true },
-  { id: "vertex", transport: "vertex_generate_content", label: "Vertex AI · Generate Content", root: "/vertex/v1/models/", google: true },
-  { id: "image_generation", transport: "openai_image_generation", label: "OpenAI Images · 创建图片", root: "/v1/images/generations", google: false },
-  { id: "image_edit", transport: "openai_image_edit", label: "OpenAI Images · 编辑图片", root: "/v1/images/edits", google: false },
+  {
+    id: "gemini",
+    transport: "gemini_generate_content",
+    label: "Gemini · Generate Content",
+    root: "/v1beta/models/",
+    google: true,
+  },
+  {
+    id: "vertex",
+    transport: "vertex_generate_content",
+    label: "Vertex AI · Generate Content",
+    root: "/vertex/v1/models/",
+    google: true,
+  },
+  {
+    id: "image_generation",
+    transport: "openai_image_generation",
+    label: "OpenAI Images · 创建图片",
+    root: "/v1/images/generations",
+    google: false,
+  },
+  {
+    id: "image_edit",
+    transport: "openai_image_edit",
+    label: "OpenAI Images · 编辑图片",
+    root: "/v1/images/edits",
+    google: false,
+  },
 ]) {
   test("native " + native.id + " saves exact protocol and executes in Playground", async ({ page }) => {
     const guard = watchGateway(page);
@@ -41,11 +70,15 @@ for (const native of [
     const credential = "e2e-native-" + native.id;
     const name = credential + "-model";
     const upstreamModel = "e2e-native-real-" + native.id;
-    const headers = { Authorization: "Bearer " + await sessionBearer(page) };
-    const createdCredential = await page.request.post(GATEWAY + "/credentials", { headers, data: {
-      credential_name: credential, credential_info: { custom_llm_provider: "custom" },
-      credential_values: { api_base: UPSTREAM, api_key: "sk-fake" },
-    } });
+    const headers = { Authorization: "Bearer " + (await sessionBearer(page)) };
+    const createdCredential = await page.request.post(GATEWAY + "/credentials", {
+      headers,
+      data: {
+        credential_name: credential,
+        credential_info: { custom_llm_provider: "custom" },
+        credential_values: { api_base: UPSTREAM, api_key: "sk-fake" },
+      },
+    });
     expect(createdCredential.status(), await createdCredential.text()).toBe(200);
     let id = "";
     try {
@@ -68,11 +101,16 @@ for (const native of [
       await form.getByLabel("价格来源").selectOption("manual");
       await form.locator("#editor-input_cost_per_token").fill("1");
       await form.locator("#editor-output_cost_per_token").fill("2");
-      const submitted = page.waitForResponse(r => new URL(r.url()).pathname === "/model/new" && r.request().method() === "POST");
+      const submitted = page.waitForResponse(
+        (r) => new URL(r.url()).pathname === "/model/new" && r.request().method() === "POST",
+      );
       await form.getByRole("button", { name: "添加模型", exact: true }).click();
       const saved = await submitted;
       expect(saved.status(), await saved.text()).toBe(200);
-      expect(saved.request().postDataJSON().model_info).toMatchObject({ endpoint_types: native.google ? ["chat","gemini","vertex","responses","messages"] : [native.id], transport: native.transport });
+      expect(saved.request().postDataJSON().model_info).toMatchObject({
+        endpoint_types: native.google ? ["chat", "gemini", "vertex", "responses", "messages"] : [native.id],
+        transport: native.transport,
+      });
       id = (await saved.json()).model_info.id;
       await stableGoto(page, "/models-and-endpoints");
       await page.getByRole("tab", { name: t("pages.models.all") }).click();
@@ -83,48 +121,102 @@ for (const native of [
       await form.getByRole("button", { name: "取消", exact: true }).click();
       await stableGoto(page, "/playground");
       // 图像原生请求在窄屏执行，验证 JSON 编辑器、提交与真实结果不横向溢出。
-      if (native.id === "image_generation") await page.setViewportSize({width:390,height:844});
+      if (native.id === "image_generation") await page.setViewportSize({ width: 390, height: 844 });
       await page.getByPlaceholder(t("Select a Model"), { exact: true }).click();
       await page.getByRole("option", { name, exact: true }).click();
       const path = native.google ? native.root + name + ":generateContent" : native.root;
       if (native.google) {
         await page.getByPlaceholder(t("Select an endpoint"), { exact: true }).click();
-        await page.getByRole("option", { name: new RegExp(native.label.split(" · ")[0] + ".*generateContent$") }).click();
+        await page
+          .getByRole("option", { name: new RegExp(native.label.split(" · ")[0] + ".*generateContent$") })
+          .click();
       }
       await page.getByText("接口详情", { exact: true }).click();
       await expect(page.getByText("POST " + path, { exact: true })).toBeVisible();
-      const body = native.google ? { contents: [{ role: "user", parts: [{ text: "hello" }] }] } : { prompt: "hello" };
-      await page.getByLabel("原生请求参数").fill(JSON.stringify(body));
-      await page.getByRole("button",{name:"格式化",exact:true}).click();
-      if (native.id === "image_edit") {
-        await page.getByLabel("编辑图片", { exact: true }).setInputFiles({ name: "edit.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII=", "base64") });
+      const body = native.google
+        ? { contents: [{ role: "user", parts: [{ text: "hello" }] }] }
+        : { prompt: "hello", size: "1024x1024", n: 1 };
+      if (!native.google) {
+        await expect(page.getByLabel("图片尺寸", { exact: true })).toHaveValue("1024x1024");
+        // 创建流程直接使用表单；先验证本地必填校验，再复现渠道不支持尺寸的真实 400 并重试。
+        if (native.id === "image_generation") {
+          await page.getByRole("button", { name: "提交请求", exact: true }).click();
+          await expect(page.getByRole("region", {name:"请求结果"}).getByRole("alert")).toContainText("图片提示词");
+          await page.getByLabel("图片提示词", { exact: true }).fill("hello");
+          await page.getByLabel("图片尺寸", { exact: true }).fill("2048x2048");
+          const failed = page.waitForResponse(
+            (r) => new URL(r.url()).pathname === path && r.request().method() === "POST",
+          );
+          await page.getByRole("button", { name: "提交请求", exact: true }).click();
+          expect((await failed).status()).toBe(400);
+          await expect(page.getByRole("region", {name:"请求结果"}).getByRole("alert")).toContainText("2048x2048");
+          await expect(page.getByLabel("图片提示词", { exact: true })).toHaveValue("hello");
+          await page.getByLabel("图片尺寸", { exact: true }).fill("1024x1024");
+        }
+        await page.getByText("JSON 参数", { exact: true }).click();
       }
-      const inferred = page.waitForResponse(r => new URL(r.url()).pathname === path && r.request().method() === "POST");
+      await page.getByLabel("原生请求参数").fill(JSON.stringify(body));
+      await page.getByRole("button", { name: "格式化", exact: true }).click();
+      if (native.id === "image_edit") {
+        await page
+          .getByLabel("编辑图片", { exact: true })
+          .setInputFiles({
+            name: "edit.png",
+            mimeType: "image/png",
+            buffer: Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII=",
+              "base64",
+            ),
+          });
+      }
+      const inferred = page.waitForResponse(
+        (r) => new URL(r.url()).pathname === path && r.request().method() === "POST",
+      );
       await page.getByRole("button", { name: "提交请求", exact: true }).click();
       const response = await inferred;
       expect(response.status(), await response.text()).toBe(200);
+      if (native.id === "image_generation")
+        expect(response.request().postDataJSON()).toMatchObject({ ...body, model: name });
+      if (!native.google) {
+        await expect(page.getByRole("img", { name: "生成图片 1", exact: true })).toBeVisible();
+        await expect
+          .poll(() =>
+            page
+              .getByRole("img", { name: "生成图片 1", exact: true })
+              .evaluate((img) => (img as HTMLImageElement).naturalWidth),
+          )
+          .toBeGreaterThan(0);
+        await page.getByText("原生响应", { exact: true }).click();
+      }
       await expect(page.getByLabel("原生响应")).toContainText("e2e-ok");
       if (native.id === "image_generation") {
-        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await page.getByLabel("原生响应").scrollIntoViewIfNeeded();
         await expect(page.getByLabel("原生响应")).toBeInViewport();
-        await page.screenshot({path:"../.e2e/playground/native-mobile.png",fullPage:true});
+        await page.screenshot({ path: "../.e2e/playground/native-mobile.png", fullPage: true });
       }
       if (native.google) expect(response.request().postDataJSON()).toEqual(body);
-      else if (native.id === "image_edit") expect(response.request().headers()["content-type"]).toContain("multipart/form-data");
+      else if (native.id === "image_edit")
+        expect(response.request().headers()["content-type"]).toContain("multipart/form-data");
       const callId = response.headers()["x-litellm-call-id"];
       expect(callId, "原生推理必须关联真实账单").toBeTruthy();
-      await expect.poll(async () => {
-        const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callId, { headers });
-        return detail.ok() ? Number((await detail.json()).spend) : 0;
-      }).toBeCloseTo(0.000012, 10);
-      const disabled = await page.request.patch(GATEWAY + "/model/" + id + "/update", { headers, data: { model_info: { disabled: true } } });
+      await expect
+        .poll(async () => {
+          const detail = await page.request.get(GATEWAY + "/spend/logs/ui/" + callId, { headers });
+          return detail.ok() ? Number((await detail.json()).spend) : 0;
+        })
+        .toBeCloseTo(0.000012, 10);
+      const disabled = await page.request.patch(GATEWAY + "/model/" + id + "/update", {
+        headers,
+        data: { model_info: { disabled: true } },
+      });
       expect(disabled.status(), await disabled.text()).toBe(200);
       const denied = await page.request.post(GATEWAY + path, { headers, data: { ...body, model: name } });
       expect(denied.status(), "禁用部署必须拒绝实际调用").toBe(400);
       guard.assertOk();
     } finally {
-      if (id) expect((await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } })).status()).toBe(200);
+      if (id)
+        expect((await page.request.post(GATEWAY + "/model/delete", { headers, data: { id } })).status()).toBe(200);
       expect((await page.request.delete(GATEWAY + "/credentials/" + credential, { headers })).status()).toBe(200);
     }
   });

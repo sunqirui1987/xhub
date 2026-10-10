@@ -309,6 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(payload)
             return
         if "/images" in path:
+            # 专用图片夹具严格检查尺寸，复现中转渠道缺省 size 时的 400；普通夹具保持原行为。
             if req.get("model", "").startswith("e2e-native-real-") or b"e2e-native-real-image_edit" in raw:
                 if self.headers.get("Authorization") != "Bearer sk-fake":
                     self.send_error(401)
@@ -323,7 +324,11 @@ class Handler(BaseHTTPRequestHandler):
                 elif req.get("prompt") != "hello":
                     self.send_error(400, "invalid native image generation")
                     return
-                self._json({"created": 1, "data": [{"b64_json": "e2e-ok"}], "usage": {"input_tokens": 8, "output_tokens": 2}})
+                if path.endswith("/generations") and req.get("size") not in ("1024x1024", "1536x1024", "1024x1536"):
+                    self.send_error(400, 'image size "' + str(req.get("size", "")) + '" is not available for this channel')
+                    return
+                png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0S8AAAAASUVORK5CYII="
+                self._json({"created": 1, "data": [{"b64_json": png, "revised_prompt": "e2e-ok"}], "usage": {"input_tokens": 8, "output_tokens": 2}})
                 return
             self._json({"created": 1, "data": [{"url": "https://example.invalid/img/1"}]})
             return

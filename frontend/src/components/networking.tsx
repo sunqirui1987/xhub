@@ -1515,6 +1515,8 @@ export const teamDailyActivityAggregatedCall = async (
 
 export type TeamUserSpendResponse = components["schemas"]["TeamUserSpendResponse"];
 
+/** 获取团队内用户费用；参数为令牌、本地日期和团队 ID，返回用户统计。
+ * 用量页调用，携带时区保证与日报一致；错误向调用方传播，无写入副作用。 */
 export const teamSpendByUserCall = async (
   accessToken: string,
   startTime: Date,
@@ -1527,6 +1529,7 @@ export const teamSpendByUserCall = async (
       start_date: formatDate(startTime),
       end_date: formatDate(endTime),
       team_ids: teamIds.join(","),
+      timezone: new Date().getTimezoneOffset().toString(),
     },
   });
 
@@ -2494,11 +2497,9 @@ export const userDailyActivityAggregatedCall = async (
   }
 };
 
+/** 获取本地日期范围内已记录调用的路由计数；参数为令牌和日期，返回授权范围统计。
+ * 总览页调用，传递浏览器时区；失败抛出错误，不修改数据。 */
 export const gatewayDailyActivityCall = async (accessToken: string, startTime: Date, endTime: Date) => {
-  /**
-   * Get gateway request counts (SGR) recorded by the proxy middleware.
-   * Deployment-wide and admin-only; carries no per-key or per-user dimension.
-   */
   try {
     const formatDate = (date: Date) => {
       const year = date.getFullYear();
@@ -2511,6 +2512,7 @@ export const gatewayDailyActivityCall = async (accessToken: string, startTime: D
       query: {
         start_date: formatDate(startTime),
         end_date: formatDate(endTime),
+        timezone: new Date().getTimezoneOffset().toString(),
       },
     });
   } catch (error) {

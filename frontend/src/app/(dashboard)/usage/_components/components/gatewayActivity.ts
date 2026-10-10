@@ -1,12 +1,4 @@
-/**
- * Gateway request counts (SGR) from `/gateway/daily/activity`.
- *
- * Recorded by the proxy's request-metrics middleware rather than derived from
- * spend logs, so it counts what the gateway actually answered. Deployment-wide
- * with no per-key or per-user dimension, which is why it is admin-only and why
- * the per-key and per-model breakdowns on the usage page still come from the
- * spend tables.
- */
+/** 网关请求统计来自已持久化账单，与费用及 Token 使用同一归属范围；页面仅在管理员未筛选用户时使用此汇总。 */
 
 export const GATEWAY_TOP_ROUTES = 15;
 
@@ -56,7 +48,7 @@ export const selectForRange = <T>(fetched: FetchedForRange<T> | null, currentRan
 
 /**
  * As `selectForRange`, and additionally withholds the counts from a non-admin:
- * they are deployment-wide, so they are not a non-admin's to read.
+ * 页面仅在管理员全局视图使用该源；其他视图使用各自筛选后的账单汇总。
  */
 export const selectGatewayActivity = (
   isAdmin: boolean,

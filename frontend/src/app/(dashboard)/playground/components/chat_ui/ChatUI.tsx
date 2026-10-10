@@ -59,6 +59,7 @@ import EndpointSelector from "./EndpointSelector";
 import { isModelCompatibleWithEndpoint } from "./EndpointUtils";
 import { endpointLabel, modelEndpoints, endpointUIType } from "@/components/llm_calls/model_endpoints";
 import NativeEndpointPlayground from "./NativeEndpointPlayground";
+import { ChatCurlGuide } from "./ChatCurlGuide";
 import { getProxyBaseUrl } from "@/components/networking";
 import { callTextEndpoint } from "@/components/llm_calls/model_endpoints";
 import FilePreviewCard from "./FilePreviewCard";
@@ -89,7 +90,7 @@ import {
   validateChatAttachment,
   validateImageEditFile,
 } from "./uploadValidation";
-import { t } from "@/i18n";
+import { useT } from "@/i18n";
 
 const SDK_ITEMS = [
   { value: "openai", labelKey: "OpenAI SDK" },
@@ -218,7 +219,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
   const selectedModelInfo = modelInfo.find((model) => model.model_group === selectedModel);
   const supportedEndpoints = modelEndpoints(selectedModelInfo);
   const selectedBinding = supportedEndpoints.find((endpoint) => endpoint.path === endpointPath);
-  const endpointType = selectedBinding ? endpointUIType(selectedBinding) ?? selectedBinding.path : null;
+  const endpointType = selectedBinding ? (endpointUIType(selectedBinding) ?? selectedBinding.path) : null;
   const isNativeBinding = selectedBinding?.kind === "bypass";
   const [requestFailure, setRequestFailure] = useState<RequestFailure | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -894,7 +895,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
 
           const requestProxyBaseUrl =
             simplified && proxySettings
-              ? proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined
+              ? (proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL ?? undefined)
               : customProxyBaseUrl || undefined;
           await makeOpenAIChatCompletionRequest(
             apiChatHistory,
@@ -1213,7 +1214,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
     if (!modelInfo.length) return;
     const options = modelEndpoints(modelInfo.find((model) => model.model_group === selectedModel));
     setEndpointPath((previous) =>
-      options.some((item) => item.path === previous) ? previous : options[0]?.path ?? null,
+      options.some((item) => item.path === previous) ? previous : (options[0]?.path ?? null),
     );
   }, [selectedModel, modelInfo]);
   let modelEmptyText = "No models available for this key";
@@ -1259,7 +1260,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
         <div className="flex h-full min-h-0 min-w-0 w-full flex-col lg:flex-row">
           {!simplified && (
             <div className="max-h-[42%] w-full shrink-0 overflow-y-auto border-b border-border bg-sidebar p-4 lg:max-h-none lg:w-64 lg:border-r lg:border-b-0 xl:w-72">
-              <h2 className="mb-4 text-sm font-semibold">模型与端点</h2>
+              <h2 className="mb-4 text-sm font-semibold">{t("myModels.modelsAndEndpoints")}</h2>
               <div className="space-y-4">
                 {endpointType !== EndpointType.A2A_AGENTS && endpointType !== EndpointType.MCP && (
                   <div>
@@ -1438,7 +1439,7 @@ const ChatUI: React.FC<ChatUIProps> = ({
                 {/* 低频连接配置放在模型之后；保留挂载以避免展开动作触发重复目录请求。 */}
                 <details className="border-t border-border pt-4">
                   <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
-                    连接设置
+                    {t("myModels.connectionSettings")}
                   </summary>
                   <div className="mt-4 space-y-4">
                     <div>
@@ -1594,6 +1595,51 @@ const ChatUI: React.FC<ChatUIProps> = ({
                   </div>
                 </div>
                 <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3 pb-0 sm:p-4 sm:pb-0">
+                  {selectedBinding && selectedModel && (
+                    <ChatCurlGuide
+                      options={{
+                        endpoint: selectedBinding,
+                        model: selectedModel,
+                        input: inputMessage,
+                        messages: chatHistory
+                          .filter((message) => !message.isImage && !message.isAudio)
+                          .map(({ role, content }) => ({ role, content })),
+                        stream: streamingEnabled,
+                        temperature: useAdvancedParams ? temperature : undefined,
+                        maxTokens: useAdvancedParams ? maxTokens : undefined,
+                        voice: selectedVoice,
+                        vectorStores: selectedVectorStores,
+                        guardrails: selectedGuardrails,
+                        policies: selectedPolicies,
+                        selectedMCPServers,
+                        mcpServers,
+                        mcpToolsets,
+                        mcpServerToolRestrictions,
+                        previousResponseId: useApiSessionManagement ? responsesSessionId : null,
+                        codeInterpreter: codeInterpreter.enabled,
+                        mockFallbacks: mockTestFallbacks,
+                        base:
+                          (simplified && proxySettings
+                            ? (proxySettings.LITELLM_UI_API_DOC_BASE_URL ?? proxySettings.PROXY_BASE_URL)
+                            : customProxyBaseUrl) || getProxyBaseUrl(),
+                      }}
+                      tags={selectedTags}
+                      image={
+                        endpointType === EndpointType.RESPONSES
+                          ? responsesUploadedImage
+                          : endpointType === EndpointType.CHAT
+                            ? chatUploadedImage
+                            : null
+                      }
+                      files={
+                        endpointType === EndpointType.IMAGE_EDITS
+                          ? uploadedImages
+                          : uploadedAudio
+                            ? [uploadedAudio]
+                            : undefined
+                      }
+                    />
+                  )}
                   {requestFailure && <RequestDiagnostic failure={requestFailure} />}
                   {chatHistory.length === 0 && !requestFailure && (
                     <div className="flex h-full flex-col items-center justify-center text-muted-foreground">

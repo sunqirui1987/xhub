@@ -144,6 +144,7 @@ describe("PrettyMessagesView", () => {
     expect(screen.queryByText("No response data available")).not.toBeInTheDocument();
   });
 
+  /** 目的：续接请求保留工具调用及结果；前置内存 Responses 回执，验证结果正文与当前英文工具标签，组件卸载自动清理。 */
   it("renders a Responses API follow-up turn carrying a prior function_call and its output", () => {
     const request = {
       input: [
@@ -164,9 +165,10 @@ describe("PrettyMessagesView", () => {
     render(<PrettyMessagesView request={request} response={response} />);
     expect(screen.getByText("It is 18 degrees.")).toBeInTheDocument();
     expect(screen.getByText('{"temp":18}')).toBeInTheDocument();
-    expect(screen.getByText("TOOL")).toBeInTheDocument();
+    expect(screen.getByText("TOOL RESULT")).toBeInTheDocument();
   });
 
+  /** 目的：旧 function 和 developer 角色兼容现有日志展示；前置旧协议内存消息，验证系统正文、工具结果标签且不泄漏原始角色，组件卸载自动清理。 */
   it("maps the developer and legacy function roles onto the roles the drawer renders", () => {
     const request = {
       messages: [
@@ -179,7 +181,7 @@ describe("PrettyMessagesView", () => {
 
     render(<PrettyMessagesView request={request} response={response} />);
     expect(screen.getByText("Stay terse.")).toBeInTheDocument();
-    expect(screen.getByText("TOOL")).toBeInTheDocument();
+    expect(screen.getByText("TOOL RESULT")).toBeInTheDocument();
     expect(screen.queryByText("FUNCTION")).not.toBeInTheDocument();
   });
 
